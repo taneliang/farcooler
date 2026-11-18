@@ -43,7 +43,7 @@ impl Exec {
             if !self.item_tree(workspace, id).try_exists()? || records.iter().any(|r| r.effect.item == *id
                 && r.result.as_ref().is_none_or(|r| r.retry
                     || r.skipped.iter().any(|s| s.starts_with("cleanup attempt interrupted")))) { continue; }
-            self.store.workflow_cleanup_enqueue(&farcooler_workflow::cleanup::CleanupEffect {
+            self.store.workflow_cleanup_enqueue(&farcooler_workflow::cleanup::CleanupEffect { restart: None,
                 id: digest(&("group-tree-release/v1", workspace, id)), workspace: workspace.into(),
                 revision: state.revision, item: id.clone(), run, tree: None, folders: Vec::new(), uncertain: false,
             })?;

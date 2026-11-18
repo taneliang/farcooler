@@ -92,6 +92,7 @@ fn a_failed_and_an_uncertain_run_say_so_with_no_gate() {
         assert_eq!(run.phase, word);
         assert_eq!((run.gate.as_str(), run.gate_principal.as_str()), ("", ""));
         assert_eq!(run.stage_kind, "\"Provision\"", "still the stage it stopped on");
+        assert_eq!(run.reason.is_some(), word == "Failed");
     }
 }
 

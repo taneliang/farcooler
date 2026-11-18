@@ -44,6 +44,7 @@ pub struct GroupLanding {
     /// The commit it pushed, once a push has passed. `await-ci` follows this.
     pub pushed_sha: Option<String>,
     pub since: i64,
+    pub reason: Option<String>,
     phase: Phase,
     verb: Option<StageKind>,
     after_push: bool,
@@ -126,7 +127,7 @@ pub fn groups_in(state: &State, task_of: &dyn Fn(&str) -> Option<Uuid>, since: &
             group: id.clone(), name,
             tickets: item.members.iter().map(|m| &m.item).chain(&item.handed).filter_map(|i| task_of(i)).collect(),
             after_push: sha.is_some(), pushed_sha: sha, since: if item.since_ms > 0 { item.since_ms } else { since(id) },
-            phase: item.phase.clone(), verb: item.definition.stages.get(item.stage).map(|s| s.kind.clone()),
+            reason: item.failed_reason(), phase: item.phase.clone(), verb: item.definition.stages.get(item.stage).map(|s| s.kind.clone()),
         }
     }).collect();
     // A group that landed has left live state; its archive entry keeps what the board draws.
@@ -137,7 +138,7 @@ pub fn groups_in(state: &State, task_of: &dyn Fn(&str) -> Option<Uuid>, since: &
             tickets: group.tickets.iter().filter_map(|i| task_of(i)).collect(),
             pushed_sha: group.pushed.clone(), after_push: group.pushed.is_some(),
             since: if group.since_ms > 0 { group.since_ms } else { since(id) },
-            phase: Phase::Done, verb: None,
+            reason: None, phase: Phase::Done, verb: None,
         });
     }
     let finished = GroupLanding::is_finished;

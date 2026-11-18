@@ -42,10 +42,21 @@ pub struct Item {
     pub fence: u64,
     pub phase: Phase,
     pub run: String,
+    /// Identifies the private checkout of a replacement run across its steps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restart: Option<String>,
+    /// Earlier runs stopped under this ticket key, oldest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub history: Vec<RunRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
     pub pending: Option<String>,
     pub candidate: Option<String>,
     pub last_evidence: Option<Evidence>,
     pub stopping: Option<String>,
+    /// The execution run which the separate cancellation operation stopped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stopped_from: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rework_history: Vec<ReworkDecision>,
     /// Back edges taken so far, by the id of the step that took them (schema 2).
@@ -186,6 +197,62 @@ pub struct State {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub archive: BTreeMap<String, Archived>,
 }
+/// The terminal facts of a workflow run.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunRecord {
+    pub phase: Phase,
+    pub run: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_run: Option<String>,
+    pub pin: String,
+    pub fence: u64,
+    pub candidate: Option<String>,
+    pub tree: Option<RunTree>,
+    pub models: BTreeMap<String, String>,
+    pub reason: Option<String>,
+    pub rework_history: Vec<ReworkDecision>,
+    pub sent_back: Vec<SendBack>,
+    pub back_edges: BTreeMap<String, u8>,
+}
+impl Item {
+    pub fn can_start(&self) -> bool {
+        self.follows.is_none() && self.group_of.is_none() && self.grouped_in.is_none()
+            && self.closed.is_none() && self.stopping.is_none()
+            && (self.pending.is_none() || self.deciding.is_some())
+            && (matches!(self.phase, Phase::Cancelled | Phase::Failed)
+                || self.phase == Phase::WaitingApproval && self.definition.is_ticket())
+    }
+
+    pub fn failed_reason(&self) -> Option<String> {
+        (self.phase == Phase::Failed).then(|| self.reason.clone().unwrap_or_else(|| {
+            let step = &self.definition.stages[self.stage].id;
+            let cause = self.failure.clone().or_else(|| self.group_failure.as_ref()
+                .map(|detail| format!("{}: {}", detail.job, detail.first_line)))
+                .unwrap_or_else(|| "The step did not pass.".into());
+            let receipt = self.last_evidence.as_ref().map(|e| e.receipt.as_str());
+            format_reason(step, &cause, receipt)
+        }))
+    }
+
+    pub(crate) fn last_run(&self) -> RunRecord {
+        RunRecord { phase: self.phase.clone(), run: self.stopped_from.as_ref().unwrap_or(&self.run).clone(),
+            stop_run: self.stopped_from.as_ref().map(|_| self.run.clone()), pin: self.pin.clone(),
+            fence: self.fence, candidate: self.candidate.clone(), tree: self.tree.clone(),
+            models: self.models.clone(), reason: self.failed_reason().or_else(|| self.reason.clone())
+                .or_else(|| self.cancel_reason.clone()),
+            rework_history: self.rework_history.clone(), sent_back: self.sent_back.clone(),
+            back_edges: self.back_edges.clone() }
+    }
+}
+
+pub(crate) fn format_reason(step: &str, cause: &str, receipt: Option<&str>) -> String {
+    let cause = cause.split_whitespace().collect::<Vec<_>>().join(" ");
+    match receipt {
+        Some(receipt) => format!("{step}: {cause} (receipt {receipt})"),
+        None => format!("{step}: {cause}"),
+    }
+}
+
 /// What a later step needs to know about an item that has left live state.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Archived {
@@ -199,6 +266,30 @@ pub struct Archived {
     /// archives written before groups were kept.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<ArchivedGroup>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_run: Option<RunRecord>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub history: Vec<RunRecord>,
+}
+impl Archived {
+    pub fn can_start(&self) -> bool {
+        self.phase == Phase::Cancelled && self.group.is_none() && self.closed.is_none()
+    }
+
+    pub fn start_identity(&self, key: &str) -> (String, String) {
+        if let Some(run) = &self.last_run { return (run.stop_run.as_ref().unwrap_or(&run.run).clone(), run.pin.clone()); }
+        // Legacy archives have terminal status but no run binding. The archive itself
+        // supplies an identity, still fenced by the command's expected revision.
+        let identity = crate::digest(&("legacy-archive", key, self));
+        (identity.clone(), identity)
+    }
+}
+impl State {
+    pub fn matches_start(&self, key: &str, run: &str, pin: &str) -> bool {
+        if let Some(item) = self.items.get(key) { return item.run == run && item.pin == pin; }
+        self.archive.get(key).is_some_and(|item| item.can_start()
+            && item.start_identity(key) == (run.to_owned(), pin.to_owned()))
+    }
 }
 /// A finished group's name, tickets and clock, kept so its landing stays on the board.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -324,6 +415,7 @@ pub enum Outcome {
     /// Digest-verified gate diagnostics and the members whose changed paths they name.
     /// An empty member list takes the published anonymous-failure route.
     GateRejected { evidence: Evidence, members: Vec<String>, brief: String, failure: GroupFailure },
+    ReviewRejected { evidence: Evidence, summary: String, receipt: String },
     Passed(Evidence), Rejected(Evidence), RejectedWithDetails(Evidence, GroupFailure), RejectedWithBrief(Evidence, String), Labeled(String, Evidence), SafeFailure,
     /// A `SafeFailure` that says why, in a sentence kept on the run as its `failure` (ov-1058).
     SafeFailureBecause(String),
@@ -334,6 +426,8 @@ pub enum Outcome {
 pub enum EffectKind { Decide { policy: crate::ScriptPolicy, input: Box<crate::HookInput> }, Execute(StageKind), Stop { operation: String } }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Effect {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restart: Option<String>,
     pub id: String,
     pub item: String,
     pub run: String,

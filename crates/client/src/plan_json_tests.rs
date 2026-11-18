@@ -247,6 +247,7 @@ fn landings() -> (Vec<pb::Landing>, Vec<pb::BoardCiRead>) {
         summary: "Title of ov-4".into(),
         phase: pb::LandingPhase::CiFailed as i32,
         phase_since: NOW - 20 * 60_000,
+        reason: None,
         spend: Some(pb::Spend { input_tokens: 90_000, output_tokens: 30_000, cost_micros: Some(4_000_000), runs: 1, ..Default::default() }),
     };
     let landed = pb::Landing {
@@ -438,9 +439,13 @@ fn a_ticket_s_engine_run_reaches_the_json_and_is_left_out_when_unsaid() {
         stage_kind: "\"Build\"".into(),
         gate: "approval".into(),
         gate_principal: "owner".into(),
+        reason: Some("gate: the check failed (receipt gate.json)".into()),
+        send_back_refused: Some("gate: the back-edge limit was reached".into()),
     });
     let json = plan_json(&plan);
     assert_eq!(json["lines"][at]["run"]["phase"], "WaitingApproval");
+    assert_eq!(json["lines"][at]["run"]["reason"], "gate: the check failed (receipt gate.json)");
+    assert_eq!(json["lines"][at]["run"]["send_back_refused"], "gate: the back-edge limit was reached");
     assert_eq!(json["lines"][at]["run"]["gate_principal"], "owner");
     assert!(json["lines"][(at + 1) % plan.lines.len()].get("run").is_none());
 }

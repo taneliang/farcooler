@@ -687,3 +687,107 @@ async fn a_start_that_names_a_worktree_pins_the_remotes_main_not_the_stale_one()
     let tree = r.runtime.prepare_start(&board, "orchestrator", &start).await.unwrap().expect("a named tree");
     assert_eq!(tree.base, moved, "the tree's base is the remote's main");
 }
+
+#[tokio::test]
+async fn workflow_start_reuses_a_failed_tickets_branch_with_a_new_model() {
+    use farcooler_protocol::{workflow_commands::{Action, Mutation, NamedTree}, workflow_config::AdapterConfiguration};
+    use super::wire_commands::Prepared;
+
+    let (dir, mut runtime) = lander("pass").await;
+    let config = runtime.coding.clone().unwrap();
+    let mut definition = batched_push(&runtime, "any", 5000);
+    let mut review = config.stage("gate-0", StageKind::Review(Reviewer::Orchestrator("owner".into())),
+        "coding-review/v1", "orchestrator:owner");
+    review.routes.insert("rejected".into(), Target::Step("build".into()));
+    review.limit = 2;
+    definition.stages.insert(3, review);
+    definition.models.insert("build".into(), vec!["codex:gpt-5.5".into(), "claude:sonnet".into()]);
+
+    let host_id = Uuid::now_v7();
+    let root = runtime.store.create_repository_root(host_id, config.repository.to_str().unwrap(), 0).unwrap();
+    let repo = runtime.store.create_repository(host_id, root.id, "demo", config.repository.join(".git").to_str().unwrap(), "").unwrap();
+    let board_id = runtime.store.create_workspace(repo.id, "Demo", "dem").unwrap().id;
+    let board = board_id.to_string();
+    let task = runtime.store.create_task(board_id, "Repair the check", farcooler_store::models::Actor::User).unwrap();
+    let key = task.key.as_str();
+    runtime.host = Some(WorktreeHost { dir: dir.path().join("trees"), install_id: "fixture".into(), locks: Default::default() });
+    let adapter = Some(Box::new(AdapterConfiguration::Coding(config)));
+    let start_pin = farcooler_store::workflow_publication::configuration_pin(&definition, adapter.as_deref());
+    let mutation = |id: &str, revision| Mutation { id: id.into(), revision, epoch: 1, sequence: revision + 1 };
+    let accepted = |reply: serde_json::Value| assert!(reply.pointer("/receipt/result/Ok").is_some(), "{reply}");
+    accepted(runtime.wire_command(&board, "owner", Action::Publish { reason: None, notifications: None, adapter,
+        expected_pin: None, mutation: mutation("publish", 0), definition }).unwrap());
+    let start = |state: &State, id: &str, model: &str, adopt| {
+        let item = &state.items[key];
+        Action::Start { mutation: mutation(id, state.revision), item: key.into(),
+            run: item.run.clone(), pin: item.pin.clone(), start_pin: start_pin.clone(),
+            worktree: Some(NamedTree { name: key.into(), branch: "dem-1-work".into(), adopt }),
+            models: [("build".into(), model.into())].into(), with: Vec::new() }
+    };
+    let first = start(&runtime.state(&board).unwrap().unwrap(), "start", "codex:gpt-5.5", false);
+    let tree = runtime.prepare_start(&board, "owner", &first).await.unwrap().unwrap();
+    accepted(runtime.wire_command_with(&board, "owner", &[], None, first,
+        Prepared { tree: Some(tree.clone()), ..Default::default() }).unwrap());
+
+    for round in 0..3 {
+        for now in 2 + round * 10..12 + round * 10 {
+            runtime.pump(now).await.unwrap();
+            if runtime.state(&board).unwrap().unwrap().items[key].phase == Phase::WaitingReview { break; }
+        }
+        let state = runtime.state(&board).unwrap().unwrap();
+        let item = &state.items[key];
+        assert_eq!(item.phase, Phase::WaitingReview, "{:?}", item.failed_reason());
+        accepted(runtime.wire_command(&board, "owner", Action::Review {
+            mutation: mutation(&format!("reject-{round}"), state.revision), item: key.into(), run: item.run.clone(),
+            pin: item.pin.clone(), evidence: item.last_evidence.clone().unwrap(), passed: false, reason: None,
+        }).unwrap());
+    }
+    let failed = runtime.state(&board).unwrap().unwrap();
+    let old = &failed.items[key];
+    assert_eq!(old.phase, Phase::Failed);
+    assert_eq!(old.back_edges.get("gate-0"), Some(&2), "{:?}", old.failed_reason());
+    assert_eq!(old.models["build"], "codex:gpt-5.5");
+    let denied = runtime.wire_command(&board, "owner", Action::SendBack {
+        mutation: mutation("deny", failed.revision), item: key.into(),
+        run: old.run.clone(), pin: old.pin.clone(), reason: "Fix the check".into(),
+    }).unwrap();
+    let refusal = denied["receipt"]["reason"].as_str().unwrap();
+    assert!(refusal.starts_with("gate-0:") && refusal.contains("back-edge limit of 2") && refusal.contains("wire:owner:deny"), "{denied}");
+    let get = runtime.wire_command(&board, "owner", Action::Get).unwrap();
+    let failure = get["state"]["items"][key]["reason"].as_str().unwrap();
+    assert!(failure.starts_with("gate-0:") && failure.contains("rejected") && failure.contains("receipt"), "{get}");
+    assert_eq!(get["state"]["items"][key]["send_back_refused"], refusal);
+    let task_id = crate::wire::id_bytes(task.id);
+    let mut plan = farcooler_protocol::v1::Plan {
+        cards: vec![farcooler_protocol::v1::PlanCard { task_id: task_id.clone(), key: key.into(), ..Default::default() }],
+        lines: vec![farcooler_protocol::v1::TicketLine { task_id, ..Default::default() }],
+        ..Default::default()
+    };
+    crate::plan_run::annotate(&failed, &mut plan, &runtime.store.workflow_send_back_refusals(&failed).unwrap());
+    let run = plan.lines[0].run.as_ref().unwrap();
+    assert_eq!(run.reason.as_deref(), Some(failure));
+    assert_eq!(run.send_back_refused.as_deref(), Some(refusal));
+
+    let head = adapters::git(Path::new(&tree.path), &["rev-parse", "HEAD"]).await.unwrap();
+    let again = start(&failed, "restart", "claude:sonnet", true);
+    let adopted = runtime.prepare_start(&board, "owner", &again).await.unwrap().unwrap();
+    assert_eq!((&adopted.branch, &adopted.path), (&tree.branch, &tree.path));
+    accepted(runtime.wire_command_with(&board, "owner", &[], None, again,
+        Prepared { tree: Some(adopted), ..Default::default() }).unwrap());
+    runtime.pump(60).await.unwrap();
+    let current = runtime.state(&board).unwrap().unwrap();
+    let new = &current.items[key];
+    assert_ne!(new.run, old.run);
+    assert!(new.back_edges.is_empty());
+    assert_eq!(new.models["build"], "claude:sonnet");
+    assert_eq!(new.history[0].run, old.run);
+    assert_eq!(new.history[0].back_edges["gate-0"], 2);
+    assert_eq!(new.history[0].reason.as_deref(), Some(failure));
+    assert_eq!(adapters::git(Path::new(&tree.path), &["rev-parse", "HEAD"]).await.unwrap(), head,
+        "provision kept the branch's commits");
+    let effect = runtime.store.workflow_outbox(&board).unwrap().pop().unwrap().effect;
+    assert_eq!(effect.kind, EffectKind::Execute(StageKind::Build));
+    assert_eq!(effect.model.as_deref(), Some("claude:sonnet"));
+    assert!(runtime.wire_command(&board, "owner", Action::Get).unwrap()["state"]["items"][key]["send_back_refused"].is_null());
+    assert_eq!(runtime.store.workflow_item_task(&board, key).unwrap(), Some(task.id));
+}

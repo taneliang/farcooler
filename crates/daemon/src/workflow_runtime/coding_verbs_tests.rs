@@ -574,6 +574,12 @@ async fn a_failing_gate_is_rejected_on_the_first_run_and_not_retried_as_a_crash(
     assert!(!failure.split, "a one-member fallback failed without splitting");
     assert_eq!(outbox(&runtime, StageKind::Run), 1, "a failing exit is the candidate's answer: one run, not one per attempt");
     let reply = runtime.wire_command("w", "owner", farcooler_protocol::workflow_commands::Action::Get).unwrap();
+    let group = group_id(&state);
+    let reason = reply["state"]["items"][&group]["reason"].as_str().unwrap();
+    assert!(reason.starts_with("gate:") && reason.contains("error: first gate failure")
+        && reason.contains("receipt"), "{reply}");
+    let ticket_reason = reply["state"]["items"]["one"]["reason"].as_str().unwrap();
+    assert!(ticket_reason.starts_with("join:") && ticket_reason.contains("error: first gate failure"), "{reply}");
     let logs = reply["process_logs"].as_array().unwrap();
     let log = logs.iter().find(|log| log["stage"] == serde_json::json!({"Execute":"Run"})).unwrap();
     let state = runtime.state("w").unwrap().unwrap();

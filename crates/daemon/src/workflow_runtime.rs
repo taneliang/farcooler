@@ -64,7 +64,7 @@ mod recovery_backoff;
 #[cfg(test)]
 mod recovery_backoff_tests;
 pub use coding::{AGENT_REVIEWER, CodingConfigExt,CodingConfig, CodingCommand, CodingHarness, CodingReviewer, CodingCi, CodingLanding, CodingPullRequest, LaunchFile, MAX_COMMAND_MS};
-pub use coding_execute::{CodingReviewReceipt, CodingCiReceipt, write_agent_verdict};
+pub use coding_execute::{CodingReviewReceipt, CodingCiReceipt, write_agent_verdict, write_agent_verdict_with_summary};
 mod wire_commands;
 mod named_tree;
 pub use named_tree::{RepoLocks, WorktreeHost};

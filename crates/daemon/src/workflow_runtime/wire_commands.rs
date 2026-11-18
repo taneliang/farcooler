@@ -1,7 +1,7 @@
 //! Only the RPC admission seam supplies principal; the wire vocabulary has none.
 use super::*;
 use farcooler_protocol::workflow_commands::{Action, MAX_BYTES};
-use farcooler_store::{workflow::WorkflowActor, workflow_publication::Write};
+use farcooler_store::{workflow::{Receipt, WorkflowActor}, workflow_publication::Write};
 
 /// `workflow.get` for anyone but the owner (R-111, M1): every value in the adapter's command environments is
 /// replaced by `HIDDEN`, and the names stay, so a member sees what a gate is given without what it is given.
@@ -37,6 +37,13 @@ pub(super) use crate::workflow_summary::HIDDEN;
 #[derive(Default)]
 pub(super) struct Prepared { pub tree: Option<RunTree>, pub close_verified: bool, pub queue_held: bool }
 
+fn command_reply(receipt: Receipt) -> serde_json::Value {
+    let reason = receipt.send_back_reason();
+    let mut reply = serde_json::json!({"schema":1,"receipt":receipt});
+    if let Some(reason) = reason { reply["receipt"]["reason"] = reason.into(); }
+    reply
+}
+
 /// The CLI's small view is a projection only: no durable item or archive is changed.
 fn summarize(mut value:serde_json::Value) -> serde_json::Value {
     if let Some(config) = value.get_mut("configuration").and_then(|v| v.as_object_mut()) {
@@ -49,7 +56,7 @@ fn summarize(mut value:serde_json::Value) -> serde_json::Value {
         }
         if let Some(items) = state.get_mut("items").and_then(|v| v.as_object_mut()) {
             items.retain(|_, item| !(item.get("group_of").is_some_and(|g| !g.is_null())
-                && matches!(item["phase"].as_str(), Some("Done" | "Failed" | "Cancelled"))));
+                && matches!(item["phase"].as_str(), Some("Done" | "Cancelled"))));
             for item in items.values_mut().filter_map(|v| v.as_object_mut()) {
                 item.remove("definition");
                 item.entry("members").or_insert_with(|| serde_json::json!([]));
@@ -93,10 +100,26 @@ impl Exec {
         }
         let budgets: std::collections::BTreeMap<_, _> = state.iter().flat_map(|s| &s.items)
             .map(|(id, item)| (id.clone(), farcooler_workflow::back_edge_budgets(item))).collect();
+        let mut view = serde_json::to_value(&state)?;
+        if let Some(state) = &state {
+            for (id, item) in &state.items {
+                if let Some(reason) = item.failed_reason() { view["items"][id]["reason"] = reason.into(); }
+            }
+            for (id, reason) in self.store.workflow_send_back_refusals(state)? {
+                view["items"][id]["send_back_refused"] = reason.into();
+            }
+            for (id, item) in &state.archive {
+                if item.can_start() {
+                    let (run, pin) = item.start_identity(id);
+                    view["archive"][id]["run"] = run.into();
+                    view["archive"][id]["pin"] = pin.into();
+                }
+            }
+        }
         let mut reply = serde_json::json!({"schema":1,"configuration": self.store.workflow_configuration(workspace)?,
             "publication_history":self.store.workflow_publication_history(workspace)?,
             "orchestrator_publishes_workflow":self.store.orchestrator_publishes_workflow(workspace)?,
-            "back_edge_budgets":budgets, "places":self.places().view(workspace), "state":state, "notices":notices,"notice_deliveries":deliveries, "stops":stops});
+            "back_edge_budgets":budgets, "places":self.places().view(workspace), "state":view, "notices":notices,"notice_deliveries":deliveries, "stops":stops});
         let fields = reply.as_object_mut().expect("a JSON object");
         bound_recent(fields, "build_cleanup", self.store.workflow_cleanups(workspace)?);
         bound_recent(fields, "process_logs", self.failed_process_logs(workspace)?);
@@ -183,7 +206,7 @@ impl Runtime {
             {
                 (sender.device, sender.pane) = (None, None);
             }
-            return Ok(serde_json::json!({"schema":1,"receipt":receipt}));
+            return Ok(command_reply(receipt));
         }
         let state = self.state(workspace)?.unwrap_or_else(|| State::empty(workspace.into(), 1));
         let stale = state.epoch != mutation.epoch || state.revision != mutation.revision;
@@ -324,15 +347,19 @@ impl Runtime {
                 Action::Start { item, run, pin, start_pin, models, worktree, with, .. } => {
                     let configuration = self.store.workflow_configuration(workspace)?.filter(|c| &c.pin == start_pin);
                     match configuration {
-                        Some(configuration) if state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin) => {
+                        Some(configuration) if state.matches_start(item, run, pin) => {
                             self.validate_publication(&configuration.definition, configuration.adapter.as_ref())?;
                             self.refuse_removed_decider(&configuration.definition)?;
                             if worktree.as_ref().map(|w| (&w.name, &w.branch)) != tree.as_ref().map(|t| (&t.name, &t.branch)) {
                                 return Err(Error::Refused("a named worktree is prepared by the runner before Start"));
                             }
                             let initial_candidate = matches!(configuration.definition.stages[0].kind, StageKind::Tracker).then(|| start_pin.clone());
+                            let with = if with.is_empty() {
+                                state.items.get(item).filter(|i| i.phase == Phase::Failed)
+                                    .map(|i| i.followers.clone()).unwrap_or_default()
+                            } else { with.clone() };
                             let input = input(Command::Start { start_load: None, item:item.clone(),definition:configuration.definition,
-                                policy_pin:start_pin.clone(),resource:Exec::item_resource(workspace, item),dependencies:BTreeSet::new(),initial_candidate,models:models.clone(),tree:tree.clone().map(Box::new),with:with.clone() },Grant::Controller);
+                                policy_pin:start_pin.clone(),resource:Exec::item_resource(workspace, item),dependencies:BTreeSet::new(),initial_candidate,models:models.clone(),tree:tree.clone().map(Box::new),with },Grant::Controller);
                             self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
                         }
                         _ => self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Stale))?,
@@ -394,7 +421,7 @@ impl Runtime {
             let _ = self.track_tickets(&mine);
         }
         if let Some(wake) = &self.notice_wake { wake.notify_one(); }
-        Ok(serde_json::json!({"schema":1,"receipt":receipt}))
+        Ok(command_reply(receipt))
     }
 }
 
@@ -410,11 +437,13 @@ mod tests {
             "state":{"revision":17,"epoch":2,"source_sequences":{"wire:owner":9},"seen":["old"],
                 "items":{"ticket":{"definition":{},"phase":"Done","run":"r","pin":"p"},
                     "active":{"definition":{},"group_of":{"name":"landing"},"phase":"Running"},
-                    "finished":{"definition":{},"group_of":{"name":"landing"},"phase":"Failed"}},
+                    "failed":{"definition":{},"group_of":{"name":"landing"},"phase":"Failed","reason":"gate-0: rejected"},
+                    "finished":{"definition":{},"group_of":{"name":"landing"},"phase":"Done"}},
                 "archive":{"old":{"phase":"Done","group":{}}}},"notice_deliveries":[{"body":"large"}]});
         let summary = summarize(input.clone());
         assert!(summary.pointer("/state/items/finished").is_none());
         assert!(summary.pointer("/state/items/active").is_some());
+        assert_eq!(summary["state"]["items"]["failed"]["reason"], "gate-0: rejected");
         assert_eq!(summary["state"]["items"]["ticket"]["run"], "r");
         assert!(summary.pointer("/state/items/ticket/definition").is_none());
         assert!(summary.pointer("/configuration/definition").is_none());
@@ -659,6 +688,65 @@ mod tests {
         assert_eq!(state.items["a"].policy_pin,start_pin);
         assert!(!state.items["a"].definition.is_ticket());
     }
+    #[tokio::test]
+    async fn workflow_start_replaces_a_cancelled_run_under_the_same_key() {
+        for archive in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut runtime = Runtime::create(&dir.path().join("fixture")).await.unwrap();
+            let definition = coding_definition(false);
+            let start_pin = definition.pin();
+            let ws = "ws";
+            let key = "ov-7";
+            let send = |r: &Runtime, action| r.wire_command(ws, "owner", action).unwrap();
+            ok(&send(&runtime, Action::Publish { mutation: m("publish", 0, 1), expected_pin: None,
+                definition, adapter: None, notifications: None, reason: None }));
+            ok(&send(&runtime, Action::Track { mutation: m("track", 0, 2), item: key.into(), column: None }));
+            let start = |id, state: &State, run: &str, pin: &str| Action::Start {
+                mutation: m(id, state.revision, state.revision + 3), item: key.into(),
+                run: run.into(), pin: pin.into(), start_pin: start_pin.clone(), models: Default::default(),
+                worktree: None, with: vec![],
+            };
+            let state = runtime.state(ws).unwrap().unwrap();
+            let tracked = &state.items[key];
+            ok(&send(&runtime, start("start", &state, &tracked.run, &tracked.pin)));
+            runtime.pump(10).await.unwrap();
+            let state = runtime.state(ws).unwrap().unwrap();
+            let original = &state.items[key];
+            ok(&send(&runtime, Action::Cancel { mutation: m("cancel", state.revision, state.revision + 4),
+                item: key.into(), run: original.run.clone(), pin: original.pin.clone() }));
+            for now in 11..25 {
+                if runtime.state(ws).unwrap().unwrap().items[key].phase == Phase::Cancelled { break; }
+                runtime.pump(now).await.unwrap();
+            }
+            let stopped = runtime.state(ws).unwrap().unwrap();
+            assert_eq!(stopped.items[key].phase, Phase::Cancelled);
+            if archive {
+                runtime.internal(ws, Command::Advance, Grant::Controller, 25).unwrap();
+            }
+            let state = runtime.state(ws).unwrap().unwrap();
+            assert_eq!(state.archive.contains_key(key), archive);
+            let view = summarize(send(&runtime, Action::Get));
+            let bucket = if archive { "archive" } else { "items" };
+            let stopped = &view["state"][bucket][key];
+            let restart = start("restart", &state, stopped["run"].as_str().unwrap(), stopped["pin"].as_str().unwrap());
+            let receipt = send(&runtime, restart.clone());
+            ok(&receipt);
+            assert_eq!(send(&runtime, restart), receipt);
+            let current = summarize(send(&runtime, Action::Get));
+            let live = &current["state"]["items"][key];
+            assert_ne!(live["run"], original.run);
+            assert_eq!(live["history"][0]["run"], original.run);
+            assert_eq!(live["history"][0]["phase"], "Cancelled");
+            assert_eq!(current["state"]["items"].as_object().unwrap().len(), 1);
+            let attempt = start("obsolete", &runtime.state(ws).unwrap().unwrap(),
+                stopped["run"].as_str().unwrap(), stopped["pin"].as_str().unwrap());
+            assert_eq!(send(&runtime, attempt)["receipt"]["result"]["Err"], "Stale");
+            runtime.pump(26).await.unwrap();
+            let next = runtime.state(ws).unwrap().unwrap();
+            assert!(next.items[key].stage > 0, "the replacement provisions its own private checkout");
+        }
+    }
+
     #[tokio::test]
     async fn workflow_wire_retry_needs_the_exact_run_and_a_failed_item() {
         let dir = tempfile::tempdir().unwrap(); let mut runtime = Runtime::create(&dir.path().join("fixture")).await.unwrap();

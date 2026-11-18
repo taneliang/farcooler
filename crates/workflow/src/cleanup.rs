@@ -22,6 +22,8 @@ pub struct CleanupEffect {
     pub revision: u64,
     pub item: String,
     pub run: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restart: Option<String>,
     pub tree: Option<RunTree>,
     pub folders: Vec<String>,
     pub uncertain: bool,
@@ -49,7 +51,7 @@ pub fn effects(before: &State, after: &State) -> Vec<CleanupEffect> {
         if !(entered_wait || ended) || new.is_some_and(|i| i.phase == old.phase && i.stage == old.stage) { return None; }
         Some(CleanupEffect { id: digest(&("build-cleanup/v1", &after.workspace, after.revision, id)),
             workspace: after.workspace.clone(), revision: after.revision, item: id.clone(), run: old.run.clone(),
-            tree: old.tree.clone(), folders: old.definition.build_folders(),
+            restart: old.restart.clone(), tree: old.tree.clone(), folders: old.definition.build_folders(),
             uncertain: new.is_some_and(|i| i.phase == Phase::Uncertain) })
     }).collect()
 }

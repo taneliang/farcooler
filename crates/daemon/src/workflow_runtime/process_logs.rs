@@ -65,7 +65,7 @@ impl Exec {
         let failed_run = state.and_then(|s| s.items.get(&effect.item)).is_some_and(|i|
             i.run == effect.run && matches!(i.phase, Phase::Failed | Phase::Uncertain));
         let failed = failed_run || exit.is_some_and(|code| code != 0) || journal.is_some_and(|j|
-            matches!(j.outcome, Outcome::Rejected(_) | Outcome::SafeFailure | Outcome::SafeFailureBecause(_)
+            matches!(j.outcome, Outcome::ReviewRejected { .. } | Outcome::Rejected(_) | Outcome::SafeFailure | Outcome::SafeFailureBecause(_)
                 | Outcome::Interrupted | Outcome::Uncertain));
         if !failed && !all { return Ok(None); }
         // Old daemons left unbounded logs. Inspect their tail without reading the entire file.
@@ -187,7 +187,7 @@ mod tests {
         for n in 0..count {
             let id = format!("item-{n:03}");
             let item = state.items.remove(&id).unwrap();
-            state.archive.insert(id, farcooler_workflow::Archived { start_load: item.start_load, closed: None, phase: Phase::Cancelled, candidate: item.candidate, group: None });
+            state.archive.insert(id, farcooler_workflow::Archived { start_load: item.start_load, last_run: None, history: Vec::new(), closed: None, phase: Phase::Cancelled, candidate: item.candidate, group: None });
         }
         runtime.store.workflow_state_for_tests(&state).unwrap();
         assert_eq!(runtime.state(workspace).unwrap().unwrap().archive.len(), count);

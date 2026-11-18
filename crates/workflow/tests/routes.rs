@@ -287,7 +287,7 @@ fn send_back_refuses_an_exhausted_gate_and_restarts_one_under_budget() {
     let before = state.clone();
     let command = input(&state, Command::SendBack { item: "item".into(), reason: "Fix it".into() }, Grant::Controller);
     assert_eq!(step(&state, &command), Err(Refusal::SendBackRefused(
-        "The back-edge limit of 2 for step stage-2 has been reached.".into())));
+        "stage-2: The back-edge limit of 2 has been reached.".into())));
     assert_eq!(state, before);
     assert_eq!(back_edge_budgets(&state.items["item"])["stage-2"], BackEdgeBudget { used: 2, limit: 2 });
     assert_eq!(back_edge_budgets(&state.items["item"])["stage-1"], BackEdgeBudget { used: 0, limit: 0 });
@@ -302,7 +302,7 @@ fn send_back_refuses_an_exhausted_gate_and_restarts_one_under_budget() {
     let mut busy = command.clone();
     busy.busy_resources.insert("repo/branch".into());
     assert_eq!(step(&state, &busy), Err(Refusal::SendBackRefused(
-        "The build could not start because its resource is unavailable.".into())));
+        "stage-1: The build could not start because its resource is unavailable.".into())));
     assert_eq!(state.items["item"].sent_back.len(), 0);
     let transition = step(&state, &command).unwrap();
     assert_eq!(transition.state.items["item"].phase, Phase::Running);

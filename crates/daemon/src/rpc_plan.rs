@@ -357,7 +357,11 @@ pub(crate) async fn read_plan(
     }
     crate::plan_stage::annotate(svc, &plan, &mut wire);
     if let Ok(Some(state)) = svc.store.workflow_state(&workspace.to_string()) {
-        crate::plan_run::annotate(&state, &mut wire);
+        let refusals = svc.store.workflow_send_back_refusals(&state).unwrap_or_else(|error| {
+            tracing::warn!(%error, "workflow send-back receipts unreadable");
+            Default::default()
+        });
+        crate::plan_run::annotate(&state, &mut wire, &refusals);
     }
     if control {
         crate::plan_stage::annotate_waits(svc, workspace, &plan, &mut wire);

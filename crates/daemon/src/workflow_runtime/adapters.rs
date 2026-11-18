@@ -186,13 +186,16 @@ impl Exec {
     pub(super) fn effect_tree(&self, workspace: &str, effect: &Effect) -> PathBuf {
         // A worktree the orchestrator named at Start (ov-967), or the run's private one.
         if let Some(tree) = &effect.tree { return PathBuf::from(&tree.path); }
-        self.item_tree(workspace, &effect.item)
+        self.item_tree_for(workspace, &effect.item, effect.restart.as_deref())
     }
     /// A run's private tree, `tree-wf1-<hex>`. One made before ov-1081 as `tree-wf1:<hex>` keeps that name while it
     /// stands: an agent or gate already running there reports and reads that path. A fold makes its tree anew, so a
     /// group's next fold moves it to the new name (`coding_verbs::fold`).
     pub(super) fn item_tree(&self, workspace: &str, item: &str) -> PathBuf {
-        let key = digest(&(workspace, item));
+        self.item_tree_for(workspace, item, None)
+    }
+    pub(super) fn item_tree_for(&self, workspace: &str, item: &str, restart: Option<&str>) -> PathBuf {
+        let key = private_tree_key(workspace, item, restart);
         let tree = self.root.join(format!("tree-{}", folder_name(&key)));
         let legacy = self.root.join(format!("tree-{key}"));
         if !tree.exists() && legacy.exists() { legacy } else { tree }
@@ -232,7 +235,7 @@ impl Exec {
         let mut passed = true;
         match kind {
             StageKind::Provision => {
-                let branch = format!("wf-{}", &digest(&(workspace, &effect.item))[4..]);
+                let branch = private_branch(workspace, effect);
                 crate::git::create_worktree_with(&repo, &branch, &binding.base, &tree, true).await
                     .map_err(|_| Error::Refused("worktree provisioning uncertain"))?;
                 self.git_recorded(binding, &tree, &["rev-parse", "HEAD"]).await?;
@@ -334,4 +337,15 @@ impl Exec {
         }
         Ok(Outcome::Stopped { operation: operation.into(), receipt: digest(&("quiescent/v1", binding, operation)) })
     }
+}
+
+
+fn private_tree_key(workspace: &str, item: &str, restart: Option<&str>) -> String {
+    match restart {
+        Some(start) => digest(&("restart-tree", workspace, item, start)),
+        None => digest(&(workspace, item)),
+    }
+}
+pub(super) fn private_branch(workspace: &str, effect: &Effect) -> String {
+    format!("wf-{}", &private_tree_key(workspace, &effect.item, effect.restart.as_deref())[4..])
 }

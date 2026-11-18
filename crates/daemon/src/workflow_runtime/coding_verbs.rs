@@ -206,8 +206,9 @@ impl Exec {
             { return Err(Error::Refused("remote landing SHA changed")); }
         }
         let manifest = digest(&(binding, &fact.candidate, &raw, &fact.label));
-        let evidence = Evidence { candidate: fact.candidate, manifest: manifest.clone(),
-            receipt: digest(&("coding-receipt/v1", manifest)), policy_pin: binding.effect.policy_pin.clone() };
+        let receipt = if fact.label == "passed" { digest(&("coding-receipt/v1", &manifest)) }
+            else { format!("{}.verb.json", digest(&binding.effect)) };
+        let evidence = Evidence { candidate: fact.candidate, manifest, receipt, policy_pin: binding.effect.policy_pin.clone() };
         if *kind == StageKind::AwaitCi && (binding.effect.ci_retry.is_some()
             || fact.detail.get("run").is_some_and(|r| !r.is_null())) {
             return Ok(Outcome::CiResult { label: fact.label, evidence,

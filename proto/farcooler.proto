@@ -4896,6 +4896,10 @@ message TicketRun {
   string gate = 4;
   // Who decides, with a gate.
   string gate_principal = 5;
+  // The failed step, its verdict, and the receipt when available.
+  optional string reason = 6;
+  // The latest refused send-back for this step's run.
+  optional string send_back_refused = 7;
 }
 
 // A ticket an agent works now.
@@ -5989,6 +5993,8 @@ message Landing {
   int64 phase_since = 20;
   // What its lander has spent; zero without one.
   Spend spend = 21;
+  // Why the workflow group failed.
+  optional string reason = 22;
 }
 
 enum BoardCiStatus {

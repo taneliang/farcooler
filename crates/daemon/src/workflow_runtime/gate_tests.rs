@@ -145,9 +145,6 @@ async fn the_verdict_command_writes_the_receipt_the_gate_reads() {
     let receipt = write_agent_verdict(env, true).unwrap();
     assert_eq!(receipt, PathBuf::from(env("FARCOOLER_RECEIPT").unwrap()));
     assert!(matches!(runtime.reconcile_coding(&binding).await.unwrap(), Outcome::Passed(_)));
-    write_agent_verdict(env, false).unwrap();
-    assert!(matches!(runtime.reconcile_coding(&binding).await.unwrap(), Outcome::Rejected(_)));
-    let _ = dir;
     // A verdict for another effect, or another candidate, is no verdict for this one.
     for (key, value) in [("FARCOOLER_OPERATION_BINDING", "foreign"), ("FARCOOLER_CANDIDATE", "a".repeat(40).as_str())] {
         let mut other = command.environment.clone();
@@ -155,6 +152,19 @@ async fn the_verdict_command_writes_the_receipt_the_gate_reads() {
         write_agent_verdict(|k| other.get(k).cloned(), true).unwrap();
         assert!(runtime.reconcile_coding(&binding).await.is_err(), "{key}");
     }
+    let finding = "Retry discards the caller's deadline.";
+    write_agent_verdict_with_summary(env, false, Some(finding.into())).unwrap();
+    let rejected = runtime.reconcile_coding(&binding).await.unwrap();
+    assert!(matches!(rejected, Outcome::ReviewRejected { .. }));
+    assert!(runtime.observe("w", &binding.effect, rejected, false, 40).unwrap());
+    let state = runtime.state("w").unwrap().unwrap();
+    assert_eq!(state.items["one"].phase, Phase::Failed);
+    let get = runtime.wire_command("w", "owner", farcooler_protocol::workflow_commands::Action::Get).unwrap();
+    let reason = get["state"]["items"]["one"]["reason"].as_str().unwrap();
+    assert!(reason.starts_with("agent-review:") && reason.contains(finding)
+        && reason.contains(receipt.file_name().unwrap().to_str().unwrap()), "{get}");
+    assert_eq!(crate::plan_run::run_of(&state, "one").unwrap().reason.as_deref(), Some(reason));
+    drop(dir);
 }
 
 #[tokio::test]

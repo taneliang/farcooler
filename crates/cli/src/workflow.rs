@@ -113,7 +113,7 @@ pub enum WorkflowCmd {
     Track { workspace:Uuid,item:String,#[arg(long)] column:Option<String>,#[command(flatten)] identity:RoutineIdentity },
     /// Move a tracked ticket to a column: backlog, todo, doing, review or decision; done or cancelled close it.
     Move { workspace:Uuid,item:String,#[arg(long)] to:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
-    /// Start a run on a tracked ticket under the published definition `--start-pin`.
+    /// Start a run on a tracked ticket, or replace a cancelled or failed run under its key.
     Start { workspace:Uuid,item:String,#[arg(long)] start_pin:Option<String>,#[arg(long)] run:Option<String>,#[arg(long)] pin:Option<String>,
         /// A build step's model, as `<step>=<model>` (`build=codex:gpt-5.5`), from the ones the workflow lists. Once per
         /// step; a step left out runs with its default.
@@ -152,7 +152,13 @@ pub enum WorkflowCmd {
     /// For an agent the engine started to review a ticket: record your verdict. Only this counts; what you
     /// say in your turn doesn't. Run it before you end your turn, or the review runs again. Writes the step's
     /// receipt locally and talks to no runner.
-    Verdict { #[arg(long, action = clap::ArgAction::Set, required = true)] passed:bool },
+    Verdict {
+        #[arg(long, action = clap::ArgAction::Set, required = true)]
+        passed: bool,
+        /// A brief finding to keep with the verdict.
+        #[arg(long)]
+        summary: Option<String>,
+    },
 }
 impl WorkflowCmd {
     pub fn action(self) -> Result<(Uuid, Action), Box<dyn std::error::Error>> {
@@ -235,7 +241,10 @@ impl WorkflowCmd {
         let sequence = state["source_sequences"].as_object().map(|m| m.values().filter_map(|v|v.as_u64()).max().unwrap_or(0)).unwrap_or(0)
             .checked_add(1).ok_or("workflow sequence exhausted")?;
         if let Some((run,pin)) = bindings {
-            let current = state["items"].get(item).ok_or("ticket is not tracked")?;
+            let current = state["items"].get(item)
+                .or_else(|| start_pin.as_ref().and_then(|_| state["archive"].get(item))
+                    .filter(|archived| archived["phase"] == "Cancelled" && archived["run"].is_string()))
+                .ok_or("ticket is not tracked")?;
             *run = Some(current["run"].as_str().ok_or("missing ticket run")?.into());
             *pin = Some(current["pin"].as_str().ok_or("missing ticket pin")?.into());
         }
@@ -384,8 +393,8 @@ pub async fn workflow(runner:Option<&str>,cmd:WorkflowCmd,json:bool) -> Fallible
         return Ok(());
     }
     if let WorkflowCmd::Watch { workspace,item } = cmd { return watch(runner,workspace,item).await; }
-    if let WorkflowCmd::Verdict { passed } = cmd {
-        farcooler_daemon::workflow_runtime::write_agent_verdict(|key| std::env::var(key).ok(), passed)
+    if let WorkflowCmd::Verdict { passed, summary } = cmd {
+        farcooler_daemon::workflow_runtime::write_agent_verdict_with_summary(|key| std::env::var(key).ok(), passed, summary)
             .map_err(|error| match error {
                 farcooler_daemon::workflow_runtime::Error::Refused(_) => "This only works inside an agent the engine started to review a ticket.".to_string(),
                 error => format!("Couldn't record the verdict: {error}"),

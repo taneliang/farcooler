@@ -57,6 +57,7 @@ pub(crate) fn pb_landing(l: &Landing) -> pb::Landing {
         phase: pb::LandingPhase::Unspecified as i32,
         phase_since: 0,
         spend: None,
+        reason: None,
     }
 }
 
@@ -84,6 +85,7 @@ pub(crate) fn pb_landing_view(v: &LandingView) -> pb::Landing {
     wire.summary = v.summary.clone();
     wire.phase = pb_phase(v.phase) as i32;
     wire.phase_since = v.phase_since;
+    wire.reason = v.reason.clone();
     wire.spend = v.landing.lander_id.map(|_| crate::rpc_plan::pb_spend(&v.spend));
     wire
 }

@@ -150,6 +150,7 @@ fn landing_text(plan: &pb::Plan, l: &pb::Landing, now: i64) -> Vec<String> {
     };
     facts.push(format!("{} for {}", word.to_lowercase(), age(now - since)));
     out.push(format!("  {}", facts.join(" · ")));
+    if let Some(reason) = &l.reason { out.push(format!("  {reason}")); }
     if !l.summary.is_empty() {
         out.push(format!("  Carries: {}", l.summary));
     }

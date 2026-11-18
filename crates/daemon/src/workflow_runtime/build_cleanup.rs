@@ -57,7 +57,7 @@ impl Exec {
             for record in self.store.workflow_cleanups(workspace)? {
                 if record.result.as_ref().is_some_and(|r| !r.retry) { continue; }
                 let effect = record.effect;
-                let tree = effect.tree.as_ref().map_or_else(|| self.item_tree(workspace, &effect.item), |t| PathBuf::from(&t.path));
+                let tree = effect.tree.as_ref().map_or_else(|| self.item_tree_for(workspace, &effect.item, effect.restart.as_deref()), |t| PathBuf::from(&t.path));
                 // Retry rather than settle a skip. A cancellation can end the item before its
                 // already-running future is joined, and a waiting branch can also be in use.
                 let Ok(held) = self.tree_lock(&tree).try_write_owned() else {
@@ -100,7 +100,7 @@ impl Exec {
     }
     #[cfg(test)]
     pub(super) async fn release_build_checked(&self, effect: &CleanupEffect, after_check: impl FnOnce()) -> Result<CleanupResult> {
-        let tree = effect.tree.as_ref().map_or_else(|| self.item_tree(&effect.workspace, &effect.item), |t| PathBuf::from(&t.path));
+        let tree = effect.tree.as_ref().map_or_else(|| self.item_tree_for(&effect.workspace, &effect.item, effect.restart.as_deref()), |t| PathBuf::from(&t.path));
         let held = self.tree_lock(&tree).try_write_owned().map_err(|_| Error::Refused("cleanup tree is busy"))?;
         self.release_build_attempt(effect, &tree, held, after_check, false).await
     }
@@ -142,7 +142,7 @@ impl Exec {
         for workspace in &self.store.workflow_workspaces()? {
             let Some(state) = self.state(workspace)? else { continue };
             for (id, item) in &state.items {
-                let path = item.tree.as_ref().map_or_else(|| self.item_tree(workspace, id), |t| PathBuf::from(&t.path));
+                let path = item.tree.as_ref().map_or_else(|| self.item_tree_for(workspace, id, item.restart.as_deref()), |t| PathBuf::from(&t.path));
                 let same = path == tree || path.canonicalize().is_ok_and(|p| p == canonical);
                 if !same { continue; }
                 if item.phase == Phase::Uncertain { return Ok(skip("run is Uncertain")); }

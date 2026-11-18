@@ -36,6 +36,14 @@ pub struct Receipt {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actor: Option<WorkflowActor>,
 }
+impl Receipt {
+    pub fn send_back_reason(&self) -> Option<String> {
+        match &self.result {
+            Err(Refusal::SendBackRefused(reason)) => Some(format!("{reason} (receipt {})", self.id)),
+            _ => None,
+        }
+    }
+}
 /// Who sent a wire command (ov-1001): the person, and the device or pane it came from. The daemon reads it from
 /// the caller's admission; nothing a client sends names it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -184,6 +192,30 @@ impl Store {
         Ok(self.conn().query_row(
             "SELECT workspace, item FROM workflow_owned_items WHERE task_id = ?1", [task.as_bytes().as_slice()], |r| Ok((r.get(0)?, r.get(1)?)),
         ).optional()?)
+    }
+    /// The last refused send-back for each current run. Old requests stay in their immutable receipts.
+    pub fn workflow_send_back_refusals(&self, state: &State) -> Result<std::collections::BTreeMap<String, String>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT payload, receipt FROM workflow_wire_receipts
+             WHERE workspace = ?1 AND json_type(receipt, '$.result.Err.SendBackRefused') = 'text'
+             ORDER BY rowid DESC")?;
+        let mut rows = stmt.query([&state.workspace])?;
+        let mut reasons = std::collections::BTreeMap::new();
+        while let Some(row) = rows.next()? {
+            let payload: String = row.get(0)?;
+            let (_, action): (String, farcooler_protocol::workflow_commands::Action) = serde_json::from_str(&payload)?;
+            let farcooler_protocol::workflow_commands::Action::SendBack { item, run, pin, mutation, .. } = action else { continue };
+            if mutation.epoch != state.epoch || reasons.contains_key(&item)
+                || !state.items.get(&item).is_some_and(|i| i.run == run && i.pin == pin) {
+                continue;
+            }
+            let raw: String = row.get(1)?;
+            if let Some(reason) = serde_json::from_str::<Receipt>(&raw)?.send_back_reason() {
+                reasons.insert(item, reason);
+            }
+        }
+        Ok(reasons)
     }
     pub fn workflow_events(&self, workspace: &str) -> Result<Vec<Input>> {
         let conn = self.conn();

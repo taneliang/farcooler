@@ -159,6 +159,7 @@ pub struct LandingView {
     /// What it is doing (`landing_phase.rs`), and since when.
     pub phase: LandingPhase,
     pub phase_since: i64,
+    pub reason: Option<String>,
 }
 
 /// The plan's whole read for one board.
@@ -382,6 +383,7 @@ impl Store {
                 spend,
                 phase: ended.phase,
                 phase_since: ended.since,
+                reason: None,
             });
         }
         let ci = ci_of(&conn, workspace)?;
@@ -403,7 +405,7 @@ impl Store {
             let landing = group.landing(workspace, read);
             landings.push(LandingView {
                 title: landing_title(&landing), landing, summary, spend: Spend::default(),
-                phase: group.phase(read), phase_since: group.since,
+                phase: group.phase(read), phase_since: group.since, reason: group.reason,
             });
         }
         let conn = self.conn();

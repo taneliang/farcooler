@@ -38,7 +38,7 @@ impl Runtime {
     /// (refused as stale by the command itself). A run that lands on a network remote reads the remote's main
     /// here (ov-1059), and a remote that can't be read refuses the Start with a sentence, named tree or not.
     pub(super) async fn prepare_start(&self, workspace: &str, principal: &str, action: &Action) -> Result<Option<RunTree>> {
-        let Action::Start { mutation, worktree, start_pin, .. } = action else { return Ok(None) };
+        let Action::Start { mutation, item, run, pin, worktree, start_pin, .. } = action else { return Ok(None) };
         let id = format!("wire:{principal}:{}", mutation.id);
         if self.store.workflow_wire_receipt(workspace, &id, &serde_json::to_string(&(principal, action))?)?.is_some() { return Ok(None); }
         let Some(configuration) = self.store.workflow_configuration(workspace)?.filter(|c| &c.pin == start_pin) else { return Ok(None) };
@@ -76,7 +76,10 @@ impl Runtime {
         }
         // Another run in this workspace already holds the tree or the branch, though it may not be made yet.
         if let Some(state) = self.state(workspace)? {
-            let held = |f: &dyn Fn(&RunTree) -> bool| state.items.values()
+            let replaces = named.adopt && state.matches_start(item, run, pin);
+            let held = |f: &dyn Fn(&RunTree) -> bool| state.items.iter()
+                .filter(|(id, i)| !(replaces && *id == item && i.can_start()))
+                .map(|(_, i)| i)
                 // A run that has ended holds its name only while its tree is still there (ov-979).
                 .filter(|i| !matches!(i.phase, Phase::Done | Phase::Failed | Phase::Cancelled) || i.tree.as_ref().is_some_and(|t| Path::new(&t.path).exists()))
                 .filter_map(|i| i.tree.as_ref()).any(f);

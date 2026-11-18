@@ -229,10 +229,10 @@ pub fn with_stage(mut record: Value, stage: &Option<pb::PrStage>) -> Value {
 /// Left out of the record when the runner said nothing, as `pr_stage` is.
 pub fn with_run(mut record: Value, run: &Option<pb::TicketRun>) -> Value {
     if let (Some(run), Some(map)) = (run, record.as_object_mut()) {
-        map.insert(
-            "run".into(),
-            json!({ "run": run.run, "phase": run.phase, "stage_kind": run.stage_kind, "gate": run.gate, "gate_principal": run.gate_principal }),
-        );
+        let mut facts = json!({ "run": run.run, "phase": run.phase, "stage_kind": run.stage_kind, "gate": run.gate, "gate_principal": run.gate_principal });
+        if let Some(reason) = &run.reason { facts["reason"] = json!(reason); }
+        if let Some(reason) = &run.send_back_refused { facts["send_back_refused"] = json!(reason); }
+        map.insert("run".into(), facts);
     }
     record
 }
@@ -366,7 +366,7 @@ fn landing_phase_word(phase: i32) -> Option<&'static str> {
 
 /// A landing (ov-309, ov-872), with its tickets named by key.
 pub fn landing_json(plan: &pb::Plan, l: &pb::Landing) -> Value {
-    json!({
+    let mut record = json!({
         "id": id_text(&l.id),
         "short": short(&l.id),
         "number": l.number,
@@ -387,7 +387,9 @@ pub fn landing_json(plan: &pb::Plan, l: &pb::Landing) -> Value {
         "ci_subject": l.ci_subject,
         "lander": l.lander_id.as_deref().map(id_text),
         "spend": l.spend.as_ref().map(spend_json),
-    })
+    });
+    if let Some(reason) = &l.reason { record["reason"] = json!(reason); }
+    record
 }
 
 /// An agent at work (ov-872): its role, where it runs, the tickets it works

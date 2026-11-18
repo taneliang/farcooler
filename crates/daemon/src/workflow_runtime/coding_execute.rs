@@ -40,6 +40,8 @@ pub struct CodingReviewReceipt {
     pub identity: String,
     pub candidate: String,
     pub passed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
 }
 
 /// The account the runner runs as, from the account database rather than the daemon's own environment, so a
@@ -72,12 +74,20 @@ fn account_tools_first(environment: &mut std::collections::BTreeMap<String, Stri
 /// Write an agent gate's verdict where its step reads it (ov-969): `farcooler workflow verdict`, run by the reviewing
 /// agent, whose environment the step pinned. `env` reads that environment. Returns where the receipt went.
 pub fn write_agent_verdict(env: impl Fn(&str) -> Option<String>, passed: bool) -> Result<PathBuf> {
+    write_agent_verdict_with_summary(env, passed, None)
+}
+
+pub fn write_agent_verdict_with_summary(env: impl Fn(&str) -> Option<String>, passed: bool, summary: Option<String>) -> Result<PathBuf> {
+    if summary.as_deref().is_some_and(|text| !farcooler_workflow::valid_rework_reason(text)) {
+        return Err(Error::Domain(farcooler_core::error::DomainError::refused(
+            "A verdict summary must contain text and fit within 4096 bytes.".into())));
+    }
     let var = |key: &str| env(key).filter(|v| !v.is_empty()).ok_or(Error::Refused("not run by an agent's review gate"));
     let receipt = PathBuf::from(var("FARCOOLER_RECEIPT")?);
     let parent = receipt.parent().filter(|p| receipt.is_absolute() && p.is_dir())
         .ok_or(Error::Refused("not run by an agent's review gate"))?;
     let body = serde_json::to_vec(&CodingReviewReceipt { binding: var("FARCOOLER_OPERATION_BINDING")?,
-        identity: AGENT_REVIEWER.into(), candidate: var("FARCOOLER_CANDIDATE")?, passed })?;
+        identity: AGENT_REVIEWER.into(), candidate: var("FARCOOLER_CANDIDATE")?, passed, summary })?;
     // A fresh file renamed into place: the step reads one whole verdict, the last one given, and never follows a link.
     let draft = parent.join(format!(".verdict-{}", Uuid::now_v7()));
     let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600).custom_flags(libc::O_NOFOLLOW).open(&draft)?;
@@ -298,7 +308,7 @@ impl Exec {
             change, commit or stage anything here.\n\nIf it isn't ready, first write what must change, plainly, with \
             `farcooler task note {item} --kind finding --body \"…\"`: a fresh agent makes the fix, and that note is how it \
             knows.\n\nWhen you've decided, record your verdict with \
-            `farcooler workflow verdict --passed true` or `farcooler workflow verdict --passed false`, then end your turn. \
+            `farcooler workflow verdict --passed true` or `farcooler workflow verdict --passed false --summary \"Brief finding\"`, then end your turn. \
             Only that command's verdict counts. If you end your turn without one, the review hasn't happened, and it \
             runs again.")
     }
@@ -578,7 +588,7 @@ impl Exec {
                     other => other?,
                 },
                 None => {
-                    let branch = format!("wf-{}", &digest(&(workspace, &binding.effect.item))[4..]);
+                    let branch = adapters::private_branch(workspace, &binding.effect);
                     if let Err(error) = crate::git::create_worktree_with(&self.repository(), &branch, &binding.base, &tree, true).await {
                         // Nothing made fails the step with a sentence (ov-1220); git's own reason is in the warning just above.
                         tracing::warn!(item = %binding.effect.item, %error, "worktree provisioning failed");
@@ -610,7 +620,7 @@ impl Exec {
                         let candidate = binding.effect.candidate.as_deref().filter(|c| sha(c))
                             .ok_or(Error::Refused("missing gate candidate"))?;
                         self.git_recorded(binding, &self.repository(), &["worktree", "prune"]).await?;
-                        let branch = format!("wf-{}", &digest(&(&binding.workspace, &binding.effect.item))[4..]);
+                        let branch = adapters::private_branch(&binding.workspace, &binding.effect);
                         let exists = self.try_git(binding, &self.repository(),
                             &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")]).await?.0;
                         if exists {
@@ -724,8 +734,9 @@ impl Exec {
         }
         let unchanged = code == 0 && self.verify_candidate(binding, &self.tree(binding)).await.is_ok();
         let manifest = digest(&(binding, &candidate, &raw, unchanged));
-        let evidence = Evidence { candidate, manifest: manifest.clone(), receipt: digest(&("coding-receipt/v1", manifest)),
-            policy_pin: binding.effect.policy_pin.clone() };
+        let receipt = if unchanged { digest(&("coding-receipt/v1", &manifest)) }
+            else { format!("{}.json", digest(&binding.effect)) };
+        let evidence = Evidence { candidate, manifest, receipt, policy_pin: binding.effect.policy_pin.clone() };
         Ok(if unchanged { Outcome::Passed(evidence) } else {
             // Read the digest-verified log, never a renderer's guess at a receipt path. The command
             // gate is the job; the earliest error line is its failure context.
@@ -778,7 +789,7 @@ impl Exec {
         let candidate = self.git_recorded(binding, &tree, &["rev-parse", "HEAD"]).await?;
         if !sha(&candidate) { return Err(Error::Refused("invalid candidate SHA")); }
         let branch = self.git_recorded(binding, &tree, &["symbolic-ref", "HEAD"]).await?;
-        let owned = binding.effect.tree.as_ref().map_or_else(|| format!("wf-{}", &digest(&(&binding.workspace, &binding.effect.item))[4..]), |t| t.branch.clone());
+        let owned = binding.effect.tree.as_ref().map_or_else(|| adapters::private_branch(&binding.workspace, &binding.effect), |t| t.branch.clone());
         if branch != format!("refs/heads/{owned}") {
             return Err(Error::Refused("worktree branch is not owned by this item"));
         }
@@ -933,6 +944,7 @@ impl Exec {
                 return Ok(Outcome::SafeFailureBecause(refused.to_string())),
             other => other?,
         };
+        let mut review_rejection = None;
         let mut passed = check_rejection.is_none();
         match kind {
             StageKind::Provision => {
@@ -970,7 +982,8 @@ impl Exec {
                 }
                 if matches!(kind, StageKind::Review(_) | StageKind::Ci) {
                     let agent = matches!(kind, StageKind::Review(Reviewer::Agent));
-                    let raw = match self.bytes(&self.provider_path(binding)) {
+                    let path = self.provider_path(binding);
+                    let raw = match self.bytes(&path) {
                         // An agent that ended its turn without a verdict gave none: it never passes, and it runs again (ov-969).
                         Err(Error::Io(error)) if agent && error.kind() == std::io::ErrorKind::NotFound => return Ok(Outcome::SafeFailure),
                         raw => raw?,
@@ -984,6 +997,12 @@ impl Exec {
                             return Err(Error::Refused("foreign review receipt"));
                         }
                         passed = receipt.passed;
+                        if !passed {
+                            let summary = receipt.summary.filter(|text| farcooler_workflow::valid_rework_reason(text))
+                                .unwrap_or_else(|| "The reviewer rejected the candidate.".into());
+                            let name = path.file_name().expect("provider receipt filename").to_string_lossy().into_owned();
+                            review_rejection = Some((summary, name));
+                        }
                     } else {
                         self.verify_landing(binding).await?;
                         let receipt: CodingCiReceipt = serde_json::from_slice(&raw)?;
@@ -1007,10 +1026,11 @@ impl Exec {
         let manifest = digest(&(binding, &candidate, &facts, passed));
         let evidence = Evidence { candidate, manifest: manifest.clone(), receipt: digest(&("coding-receipt/v1", manifest)),
             policy_pin: binding.effect.policy_pin.clone() };
-        Ok(match check_rejection {
-            Some(brief) => Outcome::RejectedWithBrief(evidence, brief),
-            None if passed => Outcome::Passed(evidence),
-            None => Outcome::Rejected(evidence),
+        Ok(match (review_rejection, check_rejection) {
+            (Some((summary, receipt)), _) => Outcome::ReviewRejected { evidence, summary, receipt },
+            (None, Some(brief)) => Outcome::RejectedWithBrief(evidence, brief),
+            (None, None) if passed => Outcome::Passed(evidence),
+            (None, None) => Outcome::Rejected(evidence),
         })
     }
 }

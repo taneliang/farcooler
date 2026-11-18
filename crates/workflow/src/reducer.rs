@@ -4,6 +4,20 @@ use std::collections::{BTreeMap, BTreeSet};
 pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
     step_inner(state, input, false)
 }
+fn new_item(definition: &Definition, policy_pin: &str, resource: &str,
+    dependencies: &BTreeSet<String>, initial_candidate: &Option<String>) -> Item {
+    Item {
+        start_load: None, execution: None, definition: definition.clone(), pin: definition.pin(), policy_pin: policy_pin.into(),
+        dependencies: dependencies.clone(), resource: resource.into(), stage: 0, iteration: 0, attempt: 1, fence: 1,
+        phase: Phase::Blocked, run: String::new(), pending: None, candidate: initial_candidate.clone(),
+        restart: None, history: Vec::new(), reason: None, last_evidence: None, stopping: None, stopped_from: None,
+        cancel_reason: None, closed: None, failure: None, group_failure: None, deciding: None,
+        hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, landed: None,
+        rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
+        members: Vec::new(), handed: Vec::new(), since_ms: 0, group_of: None, grouped_in: None,
+        models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new(),
+    }
+}
 #[path = "hook_reducer.rs"]
 mod hook_reducer;
 fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Transition, Refusal> {
@@ -53,15 +67,8 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     || next.items.values().any(|i| owns_resource(i) && i.resource == *resource)) {
                 return Err(Refusal::Resource);
             }
-            let mut record = Item { start_load: None, execution: None, definition: definition.clone(), pin: definition.pin(),
-                policy_pin: policy_pin.clone(), dependencies: dependencies.clone(),
-                resource: resource.clone(), stage: 0, iteration: 0, attempt: 1, fence: 1,
-                phase: Phase::Blocked, run: String::new(), pending: None,
-                candidate: initial_candidate.clone(), last_evidence: None, stopping: None, cancel_reason: None, closed: None, failure: None, group_failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, landed: None, rework_history: Vec::new(),
-                back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
-                members: Vec::new(), handed: Vec::new(), since_ms: 0, group_of: None, grouped_in: None,
-                models: definition.picked_models(&BTreeMap::new())?, tree: None,
-                sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() };
+            let mut record = new_item(definition, policy_pin, resource, dependencies, initial_candidate);
+            record.models = definition.picked_models(&BTreeMap::new())?;
             if ready(&next, &record, input) { enter(&mut record, item, input, &mut effects)?; }
             next.items.insert(item.clone(), record);
         }
@@ -77,28 +84,94 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
             if input.busy_resources.contains(resource) || next.items.values().any(|i| owns_resource(i) && i.resource == *resource) {
                 return Err(Refusal::Resource);
             }
-            next.items.remove(item);
-            next.archive.remove(item);
+            let mut history = Vec::new();
+            if let Some(mut prior) = next.items.remove(item) {
+                history = std::mem::take(&mut prior.history);
+                if !prior.definition.is_ticket() { history.push(prior.last_run()); }
+            }
+            if let Some(prior) = next.archive.remove(item) {
+                history = prior.history;
+                if let Some(run) = prior.last_run { history.push(run); }
+            }
             if next.items.len() >= MAX_ITEMS { return Err(Refusal::Limit); }
-            let mut record = Item { start_load: None, execution: None, definition: definition.clone(), pin: definition.pin(),
-                policy_pin: policy_pin.clone(), dependencies: BTreeSet::new(), resource: resource.clone(),
-                stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked, run: String::new(), pending: None,
-                candidate: Some(definition.pin()), last_evidence: None, stopping: None, cancel_reason: None, closed: None, failure: None, group_failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, landed: None, rework_history: Vec::new(),
-                back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
-                members: Vec::new(), handed: Vec::new(), since_ms: 0, group_of: None, grouped_in: None,
-                models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() };
+            let mut record = new_item(definition, policy_pin, resource, &BTreeSet::new(), &Some(definition.pin()));
+            record.history = history;
             if ready(&next, &record, input) { enter(&mut record, item, input, &mut effects)?; }
             next.items.insert(item.clone(), record);
+        }
+        Command::Start { item: id, definition, policy_pin, resource, dependencies, initial_candidate, models, tree, with, start_load } => {
+            controller(input)?;
+            let prior = next.items.remove(id);
+            let archived = next.archive.remove(id);
+            if let Some(item) = &prior {
+                if !item.can_start() { return Err(Refusal::Phase); }
+            } else {
+                if !archived.as_ref().ok_or(Refusal::Missing)?.can_start() { return Err(Refusal::Phase); }
+                if next.items.len() >= MAX_ITEMS { return Err(Refusal::Limit); }
+            }
+            if prior.as_ref().is_some_and(|item| item.phase == Phase::Failed
+                && item.followers.iter().any(|f| !with.contains(f))) { return Err(Refusal::Phase); }
+            // The run's other tickets: each a ticket at rest of its own, named once (ov-970).
+            if with.len() > usize::from(definition.execution_limits().group_members) || with.iter().any(|f| f == id || !valid_id(f))
+                || with.iter().collect::<BTreeSet<_>>().len() != with.len()
+            { return Err(Refusal::Invalid); }
+            for follower in with {
+                let f = next.items.get(follower).ok_or(Refusal::Missing)?;
+                if !f.definition.is_ticket() || f.phase != Phase::WaitingApproval || f.follows.as_ref().is_some_and(|lead| lead != id) || !f.followers.is_empty() {
+                    return Err(Refusal::Phase);
+                }
+            }
+            definition.validate()?;
+            if definition.is_ticket() { return Err(Refusal::Invalid); }
+            if !valid_id(resource) || !valid_id(policy_pin) || dependencies.len() > 128 { return Err(Refusal::Invalid); }
+            let picked = definition.picked_models(models)?;
+            if tree.as_ref().is_some_and(|t| !t.valid()) { return Err(Refusal::Invalid); }
+            if matches!(definition.stages[0].kind, StageKind::Tracker) != initial_candidate.is_some()
+                || initial_candidate.as_ref().is_some_and(|c| !valid_id(c))
+            { return Err(Refusal::Evidence); }
+            for dep in dependencies {
+                if !next.items.contains_key(dep) && !next.archive.contains_key(dep) { return Err(Refusal::Missing); }
+            }
+            if dependencies.iter().all(|d| dependency_done(&next, d))
+                && (input.busy_resources.contains(resource)
+                    || next.items.values().any(|i| owns_resource(i) && i.resource == *resource)) {
+                return Err(Refusal::Resource);
+            }
+            let mut item = new_item(definition, policy_pin, resource, dependencies, initial_candidate);
+            if let Some(mut prior) = prior {
+                item.fence = prior.fence.checked_add(1).ok_or(Refusal::Limit)?;
+                item.history = std::mem::take(&mut prior.history);
+                if matches!(prior.phase, Phase::Failed | Phase::Cancelled) {
+                    item.history.push(prior.last_run());
+                }
+            } else if let Some(archived) = archived {
+                let (run, pin) = archived.start_identity(id);
+                let previous = archived.last_run.unwrap_or_else(|| RunRecord {
+                    phase: Phase::Cancelled, run, stop_run: None, pin, fence: 0, candidate: archived.candidate,
+                    tree: None, models: BTreeMap::new(), reason: None, rework_history: Vec::new(),
+                    sent_back: Vec::new(), back_edges: BTreeMap::new(),
+                });
+                item.fence = previous.fence.checked_add(1).ok_or(Refusal::Limit)?;
+                item.history = archived.history;
+                item.history.push(previous);
+            }
+            if !item.history.is_empty() { item.restart = Some(input.id.clone()); }
+            item.start_load = start_load.clone();
+            item.models = picked;
+            item.tree = tree.as_deref().cloned();
+            item.followers = with.clone();
+            for follower in with { next.items.get_mut(follower).ok_or(Refusal::Missing)?.follows = Some(id.clone()); }
+            next.items.insert(id.clone(), item);
         }
         command => {
             let id = match command {
                 Command::Approve { item, .. } | Command::Review { item, .. }
                 | Command::Observe { item, .. } | Command::Cancel { item, .. } | Command::Retry { item }
                 | Command::Queue { item } | Command::Leave { item } | Command::RefreshJoin { item, .. }
-                | Command::Move { item, .. } | Command::Start { item, .. }
+                | Command::Move { item, .. }
                 | Command::Resolve { item, .. } | Command::SendBack { item, .. } | Command::Close { item, .. }
                 | Command::Land { item, .. } | Command::RepinPending { item, .. } => item,
-                Command::Decide { .. } | Command::Enqueue { .. } | Command::Advance | Command::RefreshGroups { .. } | Command::Reopen { .. } => unreachable!(),
+                Command::Decide { .. } | Command::Enqueue { .. } | Command::Advance | Command::RefreshGroups { .. } | Command::Reopen { .. } | Command::Start { .. } => unreachable!(),
             };
             let mut item = next.items.remove(id).ok_or(Refusal::Missing)?;
             // Manual moves supersede a read-only decision without needing to stop an operation.
@@ -193,6 +266,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     let wait_since = item.wait_since.take();
                     // Each answer replaces the last attempt's reason; only a failure that says why sets one.
                     item.failure = None;
+                    item.reason = None;
                     // A rerun is an outside side effect. Its success resumes the CI look; anything
                     // ambiguous waits for reconciliation and can never dispatch the rerun again.
                     let rerunning = item.ci_retry.as_ref().is_some_and(|r| r.pending) && !item.run.starts_with("cancel:");
@@ -287,6 +361,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                                 }
                                 item.members.retain(|m| !members.contains(&m.item));
                                 if item.members.is_empty() {
+                                    item.handed = members.clone();
                                     item.pending = None; item.last_evidence = Some(evidence.clone());
                                     item.phase = Phase::Failed;
                                 } else {
@@ -332,6 +407,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                                 }
                                 item.members.retain(|m| !members.contains(&m.item));
                                 if item.members.is_empty() {
+                                    item.handed = members.clone();
                                     item.pending = None; item.last_evidence = Some(evidence.clone());
                                     item.phase = Phase::Failed;
                                 } else {
@@ -361,6 +437,15 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                             }
                             evidence_matches(&item, evidence)?;
                             route(&mut item, id, input, label, Some(evidence), Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
+                        }
+                        Outcome::ReviewRejected { evidence, summary, receipt } => {
+                            if item.run.starts_with("cancel:") || !matches!(item.definition.stages[item.stage].kind, StageKind::Review(_))
+                                || !valid_rework_reason(summary) || !valid_id(receipt) { return Err(Refusal::Evidence); }
+                            evidence_matches(&item, evidence)?;
+                            item.brief = Some(summary.clone());
+                            finish(&mut item, id, input, false, evidence,
+                                Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
+                            if item.phase == Phase::Failed { describe_failure(&mut item, summary, Some(receipt)); }
                         }
                         Outcome::Passed(evidence) | Outcome::Rejected(evidence) | Outcome::RejectedWithDetails(evidence, _) | Outcome::RejectedWithBrief(evidence, _) => {
                             if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
@@ -425,6 +510,25 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                             launch(&mut item, id, input, &mut effects)?;
                         }
                     }
+                    if item.phase == Phase::Failed {
+                        match outcome {
+                            Outcome::SafeFailure | Outcome::SafeFailureBecause(_) => {
+                                let cause = item.failure.as_deref().unwrap_or("The operation failed before completing.").to_owned();
+                                let step = &item.definition.stages[item.stage].id;
+                                item.reason = Some(format_reason(step, &format!("{cause} Attempts exhausted."), Some(&input.id)));
+                            }
+                            Outcome::GateRejected { evidence, failure, .. }
+                            | Outcome::RejectedWithDetails(evidence, failure)
+                            | Outcome::CiResult { label: _, evidence, failure: Some(failure), .. } => {
+                                describe_failure(&mut item, &format!("{}: {}", failure.job, failure.first_line), Some(&evidence.receipt));
+                            }
+                            Outcome::RejectedWithBrief(evidence, brief) => describe_failure(&mut item, brief, Some(&evidence.receipt)),
+                            Outcome::FoldConflict { evidence, files, .. } => {
+                                describe_failure(&mut item, &conflict_brief(evidence, files)?, Some(&evidence.receipt));
+                            }
+                            _ => {}
+                        }
+                    }
                 }
                 Command::Close { resolution, .. } => {
                     controller(input)?;
@@ -447,7 +551,8 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                         // caller's claim, makes the final move, so no active worker is abandoned.
                         item.phase = Phase::Cancelling;
                         item.stopping = Some(operation.clone());
-                        item.run = format!("cancel:{}", run_id(&item, id, input));
+                        let stop_run = format!("cancel:{}", run_id(&item, id, input));
+                        item.stopped_from = Some(std::mem::replace(&mut item.run, stop_run));
                         emit(&mut item, id, input, EffectKind::Stop { operation }, &mut effects);
                     } else { finish_close(&mut item); }
                 }
@@ -473,7 +578,8 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     if let Some(operation) = item.pending.take() {
                         item.phase = Phase::Cancelling;
                         item.stopping = Some(operation.clone());
-                        item.run = format!("cancel:{}", run_id(&item, id, input));
+                        let stop_run = format!("cancel:{}", run_id(&item, id, input));
+                        item.stopped_from = Some(std::mem::replace(&mut item.run, stop_run));
                         emit(&mut item, id, input, EffectKind::Stop { operation }, &mut effects);
                     } else { item.phase = Phase::Cancelled; }
                 }
@@ -502,11 +608,11 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                             let gid = group_id(state, name);
                             let resource = definition.groups[name].exclusive.clone();
                             let definition = definition.group_definition(name).ok_or(Refusal::Definition)?;
-                            next.items.insert(gid.clone(), Item { start_load: None, execution: None, pin: definition.pin(), definition,
+                            next.items.insert(gid.clone(), Item { start_load: None, execution: None, restart: None, history: Vec::new(), reason: None, pin: definition.pin(), definition,
                                 policy_pin: policy_pin.clone(), dependencies: BTreeSet::new(), resource,
                                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked,
                                 run: String::new(), pending: None, candidate: None, last_evidence: None,
-                                stopping: None, cancel_reason: None, closed: None, failure: None, group_failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, landed: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
+                                stopping: None, stopped_from: None, cancel_reason: None, closed: None, failure: None, group_failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, landed: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                                 members: Vec::new(), handed: Vec::new(), since_ms: 0,
                                 group_of: Some(GroupOf { name: name.clone(), pin }),
                                 grouped_in: None, models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() });
@@ -554,6 +660,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     item.retries += 1;
                     item.attempt = 1;
                     item.failure = None;
+                    item.reason = None;
                     item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
                     item.phase = Phase::Blocked;
                 }
@@ -572,49 +679,6 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     // Each column is a run of its own, so a decision made in the last one cannot be replayed in this one.
                     if item.phase == Phase::WaitingApproval { item.run = run_id(&item, id, input); }
                 }
-                Command::Start { definition, policy_pin, resource, dependencies, initial_candidate, models, tree, with, start_load, .. } => {
-                    controller(input)?;
-                    if !item.definition.is_ticket() || item.phase != Phase::WaitingApproval || item.follows.is_some() { return Err(Refusal::Phase); }
-                    // The run's other tickets: each a ticket at rest of its own, named once (ov-970).
-                    if with.len() > usize::from(definition.execution_limits().group_members) || with.iter().any(|f| f == id || !valid_id(f))
-                        || with.iter().collect::<BTreeSet<_>>().len() != with.len()
-                    { return Err(Refusal::Invalid); }
-                    for follower in with {
-                        let f = next.items.get(follower).ok_or(Refusal::Missing)?;
-                        if !f.definition.is_ticket() || f.phase != Phase::WaitingApproval || f.follows.is_some() || !f.followers.is_empty() {
-                            return Err(Refusal::Phase);
-                        }
-                    }
-                    definition.validate()?;
-                    if definition.is_ticket() { return Err(Refusal::Invalid); }
-                    if !valid_id(resource) || !valid_id(policy_pin) || dependencies.len() > 128 { return Err(Refusal::Invalid); }
-                    let picked = definition.picked_models(models)?;
-                    if tree.as_ref().is_some_and(|t| !t.valid()) { return Err(Refusal::Invalid); }
-                    if matches!(definition.stages[0].kind, StageKind::Tracker) != initial_candidate.is_some()
-                        || initial_candidate.as_ref().is_some_and(|c| !valid_id(c))
-                    { return Err(Refusal::Evidence); }
-                    for dep in dependencies {
-                        if !next.items.contains_key(dep) && !next.archive.contains_key(dep) { return Err(Refusal::Missing); }
-                    }
-                    if dependencies.iter().all(|d| dependency_done(&next, d))
-                        && (input.busy_resources.contains(resource)
-                            || next.items.values().any(|i| owns_resource(i) && i.resource == *resource)) {
-                        return Err(Refusal::Resource);
-                    }
-                    // The run begins from nothing, under the same name; the sweep below starts it once it is ready.
-                    item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
-                    item.pin = definition.pin(); item.definition = definition.clone();
-                    item.hook_calls.clear(); item.hook_refused = None;
-                    item.policy_pin = policy_pin.clone(); item.resource = resource.clone(); item.dependencies = dependencies.clone();
-                    item.candidate = initial_candidate.clone(); item.stage = 0; item.iteration = 0; item.attempt = 1;
-                    item.phase = Phase::Blocked; item.run = String::new(); item.pending = None; item.last_evidence = None;
-                    item.stopping = None; item.rework_history = Vec::new(); item.back_edges = BTreeMap::new(); item.retries = 0;
-                    item.start_load = start_load.clone();
-                    item.models = picked; item.tree = tree.as_deref().cloned();
-                    item.sent_back = Vec::new(); item.brief = None;
-                    item.followers = with.clone();
-                    for follower in with { next.items.get_mut(follower).ok_or(Refusal::Missing)?.follows = Some(id.clone()); }
-                }
                 Command::SendBack { reason, .. } => {
                     controller(input)?;
                     // Only while nothing is in flight: an effect running now would answer for a step it left. A build
@@ -631,21 +695,23 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                         .ok_or(Refusal::Invalid)?;
                     // Never back across a landing: what it landed would be built and landed again.
                     if item.definition.stages[to..=item.stage].iter().any(|s| lands(&s.kind)) { return Err(Refusal::Phase); }
+                    let stage = &item.definition.stages[item.stage];
+                    let refused = |cause: &str| Refusal::SendBackRefused(format_reason(&stage.id, cause, None));
                     let limit = item.definition.send_back_limit();
                     if item.sent_back.len() >= usize::from(limit) {
-                        return Err(Refusal::SendBackRefused(format!("The send-back limit of {limit} has been reached.")));
+                        return Err(refused(&format!("The send-back limit of {limit} has been reached.")));
                     }
-                    let stage = &item.definition.stages[item.stage];
                     if stage.limit > 0 && item.back_edges.get(&stage.id).copied().unwrap_or(0) >= stage.limit {
-                        return Err(Refusal::SendBackRefused(format!("The back-edge limit of {} for step {} has been reached.", stage.limit, stage.id)));
+                        return Err(refused(&format!("The back-edge limit of {} has been reached.", stage.limit)));
                     }
                     if item.fence == u64::MAX {
-                        return Err(Refusal::SendBackRefused(format!("The fence limit of {} has been reached.", u64::MAX)));
+                        return Err(refused(&format!("The fence limit of {} has been reached.", u64::MAX)));
                     }
                     item.sent_back.push(SendBack { id: input.id.clone(), revision: input.expected_revision, run: item.run.clone(),
                         from: item.definition.stages[item.stage].id.clone(), to: item.definition.stages[to].id.clone(), reason: reason.clone() });
                     item.brief = Some(reason.clone());
                     item.failure = None;
+                    item.reason = None;
                     // It builds anew in the same tree, and queues for its resource like new work.
                     item.stage = to; item.attempt = 1; item.candidate = None; item.pending = None;
                     item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
@@ -663,9 +729,9 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     item.landed = item.candidate.clone();
                     item.stage = item.definition.stages.len();
                     item.phase = Phase::Done;
-                    item.failure = None; item.brief = None; item.stopping = None;
+                    item.failure = None; item.reason = None; item.brief = None; item.stopping = None;
                 }
-                Command::Decide { .. } | Command::Enqueue { .. } | Command::Advance | Command::RefreshGroups { .. } | Command::Reopen { .. } => unreachable!(),
+                Command::Decide { .. } | Command::Enqueue { .. } | Command::Advance | Command::RefreshGroups { .. } | Command::Reopen { .. } | Command::Start { .. } => unreachable!(),
             }
             next.items.insert(id.clone(), item);
             for (from, members) in spawn.drain(..) {
@@ -701,7 +767,9 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
             let item = next.items.remove(&id).ok_or(Refusal::Missing)?;
             let group = item.group_of.as_ref().map(|g| ArchivedGroup {
                 name: g.name.clone(), tickets: item.handed.clone(), pushed: item.pushed.clone().or_else(|| item.candidate.clone()), since_ms: item.since_ms });
-            next.archive.insert(id, Archived { start_load: item.start_load, closed:item.closed, phase: item.phase, candidate: item.candidate, group });
+            let last_run = (group.is_none() && (!item.definition.is_ticket() || item.phase == Phase::Cancelled)).then(|| item.last_run());
+            next.archive.insert(id, Archived { start_load: item.start_load, closed:item.closed, phase: item.phase, candidate: item.candidate,
+                group, last_run, history: item.history });
         }
     }
     // A group that ended hands each member its result, through the member's own join routes.
@@ -722,6 +790,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
             .then(|| group.brief.clone()).flatten();
         let gate_brief = (label == "rejected" && matches!(group.definition.stages[group.stage].kind, StageKind::Run | StageKind::Check))
             .then(|| group.brief.clone()).flatten();
+        let group_reason = group.failed_reason();
         let members = std::mem::take(&mut group.members);
         // Remember whom it ran: the board still draws a finished group with its tickets.
         group.handed = members.iter().map(|m| m.item.clone()).collect();
@@ -748,6 +817,9 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
             } else {
                 route(&mut ticket, &member.item, input, label, None, Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
                 if let Some(brief) = &gate_brief { ticket.brief = Some(brief.clone()); }
+                if ticket.phase == Phase::Failed && let Some(reason) = &group_reason {
+                    describe_failure(&mut ticket, &format!("Group {gid} failed at {reason}"), None);
+                }
             }
             next.items.insert(member.item, ticket);
         }
@@ -784,7 +856,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                 Phase::Blocked => "The build could not start because its resource is unavailable.",
                 _ => "The build could not start.",
             };
-            return Err(Refusal::SendBackRefused(reason.into()));
+            return Err(Refusal::SendBackRefused(format_reason(&restarted.definition.stages[restarted.stage].id, reason, None)));
         }
     }
     // A group result can fail a member at its join, after the first failure pass.
@@ -933,8 +1005,12 @@ fn decision(input: &Input, principal: &str) -> Result<(), Refusal> {
     else { Err(Refusal::Unauthorized) }
 }
 fn run_id(item: &Item, id: &str, input: &Input) -> String {
-    digest(&("run/v1", &input.workspace, id, &item.pin, &item.policy_pin,
-        item.stage, item.iteration, item.attempt, input.epoch, item.fence))
+    let binding = ("run/v1", &input.workspace, id, &item.pin, &item.policy_pin,
+        item.stage, item.iteration, item.attempt, input.epoch, item.fence);
+    match &item.restart {
+        Some(start) => digest(&(binding, start)),
+        None => digest(&binding),
+    }
 }
 fn enter(item: &mut Item, id: &str, input: &Input, effects: &mut Vec<Effect>) -> Result<(), Refusal> {
     // Once pushed, only this group's CI and follow-up steps remain. Keep their admission fence
@@ -971,7 +1047,7 @@ pub(crate) fn emit(item: &mut Item, id: &str, input: &Input, kind: EffectKind, e
             || item.definition.stages[item.stage].kind == StageKind::Push) {
         *item.wait_since.get_or_insert(input.now_ms)
     } else { input.now_ms };
-    effects.push(Effect { id: effect_id, item: id.into(), run: item.run.clone(),
+    effects.push(Effect { restart: item.restart.clone(), id: effect_id, item: id.into(), run: item.run.clone(),
         epoch: input.epoch, fence: item.fence, resource: item.resource.clone(),
         definition_pin: item.pin.clone(), policy_pin: item.policy_pin.clone(),
         candidate: item.candidate.clone(), members: item.members.clone(), kind,
@@ -1014,7 +1090,10 @@ fn finish(item: &mut Item, id: &str, input: &Input, passed: bool, evidence: &Evi
             item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
             return enter(item, id, input, out.effects);
         }
-        item.phase = Phase::Failed;
+        let cause = if matches!(item.definition.stages[item.stage].kind, StageKind::Review(_) | StageKind::Evaluate(_)) {
+            "Review rejected the candidate."
+        } else { "The step rejected the candidate." };
+        fail(item, cause, Some(evidence));
         return Ok(());
     }
     if matches!(item.definition.stages[item.stage].kind, StageKind::Build | StageKind::Tracker | StageKind::Action(_)) {
@@ -1099,7 +1178,8 @@ fn take_route(item: &mut Item, id: &str, input: &Input, answer: (&str, Option<&E
                 item.brief = Some(format!("Rebase your existing work onto landing base {} and resolve the cherry-pick conflicts. Run the affected tests and commit the result. Checks and review will run again for the new candidate.",
                     item.candidate.as_deref().unwrap_or("the current target")));
             }
-            item.phase = Phase::Failed; return Ok(());
+            fail(item, &format!("The step returned {label}."), evidence);
+            return Ok(());
         }
         Target::Done => {
             item.stage = item.definition.stages.len();
@@ -1109,7 +1189,10 @@ fn take_route(item: &mut Item, id: &str, input: &Input, answer: (&str, Option<&E
         Target::Step(to) => item.definition.stages.iter().position(|s| &s.id == to).ok_or(Refusal::Definition)?,
     };
     if !split && is_back_edge(item, &target) {
-        if taken >= limit { item.phase = Phase::Failed; return Ok(()); }
+        if taken >= limit {
+            fail(item, &format!("The step returned {label} and its back-edge limit of {limit} was reached."), evidence);
+            return Ok(());
+        }
         item.back_edges.insert(key, taken + 1);
         item.iteration = item.iteration.checked_add(1).ok_or(Refusal::Limit)?;
     }
@@ -1123,6 +1206,22 @@ fn take_route(item: &mut Item, id: &str, input: &Input, answer: (&str, Option<&E
         return Ok(());
     }
     enter(item, id, input, out.effects)
+}
+
+fn fail(item: &mut Item, cause: &str, evidence: Option<&Evidence>) {
+    item.phase = Phase::Failed;
+    let step = &item.definition.stages[item.stage].id;
+    item.reason = Some(format_reason(step, cause, evidence.map(|e| e.receipt.as_str())));
+}
+
+/// Add a diagnostic to the route verdict while keeping a single receipt reference.
+fn describe_failure(item: &mut Item, summary: &str, receipt: Option<&str>) {
+    let step = &item.definition.stages[item.stage].id;
+    let verdict = item.reason.as_deref().and_then(|reason| reason.strip_prefix(step))
+        .and_then(|reason| reason.strip_prefix(": "))
+        .map(|reason| reason.rsplit_once(" (receipt ").map_or(reason, |(verdict, _)| verdict));
+    let cause = verdict.map_or_else(|| summary.to_owned(), |verdict| format!("{verdict} {summary}"));
+    item.reason = Some(format_reason(step, &cause, receipt));
 }
 
 /// Groups and the tickets queued into them agree with each other, in both directions.

@@ -147,7 +147,7 @@ impl Runtime {
         }
         let (path, made) = match &provision.effect.tree {
             Some(tree) => (PathBuf::from(&tree.path), (!tree.adopted).then(|| tree.branch.clone())),
-            None => (exec.tree(&binding), Some(format!("wf-{}", &digest(&(workspace, &provision.effect.item))[4..]))),
+            None => (exec.tree(&binding), Some(adapters::private_branch(workspace, &provision.effect))),
         };
         // Under the repository's lock, as Provision makes a named tree, so nothing is made while it looks. Taken only
         // if free: this runs inside the runtime's loop, which is what polls a Provision holding the lock, so waiting

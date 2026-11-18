@@ -260,6 +260,9 @@ pub(super) fn ticket_text(plan: &pb::Plan, l: &pb::TicketLine, events: &[pb::Pla
     if !l.reason.is_empty() {
         out.push(l.reason.clone());
     }
+    if let Some(run) = &l.run {
+        out.extend(run.reason.iter().chain(&run.send_back_refused).cloned());
+    }
     let mut place: Vec<String> = Vec::new();
     if !l.branch.is_empty() {
         place.push(format!("Branch {}", l.branch));

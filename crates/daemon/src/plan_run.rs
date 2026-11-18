@@ -34,11 +34,13 @@ pub fn run_of(state: &State, key: &str) -> Option<pb::TicketRun> {
         stage_kind: stage.map(|s| serde_json::to_string(&s.kind)).transpose().ok()?.unwrap_or_default(),
         gate: gate.into(),
         gate_principal: principal,
+        reason: item.failed_reason(),
+        send_back_refused: None,
     })
 }
 
 /// Lay each ticket's run onto the wire plan, in step with `plan.lines`.
-pub fn annotate(state: &State, wire: &mut pb::Plan) {
+pub fn annotate(state: &State, wire: &mut pb::Plan, refusals: &std::collections::BTreeMap<String, String>) {
     let keys: Vec<(Vec<u8>, String)> = wire
         .cards
         .iter()
@@ -47,6 +49,10 @@ pub fn annotate(state: &State, wire: &mut pb::Plan) {
     for line in &mut wire.lines {
         let Some((_, key)) = keys.iter().find(|(id, _)| id.as_slice() == line.task_id.as_ref()) else { continue };
         line.run = run_of(state, key);
+        if let Some(run) = &mut line.run {
+            run.send_back_refused = refusals.iter().find(|(item, _)| item.eq_ignore_ascii_case(key))
+                .map(|(_, reason)| reason.clone());
+        }
     }
 }
 
@@ -56,7 +62,7 @@ pub(crate) fn signature(state: &State) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     for key in state.items.keys() {
         if let Some(run) = run_of(state, key) {
-            (key, run.run, run.phase, run.stage_kind, run.gate, run.gate_principal).hash(&mut hasher);
+            (key, run.run, run.phase, run.stage_kind, run.gate, run.gate_principal, run.reason).hash(&mut hasher);
         }
     }
     hasher.finish()

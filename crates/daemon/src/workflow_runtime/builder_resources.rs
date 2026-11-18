@@ -32,7 +32,7 @@ impl Exec {
             let cleanups = self.store.workflow_cleanups(&workspace)?;
             for (id, item) in &state.items {
                 if item.group_of.is_some() { continue; }
-                let tree = item.tree.as_ref().map(|t| PathBuf::from(&t.path)).unwrap_or_else(|| self.item_tree(&workspace, id));
+                let tree = item.tree.as_ref().map(|t| PathBuf::from(&t.path)).unwrap_or_else(|| self.item_tree_for(&workspace, id, item.restart.as_deref()));
                 if matches!(item.phase, Phase::WaitingJoin | Phase::Failed | Phase::Cancelled) {
                     // The durable cleanup owns policy, byte accounting and open-file retries (ov-1203).
                     // This older sweep is only a fallback for runs with no retained cleanup intent.
