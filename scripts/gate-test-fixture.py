@@ -14,10 +14,21 @@ import tempfile
 
 
 def run(source):
-    with tempfile.TemporaryDirectory(prefix="lane-gate-source-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="lane-gate-source-") as temporary, \
+            tempfile.TemporaryDirectory(prefix="lane-gate-disk-stub-") as stub_dir:
         repo = Path(temporary)
         env = {k: v for k, v in os.environ.items() if not k.startswith("FARCOOLER_")}
         env.update(LANE_GATE_TEST_FIXTURE="1", GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+        # Every Python child, including the real wrapper, must use synthetic capacity.
+        # Prepend our sitecustomize so an inherited probe cannot reach the host disk.
+        stub = Path(stub_dir)
+        (stub / "sitecustomize.py").write_text(
+            "import os, shutil\n"
+            "def forbidden(*args, **kwargs): raise AssertionError('real disk probe in self-test')\n"
+            "os.statvfs = forbidden\n"
+            "shutil.disk_usage = lambda path: shutil._ntuple_diskusage(100 * 1024**3, 0, 100 * 1024**3)\n"
+        )
+        env["PYTHONPATH"] = str(stub)
         names = subprocess.check_output(["git", "-C", str(source), "ls-files", "--cached", "--others",
                                          "--exclude-standard", "-z"], env=env).decode().split("\0")
         for name in names:

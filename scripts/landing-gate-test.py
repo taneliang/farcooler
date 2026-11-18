@@ -146,6 +146,18 @@ def selected(paths):
     return set(lane.jobs_for(paths, changes.SITE, lambda _: False, {}, changes.families))
 
 
+def setUpModule():
+    # Standalone runs also must not consult host capacity. Individual admission
+    # boundary tests override this with their own synthetic values.
+    global disk_probe_patch
+    disk_probe_patch = patch.object(shutil, "disk_usage", return_value=shutil._ntuple_diskusage(100 * 1024**3, 0, 100 * 1024**3))
+    disk_probe_patch.start()
+
+
+def tearDownModule():
+    disk_probe_patch.stop()
+
+
 class DiskTests(unittest.TestCase):
     def test_plain_gate_preserves_run_jobs_exceptions(self):
         for error in (OSError(28, "No space left on device"), RuntimeError("unexpected failure")):
@@ -551,7 +563,7 @@ class LandingTests(unittest.TestCase):
             self.assertIn("full workspace", lane.rust_impact(ROOT, [("M", "crates/cli/src/main.rs")]))
 
     def test_real_wrapper_uses_pinned_combined_diff_and_never_builds_reports(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as stub_dir:
             repo = Path(tmp)
             def git(*args):
                 return subprocess.check_output(["git", "-C", tmp, "-c", "commit.gpgsign=false",
@@ -587,7 +599,14 @@ class LandingTests(unittest.TestCase):
             git("commit", "-qm", "second ticket")
             # origin/main already moved: selecting against it would miss both tickets.
             git("update-ref", "refs/remotes/origin/main", "HEAD")
-            env = {**os.environ, "FARCOOLER_BASE": base}
+            # The wrapper launches fresh Python processes, so the in-process
+            # mock above does not apply to them.
+            stub = Path(stub_dir)
+            (stub / "sitecustomize.py").write_text(
+                "import shutil\n"
+                "shutil.disk_usage = lambda path: shutil._ntuple_diskusage(100 * 1024**3, 0, 100 * 1024**3)\n"
+            )
+            env = {**os.environ, "FARCOOLER_BASE": base, "PYTHONPATH": str(stub)}
             out = subprocess.run(["bash", str(repo / "scripts/landing-gate"), "--worktree", tmp,
                                   "--keep-target", "--no-load-wait"], env=env,
                                  capture_output=True, text=True)
