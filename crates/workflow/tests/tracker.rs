@@ -41,7 +41,7 @@ fn coding() -> Definition {
 fn start(item: &str, d: Definition) -> Command { start_with(item, d, &[]) }
 /// A Start that names a model for some of the steps (ov-966).
 fn start_with(item: &str, d: Definition, picks: &[(&str, &str)]) -> Command {
-    Command::Start { item: item.into(), policy_pin: "policy-2".into(), resource: format!("run-{item}"),
+    Command::Start { start_load: None, item: item.into(), policy_pin: "policy-2".into(), resource: format!("run-{item}"),
         dependencies: BTreeSet::new(), initial_candidate: None, definition: d,
         models: picks.iter().map(|(s, m)| (s.to_string(), m.to_string())).collect(), tree: None, with: vec![] }
 }
@@ -153,7 +153,7 @@ fn only_a_tracker_only_ticket_can_start_and_only_with_a_real_definition() {
     let person = Grant::Decision { principal: "owner".into() };
     assert_eq!(log.try_run(start("ov-1", coding()), person), Err(Refusal::Unauthorized));
     assert_eq!(log.try_run(start("ov-1", Definition::ticket()), Grant::Controller), Err(Refusal::Invalid), "a tracker is not a run");
-    assert_eq!(log.try_run(Command::Start { item: "ov-1".into(), policy_pin: "p".into(), resource: "r".into(),
+    assert_eq!(log.try_run(Command::Start { start_load: None, item: "ov-1".into(), policy_pin: "p".into(), resource: "r".into(),
         dependencies: BTreeSet::new(), initial_candidate: Some("x".into()), definition: coding(), models: Default::default(), tree: None, with: vec![] }, Grant::Controller),
         Err(Refusal::Evidence), "a build makes its own candidate");
     log.try_run(start("ov-1", coding()), Grant::Controller).unwrap();

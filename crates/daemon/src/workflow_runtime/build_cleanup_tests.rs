@@ -168,7 +168,7 @@ fn named_start(runtime: &Runtime, workspace: &str, item: &str, path: &Path) {
     controller_command(runtime, workspace, Command::Enqueue { item: item.into(), definition: Definition::ticket(),
         policy_pin: "policy/v1".into(), resource: Exec::item_resource(workspace, item), dependencies: BTreeSet::new(),
         initial_candidate: Some("ticket".into()) });
-    controller_command(runtime, workspace, Command::Start { item: item.into(), definition: coding_definition(false),
+    controller_command(runtime, workspace, Command::Start { start_load: None, item: item.into(), definition: coding_definition(false),
         policy_pin: "policy/v1".into(), resource: Exec::item_resource(workspace, item), dependencies: BTreeSet::new(),
         initial_candidate: None, models: Default::default(), with: vec![], tree: Some(Box::new(RunTree {
             name: item.into(), branch: item.into(), path: path.to_str().unwrap().into(), base: runtime.base.clone(), adopted: false })) });

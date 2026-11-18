@@ -192,7 +192,7 @@ async fn adopted() -> (tempfile::TempDir, Runtime, PathBuf, String) {
         base: runtime.base.clone(), adopted: true };
     let state = runtime.state(&workspace).unwrap().unwrap();
     let receipt = runtime.apply(Request { id: "start".into(), workspace: workspace.clone(), expected_revision: state.revision, sequence: 2,
-        command: Command::Start { item: "one".into(), definition: runtime.configured_definition().unwrap(),
+        command: Command::Start { start_load: None, item: "one".into(), definition: runtime.configured_definition().unwrap(),
         policy_pin: "p".into(), resource: Exec::item_resource(&workspace, "one"), dependencies: BTreeSet::new(),
         initial_candidate: None, models: Default::default(), tree: Some(Box::new(named)), with: vec![] } }, "controller", Grant::Controller, 1).unwrap();
     assert!(receipt.result.is_ok(), "{receipt:?}");

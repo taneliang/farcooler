@@ -25,7 +25,7 @@ impl Log {
             dependencies: BTreeSet::new(), initial_candidate: Some(d.pin()), definition: d }, Grant::Controller).unwrap();
     }
     fn start(&mut self, item: &str, d: Definition, tree: Option<RunTree>) {
-        self.try_run(Command::Start { item: item.into(), policy_pin: "policy-2".into(), resource: format!("run-{item}"),
+        self.try_run(Command::Start { start_load: None, item: item.into(), policy_pin: "policy-2".into(), resource: format!("run-{item}"),
             dependencies: BTreeSet::new(), initial_candidate: None, definition: d, models: Default::default(),
             tree: tree.map(Box::new), with: vec![] }, Grant::Controller).unwrap();
     }
@@ -135,7 +135,7 @@ fn a_landed_run_takes_the_tickets_that_follow_it() {
     let mut log = Log::new();
     log.track("ov-1");
     log.track("ov-2");
-    log.try_run(Command::Start { item: "ov-1".into(), policy_pin: "policy-2".into(), resource: "run-ov-1".into(),
+    log.try_run(Command::Start { start_load: None, item: "ov-1".into(), policy_pin: "policy-2".into(), resource: "run-ov-1".into(),
         dependencies: BTreeSet::new(), initial_candidate: None, definition: coding(), models: Default::default(),
         tree: None, with: vec!["ov-2".into()] }, Grant::Controller).unwrap();
     log.observe("ov-1", Outcome::Passed(ev("c1")));

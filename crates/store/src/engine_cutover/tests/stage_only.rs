@@ -186,7 +186,7 @@ fn the_marker_follows_the_run() {
         assert!(b.apply("doing", Command::Move { item: b.ticket.key.clone(), to: "doing".into() }).result.is_ok());
         assert_eq!(b.resting(), vec![b.ticket.id], "{phase:?}: a column move keeps it at rest");
         let tracker = Definition::tracker("owner");
-        assert!(b.apply("start", Command::Start { item: b.ticket.key.clone(), policy_pin: tracker.pin(), resource: "own-ticket".into(),
+        assert!(b.apply("start", Command::Start { start_load: None, item: b.ticket.key.clone(), policy_pin: tracker.pin(), resource: "own-ticket".into(),
             dependencies: Default::default(), initial_candidate: Some(tracker.pin()), definition: tracker, models: Default::default(), tree: None, with: vec![] }).result.is_ok());
         assert!(b.resting().is_empty(), "{phase:?}: Start takes it off");
         assert!(b.store.put_on_line(b.ticket.id, &line(), Actor::User).is_err(), "{phase:?}: and its line is the run's again");
@@ -439,7 +439,7 @@ fn start_waits_for_a_tickets_subagents_and_blocks_to_settle() {
         let b = board(phase);
         let (s, t, user) = (&b.store, b.ticket.id, Actor::User);
         let tracker = Definition::tracker("owner");
-        let start = |b: &Board, id: &str| b.apply(id, Command::Start { item: b.ticket.key.clone(), policy_pin: tracker.pin(), resource: "own-ticket".into(),
+        let start = |b: &Board, id: &str| b.apply(id, Command::Start { start_load: None, item: b.ticket.key.clone(), policy_pin: tracker.pin(), resource: "own-ticket".into(),
             dependencies: Default::default(), initial_candidate: Some(tracker.pin()), definition: tracker.clone(), models: Default::default(), tree: None, with: vec![] }).result.is_ok();
         s.record_worker(t, &worker("a1"), user).unwrap();
         assert!(!start(&b, "start-1"), "{phase:?}: an open subagent holds Start back");
@@ -464,7 +464,7 @@ fn a_start_held_back_says_what_holds_it() {
         let key = b.ticket.key.clone();
         let other = s.get_task(b.other).unwrap().key;
         let tracker = Definition::tracker("owner");
-        let start = |b: &Board, id: &str| b.apply(id, Command::Start { item: key.clone(), policy_pin: tracker.pin(), resource: "own-ticket".into(),
+        let start = |b: &Board, id: &str| b.apply(id, Command::Start { start_load: None, item: key.clone(), policy_pin: tracker.pin(), resource: "own-ticket".into(),
             dependencies: Default::default(), initial_candidate: Some(tracker.pin()), definition: tracker.clone(), models: Default::default(), tree: None, with: vec![] }).result;
         s.set_block(t, b.other, Some("waits on the spike")).unwrap();
         let Err(farcooler_workflow::Refusal::Held(why)) = start(&b, "start-1") else { panic!("{phase:?}: a block is named") };
@@ -495,7 +495,7 @@ fn a_follower_is_fenced_with_the_run_it_follows() {
         assert!(b.apply("follower", Command::Enqueue { item: follower.key.clone(), policy_pin, resource: "own-follower".into(),
             dependencies: Default::default(), initial_candidate: Some(definition.pin()), definition }).result.is_ok());
         let tracker = Definition::tracker("owner");
-        let start = |b: &Board, id: &str| b.apply(id, Command::Start { item: b.ticket.key.clone(), policy_pin: tracker.pin(), resource: "own-ticket".into(),
+        let start = |b: &Board, id: &str| b.apply(id, Command::Start { start_load: None, item: b.ticket.key.clone(), policy_pin: tracker.pin(), resource: "own-ticket".into(),
             dependencies: Default::default(), initial_candidate: Some(tracker.pin()), definition: tracker.clone(), models: Default::default(), tree: None,
             with: vec![follower.key.clone()] }).result.is_ok();
         s.record_worker(follower.id, &worker("f1"), user).unwrap();
@@ -520,7 +520,7 @@ fn a_followers_line_ends_where_its_run_ends() {
         assert!(b.apply("follower", Command::Enqueue { item: follower.key.clone(), policy_pin, resource: "own-follower".into(),
             dependencies: Default::default(), initial_candidate: Some(definition.pin()), definition }).result.is_ok());
         let tracker = Definition::tracker("owner");
-        assert!(b.apply("start", Command::Start { item: b.ticket.key.clone(), policy_pin: tracker.pin(), resource: "own-ticket".into(),
+        assert!(b.apply("start", Command::Start { start_load: None, item: b.ticket.key.clone(), policy_pin: tracker.pin(), resource: "own-ticket".into(),
             dependencies: Default::default(), initial_candidate: Some(tracker.pin()), definition: tracker, models: Default::default(), tree: None,
             with: vec![follower.key.clone()] }).result.is_ok());
         let seen = |t: uuid::Uuid| (s.get_task(t).unwrap().status, s.ticket_line(t).unwrap().stage);
@@ -566,7 +566,7 @@ fn a_start_is_held_back_by_a_followers_quarantine() {
         dependencies: Default::default(), initial_candidate: Some(definition.pin()), definition }).result.is_ok());
     s.conn().execute("INSERT INTO engine_cutover_quarantine VALUES('own-follower','held for the test')", []).unwrap();
     let tracker = Definition::tracker("owner");
-    let start = |id: &str| b.apply(id, Command::Start { item: b.ticket.key.clone(), policy_pin: tracker.pin(), resource: "own-ticket".into(),
+    let start = |id: &str| b.apply(id, Command::Start { start_load: None, item: b.ticket.key.clone(), policy_pin: tracker.pin(), resource: "own-ticket".into(),
         dependencies: Default::default(), initial_candidate: Some(tracker.pin()), definition: tracker.clone(), models: Default::default(), tree: None,
         with: vec![follower.key.clone()] }).result;
     let Err(farcooler_workflow::Refusal::Held(why)) = start("start-1") else { panic!("the follower's quarantine holds the run back") };

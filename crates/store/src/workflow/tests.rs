@@ -101,7 +101,7 @@ fn workflow_load_gap_recovers_only_accepted_automatic_starts() {
     assert!(store.workflow_apply(&ticket).unwrap().result.is_ok());
     assert_eq!(store.workflow_last_automatic_start_ms().unwrap(), None);
     let start = Input { id: "start".into(), source: "runtime".into(), source_sequence: 1,
-        expected_revision: 1, now_ms: 100, command: Command::Start { item: "item".into(),
+        expected_revision: 1, now_ms: 100, command: Command::Start { start_load: None, item: "item".into(),
             definition: Definition::coding(), policy_pin: "policy-1".into(), resource: "resource".into(),
             dependencies: Default::default(), initial_candidate: None, models: Default::default(),
             tree: None, with: vec![] }, ..ticket };
@@ -494,7 +494,7 @@ fn a_start_refused_for_its_resource_names_it_and_what_holds_it() {
         policy_pin: ticket_pin.clone(), resource: format!("own-{workspace}"), dependencies: BTreeSet::new(),
         initial_candidate: Some(ticket.pin()) }).is_ok());
     let tracker = Definition::tracker("owner");
-    let start = |workspace: &str, id: &str, resource: &str| apply(workspace, id, Command::Start { item: "ticket".into(),
+    let start = |workspace: &str, id: &str, resource: &str| apply(workspace, id, Command::Start { start_load: None, item: "ticket".into(),
         policy_pin: tracker.pin(), resource: resource.into(), dependencies: Default::default(), initial_candidate: Some(tracker.pin()),
         definition: tracker.clone(), models: Default::default(), tree: None, with: vec![] });
     rest("workspace");

@@ -314,7 +314,7 @@ impl Runtime {
                                 return Err(Error::Refused("a named worktree is prepared by the runner before Start"));
                             }
                             let initial_candidate = matches!(configuration.definition.stages[0].kind, StageKind::Tracker).then(|| start_pin.clone());
-                            let input = input(Command::Start { item:item.clone(),definition:configuration.definition,
+                            let input = input(Command::Start { start_load: None, item:item.clone(),definition:configuration.definition,
                                 policy_pin:start_pin.clone(),resource:Exec::item_resource(workspace, item),dependencies:BTreeSet::new(),initial_candidate,models:models.clone(),tree:tree.clone().map(Box::new),with:with.clone() },Grant::Controller);
                             self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
                         }

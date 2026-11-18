@@ -41,6 +41,7 @@ fn every_field_set() -> Value {
     let mut v = serde_json::to_value(&o.state.items["a"]).unwrap();
     let evidence = json!({ "candidate": "c", "manifest": "m", "receipt": "r", "policy_pin": "p" });
     let set = json!({
+        "start_load": { "sample_milli": 4100, "below_milli": 6000 },
         "execution": { "phase": "Running", "position": null, "holders": [], "text": "" },
         "rework_history": [{ "id": "i", "principal": "owner", "revision": 1, "run": "r", "definition_pin": "d", "evidence": evidence, "iteration": 0, "reason": "why" }],
         "back_edges": { "build": 1 }, "retries": 1, "members": [{ "item": "b", "candidate": "c" }],

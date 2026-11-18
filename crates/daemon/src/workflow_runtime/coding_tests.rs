@@ -751,7 +751,7 @@ async fn rerun_fixture() -> (tempfile::TempDir, Runtime, String) {
     (dir, runtime, workspace)
 }
 fn rerun_start(runtime: &Runtime, workspace: &str, tree: RunTree) {
-    rerun_command(runtime, workspace, Command::Start { item: "ticket".into(), definition: runtime.configured_definition().unwrap(),
+    rerun_command(runtime, workspace, Command::Start { start_load: None, item: "ticket".into(), definition: runtime.configured_definition().unwrap(),
         policy_pin: "p".into(), resource: Exec::item_resource(workspace, "ticket"), dependencies: BTreeSet::new(),
         initial_candidate: None, models: Default::default(), tree: Some(Box::new(tree)), with: vec![] });
 }
@@ -873,7 +873,7 @@ async fn workflow_coding_resolve_never_waits_on_a_provision_in_the_loop() {
     rerun_command(&runtime, &workspace, Command::Enqueue { item: "other".into(), definition: Definition::ticket(),
         policy_pin: "p".into(), resource: Exec::item_resource(&workspace, "other"), dependencies: BTreeSet::new(),
         initial_candidate: Some("other".into()) });
-    rerun_command(&runtime, &workspace, Command::Start { item: "other".into(), definition: runtime.configured_definition().unwrap(),
+    rerun_command(&runtime, &workspace, Command::Start { start_load: None, item: "other".into(), definition: runtime.configured_definition().unwrap(),
         policy_pin: "p".into(), resource: Exec::item_resource(&workspace, "other"), dependencies: BTreeSet::new(),
         initial_candidate: None, models: Default::default(), tree: Some(Box::new(rerun_tree(dir.path(), "slow", &base))), with: vec![] });
     let hung = hung_worktree_add(dir.path());

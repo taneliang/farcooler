@@ -102,7 +102,8 @@ impl Runtime {
                         || file_conflict(&scan.boards, &configs, workspace, &key, policy)
                         || !self.dependencies_ready(workspace, &key, policy, state)? { continue; }
                     let ordinal = state.items.values().filter(|i| !i.definition.is_ticket() && i.group_of.is_none()).count() + state.archive.len();
-                    Command::Start { item: key.clone(), definition: config.definition.clone(), policy_pin: config.pin.clone(),
+                    Command::Start { start_load: Some(farcooler_workflow::StartLoad { sample_milli: load,
+                        below_milli: budgets.iter().filter_map(|b| match b { farcooler_workflow::scheduling::Budget::Load { below_milli, .. } => Some(*below_milli), _ => None }).min() }), item: key.clone(), definition: config.definition.clone(), policy_pin: config.pin.clone(),
                         resource: Exec::item_resource(workspace, &key), dependencies: policy.dependencies.get(&key).cloned().unwrap_or_default(),
                         initial_candidate: matches!(config.definition.stages[0].kind, StageKind::Tracker).then(|| config.pin.clone()),
                         models: policy.models(&config.definition, ordinal), tree: None, with: vec![] }
@@ -273,6 +274,7 @@ mod tests {
         runtime.schedule_with_load(&["w".into()], 100, Some(100)).unwrap();
         let state = runtime.state("w").unwrap().unwrap();
         assert_eq!(state.items.values().filter(|i| active(i)).count(), 3);
+        assert_eq!(state.items["a"].start_load, Some(farcooler_workflow::StartLoad { sample_milli: Some(100), below_milli: None }));
         assert!(state.items["d"].definition.is_ticket());
         complete(&runtime, "a", 200);
         runtime.schedule_with_load(&["w".into()], 201, Some(100)).unwrap();
@@ -545,6 +547,27 @@ mod tests {
         complete(&runtime, "a", 102);
         runtime.schedule_with_load(&["other".into()], 103, Some(0)).unwrap();
         assert!(active(&runtime.state("other").unwrap().unwrap().items["d"]));
+    }
+
+    #[tokio::test]
+    async fn automatic_start_records_effective_load_across_boards_and_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("runtime");
+        let runtime = Runtime::create(&root).await.unwrap();
+        let mut d = coding_definition(false);
+        d.start_policy = Some(policy(Budget::Fixed(3)));
+        publish(&runtime, d.clone());
+        track(&runtime, &["a"]);
+        d.start_policy = Some(policy(Budget::Load { below_milli: 6000, min_start_gap_ms: 60_000 }));
+        publish_on(&runtime, "other", d);
+        runtime.schedule_with_load(&["w".into()], 100, Some(4100)).unwrap();
+        let expected = farcooler_workflow::StartLoad { sample_milli: Some(4100), below_milli: Some(6000) };
+        let event = runtime.events("w").unwrap().into_iter().find(|e| matches!(e.command, Command::Start { .. })).unwrap();
+        assert!(matches!(event.command, Command::Start { start_load: Some(ref load), .. } if load == &expected));
+        assert_eq!(runtime.state("w").unwrap().unwrap().items["a"].start_load, Some(expected.clone()));
+        drop(runtime);
+        let runtime = Runtime::open(&root).unwrap();
+        assert_eq!(runtime.state("w").unwrap().unwrap().items["a"].start_load, Some(expected));
     }
 
     #[tokio::test]

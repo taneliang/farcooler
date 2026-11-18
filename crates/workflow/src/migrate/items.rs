@@ -20,7 +20,7 @@ impl Migration<'_> {
     /// The fields with no place in the pipeline. Every field is named, so a new one fails to build until
     /// `fields::ITEM_FIELDS` and this list say what becomes of it.
     fn placeable(&mut self, id: &str, item: &Item) -> bool {
-        let Item { execution, definition: _, pin: _, policy_pin: _, dependencies: _, resource: _, stage: _, iteration: _,
+        let Item { start_load: _, execution, definition: _, pin: _, policy_pin: _, dependencies: _, resource: _, stage: _, iteration: _,
             attempt: _, fence: _, phase, run: _, pending: _, candidate: _, last_evidence: _, stopping: _, rework_history: _,
             back_edges: _, retries: _, members, group_of, pushed, handed, since_ms: _, grouped_in: _, wait_since: _, models: _,
             tree: _, sent_back: _, brief: _, follows, followers, cancel_reason: _, closed: _, failure: _, ci_reruns: _,

@@ -25,6 +25,9 @@ pub enum Phase { Blocked, WaitingApproval, WaitingReview, Running, WaitingSlot, 
     Joined }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Item {
+    /// Load observed and effective load threshold at an automatic start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_load: Option<StartLoad>,
     /// Read-time execution facts. Never persisted or used for reducer authority (ov-1107).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution: Option<crate::ExecutionView>,
@@ -233,6 +236,13 @@ pub struct Input {
     #[serde(default)]
     pub busy_resources: BTreeSet<String>,
 }
+/// The one-minute load sample and strictest runner-wide load budget, in thousandths.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StartLoad {
+    pub sample_milli: Option<u64>,
+    pub below_milli: Option<u64>,
+}
+
 /// Why a run ended outside the engine. Kept in the accepted event and archived run.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -267,6 +277,7 @@ pub enum Command {
     /// The orchestrator starts a run on a tracker-only ticket: the same item takes a real definition.
     /// `models` picks a model for a build step, by step id, from the ones the definition lists (ov-966).
     Start { item: String, definition: Definition, policy_pin: String, resource: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")] start_load: Option<StartLoad>,
         dependencies: BTreeSet<String>, initial_candidate: Option<String>,
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")] models: BTreeMap<String, String>,
         /// The worktree the run makes and works in (ov-967). `None` keeps the runtime's private tree.

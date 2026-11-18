@@ -53,7 +53,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     || next.items.values().any(|i| owns_resource(i) && i.resource == *resource)) {
                 return Err(Refusal::Resource);
             }
-            let mut record = Item { execution: None, definition: definition.clone(), pin: definition.pin(),
+            let mut record = Item { start_load: None, execution: None, definition: definition.clone(), pin: definition.pin(),
                 policy_pin: policy_pin.clone(), dependencies: dependencies.clone(),
                 resource: resource.clone(), stage: 0, iteration: 0, attempt: 1, fence: 1,
                 phase: Phase::Blocked, run: String::new(), pending: None,
@@ -80,7 +80,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
             next.items.remove(item);
             next.archive.remove(item);
             if next.items.len() >= MAX_ITEMS { return Err(Refusal::Limit); }
-            let mut record = Item { execution: None, definition: definition.clone(), pin: definition.pin(),
+            let mut record = Item { start_load: None, execution: None, definition: definition.clone(), pin: definition.pin(),
                 policy_pin: policy_pin.clone(), dependencies: BTreeSet::new(), resource: resource.clone(),
                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked, run: String::new(), pending: None,
                 candidate: Some(definition.pin()), last_evidence: None, stopping: None, cancel_reason: None, closed: None, failure: None, group_failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, landed: None, rework_history: Vec::new(),
@@ -473,7 +473,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                             let gid = group_id(state, name);
                             let resource = definition.groups[name].exclusive.clone();
                             let definition = definition.group_definition(name).ok_or(Refusal::Definition)?;
-                            next.items.insert(gid.clone(), Item { execution: None, pin: definition.pin(), definition,
+                            next.items.insert(gid.clone(), Item { start_load: None, execution: None, pin: definition.pin(), definition,
                                 policy_pin: policy_pin.clone(), dependencies: BTreeSet::new(), resource,
                                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked,
                                 run: String::new(), pending: None, candidate: None, last_evidence: None,
@@ -543,7 +543,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     // Each column is a run of its own, so a decision made in the last one cannot be replayed in this one.
                     if item.phase == Phase::WaitingApproval { item.run = run_id(&item, id, input); }
                 }
-                Command::Start { definition, policy_pin, resource, dependencies, initial_candidate, models, tree, with, .. } => {
+                Command::Start { definition, policy_pin, resource, dependencies, initial_candidate, models, tree, with, start_load, .. } => {
                     controller(input)?;
                     if !item.definition.is_ticket() || item.phase != Phase::WaitingApproval || item.follows.is_some() { return Err(Refusal::Phase); }
                     // The run's other tickets: each a ticket at rest of its own, named once (ov-970).
@@ -580,6 +580,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     item.candidate = initial_candidate.clone(); item.stage = 0; item.iteration = 0; item.attempt = 1;
                     item.phase = Phase::Blocked; item.run = String::new(); item.pending = None; item.last_evidence = None;
                     item.stopping = None; item.rework_history = Vec::new(); item.back_edges = BTreeMap::new(); item.retries = 0;
+                    item.start_load = start_load.clone();
                     item.models = picked; item.tree = tree.as_deref().cloned();
                     item.sent_back = Vec::new(); item.brief = None;
                     item.followers = with.clone();

@@ -25,7 +25,7 @@ impl Log {
             dependencies: BTreeSet::new(), initial_candidate: Some(d.pin()), definition: d }, Grant::Controller).unwrap();
     }
     fn start(&mut self, item: &str, d: Definition, tree: Option<RunTree>) {
-        self.try_run(Command::Start { item: item.into(), policy_pin: "policy-2".into(), resource: format!("run-{item}"),
+        self.try_run(Command::Start { start_load: None, item: item.into(), policy_pin: "policy-2".into(), resource: format!("run-{item}"),
             dependencies: BTreeSet::new(), initial_candidate: None, definition: d, models: Default::default(),
             tree: tree.map(Box::new), with: vec![] }, Grant::Controller).unwrap();
     }

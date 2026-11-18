@@ -14,6 +14,7 @@ pub enum Decision {
 }
 
 pub const ITEM_FIELDS: &[(&str, Decision)] = &[
+    ("start_load", Decision::Dropped("Automatic start evidence remains in the event log")),
     ("execution", Decision::Refused("a read-time view that is never stored; a stored one is refused")),
     ("definition", Decision::Dropped("the published layout is in force for every token; no pinning")),
     ("pin", Decision::Dropped("Published::digest names the one workflow in force")),
