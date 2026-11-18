@@ -669,6 +669,13 @@ async fn build_cleanup_resumed_run_rebuilds_from_a_cold_target() {
 async fn scheduled_cleanup(with_running_effect: bool) {
     use super::coding_tests::{admitted, configured};
     let (dir, mut runtime) = configured(false, "cancel").await;
+    // Real Git and lsof calls compete with parallel tests. Keep the companion
+    // effect alive beyond both observation deadlines so this still proves that
+    // cleanup wakes independently, rather than waiting for that effect to end.
+    let script = dir.path().join("adapter.py");
+    std::fs::write(&script, std::fs::read_to_string(&script).unwrap().replace("['/bin/sleep', '30']", "['/bin/sleep', '120']")).unwrap();
+    let CodingHarness::Command(build) = &mut runtime.coding.as_mut().unwrap().harness else { unreachable!() };
+    build.timeout_ms = 120_000;
     let definition = runtime.configured_definition().unwrap();
     enqueue(&mut runtime, "w", "ended", definition.clone());
     runtime.pump(2).await.unwrap();
@@ -685,7 +692,7 @@ async fn scheduled_cleanup(with_running_effect: bool) {
     let started = dir.path().join("started");
     let (stop, shutdown) = tokio::sync::watch::channel(false);
     let task = tokio::spawn(async move { runtime.run(shutdown).await.unwrap(); runtime });
-    tokio::time::timeout(Duration::from_secs(5), async {
+    tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             let retry = store.workflow_cleanups("w").unwrap().iter()
                 .any(|r| r.result.as_ref().is_some_and(|r| r.retry));
@@ -695,7 +702,7 @@ async fn scheduled_cleanup(with_running_effect: bool) {
     }).await.unwrap();
     assert!(tree.join("target/output").exists());
     drop(open);
-    let released = tokio::time::timeout(Duration::from_secs(3), async {
+    let released = tokio::time::timeout(Duration::from_secs(30), async {
         while tree.join("target").exists() { tokio::time::sleep(Duration::from_millis(20)).await; }
     }).await.is_ok();
     if with_running_effect {
