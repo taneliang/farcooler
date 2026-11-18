@@ -11,6 +11,9 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.ButtonDefaults
+import com.farcooler.core.wire.ActionWeight
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -122,19 +125,19 @@ fun WorkflowRunCard(run: WorkflowRun, enabled: Boolean, detailsOpen: Boolean = f
             run.page.more.forEach { Text(it) }
             run.actions.forEach { action ->
                 val form = run.forms?.firstOrNull { it.action == action.kind }
-                if (form == null) Button(onClick = { perform(action) }, enabled = enabled) { Text(action.label) }
+                if (form == null) WorkflowActionButton(action.weight, action.label, enabled) { perform(action) }
                 else {
                     var draft by rememberSaveable(run.item, run.run, action.guard) { mutableStateOf("") }
                     OutlinedTextField(value = draft, onValueChange = { draft = it }, enabled = enabled,
                         label = { Text(form.label) })
                     Text(form.help)
-                    Button(onClick = { performReason(action, draft) }, enabled = enabled) { Text(form.submitLabel) }
+                    WorkflowActionButton(action.weight, form.submitLabel, enabled) { performReason(action, draft) }
                 }
             }
             if (onWatch != null) Button(onClick = onWatch) { Text("Watch agent") }
             run.page.steps.forEach { step -> Text("${step.label} · ${step.state}") }
             var open by rememberSaveable(run.item, run.run) { mutableStateOf(detailsOpen) }
-            Text(run.page.detailsLabel, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable(role = Role.Button) { open = !open })
+            Text("${if (open) "▾" else "▸"} ${run.page.detailsLabel}", color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable(role = Role.Button) { open = !open })
             if (open) run.page.details.forEach { row ->
                 Text("${row.title}: ${row.value}")
                 row.whole?.let { whole -> Text(run.page.copyLabel, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable(role = Role.Button) { clipboard.setText(AnnotatedString(whole)) }) }
@@ -144,5 +147,15 @@ fun WorkflowRunCard(run: WorkflowRun, enabled: Boolean, detailsOpen: Boolean = f
     run.reworkHistory?.forEach { history ->
         Text(history.principal)
         SelectionContainer { Text(history.reason) }
+    }
+}
+
+@Composable
+private fun WorkflowActionButton(weight: ActionWeight, label: String, enabled: Boolean, onClick: () -> Unit) {
+    when (weight) {
+        ActionWeight.Primary -> Button(onClick = onClick, enabled = enabled) { Text(label) }
+        ActionWeight.Secondary -> OutlinedButton(onClick = onClick, enabled = enabled) { Text(label) }
+        ActionWeight.Destructive -> OutlinedButton(onClick = onClick, enabled = enabled,
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text(label) }
     }
 }

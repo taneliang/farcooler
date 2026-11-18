@@ -40,8 +40,12 @@ pub enum Reason {
 pub enum ActionKind { InspectLatestEvidence, InspectUncertainty, Approve, AcceptReview, RequestRework, RejectReview, Cancel, Retry }
 #[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ActionWeight { Primary, Secondary, Destructive }
+#[typeshare]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Action {
+    pub weight: ActionWeight,
     pub kind: ActionKind,
     pub label: String,
     /// Binds the entire snapshot and capability context; not a secret or an authorization token.
@@ -280,6 +284,9 @@ pub fn project(state: &State, auth: &Capabilities, style: Style) -> Result<Prese
         if auth.controller && item.phase == Phase::Failed && item.group_of.is_none() && item.retries < MAX_RETRIES
         { kinds.push(ActionKind::Retry); }
         if auth.controller && !ended && !pushing && item.follows.is_none() { kinds.push(ActionKind::Cancel); }
+        let primary = [ActionKind::Approve, ActionKind::AcceptReview, ActionKind::Retry,
+            ActionKind::InspectUncertainty, ActionKind::InspectLatestEvidence]
+            .into_iter().find(|kind| kinds.contains(kind));
         let page = page::run_page(id, item, &reasons, gate.as_ref(), auth.decision_principal.as_deref(), style);
         runs.push(RunCard { label: display::run_label(style), phase_label: display::phase_label(&item.phase, style),
             item: id.clone(), run: item.run.clone(), definition_pin: item.pin.clone(),
@@ -293,7 +300,7 @@ pub fn project(state: &State, auth: &Capabilities, style: Style) -> Result<Prese
                 vec![display::rework_form(farcooler_workflow::MAX_REWORK_REASON_BYTES, style)] } else { Vec::new() },
             rework_history: item.rework_history.clone(),
             reasons: reasons.clone(), page,
-            actions: kinds.into_iter().map(|kind| Action { label: if kind == ActionKind::Cancel && item.phase == Phase::Failed { display::close_label(style) } else { display::action_label(&kind, style) }, kind, guard: guard.clone() }).collect() });
+            actions: kinds.into_iter().map(|kind| Action { weight: if kind == ActionKind::Cancel || kind == ActionKind::RejectReview { ActionWeight::Destructive } else if Some(&kind) == primary.as_ref() { ActionWeight::Primary } else { ActionWeight::Secondary }, label: if kind == ActionKind::Cancel && item.phase == Phase::Failed { display::close_label(style) } else { display::action_label(&kind, style) }, kind, guard: guard.clone() }).collect() });
     }
     Ok(Presentation { schema: SCHEMA, workspace: state.workspace.clone(), epoch: state.epoch,
         revision: state.revision, runs, landing_groups: state.items.iter()

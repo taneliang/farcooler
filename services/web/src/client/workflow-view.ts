@@ -52,6 +52,7 @@ function runCard(run: WorkflowRun, view: WorkflowView, board: WorkflowBoard): HT
   for (const action of run.actions) {
     const key = JSON.stringify(['action', run.item, run.run, action.kind, action.guard])
     const form = run.forms?.find(f => f.action === action.kind)
+    const weighted = (node: HTMLButtonElement) => { node.className = `workflow-action-${action.weight.toLowerCase()}`; return node }
     if (form) {
       let saved = drafts.get(board); if (!saved) { saved = new Map(); drafts.set(board, saved) }
       const draft = saved.get(key) ?? { value: '', start: 0, end: 0 }; saved.set(key, draft)
@@ -61,8 +62,8 @@ function runCard(run: WorkflowRun, view: WorkflowView, board: WorkflowBoard): HT
       input.oninput = input.onselect = () => { draft.value = input.value; draft.start = input.selectionStart; draft.end = input.selectionEnd }
       input.onfocus = () => input.setSelectionRange(draft.start, draft.end)
       label.append(input); actions.append(label, el('p', form.help),
-        keyed(button(form.submitLabel, () => void board.dispatch(run.item, action, draft.value), !view.ready || view.busy), key))
-    } else actions.append(keyed(button(action.label, () => void board.dispatch(run.item, action), !view.ready || view.busy), key))
+        keyed(weighted(button(form.submitLabel, () => void board.dispatch(run.item, action, draft.value), !view.ready || view.busy)), key))
+    } else actions.append(keyed(weighted(button(action.label, () => void board.dispatch(run.item, action), !view.ready || view.busy)), key))
   }
   card.append(actions)
   for (const step of run.page.steps) card.append(el('p', `${step.label} · ${step.state}`))

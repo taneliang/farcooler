@@ -143,7 +143,8 @@
               {
                 "guard": "wf1:42fd5dbeccac4ecbdcf4b1a82f44e164fac3b18c3d406461fe8b5c986b634673",
                 "kind": "Cancel",
-                "label": "Cancel Run"
+                "label": "Cancel Run",
+                "weight": "Destructive"
               }
             ],
             "attempt": 1,
@@ -455,12 +456,14 @@
               {
                 "guard": "wf1:1ce42e416e974eed65572a0e4bac98b1788cbb23faacc972469e0d53f8cf3003",
                 "kind": "Approve",
-                "label": "Approve"
+                "label": "Approve",
+                "weight": "Primary"
               },
               {
                 "guard": "wf1:1ce42e416e974eed65572a0e4bac98b1788cbb23faacc972469e0d53f8cf3003",
                 "kind": "Cancel",
-                "label": "Cancel Run"
+                "label": "Cancel Run",
+                "weight": "Destructive"
               }
             ],
             "attempt": 1,
@@ -785,12 +788,14 @@
               {
                 "guard": "wf1:d3ee26b18fb76af2763913832bdc746f71b6a5be75d16cecedaf2cf31ae0ce64",
                 "kind": "InspectLatestEvidence",
-                "label": "Inspect Latest Evidence…"
+                "label": "Inspect Latest Evidence…",
+                "weight": "Primary"
               },
               {
                 "guard": "wf1:d3ee26b18fb76af2763913832bdc746f71b6a5be75d16cecedaf2cf31ae0ce64",
                 "kind": "Cancel",
-                "label": "Cancel Run"
+                "label": "Cancel Run",
+                "weight": "Destructive"
               }
             ],
             "attempt": 1,
@@ -1109,17 +1114,20 @@
               {
                 "guard": "wf1:405b110fd7e5554006606c2379b0dde443783e07ea6f04cb9bbdf4701c85e4a3",
                 "kind": "InspectLatestEvidence",
-                "label": "Inspect Latest Evidence…"
+                "label": "Inspect Latest Evidence…",
+                "weight": "Secondary"
               },
               {
                 "guard": "wf1:405b110fd7e5554006606c2379b0dde443783e07ea6f04cb9bbdf4701c85e4a3",
                 "kind": "InspectUncertainty",
-                "label": "Inspect Uncertain Operation…"
+                "label": "Inspect Uncertain Operation…",
+                "weight": "Primary"
               },
               {
                 "guard": "wf1:405b110fd7e5554006606c2379b0dde443783e07ea6f04cb9bbdf4701c85e4a3",
                 "kind": "Cancel",
-                "label": "Cancel Run"
+                "label": "Cancel Run",
+                "weight": "Destructive"
               }
             ],
             "attempt": 1,
@@ -1430,12 +1438,14 @@
               {
                 "guard": "wf1:fc9b50d8420c349b9783dd6ae86fe2dab1bad9ac5bfad21e8f67705cfa776cd6",
                 "kind": "InspectLatestEvidence",
-                "label": "Inspect Latest Evidence…"
+                "label": "Inspect Latest Evidence…",
+                "weight": "Primary"
               },
               {
                 "guard": "wf1:fc9b50d8420c349b9783dd6ae86fe2dab1bad9ac5bfad21e8f67705cfa776cd6",
                 "kind": "Cancel",
-                "label": "Cancel Run"
+                "label": "Cancel Run",
+                "weight": "Destructive"
               }
             ],
             "attempt": 1,
@@ -2030,12 +2040,14 @@
               {
                 "guard": "wf1:d6bb226b6d2520ba74b29a23343efd0fc6c61537488cc106cd820aab936b32bf",
                 "kind": "Retry",
-                "label": "Try Again"
+                "label": "Try Again",
+                "weight": "Primary"
               },
               {
                 "guard": "wf1:d6bb226b6d2520ba74b29a23343efd0fc6c61537488cc106cd820aab936b32bf",
                 "kind": "Cancel",
-                "label": "Close Run"
+                "label": "Close Run",
+                "weight": "Destructive"
               }
             ],
             "attempt": 1,

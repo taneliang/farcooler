@@ -98,6 +98,22 @@ fn workflow_presentation_golden() {
 }
 
 #[test]
+fn action_weights_choose_one_positive_action_and_keep_destructive_actions_distinct() {
+    for (name, state) in fixtures() {
+        let card = project(&state, &auth(), STYLE).unwrap().runs.remove(0);
+        let primary: Vec<_> = card.actions.iter().filter(|a| a.weight == ActionWeight::Primary).collect();
+        assert!(primary.len() <= 1, "{name}");
+        for action in &card.actions {
+            if matches!(action.kind, ActionKind::Cancel | ActionKind::RejectReview) {
+                assert_eq!(action.weight, ActionWeight::Destructive, "{name}");
+            }
+        }
+        if name == "approval" { assert_eq!(primary[0].kind, ActionKind::Approve); }
+        if name == "failed" { assert_eq!(primary[0].kind, ActionKind::Retry); }
+    }
+}
+
+#[test]
 fn workflow_presentation_stale_and_auth_boundaries() {
     let state = fixtures().remove(1).1;
     let card = project(&state, &auth(), STYLE).unwrap().runs.remove(0);
@@ -257,7 +273,7 @@ fn a_tracker_only_ticket_offers_a_person_no_action() {
         resource: "resource".into(), dependencies: Default::default() }, Grant::Controller);
     assert!(project(&state, &auth(), STYLE).unwrap().runs.is_empty(), "a ticket is not a run");
     // And a hand-built Cancel, with the label a real one carries, is refused.
-    let forged = Action { kind: ActionKind::Cancel, label: display::action_label(&ActionKind::Cancel, STYLE),
+    let forged = Action { weight: ActionWeight::Destructive, kind: ActionKind::Cancel, label: display::action_label(&ActionKind::Cancel, STYLE),
         guard: digest(&(digest(&("workflow-presentation/v2", &state, &auth())), "item")) };
     assert!(action(&state, &auth(), STYLE, "item", &forged).is_err());
 }

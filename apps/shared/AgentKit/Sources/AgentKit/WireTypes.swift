@@ -7,6 +7,12 @@
 
 import Foundation
 
+public enum WireActionWeight: String, Codable, Equatable, Sendable {
+	case primary = "Primary"
+	case secondary = "Secondary"
+	case destructive = "Destructive"
+}
+
 public enum WireActionKind: String, Codable, Equatable, Sendable {
 	case inspectLatestEvidence = "InspectLatestEvidence"
 	case inspectUncertainty = "InspectUncertainty"
@@ -19,12 +25,14 @@ public enum WireActionKind: String, Codable, Equatable, Sendable {
 }
 
 public struct WireAction: Codable, Equatable, Sendable {
+	public var weight: WireActionWeight
 	public var kind: WireActionKind
 	public var label: String
 	/// Binds the entire snapshot and capability context; not a secret or an authorization token.
 	public var `guard`: String
 
-	public init(kind: WireActionKind, label: String, guard: String) {
+	public init(weight: WireActionWeight, kind: WireActionKind, label: String, guard: String) {
+		self.weight = weight
 		self.kind = kind
 		self.label = label
 		self.guard = `guard`

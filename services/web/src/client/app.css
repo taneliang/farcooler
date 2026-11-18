@@ -287,3 +287,6 @@ button.danger { color: var(--danger); }
 
 /* Engine group rows wrap whole ticket titles and bounded failure context on phones. */
 .plan-landing-group { padding: 12px 14px; margin: 8px 0; overflow-wrap: anywhere; }
+
+.workflow-runs .workflow-action-secondary, .workflow-runs .workflow-action-destructive { background: transparent; color: var(--button-bg); box-shadow: inset 0 0 0 1px currentColor; }
+.workflow-runs .workflow-action-destructive { color: var(--danger); }

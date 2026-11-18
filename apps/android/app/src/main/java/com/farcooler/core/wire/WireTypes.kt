@@ -11,6 +11,16 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
 
 @Serializable
+enum class ActionWeight(val string: String) {
+	@SerialName("Primary")
+	Primary("Primary"),
+	@SerialName("Secondary")
+	Secondary("Secondary"),
+	@SerialName("Destructive")
+	Destructive("Destructive"),
+}
+
+@Serializable
 enum class ActionKind(val string: String) {
 	@SerialName("InspectLatestEvidence")
 	InspectLatestEvidence("InspectLatestEvidence"),
@@ -32,6 +42,7 @@ enum class ActionKind(val string: String) {
 
 @Serializable
 data class Action (
+	val weight: ActionWeight,
 	val kind: ActionKind,
 	val label: String,
 	/// Binds the entire snapshot and capability context; not a secret or an authorization token.

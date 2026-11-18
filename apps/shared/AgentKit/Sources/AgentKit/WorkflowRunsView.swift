@@ -135,12 +135,13 @@ public struct WorkflowRunsView: View {
             ForEach(Array(run.page.more.enumerated()), id: \.offset) { _, line in Text(line) }
             ForEach(Array(run.actions.enumerated()), id: \.offset) { _, action in
                 if let form = run.forms?.first(where: { $0.action == action.kind }) {
-                    WorkflowReasonForm(form: form, enabled: model.ready && !model.busy && port != nil) { reason in
+                    WorkflowReasonForm(form: form, weight: action.weight, enabled: model.ready && !model.busy && port != nil) { reason in
                         Task { await model.perform(item: run.item, action: action, port: port, reason: reason) }
                     }.id("\(run.item)/\(run.run)/\(action.guardValue)")
                 } else {
-                    Button(action.label) { Task { await model.perform(item: run.item, action: action, port: port) } }
-                        .disabled(!model.ready || model.busy || port == nil)
+                    WorkflowActionButton(label: action.label, weight: action.weight, enabled: model.ready && !model.busy && port != nil) {
+                        Task { await model.perform(item: run.item, action: action, port: port) }
+                    }
                 }
             }
             if run.pendingEffect != nil, watch != nil {
@@ -149,7 +150,10 @@ public struct WorkflowRunsView: View {
             ForEach(Array(run.page.steps.enumerated()), id: \.offset) { _, step in
                 Text("\(step.label) · \(step.state)")
             }
-            DisclosureGroup(run.page.detailsLabel, isExpanded: $detailsOpen) {
+            Button { detailsOpen.toggle() } label: {
+                Label(run.page.detailsLabel, systemImage: detailsOpen ? "chevron.down" : "chevron.right")
+            }.accessibilityValue(detailsOpen ? "Expanded" : "Collapsed")
+            if detailsOpen {
                 ForEach(Array(run.page.details.enumerated()), id: \.offset) { _, row in
                     HStack {
                         Text("\(row.title): \(row.value)").textSelection(.enabled)
@@ -167,6 +171,7 @@ public struct WorkflowRunsView: View {
 }
 private struct WorkflowReasonForm: View {
     let form: WireActionForm
+    let weight: WireActionWeight
     let enabled: Bool
     let submit: (String) -> Void
     @State private var draft = ""
@@ -175,7 +180,21 @@ private struct WorkflowReasonForm: View {
             Text(form.label).font(.headline)
             TextEditor(text: $draft).frame(minHeight: 100).accessibilityLabel(form.label).disabled(!enabled)
             Text(form.help)
-            Button(form.submitLabel) { submit(draft) }.disabled(!enabled)
+            WorkflowActionButton(label: form.submitLabel, weight: weight, enabled: enabled) { submit(draft) }
+        }
+    }
+}
+private struct WorkflowActionButton: View {
+    let label: String
+    let weight: WireActionWeight
+    let enabled: Bool
+    let action: () -> Void
+    @ViewBuilder var body: some View {
+        if weight == .primary {
+            Button(label, action: action).buttonStyle(.borderedProminent).disabled(!enabled)
+        } else {
+            Button(label, role: weight == .destructive ? .destructive : nil, action: action)
+                .buttonStyle(.bordered).disabled(!enabled)
         }
     }
 }

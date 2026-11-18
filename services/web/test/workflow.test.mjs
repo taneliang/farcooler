@@ -43,6 +43,9 @@ for (const fixture of fixtures) await test(`Rust ${fixture.name} renders shared 
   for (const value of [run.definitionPin, `Policy: ${run.policyPin}`, `Fence ${run.fence}`, 'Iteration', ...(run.gate ? [`\n${run.gate.principal}\n`] : [])]) assert(!text.includes(value), `${value} is not shown by default`)
   for (const row of page.details) assert(text.includes(`${row.title}: ${row.value}`))
   for (const action of run.actions) {
+    const form = run.forms?.find(f => f.action === action.kind)
+    const button = root.querySelectorAll('button').find(b => b.textContent === (form?.submitLabel ?? action.label))
+    assert.equal(button.className, `workflow-action-${action.weight.toLowerCase()}`)
     await board.dispatch(run.item, action)
     assert.strictEqual(sent.at(-1)[2], action)
     assert.deepEqual(sent.at(-1), [presentation.workspace, run.item, action])
@@ -176,7 +179,7 @@ console.log(`${count} workflow fixture/controller/DOM tests passed; simulated DO
 await test('Feature B finite form retains draft/caret/focus and renders borrowed text safely', async () => {
   const shared = JSON.parse(fs.readFileSync('crates/client/src/testdata/workflow-rework.json','utf8'))
   const p = clone(fixtures[0].response.card), run=p.runs[0]
-  run.actions=[{kind:'RequestRework',label:shared.form.submitLabel,guard:'b'}];run.forms=[shared.form]
+  run.actions=[{weight:'Secondary',kind:'RequestRework',label:shared.form.submitLabel,guard:'b'}];run.forms=[shared.form]
   run.reworkHistory=[{principal:'owner',iteration:0,reason:shared.reason}]
   const sent=[];let view;const root=new Element('div')
   // Extend only native textarea mechanics in this DOM fixture.
