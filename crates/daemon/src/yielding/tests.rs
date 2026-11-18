@@ -247,3 +247,59 @@ async fn a_builder_counts_the_time_a_gate_held_it_and_not_its_hand_pause() {
     assert_eq!(guard.held_clock().held(), held, "the clock's handle reads the same");
     end(child);
 }
+
+/// A tty number alone can be reused by another run. Both the shell's start identity and its presence on that tty
+/// must agree before a gate signals anything, and an unrelated pane keeps working throughout a valid pause.
+#[tokio::test]
+async fn a_native_gate_leaves_other_panes_and_reused_ttys_alone() {
+    let dir = farcooler_core::scratch::dir("native-gate-identity");
+    let id = uuid::Uuid::now_v7();
+    let tmux = farcooler_tmux::TmuxServer::in_dir(&format!("gate-identity-{id}"), id, &dir);
+    struct Reap<'a>(&'a farcooler_tmux::TmuxServer);
+    impl Drop for Reap<'_> { fn drop(&mut self) { farcooler_tmux::reap_server(self.0.socket()); } }
+    let _reap = Reap(&tmux);
+    let mut panes = Vec::new();
+    for file in ["first", "other"] {
+        let terminal = uuid::Uuid::now_v7();
+        let command = format!("exec /bin/sh -c 'sh -c \"while :; do echo tick >> {file}; sleep 0.02; done\"; status=$?; exit \"$status\"'");
+        let window = tmux.create_terminal_window(terminal, terminal, "gate identity", dir.to_str().unwrap(), &command).await.unwrap();
+        panes.push(tmux.list_tagged_panes().await.unwrap().into_iter().find(|p| p.pane_id == window.pane_id).unwrap());
+    }
+    for _ in 0..500 {
+        if dir.join("first").exists() && dir.join("other").exists() { break; }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let first = &panes[0];
+    let target = Target::Native { tty: first.tty.clone(), supervisor: first.stamp.pid,
+        started: crate::effect_runner::Owner::started_at(first.stamp.pid).unwrap() };
+    let y = Yielding::at(&dir);
+    let mut wrong_tty = target.clone();
+    if let Target::Native { tty, .. } = &mut wrong_tty { *tty = panes[1].tty.clone(); }
+    let mut recycled = target.clone();
+    if let Target::Native { started, .. } = &mut recycled { *started = "old shell".into(); }
+    let invalid = (y.builder(wrong_tty), y.builder(recycled));
+    let gate = y.gate();
+    let before = (std::fs::read(dir.join("first")).unwrap().len(), std::fs::read(dir.join("other")).unwrap().len());
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(std::fs::read(dir.join("first")).unwrap().len() > before.0);
+    assert!(std::fs::read(dir.join("other")).unwrap().len() > before.1);
+    drop((gate, invalid));
+    let builder = y.builder(target.clone());
+    let gate = y.gate();
+    let recorded: Vec<Target> = serde_json::from_slice(&std::fs::read(dir.join("yielding.json")).unwrap()).unwrap();
+    assert_eq!(recorded, vec![target], "the restart record retains the supervisor identity");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let paused = std::fs::read(dir.join("first")).unwrap();
+    let other = std::fs::read(dir.join("other")).unwrap();
+    tokio::time::sleep(Duration::from_millis(700)).await; // also covers the gate's periodic sweep
+    assert_eq!(std::fs::read(dir.join("first")).unwrap(), paused);
+    assert!(std::fs::read(dir.join("other")).unwrap().len() > other.len());
+    for pane in &panes { assert_eq!(tmux.pane_life(&pane.pane_id, pane.terminal_id).await.unwrap(), farcooler_tmux::PaneLife::Live); }
+    builder.manual(true);
+    drop(gate);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(std::fs::read(dir.join("first")).unwrap(), paused, "a hand pause survives the gate");
+    builder.manual(false);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(std::fs::read(dir.join("first")).unwrap().len() > paused.len(), "the same pane resumes");
+}

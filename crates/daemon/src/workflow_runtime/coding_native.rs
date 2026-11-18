@@ -551,8 +551,10 @@ impl Exec {
             .map_err(|_| Error::Refused("native output stream unavailable"))?;
         let mut output = tokio::spawn(crate::effect_runner::capture(stream, self.process_log(binding)));
         // A native builder pauses while a landing gate runs; a review never does (ov-1214).
-        let _builder = matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build))
-            .then(|| self.yielding.builder(crate::yielding::Target::Tty(pane.tty.clone())));
+        let _builder = if matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build)) {
+            Some(self.yielding.builder(crate::yielding::Target::Native { tty: pane.tty.clone(), supervisor: pane.stamp.pid,
+                started: crate::effect_runner::Owner::started_at(pane.stamp.pid)? }))
+        } else { None };
         // Every ticket this run owns can watch and message it (ov-1171). Declared after `host`, so
         // all tickets are unlisted before the server is reaped, on success, failure or cancellation.
         let _watchable = crate::watch_view::publish_effect(&binding.workspace, &binding.effect, tmux.clone(), pane.clone());

@@ -16,8 +16,11 @@ use std::time::Duration;
 pub(crate) enum Target {
     /// A process group the engine created, led by `pid`, which started at `started` (so a recycled pid is never ours).
     Group { pid: u32, started: String },
-    /// A native agent's PTY: its tty and every descendant of what runs on it.
+    /// Legacy pause records, read on restart to continue builders stopped by older engines.
     Tty(String),
+    /// A native PTY's waiting shell pins its identity, but must stay running: tmux continues a stopped pane leader's
+    /// whole group. Only the agent and its descendants yield, as with a native hand pause (ov-1357).
+    Native { tty: String, supervisor: u32, started: String },
 }
 
 /// A builder, and whether the orchestrator has paused it by hand (ov-1205). A builder is stopped while a gate
@@ -85,6 +88,16 @@ fn signal(target: &Target, sig: i32) {
             let Some(raw) = crate::proc_table::snapshot() else { return };
             for pid in crate::foreground::parse(&raw).under_tty(tty.trim_start_matches("/dev/")) {
                 if pid > 1 && pid != std::process::id() as i32 { unsafe { libc::kill(pid, sig); } }
+            }
+        }
+        Target::Native { tty, supervisor, started } => {
+            if started.is_empty() || !crate::effect_runner::Owner::started_at(*supervisor).is_ok_and(|actual| actual == *started) { return; }
+            let Some(raw) = crate::proc_table::snapshot() else { return };
+            let pids = crate::foreground::parse(&raw).under_tty(tty.trim_start_matches("/dev/"));
+            // A recycled tty belongs to another run. Never signal it, even if the old shell still exists elsewhere.
+            if !pids.contains(&(*supervisor as i32)) { return; }
+            for pid in pids {
+                if pid > 1 && pid != *supervisor as i32 && pid != std::process::id() as i32 { unsafe { libc::kill(pid, sig); } }
             }
         }
     }

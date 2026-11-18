@@ -82,3 +82,43 @@ async fn a_pane_the_runner_never_reads_again_fails_the_build_with_why_on_the_ite
     let item = &runtime.state("w").unwrap().unwrap().items["one"];
     assert!(item.failure.as_deref().is_some_and(|f| f.contains("could not read the agent's pane")), "{item:?}");
 }
+
+/// A real retained builder survives both a gate already running at launch and one arriving mid-turn.
+#[tokio::test]
+async fn a_landing_gate_keeps_a_native_builds_pane_until_it_resumes_and_finishes() {
+    for (agent, gate_first) in [("claude", false), ("claude", true), ("codex", false), ("codex", true)] {
+        let (dir, mut runtime, _fake) = super::tests::native_agent("pass", agent).await;
+        let script = dir.path().join("interactive.py");
+        let source = std::fs::read_to_string(&script).unwrap();
+        let barrier = "while not pathlib.Path(os.environ['STARTED']).with_name('finish').exists(): time.sleep(0.01)\n";
+        std::fs::write(&script, source.replace("if mode in ('steering', 'active-steering'):\n    ready",
+            &format!("{barrier}if mode in ('steering', 'active-steering'):\n    ready"))).unwrap();
+        if let CodingHarness::Native { process, .. } = &mut runtime.coding.as_mut().unwrap().harness { process.timeout_ms = 30_000; }
+        let definition = runtime.configured_definition().unwrap();
+        enqueue(&mut runtime, "w", "one", definition);
+        runtime.pump(2).await.unwrap();
+        let binding = admitted(&runtime).await;
+        let yielding = runtime.exec.yielding.clone();
+        let mut gate = gate_first.then(|| yielding.gate());
+        let (_cancel, cancelled) = tokio::sync::watch::channel(false);
+        let run = runtime.execute_coding("w", &binding, cancelled);
+        tokio::pin!(run);
+        if !gate_first { started(&dir, &mut run).await; gate = Some(yielding.gate()); }
+        tokio::select! {
+            result = run.as_mut() => panic!("gate ended the builder: {result:?}"),
+            _ = tokio::time::sleep(Duration::from_secs(2)) => {}
+        }
+        let owner: NativeOwner = serde_json::from_slice(&std::fs::read(runtime.exec.native_path(&binding, "owner")).unwrap()).unwrap();
+        assert_eq!(server(&runtime.root, &binding).pane_life(&owner.pane, owner.terminal).await.unwrap(), farcooler_tmux::PaneLife::Live);
+        if dir.path().join("started").exists() {
+            let pid = std::fs::read_to_string(dir.path().join("started")).unwrap();
+            let state = std::process::Command::new("ps").args(["-o", "stat=", "-p", pid.trim()]).output().unwrap();
+            assert!(String::from_utf8_lossy(&state.stdout).trim_start().starts_with('T'),
+                "the gate must actually pause the native builder: {}", String::from_utf8_lossy(&state.stdout));
+        }
+        std::fs::write(dir.path().join("finish"), "go").unwrap();
+        drop(gate);
+        let outcome = tokio::time::timeout(Duration::from_secs(10), run).await.unwrap().unwrap();
+        assert!(matches!(outcome, Outcome::Passed(_)), "{outcome:?}");
+    }
+}
