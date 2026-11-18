@@ -21,10 +21,20 @@ pub(crate) fn select(tx: &Transaction<'_>, before: &State, after: &State) -> Res
 }
 impl Store {
     /// Recovery can retain a new, deterministic tree-release intent for a known finished group.
-    /// Never overwrite a prior attempt: an interrupted deletion must not be replayed.
+    /// Never overwrite a prior attempt; recovery explicitly reconciles finished group trees.
     pub fn workflow_cleanup_enqueue(&self, effect: &CleanupEffect) -> Result<()> {
         self.conn().execute("INSERT OR IGNORE INTO engine_build_cleanup(workspace,id,payload) VALUES (?1,?2,?3)",
             params![effect.workspace, effect.id, serde_json::to_string(effect)?])?;
+        Ok(())
+    }
+
+    /// Only the exclusive runtime's recovery pass may revive an interrupted, known finished
+    /// group with an engine-owned tree. Ordinary build output must never be replayed.
+    pub fn workflow_cleanup_recover_group(&self, effect: &CleanupEffect) -> Result<()> {
+        let resumed = CleanupResult { retry: true, bytes_freed: 0,
+            skipped: vec!["group tree cleanup interrupted; bytes freed unknown".into()] };
+        self.conn().execute("UPDATE engine_build_cleanup SET result=?3 WHERE workspace=?1 AND id=?2 AND result=?4",
+            params![effect.workspace, effect.id, serde_json::to_string(&resumed)?, serde_json::to_string(&interrupted())?])?;
         Ok(())
     }
 
@@ -56,7 +66,7 @@ impl Store {
     }
     /// Claim the observed pending or retryable result before filesystem mutation.
     /// The compare-and-swap prevents concurrent or stale sweeps from repeating an attempt.
-    /// An interrupted attempt stays terminal: deletion may have started, so its byte count is unknown.
+    /// An interrupted attempt stays terminal until explicit group recovery; its byte count is unknown.
     pub fn workflow_cleanup_begin(&self, effect: &CleanupEffect, previous: Option<&CleanupResult>) -> Result<bool> {
         if previous.is_some_and(|r| !r.retry) { return Ok(false); }
         Ok(self.conn().execute("UPDATE engine_build_cleanup SET result=?3 WHERE workspace=?1 AND id=?2 AND result IS ?4",

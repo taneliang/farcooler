@@ -155,3 +155,115 @@ async fn a_cancelled_group_keeps_its_tree_until_the_running_effect_settles() {
     assert!(board["build_cleanup"].as_array().unwrap().iter().any(|r|
         r["effect"]["item"] == group && r["result"]["bytes_freed"].as_u64().is_some_and(|n| n > 4)));
 }
+
+
+async fn interrupted_group_recovery(point: u8) {
+    let (_dir, mut runtime, group, tree) = super::build_cleanup_tests::building_group(None).await;
+    until(&mut runtime, |s| s.items[&group].phase == Phase::WaitingReview).await;
+    // Keep a detached commit reachable even if deletion removed the .git link first.
+    adapters::git(&tree, &["checkout", "--detach"]).await.unwrap();
+    adapters::git(&tree, &["-c", "commit.gpgsign=false", "-c", "user.name=Test",
+        "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "finished group"]).await.unwrap();
+    let head = adapters::git(&tree, &["rev-parse", "HEAD"]).await.unwrap();
+    command(&runtime, Command::Cancel { item: group.clone(), reason: None });
+    let record = runtime.store.workflow_cleanups("w").unwrap().into_iter().rev()
+        .find(|r| r.effect.item == group).unwrap();
+    if point == 3 {
+        let crash = runtime.release_builds_checked(&["w".into()], || Err(Error::Refused("simulated crash"))).await;
+        assert!(crash.is_err());
+        assert!(!tree.exists());
+    } else {
+        assert!(runtime.store.workflow_cleanup_begin(&record.effect, None).unwrap());
+        if point == 1 { std::fs::remove_file(tree.join(".git")).unwrap(); }
+        if point == 2 { std::fs::remove_dir_all(&tree).unwrap(); }
+    }
+    let root = runtime.root.clone();
+    drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    runtime.pump(100).await.unwrap();
+    assert!(!tree.exists(), "recovery completes an interrupted finished-group removal");
+    let reference = format!("refs/workflow/finished/{}", adapters::folder_name(&digest(&("w", &group))));
+    assert_eq!(adapters::git(&runtime.repository(), &["rev-parse", &reference]).await.unwrap(), head);
+    let listed = adapters::git(&runtime.repository(), &["worktree", "list", "--porcelain"]).await.unwrap();
+    assert!(!listed.contains(tree.to_str().unwrap()), "stale Git registration is reclaimed");
+    let records = runtime.store.workflow_cleanups("w").unwrap();
+    let result = records.iter().find(|r| r.effect.id == record.effect.id).unwrap().result.as_ref().unwrap();
+    assert!(!result.retry, "{result:?}");
+    assert_eq!(result.bytes_freed, 0, "remaining bytes cannot reconstruct the interrupted total");
+    assert!(result.skipped.iter().any(|s| s.contains("bytes freed unknown")), "{result:?}");
+    let board = runtime.wire_command("w", "owner", farcooler_protocol::workflow_commands::Action::Get).unwrap();
+    assert!(board["build_cleanup"].as_array().unwrap().iter().any(|r|
+        r["effect"]["id"] == record.effect.id && r["result"]["skipped"].to_string().contains("bytes freed unknown")));
+    runtime.pump(100).await.unwrap();
+    assert_eq!(runtime.store.workflow_cleanups("w").unwrap().len(), records.len());
+}
+
+#[tokio::test]
+async fn recovery_finishes_group_cleanup_interrupted_before_deletion() { interrupted_group_recovery(0).await; }
+
+#[tokio::test]
+async fn recovery_finishes_group_cleanup_interrupted_partway_through_deletion() { interrupted_group_recovery(1).await; }
+
+#[tokio::test]
+async fn recovery_finishes_group_cleanup_interrupted_after_deletion() { interrupted_group_recovery(2).await; }
+
+#[tokio::test]
+async fn recovery_finishes_group_cleanup_interrupted_after_git_prune() { interrupted_group_recovery(3).await; }
+
+#[tokio::test]
+async fn recovery_rechecks_safety_and_keeps_unknown_bytes_across_retries() {
+    let (_dir, mut runtime, group, tree) = super::build_cleanup_tests::building_group(None).await;
+    until(&mut runtime, |s| s.items[&group].phase == Phase::WaitingReview).await;
+    std::fs::write(tree.join("busy"), b"open output").unwrap();
+    let open = File::open(tree.join("busy")).unwrap();
+    command(&runtime, Command::Cancel { item: group.clone(), reason: None });
+    let record = runtime.store.workflow_cleanups("w").unwrap().into_iter().rev()
+        .find(|r| r.effect.item == group).unwrap();
+    assert!(runtime.store.workflow_cleanup_begin(&record.effect, None).unwrap());
+    std::fs::remove_file(tree.join(".git")).unwrap();
+    let root = runtime.root.clone();
+    drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    runtime.pump(100).await.unwrap();
+    assert!(tree.exists(), "an open file still blocks a partly removed tree");
+    let results = runtime.store.workflow_cleanups("w").unwrap();
+    let result = results.iter().find(|r| r.effect.id == record.effect.id).unwrap().result.as_ref().unwrap();
+    assert!(result.retry && result.skipped.iter().any(|s| s.contains("open files")), "{result:?}");
+    drop(open);
+    std::fs::create_dir_all(tree.join("nested/.git")).unwrap();
+    runtime.release_builds(&["w".into()]).await.unwrap();
+    assert!(tree.join("nested/.git").exists(), "recovery still protects nested repositories");
+    std::fs::remove_dir_all(tree.join("nested")).unwrap();
+    runtime.active_trees.lock().unwrap().insert(tree.clone());
+    runtime.release_builds(&["w".into()]).await.unwrap();
+    assert!(tree.exists(), "an active effect still blocks recovery");
+    runtime.active_trees.lock().unwrap().clear();
+    runtime.release_builds(&["w".into()]).await.unwrap();
+    assert!(!tree.exists());
+    let results = runtime.store.workflow_cleanups("w").unwrap();
+    let result = results.iter().find(|r| r.effect.id == record.effect.id).unwrap().result.as_ref().unwrap();
+    assert!(!result.retry && result.bytes_freed == 0, "{result:?}");
+    assert!(result.skipped.iter().any(|s| s.contains("bytes freed unknown")), "{result:?}");
+}
+
+#[tokio::test]
+async fn recovery_settles_interrupted_cleanup_after_registration_is_already_gone() {
+    let (_dir, mut runtime, group, tree) = super::build_cleanup_tests::building_group(None).await;
+    until(&mut runtime, |s| s.items[&group].phase == Phase::WaitingReview).await;
+    command(&runtime, Command::Cancel { item: group.clone(), reason: None });
+    let record = runtime.store.workflow_cleanups("w").unwrap().into_iter().rev()
+        .find(|r| r.effect.item == group).unwrap();
+    assert!(runtime.store.workflow_cleanup_begin(&record.effect, None).unwrap());
+    // A separate Git prune may have removed the registration of the absent tree.
+    // Its group branch still retains the commits; recovery has no deletion left to do.
+    std::fs::remove_dir_all(&tree).unwrap();
+    adapters::git(&runtime.repository(), &["worktree", "prune"]).await.unwrap();
+    let root = runtime.root.clone();
+    drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    runtime.pump(100).await.unwrap();
+    let records = runtime.store.workflow_cleanups("w").unwrap();
+    let result = records.iter().find(|r| r.effect.id == record.effect.id).unwrap().result.as_ref().unwrap();
+    assert!(!result.retry && result.bytes_freed == 0, "{result:?}");
+    assert!(result.skipped.iter().any(|s| s.contains("bytes freed unknown")), "{result:?}");
+}

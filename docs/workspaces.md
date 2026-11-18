@@ -57,8 +57,12 @@ build output; reports nested in other output folders remain protected.
 It skips folders with open files, trees another live run uses, and
 Uncertain runs. Each attempt records bytes freed or a skip reason in the
 `workflow get` response's `build_cleanup` results, keyed by item and run. Repeating an engine read or recovering an
-interrupted attempt doesn't repeat deletion; an interrupted attempt reports
-that its byte count is unknown.
+interrupted build-folder attempt doesn't repeat deletion. Recovery finishes interrupted
+removal of a known finished group's private checkout, even when only part of the tree
+remains. It rechecks ownership, open files and claims, and retains commits through Git's
+surviving worktree registration before pruning it. Interrupted attempts report
+`bytes freed unknown` in the result's reasons, with a zero byte-count placeholder;
+recovery never presents the remaining tree size as the total freed.
 
 ## What needs you
 

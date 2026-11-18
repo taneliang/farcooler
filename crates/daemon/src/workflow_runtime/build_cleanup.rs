@@ -31,12 +31,21 @@ impl Exec {
                     continue;
                 }
                 if !self.store.workflow_cleanup_begin(&effect, record.result.as_ref())? { continue; }
-                let mut result = match self.release_build(&effect).await {
+                let reconcile = record.result.as_ref().is_some_and(|r|
+                    r.skipped.iter().any(|s| s == "group tree cleanup interrupted; bytes freed unknown"));
+                let mut result = match self.release_build_attempt(&effect, || {}, reconcile).await {
                     Ok(result) => result,
                     Err(error) => CleanupResult { retry: false, bytes_freed: 0, skipped: vec![format!("cleanup unavailable: {error}")] },
                 };
                 // Completed folders are absent on retry; preserve their byte count exactly once.
-                result.bytes_freed = result.bytes_freed.saturating_add(record.result.map_or(0, |r| r.bytes_freed));
+                if reconcile {
+                    // Neither the remaining size nor zero is a known total for the lost attempt.
+                    // Keep the existing wire convention: zero plus an explicit unknown-byte reason.
+                    result.bytes_freed = 0;
+                    result.skipped.push("group tree cleanup interrupted; bytes freed unknown".into());
+                } else {
+                    result.bytes_freed = result.bytes_freed.saturating_add(record.result.map_or(0, |r| r.bytes_freed));
+                }
                 before_result()?;
                 self.store.workflow_cleanup_result(&effect, &result)?;
                 retry |= result.retry;
@@ -44,10 +53,11 @@ impl Exec {
         }
         Ok(retry)
     }
-    async fn release_build(&self, effect: &CleanupEffect) -> Result<CleanupResult> {
-        self.release_build_checked(effect, || {}).await
-    }
+    #[cfg(test)]
     pub(super) async fn release_build_checked(&self, effect: &CleanupEffect, after_check: impl FnOnce()) -> Result<CleanupResult> {
+        self.release_build_attempt(effect, after_check, false).await
+    }
+    async fn release_build_attempt(&self, effect: &CleanupEffect, after_check: impl FnOnce(), reconcile: bool) -> Result<CleanupResult> {
         let skip = |why: &str| CleanupResult { retry: false, bytes_freed: 0, skipped: vec![why.into()] };
         // The service shares this fence with provision_named, adoption and worktree.create.
         // The isolated runtime instead owns writer.lock for its lifetime and serializes claims
@@ -68,12 +78,18 @@ impl Exec {
         if effect.tree.as_ref().is_some_and(|t| t.adopted) { return Ok(skip("worktree is adopted; its output is a person's")); }
         if let Some(why) = self.store.workflow_cleanup_skip(effect)? { return Ok(skip(&why)); }
         let tree = effect.tree.as_ref().map_or_else(|| self.item_tree(&effect.workspace, &effect.item), |t| PathBuf::from(&t.path));
-        if !tree.try_exists()? { return Ok(skip("worktree is absent")); }
-        // A main checkout, a symlink, or a path which moved out from under its binding is never ours to clean.
-        let canonical = tree.canonicalize()?;
-        if canonical != tree || !tree.join(".git").symlink_metadata()?.file_type().is_file() {
-            return Ok(skip("worktree is not an exclusive linked tree"));
-        }
+        let group_recovery = reconcile && effect.tree.is_none() && self.ended_group(effect)?;
+        let exists = tree.try_exists()?;
+        if !exists && !group_recovery { return Ok(skip("worktree is absent")); }
+        // Recovery may find .git already removed. Its registration is checked before deletion.
+        // A main checkout, symlink or moved binding is still never ours to clean.
+        let canonical = if exists { tree.canonicalize()? } else { tree.clone() };
+        let linked = match tree.join(".git").symlink_metadata() {
+            Ok(meta) => meta.file_type().is_file(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => group_recovery,
+            Err(e) => return Err(e.into()),
+        };
+        if canonical != tree || !linked { return Ok(skip("worktree is not an exclusive linked tree")); }
         for workspace in &self.store.workflow_workspaces()? {
             let Some(state) = self.state(workspace)? else { continue };
             for (id, item) in &state.items {
@@ -92,6 +108,12 @@ impl Exec {
             }
         }
         after_check();
+        if group_recovery {
+            return Ok(match self.release_group_tree(&tree, held, effect, true).await {
+                Ok(_) => CleanupResult { retry: false, bytes_freed: 0, skipped: Vec::new() },
+                Err(why) => CleanupResult { retry: true, bytes_freed: 0, skipped: vec![why] },
+            });
+        }
         let mut result = CleanupResult { retry: false, bytes_freed: 0, skipped: Vec::new() };
         let mut paths = BTreeSet::new();
         for pattern in &effect.folders {
@@ -115,7 +137,7 @@ impl Exec {
             }
         }
         if !result.retry && self.ended_group(effect)? && effect.tree.is_none() {
-            let released = self.release_group_tree(&tree, held, effect).await;
+            let released = self.release_group_tree(&tree, held, effect, false).await;
             match released {
                 Ok(bytes) => result.bytes_freed = result.bytes_freed.saturating_add(bytes),
                 Err(why) => { result.retry = true; result.skipped.push(why); }

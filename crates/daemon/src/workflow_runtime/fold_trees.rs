@@ -4,7 +4,14 @@ use super::*;
 impl Exec {
     /// Kept at every former tree-pruning call site, including recovery and cancellation.
     /// Durable cleanup waits for running effects and retains commits before removing a checkout.
-    pub(super) async fn prune_trees(&self, workspaces: &[String], _recovering: bool) {
+    pub(super) async fn prune_trees(&self, workspaces: &[String], recovering: bool) {
+        if recovering {
+            for workspace in workspaces {
+                if let Err(error) = self.recover_group_cleanups(workspace) {
+                    tracing::warn!(%error, "could not reconcile interrupted group cleanup");
+                }
+            }
+        }
         if let Err(error) = self.prune_process_logs(workspaces) {
             tracing::warn!(%error, "could not prune orphan process logs");
         }
@@ -18,6 +25,15 @@ impl Exec {
 }
 
 impl Exec {
+    fn recover_group_cleanups(&self, workspace: &str) -> Result<()> {
+        for record in self.store.workflow_cleanups(workspace)? {
+            if record.effect.tree.is_none() && !record.effect.uncertain && self.ended_group(&record.effect)? {
+                self.store.workflow_cleanup_recover_group(&record.effect)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Older engines settled output cleanup while leaving the source checkout behind. Retain
     /// a separate intent for those known groups, without sweeping unknown directory names.
     pub(super) fn retain_finished_group_cleanups(&self, workspace: &str) -> Result<()> {
@@ -51,9 +67,30 @@ impl Exec {
     /// is used for folding and gates; no output is parked for the next group.
     pub(super) async fn release_group_tree(&self, tree: &Path,
         held: Option<std::sync::Arc<tokio::sync::OwnedMutexGuard<()>>>,
-        effect: &farcooler_workflow::cleanup::CleanupEffect) -> std::result::Result<u64, String> {
+        effect: &farcooler_workflow::cleanup::CleanupEffect, reconcile: bool) -> std::result::Result<u64, String> {
         if tree != self.item_tree(&effect.workspace, &effect.item) || tree.parent() != Some(self.root.as_path()) {
             return Err("group tree is outside the engine root".into());
+        }
+        let reference = format!("refs/workflow/finished/{}", adapters::folder_name(&digest(&(&effect.workspace, &effect.item))));
+        let (common, gitdir) = if reconcile {
+            self.group_recovery_gitdir(tree, effect).await?
+        } else {
+            let common = crate::git::git(tree, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).await.map_err(|e| e.to_string())?;
+            if !common.ok { return Err("group git directory unavailable".into()); }
+            (common.stdout.trim().to_string(), None)
+        };
+        // Git's registration survives partial checkout removal, including loss of .git.
+        // Anchor its detached HEAD before pruning that registration, even if the tree is gone.
+        if let Some(gitdir) = gitdir {
+            let anchor = crate::git::git(&self.root, &["--git-dir", &gitdir, "update-ref", &reference, "HEAD"]).await.map_err(|e| e.to_string())?;
+            if !anchor.ok { return Err("could not retain interrupted group HEAD".into()); }
+        } else if tree.try_exists().map_err(|e| e.to_string())? {
+            let anchor = crate::git::git(tree, &["update-ref", &reference, "HEAD"]).await.map_err(|e| e.to_string())?;
+            if !anchor.ok { return Err("could not retain group HEAD".into()); }
+        }
+        if !tree.try_exists().map_err(|e| e.to_string())? {
+            let _ = crate::git::git(&self.root, &["--git-dir", &common, "worktree", "prune"]).await;
+            return Ok(0);
         }
         let mut command = tokio::process::Command::new("lsof");
         command.args(["-nP", "-F", "p", "+D"]).arg(tree).kill_on_drop(true);
@@ -63,13 +100,6 @@ impl Exec {
         if output.status.code() != Some(1) || !output.stderr.is_empty() {
             return Err("group open-file check could not establish safety".into());
         }
-        let common = crate::git::git(tree, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).await.map_err(|e| e.to_string())?;
-        if !common.ok { return Err("group git directory unavailable".into()); }
-        // A failed fold can have a detached HEAD. Keep it reachable even after its worktree
-        // metadata goes; normal group branches also remain available for inspection.
-        let reference = format!("refs/workflow/finished/{}", adapters::folder_name(&digest(&(&effect.workspace, &effect.item))));
-        let anchor = crate::git::git(tree, &["update-ref", &reference, "HEAD"]).await.map_err(|e| e.to_string())?;
-        if !anchor.ok { return Err("could not retain group HEAD".into()); }
         let path = tree.to_path_buf();
         let bytes = tokio::task::spawn_blocking(move || {
             // Deletion can outlive cancellation of this future; retain the claim fence too.
@@ -79,9 +109,42 @@ impl Exec {
             std::fs::remove_dir_all(&path).map_err(|e| e.to_string())?;
             Ok::<_, String>(bytes)
         }).await.map_err(|e| e.to_string())??;
-        let _ = crate::git::git(&self.root, &["--git-dir", common.stdout.trim(), "worktree", "prune"]).await;
+        let _ = crate::git::git(&self.root, &["--git-dir", &common, "worktree", "prune"]).await;
         Ok(bytes)
     }
+
+    /// Recover only a registered engine checkout in the workspace's repository. Never guess
+    /// ownership from a directory name, or use a partly deleted checkout to find its repository.
+    async fn group_recovery_gitdir(&self, tree: &Path, effect: &farcooler_workflow::cleanup::CleanupEffect) -> std::result::Result<(String, Option<String>), String> {
+        let common = if self.service_mode {
+            let board = Uuid::parse_str(&effect.workspace).map_err(|e| e.to_string())?;
+            let workspace = self.store.get_workspace(board).map_err(|e| e.to_string())?;
+            self.store.get_repository(workspace.repository_id).map_err(|e| e.to_string())?.canonical_git_dir
+        } else {
+            let common = crate::git::git(&self.repository(), &["rev-parse", "--path-format=absolute", "--git-common-dir"])
+                .await.map_err(|e| e.to_string())?;
+            if !common.ok { return Err("group repository unavailable".into()); }
+            common.stdout.trim().to_string()
+        };
+        let registrations = Path::new(&common).join("worktrees");
+        if registrations.try_exists().map_err(|e| e.to_string())? {
+            for entry in std::fs::read_dir(&registrations).map_err(|e| e.to_string())? {
+                let entry = entry.map_err(|e| e.to_string())?;
+                if !entry.file_type().map_err(|e| e.to_string())?.is_dir() { continue; }
+                let link = entry.path().join("gitdir");
+                if !link.symlink_metadata().map_err(|e| e.to_string())?.is_file() { continue; }
+                let registered = std::fs::read_to_string(link).map_err(|e| e.to_string())?;
+                if Path::new(registered.trim_end()) == tree.join(".git") {
+                    return Ok((common, Some(entry.path().to_string_lossy().into_owned())));
+                }
+            }
+        }
+        // The prior attempt may have removed and pruned the tree before saving its result,
+        // or the group may have ended before provisioning. There is nothing left to remove.
+        if !tree.try_exists().map_err(|e| e.to_string())? { return Ok((common, None)); }
+        Err("interrupted group has no matching Git registration".into())
+    }
+
 }
 
 /// Do not traverse links, filesystem boundaries or nested repositories. Group reports are
