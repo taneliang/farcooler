@@ -123,11 +123,23 @@ exec REAL_TMUX "$@"
             "both pane probes failed in all four native gate scenarios");
         return;
     }
+    native_gate_scenarios().await;
+}
+
+/// Exercise the real pause and tmux reads independently of the failed-client
+/// regression above. A live-pane assertion alone misses tmux's automatic
+/// SIGCONT of a stopped pane supervisor: the agent must actually stay stopped.
+#[tokio::test]
+async fn a_native_builder_pauses_and_finishes_during_a_gate_without_probe_injection() {
+    native_gate_scenarios().await;
+}
+
+async fn native_gate_scenarios() {
     for (agent, gate_first) in [("claude", false), ("claude", true), ("codex", false), ("codex", true)] {
         let (dir, mut runtime, _fake) = super::tests::native_agent("pass", agent).await;
         let script = dir.path().join("interactive.py");
         let source = std::fs::read_to_string(&script).unwrap();
-        let barrier = "while not pathlib.Path(os.environ['STARTED']).with_name('finish').exists(): time.sleep(0.01)\n";
+        let barrier = "while not pathlib.Path(os.environ['STARTED']).with_name('finish').exists():\n    pathlib.Path(os.environ['STARTED']).with_name('heartbeat').write_text(str(time.monotonic_ns()))\n    time.sleep(0.01)\n";
         std::fs::write(&script, source.replace("if mode in ('steering', 'active-steering'):\n    ready",
             &format!("{barrier}if mode in ('steering', 'active-steering'):\n    ready"))).unwrap();
         if let CodingHarness::Native { process, .. } = &mut runtime.coding.as_mut().unwrap().harness { process.timeout_ms = 30_000; }
@@ -147,6 +159,13 @@ exec REAL_TMUX "$@"
         }
         let owner: NativeOwner = serde_json::from_slice(&std::fs::read(runtime.exec.native_path(&binding, "owner")).unwrap()).unwrap();
         assert_eq!(server(&runtime.root, &binding).pane_life(&owner.pane, owner.terminal).await.unwrap(), farcooler_tmux::PaneLife::Live);
+        let heartbeat = dir.path().join("heartbeat");
+        let held = std::fs::read(&heartbeat).ok();
+        tokio::select! {
+            result = run.as_mut() => panic!("gate ended the builder while paused: {result:?}"),
+            _ = tokio::time::sleep(Duration::from_millis(700)) => {}
+        }
+        assert_eq!(std::fs::read(&heartbeat).ok(), held, "the agent must stay paused across a gate sweep, not run between SIGSTOP and tmux's automatic SIGCONT");
         if dir.path().join("started").exists() {
             let pid = std::fs::read_to_string(dir.path().join("started")).unwrap();
             let state = std::process::Command::new("ps").args(["-o", "stat=", "-p", pid.trim()]).output().unwrap();

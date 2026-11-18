@@ -400,7 +400,7 @@ impl Exec {
                 accepted = listener.accept() => accepted?.0,
                 _ = look.tick() => {
                     let owner: NativeOwner = serde_json::from_slice(&self.bytes(&self.native_path(binding, "owner"))?)?;
-                    let life = server(&self.root, binding).pane_life(&owner.pane, owner.terminal).await;
+                    let life = server(&self.root, binding).pane_life_with_exit_evidence(&owner.pane, owner.terminal).await;
                     #[cfg(test)]
                     let life = if UNREADABLE_PANE.with(|n| n.get()) > 0 {
                         UNREADABLE_PANE.with(|n| n.set(n.get() - 1));

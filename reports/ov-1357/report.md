@@ -1,5 +1,92 @@
 # ov-1357 — native builders during landing gates
 
+## Fix round 2: review finding remains unresolved
+
+The latest reviewer receipt (`wf1:5a50f16eb7c05363…native-settled.json`)
+rejects historical attribution, correctly: the previous injected-client test
+proves a failure path, not what happened during group 4321. `task show ov-1357`
+currently returns status transitions and the original manager lead, but no
+review finding text; the review's retained Stop message supplies that finding.
+**Acceptance item 2 is still open. Do not treat this report as proof that the
+historical gate-time pane deaths are fixed.**
+
+This round preserves the prior fixes and adds two targeted improvements:
+
+- A separate native gate regression uses real tmux without the failed-client
+  shim. The shared scenarios now check an agent heartbeat stays unchanged
+  across a 700 ms hold (longer than the gate's 500 ms sweep). This distinguishes
+  a sustained pause from repeatedly stopping a process that tmux continues.
+  It covers Codex and Claude hook fixtures, gates before launch and mid-build,
+  the same live pane, and a passing build after release.
+- The native liveness read now captures `pane_pid`, `pane_tty`,
+  `pane_dead_status`, and `pane_dead_signal` alongside the tag and dead bit.
+  An unsuccessful or non-live native observation logs the raw response and
+  client status/stderr before teardown. Ordinary dead-pane reads stay quiet.
+  This closes the evidence gap that prevents retrospective attribution.
+
+### Round 2 failing-first evidence
+
+Temporarily restoring only `run_native`'s old `Target::Tty` registration makes
+`a_native_builder_pauses_and_finishes_during_a_gate_without_probe_injection`
+fail in 3.603 seconds: the heartbeat differs across the hold. Nextest reports
+`1 test run: 0 passed, 1 failed`. No client shim is active in this test.
+The supervisor-aware registration was restored immediately afterward.
+This is a reproduced pause failure, **not** a reproduced historical pane death.
+The transcript is `/tmp/ov1357-r2-red.log`.
+
+### Round 2 verification
+
+With the supervisor-aware registration restored, the focused selection passes:
+`28 tests run: 28 passed` in 16.151 seconds. Both the direct pause regression
+and the injected-client regression pass all four scenarios. The selection also
+covers yielding identities/recovery/manual pauses, native control and
+quiescence, lost and unreadable panes, and tmux probe parsing.
+
+```sh
+TMPDIR=/tmp CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0 /usr/bin/python3 scripts/heavy --light --load-limit 30 -- \
+  cargo nextest run -p farcooler-daemon -p farcooler-tmux --lib -E \
+  'test(pane_life::) | test(yielding::tests::) | test(workflow_runtime::coding_native::unread_tests::) | test(workflow_runtime::native_control::tests::) | test(workflow_runtime::coding_native::quiesce_order_tests::) | test(workflow_coding_native_real_pty_normalized_hooks_and_quiescence)'
+```
+
+The fanout daemon binary was built first with the same profile under
+`scripts/heavy`. Final `lint-gate.sh`, `file-size-budget.py`, and
+`git diff --check` pass. Test transcript: `/tmp/ov1357-r2-green.log`.
+
+### Additional investigation
+
+Read-only sources examined:
+
+- The six native owners, launch/process records, and captured PTY output in
+  the Canary workflow receipts. Their output ends on live Codex progress
+  indicators, without a retained shell exit reason.
+- Group `group-00000000000000004321-landing`'s process/output receipt
+  `wf1:68d5ec36dead27c0…`: all steps passed, 1813.45 seconds. The log contains
+  only the plan and summary, not per-observation tmux client errors.
+- Codex's read-only `~/.codex/logs_2.sqlite` and matching rollout files. For
+  example, the first affected run's Codex process was PID 84120, process UUID
+  `9ae81acb-684f-4cd6-bcc0-6f5a1b1b533d`, thread
+  `01a1ef98-b5ae-75c3-b601-71ce3c058c6f`. Its last retained application event
+  is at 16:58:53 UTC; the engine declares loss at 16:58:59.082739 UTC. There
+  is no retained exit signal or shutdown event identifying a closer.
+- An isolated authenticated Codex main TUI, no prompt submitted and hooks
+  disabled, stayed live through 16 old-style stop sweeps. The production
+  fish/nice/sh wrapper was retained. The earlier unauthenticated experiment
+  therefore was not the only screen tested; neither experiment reproduced a
+  pane death. This does not exercise an active model turn.
+- A live macOS process-table check found no rows with a tty device but without
+  `P_CONTROLT`, ruling out that proposed detached-server tty misclassification
+  in the observed process table.
+
+The heavy wrapper forwards termination only to its own child; process-guard
+signals only its pinned session; leak-check uses its private socket directory.
+No observed evidence justifies changing those cleanup boundaries. No landing
+gate, paid agent turn, or other run's pane was invoked or signaled.
+
+The missing historical observation cannot be reconstructed from these records.
+The remaining requirement needs a reproduction that actually loses a pane
+under a gate, or a recurrence with the new exit evidence. The prior hypothesis
+must not be promoted to a historical root cause in the meantime.
+
 ## Fix round 1: reproduced pane loss
 
 The earlier change fixed an unsafe pause but had not reproduced a lost pane.

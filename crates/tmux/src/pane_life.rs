@@ -31,8 +31,26 @@ impl TmuxServer {
     /// or server. Load or a signaled client must never masquerade as a closed pane
     /// and make a native runner tear down a live builder (ov-1357).
     pub async fn pane_life(&self, pane_id: &str, terminal: Uuid) -> Result<PaneLife> {
-        let format = format!("#{{pane_dead}}\t#{{{}}}", tags::TERMINAL_ID);
+        self.read_pane_life(pane_id, terminal, false).await
+    }
+
+    /// Read a native agent's pane, retaining exit evidence before its host is
+    /// torn down. Ordinary reads of intentionally dead panes stay quiet.
+    pub async fn pane_life_with_exit_evidence(&self, pane_id: &str, terminal: Uuid) -> Result<PaneLife> {
+        self.read_pane_life(pane_id, terminal, true).await
+    }
+
+    async fn read_pane_life(&self, pane_id: &str, terminal: Uuid, evidence: bool) -> Result<PaneLife> {
+        // Keep the kernel-facing exit facts in the same read as liveness. Once
+        // the native host tears down, neither the pane nor its exit signal can
+        // be recovered; the six ov-1357 failures retained only the verdict.
+        let format = format!("#{{pane_dead}}\t#{{{}}}\tpid=#{{pane_pid}} tty=#{{pane_tty}} status=#{{pane_dead_status}} signal=#{{pane_dead_signal}}", tags::TERMINAL_ID);
         let out = self.run(&["display-message", "-p", "-t", pane_id, &format]).await?;
+        if evidence && (!out.ok() || parse(&out.stdout, terminal) != PaneLife::Live) {
+            tracing::warn!(%terminal, pane = pane_id, status = ?out.status,
+                facts = %out.stdout.chars().take(1000).collect::<String>(), stderr = %out.stderr.chars().take(1000).collect::<String>(),
+                "native tmux pane exit evidence before teardown");
+        }
         probe(out, terminal)
     }
 }
@@ -52,7 +70,8 @@ fn probe(out: crate::server::Output, terminal: Uuid) -> Result<PaneLife> {
 }
 
 fn parse(line: &str, terminal: Uuid) -> PaneLife {
-    let Some((dead, tag)) = line.trim_end_matches('\n').split_once('\t') else { return PaneLife::Gone };
+    let mut fields = line.trim_end_matches('\n').splitn(3, '\t');
+    let (Some(dead), Some(tag)) = (fields.next(), fields.next()) else { return PaneLife::Gone };
     if Uuid::parse_str(tag.trim()).ok() != Some(terminal) {
         return PaneLife::Gone;
     }
@@ -72,6 +91,8 @@ mod tests {
         let mine = Uuid::now_v7();
         assert_eq!(parse(&format!("0\t{mine}\n"), mine), PaneLife::Live);
         assert_eq!(parse(&format!("1\t{mine}\n"), mine), PaneLife::Dead);
+        assert_eq!(parse(&format!("0\t{mine}\tpid=12 tty=/dev/ttys001 status= signal=\n"), mine), PaneLife::Live);
+        assert_eq!(parse(&format!("1\t{mine}\tpid=12 tty= status=23 signal=\n"), mine), PaneLife::Dead);
         assert_eq!(parse(&format!("0\t{}\n", Uuid::now_v7()), mine), PaneLife::Gone, "another terminal's pane");
         assert_eq!(parse("0\t\n", mine), PaneLife::Gone, "an untagged pane");
         assert_eq!(parse("", mine), PaneLife::Gone);
