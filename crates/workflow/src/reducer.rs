@@ -672,7 +672,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
             let item = next.items.remove(&id).ok_or(Refusal::Missing)?;
             let group = item.group_of.as_ref().map(|g| ArchivedGroup {
                 name: g.name.clone(), tickets: item.handed.clone(), pushed: item.pushed.clone().or_else(|| item.candidate.clone()), since_ms: item.since_ms });
-            next.archive.insert(id, Archived { closed:item.closed, phase: item.phase, candidate: item.candidate, group });
+            next.archive.insert(id, Archived { start_load: item.start_load, closed:item.closed, phase: item.phase, candidate: item.candidate, group });
         }
     }
     // A group that ended hands each member its result, through the member's own join routes.
@@ -1176,5 +1176,6 @@ fn request_size(input: &Input) -> Result<usize, Refusal> {
     // Occupancy is separately bounded store metadata, not caller command payload.
     let mut request = input.clone();
     request.busy_resources.clear();
+    if let Command::Start { start_load, .. } = &mut request.command { *start_load = None; }
     serde_json::to_vec(&request).map(|v| v.len()).map_err(|_| Refusal::Invalid)
 }

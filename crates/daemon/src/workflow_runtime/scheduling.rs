@@ -571,6 +571,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn boundary_sized_automatic_start_keeps_load_and_archives_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+        let mut d = coding_definition(false);
+        d.stages.retain(|s| s.kind == StageKind::Build);
+        d.start_policy = Some(policy(Budget::Load { below_milli: 6000, min_start_gap_ms: 60_000 }));
+        publish(&runtime, d.clone());
+        let deps: Vec<String> = (0..60).map(|n| format!("dep-{n:03}-{}", "x".repeat(90))).collect();
+        let refs: Vec<&str> = deps.iter().map(String::as_str).collect();
+        track(&runtime, &refs);
+        track(&runtime, &["a"]);
+        for key in &deps {
+            assert!(runtime.internal("w", Command::Move { item: key.clone(), to: "done".into() }, Grant::Controller, 1).unwrap().result.is_ok());
+        }
+        let p = d.start_policy.as_mut().unwrap();
+        p.dependencies.insert("a".into(), deps.into_iter().collect());
+        p.files.insert("a".into(), ["x".into()].into());
+        let state = runtime.state("w").unwrap().unwrap();
+        let sample = |definition: Definition| Input { schema: 1, id: format!("runtime:{}", Uuid::nil()), workspace: "w".into(),
+            expected_revision: state.revision + 1, epoch: state.epoch, source: "runtime".into(),
+            source_sequence: state.source_sequences.get("runtime").copied().unwrap_or(0) + 1,
+            now_ms: 100, grant: Grant::Controller, busy_resources: BTreeSet::new(),
+            command: Command::Start { start_load: None, item: "a".into(), policy_pin: definition.pin(),
+                resource: Exec::item_resource("w", "a"), dependencies: definition.start_policy.as_ref().unwrap().dependencies["a"].clone(),
+                initial_candidate: None, models: Default::default(), tree: None, with: vec![], definition } };
+        let base = serde_json::to_vec(&sample(d.clone())).unwrap().len();
+        d.start_policy.as_mut().unwrap().files.insert("a".into(), ["x".repeat(1 + 65536 - base)].into());
+        assert_eq!(serde_json::to_vec(&sample(d.clone())).unwrap().len(), 65536);
+        publish(&runtime, d);
+        runtime.schedule_with_load(&["w".into()], 100, Some(4100)).unwrap();
+        let expected = Some(farcooler_workflow::StartLoad { sample_milli: Some(4100), below_milli: Some(6000) });
+        let event = runtime.events("w").unwrap().into_iter().find(|e| matches!(e.command, Command::Start { .. })).unwrap();
+        assert!(serde_json::to_vec(&event).unwrap().len() > 65536);
+        assert_eq!(runtime.state("w").unwrap().unwrap().items["a"].start_load, expected);
+        complete(&runtime, "a", 200);
+        runtime.internal("w", Command::Advance, Grant::Controller, 201).unwrap();
+        assert_eq!(runtime.state("w").unwrap().unwrap().archive["a"].start_load, expected);
+    }
+
+    #[tokio::test]
     async fn fixed_and_load_constraints_apply_together_on_the_runner() {
         let dir = tempfile::tempdir().unwrap();
         let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();

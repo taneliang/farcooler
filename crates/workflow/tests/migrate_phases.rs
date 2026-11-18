@@ -380,7 +380,7 @@ fn what_has_no_faithful_place_refuses_naming_the_item() {
     assert!(migrate(&o.state, &o.log, &[], &bad).unwrap_err()[0].reason.contains("doesn't publish"));
     // An old archive entry that is neither done nor cancelled.
     let mut state = o.state.clone();
-    state.archive.insert("x".into(), old::Archived { closed: None, phase: old::Phase::Failed, candidate: None, group: None });
+    state.archive.insert("x".into(), old::Archived { start_load: None, closed: None, phase: old::Phase::Failed, candidate: None, group: None });
     assert!(refused(&state).iter().any(|q| q.item == "x"));
 }
 

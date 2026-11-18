@@ -98,7 +98,9 @@ impl Store {
     }
     fn workflow_apply_snapshot_by(&self, input: &Input, by: Option<&crate::models::Actor>) -> Result<(Receipt, Option<State>)> {
         let payload = serde_json::to_string(input)?;
-        if payload.len() > 65536 { return Err(WorkflowError::Oversized); }
+        let mut request = input.clone();
+        if let Command::Start { start_load, .. } = &mut request.command { *start_load = None; }
+        if serde_json::to_vec(&request)?.len() > 65536 { return Err(WorkflowError::Oversized); }
 
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;

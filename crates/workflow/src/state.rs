@@ -190,6 +190,8 @@ pub struct State {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Archived {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_load: Option<StartLoad>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub closed: Option<CloseResolution>,
     pub phase: Phase,
     pub candidate: Option<String>,

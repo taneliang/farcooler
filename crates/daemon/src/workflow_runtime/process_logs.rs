@@ -187,7 +187,7 @@ mod tests {
         for n in 0..count {
             let id = format!("item-{n:03}");
             let item = state.items.remove(&id).unwrap();
-            state.archive.insert(id, farcooler_workflow::Archived { closed: None, phase: Phase::Cancelled, candidate: item.candidate, group: None });
+            state.archive.insert(id, farcooler_workflow::Archived { start_load: item.start_load, closed: None, phase: Phase::Cancelled, candidate: item.candidate, group: None });
         }
         runtime.store.workflow_state_for_tests(&state).unwrap();
         assert_eq!(runtime.state(workspace).unwrap().unwrap().archive.len(), count);

@@ -290,7 +290,7 @@ fn a_landed_group_leaves_the_plan_when_its_tickets_leave_the_board() {
     let mut state = store.workflow_state(&ws.to_string()).unwrap().unwrap();
     let key = "group-00000000000000000002-landing".to_string();
     let item = state.items.remove(&key).unwrap();
-    state.archive.insert(key, Archived { closed:None, phase: Phase::Done, candidate: item.candidate.clone(),
+    state.archive.insert(key, Archived { start_load: None, closed:None, phase: Phase::Done, candidate: item.candidate.clone(),
         group: Some(ArchivedGroup { name: "landing".into(), tickets: vec![tasks[0].key.clone()], pushed: item.candidate, since_ms: 5 }) });
     store.conn().execute("UPDATE workflow_states SET state = ?2 WHERE workspace = ?1",
         params![ws.to_string(), serde_json::to_string(&state).unwrap()]).unwrap();
@@ -311,7 +311,7 @@ fn a_finished_group_with_no_ticket_to_name_is_not_drawn() {
     let mut failed = group(4, Phase::Failed, Some("abc1234"), &[]);
     failed.handed = vec!["gone".into()];
     state.items.insert("group-00000000000000000001-landing".into(), failed);
-    state.archive.insert("group-00000000000000000002-landing".into(), Archived { closed:None, phase: Phase::Done, candidate: None,
+    state.archive.insert("group-00000000000000000002-landing".into(), Archived { start_load: None, closed:None, phase: Phase::Done, candidate: None,
         group: Some(ArchivedGroup { name: "landing".into(), tickets: vec!["gone".into()], pushed: None, since_ms: 5 }) });
     state.items.insert("group-00000000000000000003-landing".into(), group(1, Phase::Blocked, None, &[]));
     let groups = groups_in(&state, &|_| None, &|_| 0);
