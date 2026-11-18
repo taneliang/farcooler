@@ -706,6 +706,10 @@ impl Runtime {
                 // A finished item has left live state and has nothing left to run.
                 let Some(item) = state.items.get(&effect.item) else { continue };
                 if item.pending.as_ref() != Some(&effect.id) { continue; }
+                // Resource holds retry at most once a minute, including after a restart.
+                if item.phase == Phase::Running && item.failure.as_deref().is_some_and(|reason| reason.starts_with("resource hold:"))
+                    && matches!(effect.kind, EffectKind::Execute(StageKind::Run))
+                    && now_ms < effect.created_ms.saturating_add(60_000) { continue; }
                 let selected = self.select_item_configuration(workspace, &effect.item, item);
                 if matches!(stored.dispatch_state.as_str(), "admitted" | "uncertain") {
                     if let Err(error) = selected {

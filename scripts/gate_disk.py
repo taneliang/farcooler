@@ -3,6 +3,13 @@ from pathlib import Path
 import shutil
 import subprocess
 
+RESOURCE_REFUSAL = 75
+
+
+class ResourceRefusal(ValueError):
+    """Admission refused because a resource is temporarily unavailable."""
+
+
 GIB = 1024 ** 3
 DAEMON_RESERVE = 25 * GIB
 # Nov 17 full gates used about 35 GB: 57 -> 21 GB and 62 -> 27 GB free.
@@ -20,7 +27,7 @@ def admit(repo, chosen, say=print):
                f"({budget / GIB:.0f} GB gate budget + {DAEMON_RESERVE / GIB:.0f} GB daemon reserve)")
     say(f"lane-gate: disk admission: {message}", flush=True)
     if free < needed:
-        raise ValueError(f"insufficient disk: {message}; free space manually or retry later")
+        raise ResourceRefusal(f"insufficient disk: {message}; free space manually or retry later")
 
 
 def extract_archive(repo, command, say=print):

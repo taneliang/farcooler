@@ -707,6 +707,12 @@ impl Exec {
             || (code != 0 && (log.contains("No space left on device") || log.contains("ENOSPC"))) {
             return Ok(Outcome::SafeFailure);
         }
+        if code == 75 && !binding.effect.members.is_empty() {
+            let reason = log.lines().find(|line| line.contains("resource hold:"))
+                .unwrap_or("resource hold: gate resources are temporarily unavailable.");
+            let reason: String = reason.chars().filter(|c| !c.is_control()).take(1000).collect();
+            return Ok(Outcome::ResourceHold(format!("resource hold: {reason}")));
+        }
         let unchanged = code == 0 && self.verify_candidate(binding, &self.tree(binding)).await.is_ok();
         let manifest = digest(&(binding, &candidate, &raw, unchanged));
         let evidence = Evidence { candidate, manifest: manifest.clone(), receipt: digest(&("coding-receipt/v1", manifest)),

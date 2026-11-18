@@ -185,7 +185,7 @@ sys.addaudithook(audit)
                     done = subprocess.run(["bash", str(repo / "scripts/landing-gate"),
                                            "--worktree", str(repo), "--base", "HEAD", "--only", job],
                                           cwd=repo, env=env, capture_output=True, text=True, timeout=60)
-                    self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+                    self.assertEqual(done.returncode, 75, done.stdout + done.stderr)
                     self.assertIn(f"free {free:.2f} GB; needed {needed:.2f} GB", done.stdout, done.stderr)
                     self.assertIn(f"{budget} GB gate budget + 25 GB daemon reserve", done.stdout)
                     self.assertNotIn("UNEXPECTED", done.stdout + done.stderr)

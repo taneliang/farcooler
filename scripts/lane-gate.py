@@ -881,6 +881,7 @@ def md(cell):
 
 
 def main(argv):
+    import gate_disk
     ap = argparse.ArgumentParser(description="Run the CI jobs a change reaches.")
     ap.add_argument("--full-rust", action="store_true", help="run the whole Rust suite even when the change only reaches some crates, plain or --landing (ov-1268)")
     ap.add_argument("--landing", action="store_true", help="local landing: parallel families, CI retains release bundle proof")
@@ -951,9 +952,9 @@ def gate(args):
         import gate_disk
         try:
             gate_disk.admit(repo, chosen)
-        except ValueError as e:
-            print(f"lane-gate: FAIL: {e}", flush=True)
-            return 1
+        except gate_disk.ResourceRefusal as e:
+            print(f"lane-gate: resource hold: {e}", flush=True)
+            return gate_disk.RESOURCE_REFUSAL
     if args.disk_preflight:
         return 0
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="lane-gate-"))  # ENOSPC is caught by main
@@ -1032,6 +1033,9 @@ def gate(args):
         if row:
             rows.append(row)
             failed = True
+    except gate_disk.ResourceRefusal as e:
+        print(f"lane-gate: resource hold: {e}", flush=True)
+        return gate_disk.RESOURCE_REFUSAL
     except BaseException as e:  # an interrupt or a bug still leaves a table of what ran
         full = hl.disk_full(e)  # a full disk is a named row and a red gate, not a traceback
         rows.append(("lane-gate", "(the gate itself)", f"FAIL: {DISK_FULL if full else f'{type(e).__name__}: {e}'}", "", ""))

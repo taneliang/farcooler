@@ -302,6 +302,8 @@ pub enum Outcome {
     Passed(Evidence), Rejected(Evidence), RejectedWithDetails(Evidence, GroupFailure), RejectedWithBrief(Evidence, String), Labeled(String, Evidence), SafeFailure,
     /// A `SafeFailure` that says why, in a sentence kept on the run as its `failure` (ov-1058).
     SafeFailureBecause(String),
+    /// A temporary resource refusal; retry without spending an attempt or a back-edge.
+    ResourceHold(String),
     Interrupted, Uncertain, Stopped { operation: String, receipt: String } }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EffectKind { Decide { policy: crate::ScriptPolicy, input: Box<crate::HookInput> }, Execute(StageKind), Stop { operation: String } }

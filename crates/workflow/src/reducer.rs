@@ -372,6 +372,15 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                                 enter(&mut item, id, input, &mut effects)?;
                             }
                         }
+                        Outcome::ResourceHold(reason) => {
+                            if item.run.starts_with("cancel:") || item.group_of.is_none()
+                                || item.definition.stages[item.stage].kind != StageKind::Run
+                                || !valid_rework_reason(reason) { return Err(Refusal::Invalid); }
+                            item.failure = Some(reason.clone());
+                            item.pending = None;
+                            item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
+                            enter(&mut item, id, input, &mut effects)?;
+                        }
                         Outcome::Interrupted => {
                             // Interrupted waits and proven pre-send pushes resume for free;
                             // patience starts at real stage entry and survives downtime.
