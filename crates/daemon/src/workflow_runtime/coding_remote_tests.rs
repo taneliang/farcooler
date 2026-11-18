@@ -380,6 +380,8 @@ async fn a_batch_folds_onto_the_remotes_main_when_the_local_main_is_stale() {
     assert!(adapters::git(&r.bare, &["cat-file", "-e", &format!("{pushed}:landed-elsewhere.txt")]).await.is_ok(), "the other lander's work is kept");
     assert_eq!(adapters::git(&config.repository, &["rev-parse", &config.landing_ref]).await.unwrap(), local, "the local main is left as it was");
     let other = r._dir.path().join("elsewhere");
+    plain_git(&other, &["fetch", "--quiet", "origin", "main"]);
+    plain_git(&other, &["merge", "--ff-only", "FETCH_HEAD"]);
     std::fs::write(other.join("another.txt"), "another change\n").unwrap();
     plain_git(&other, &["add", "another.txt"]);
     plain_git(&other, &["-c", "user.name=T", "-c", "user.email=t@localhost", "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "another change"]);
