@@ -58,17 +58,19 @@ impl Exec {
         let mut holders = Vec::new();
         let mut effects = BTreeMap::new();
         for board in self.store.workflow_workspaces()? {
+            let board_state = self.state(&board)?;
             for stored in self.store.workflow_outbox(&board)? {
                 let key = (board.clone(), stored.effect.id.clone());
-                let wait = matches!(stored.effect.kind, EffectKind::Execute(StageKind::AwaitBase | StageKind::AwaitCi | StageKind::AwaitPr));
+                let pool = board_state.as_ref().and_then(|s| s.items.get(&stored.effect.item))
+                    .and_then(|item| Pool::of(&stored.effect, item));
                 // A live pre-admission claim is launching, so it holds a slot rather than a place in line.
                 let claimed = stored.active && stored.dispatch_state == "claimed"
                     && stored.lease_until.is_some_and(|t| t > now_ms);
-                if (activities.contains_key(&key) || claimed) && !wait {
-                    holders.push(format!("{}/{}", board, stored.effect.item));
-                } else if stored.active && !wait && !matches!(stored.effect.kind, EffectKind::Stop { .. })
+                if (activities.contains_key(&key) || claimed) && pool.is_some() {
+                    holders.push((pool, format!("{}/{}", board, stored.effect.item)));
+                } else if stored.active && pool.is_some()
                     && matches!(stored.dispatch_state.as_str(), "pending" | "claimed") {
-                    queued.push(key.clone());
+                    queued.push((key.clone(), pool));
                 }
                 if stored.active && board == workspace { effects.insert(stored.effect.id.clone(), stored); }
             }
@@ -82,7 +84,7 @@ impl Exec {
                 if item.stopping.is_some() && item.failure.is_none() {
                     item.execution = Some(execution_view(Dispatch::UncertainBecause(
                         "The cancellation receipt could not be verified. The original process and its external effects must be checked before this run can be closed."),
-                        None, holders.clone()));
+                        None, Vec::new()));
                 }
                 continue;
             }
@@ -100,7 +102,10 @@ impl Exec {
                 }
                 _ => Dispatch::Uncertain,
             };
-            let view = execution_view(dispatch, queued.iter().position(|k| k == &key).map(|i| i + 1), holders.clone());
+            let pool = stored.and_then(|s| Pool::of(&s.effect, item));
+            let position = queued.iter().filter(|(_, p)| *p == pool).position(|(k, _)| k == &key).map(|i| i + 1);
+            let holding = holders.iter().filter(|(p, _)| *p == pool).map(|(_, h)| h.clone()).collect();
+            let view = execution_view(dispatch, position, holding);
             item.phase = view.phase.clone();
             item.execution = Some(view);
         }

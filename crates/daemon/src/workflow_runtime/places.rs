@@ -23,8 +23,8 @@ impl Pool {
         match &effect.kind {
             EffectKind::Stop { .. } | EffectKind::Decide { .. } => None,
             EffectKind::Execute(StageKind::AwaitBase | StageKind::AwaitCi | StageKind::AwaitPr) => None,
+            EffectKind::Execute(StageKind::Build | StageKind::Review(Reviewer::Agent)) => Some(Pool::Agent),
             _ if item.group_of.is_some() => Some(Pool::Landing),
-            EffectKind::Execute(StageKind::Build | StageKind::Review(_)) => Some(Pool::Agent),
             EffectKind::Execute(_) => Some(Pool::Work),
         }
     }
@@ -51,6 +51,20 @@ impl Default for Places {
     }
 }
 impl Places {
+    /// Runner-wide configuration: all workspaces share the same CPU budget.
+    pub(crate) fn load(root: &Path) -> Result<Self> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Config { agent: usize }
+        let path = root.join("workflow-places.json");
+        let config: Config = match std::fs::read(path) {
+            Ok(bytes) => serde_json::from_slice(&bytes)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Self::default()),
+            Err(error) => return Err(error.into()),
+        };
+        if config.agent == 0 { return Err(Error::Refused("agent place limit must be positive")); }
+        Ok(Self { agent: config.agent, ..Self::default() })
+    }
     pub(crate) fn cap(&self, pool: Pool) -> usize {
         match pool { Pool::Agent => self.agent, Pool::Landing => self.landing, Pool::Work => self.work }
     }
@@ -75,5 +89,18 @@ impl Places {
         }).collect();
         view.insert("waiting".into(), serde_json::json!(waiting));
         serde_json::Value::Object(view)
+    }
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+
+    #[test]
+    fn agent_limit_is_loaded_from_workflow_configuration() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("workflow-places.json"), r#"{"agent":2}"#).unwrap();
+        let places = Places::load(dir.path()).unwrap();
+        assert_eq!(places.view("w")["agent"]["cap"], 2);
     }
 }
