@@ -2,6 +2,8 @@
 use super::*;
 use farcooler_workflow::cleanup::{CleanupEffect, CleanupResult, valid_folder};
 
+const OUTPUT_INTERRUPTED: &str = "build output cleanup interrupted; bytes freed unknown";
+
 pub(super) const GROUP_INTERRUPTED: &str = "group tree cleanup interrupted; bytes freed unknown";
 
 /// Retry on a monotonic deadline, only while a transient cleanup blocker remains.
@@ -39,6 +41,11 @@ impl Exec {
                     Ok(result) => result,
                     Err(error) => CleanupResult { retry: false, bytes_freed: 0, skipped: vec![format!("cleanup unavailable: {error}")] },
                 };
+                // A preflight refusal must not discard the reconciliation mode: .git may be
+                // gone already, and only a later safe reconciliation can finish this intent.
+                if reconcile && !result.skipped.is_empty() { result.retry = true; }
+                let output_unknown = result.skipped.iter().any(|s| s.contains(OUTPUT_INTERRUPTED))
+                    || record.result.as_ref().is_some_and(|r| r.skipped.iter().any(|s| s.contains(OUTPUT_INTERRUPTED)));
                 // Completed folders are absent on retry; preserve their byte count exactly once.
                 if reconcile || result.skipped.iter().any(|s| s.starts_with(GROUP_INTERRUPTED)) {
                     // Neither the remaining size nor zero is a known total for the lost attempt.
@@ -47,6 +54,12 @@ impl Exec {
                     result.skipped.push(GROUP_INTERRUPTED.into());
                 } else {
                     result.bytes_freed = result.bytes_freed.saturating_add(record.result.map_or(0, |r| r.bytes_freed));
+                }
+                if output_unknown {
+                    result.bytes_freed = 0;
+                    if !result.skipped.iter().any(|s| s.contains(OUTPUT_INTERRUPTED)) {
+                        result.skipped.push(OUTPUT_INTERRUPTED.into());
+                    }
                 }
                 before_result()?;
                 self.store.workflow_cleanup_result(&effect, &result)?;
@@ -145,6 +158,7 @@ impl Exec {
                 Err(why) => { result.retry = true; result.skipped.push(why); }
             }
         }
+        if result.skipped.iter().any(|s| s.contains(OUTPUT_INTERRUPTED)) { result.bytes_freed = 0; }
         Ok(result)
     }
     async fn release_folder(&self, tree: &Path, path: &Path, held: Option<std::sync::Arc<tokio::sync::OwnedMutexGuard<()>>>, retry: &mut bool) -> std::result::Result<u64, String> {
@@ -181,7 +195,8 @@ impl Exec {
             // Blocking deletion can outlive a cancelled async caller; retain the fence here too.
             let _held = held;
             let bytes = size(&path, device, generated_reports).map_err(|e| e.to_string())?;
-            std::fs::remove_dir_all(&path).map_err(|e| e.to_string())?;
+            // remove_dir_all can delete some entries before returning an error.
+            std::fs::remove_dir_all(&path).map_err(|e| format!("{OUTPUT_INTERRUPTED}: {e}"))?;
             Ok(bytes)
         }).await.map_err(|e| e.to_string())?
     }

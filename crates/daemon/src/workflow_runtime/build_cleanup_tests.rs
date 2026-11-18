@@ -750,3 +750,36 @@ async fn build_cleanup_recovery_releases_a_group_tree_retained_by_an_older_engin
     runtime.pump(100).await.unwrap();
     assert_eq!(runtime.store.workflow_cleanups("w").unwrap().len(), records.len());
 }
+
+#[tokio::test]
+async fn build_cleanup_partial_folder_failure_reports_unknown_bytes() {
+    let (_dir, mut runtime, group, tree) = building_group(Some(vec!["custom-output".into(), "target".into()])).await;
+    super::coding_verbs_tests::until(&mut runtime, |s| s.items[&group].phase == Phase::WaitingReview).await;
+    let protected = tree.join("target/protected");
+    std::fs::create_dir_all(&protected).unwrap();
+    std::fs::write(protected.join("output"), b"remaining output").unwrap();
+    std::fs::create_dir_all(tree.join("custom-output")).unwrap();
+    std::fs::write(tree.join("custom-output/busy"), b"retry this output").unwrap();
+    let open = File::open(tree.join("custom-output/busy")).unwrap();
+    std::fs::set_permissions(&protected, std::fs::Permissions::from_mode(0o555)).unwrap();
+    // The group is still live, so only configured build output is released this time.
+    let mut effect = runtime.store.workflow_cleanups("w").unwrap().into_iter().rev()
+        .find(|r| r.effect.item == group).unwrap().effect;
+    effect.id = digest(&("partial-folder-test", &effect.id));
+    runtime.store.workflow_cleanup_enqueue(&effect).unwrap();
+    runtime.release_builds(&["w".into()]).await.unwrap();
+    std::fs::set_permissions(&protected, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let records = runtime.store.workflow_cleanups("w").unwrap();
+    let result = records.iter().find(|r| r.effect.id == effect.id).unwrap().result.as_ref().unwrap();
+    assert!(result.retry, "the open folder needs a later sweep: {result:?}");
+    assert!(result.skipped.iter().any(|s| s.contains("bytes freed unknown")),
+        "a failed folder removal may already have deleted output: {result:?}");
+    assert_eq!(result.bytes_freed, 0);
+    drop(open);
+    runtime.release_builds(&["w".into()]).await.unwrap();
+    assert!(tree.exists() && !tree.join("target").exists() && !tree.join("custom-output").exists());
+    let records = runtime.store.workflow_cleanups("w").unwrap();
+    let result = records.iter().find(|r| r.effect.id == effect.id).unwrap().result.as_ref().unwrap();
+    assert!(!result.retry && result.bytes_freed == 0, "a retry cannot reconstruct the total: {result:?}");
+    assert!(result.skipped.iter().any(|s| s.contains("bytes freed unknown")), "{result:?}");
+}

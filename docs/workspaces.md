@@ -62,7 +62,10 @@ removal of a known finished group's private checkout, even when only part of the
 remains. It rechecks ownership, open files and claims, and retains commits through Git's
 surviving worktree registration before pruning it. Interrupted attempts report
 `bytes freed unknown` in the result's reasons, with a zero byte-count placeholder;
-recovery never presents the remaining tree size as the total freed.
+recovery never presents the remaining tree size as the total freed. Temporary preflight
+blockers keep reconciliation retryable, including when the checkout has lost its `.git`
+link. A build-folder removal that returns an error also reports unknown bytes, since
+it may already have removed part of the output.
 
 ## What needs you
 

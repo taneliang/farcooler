@@ -298,3 +298,48 @@ async fn recovery_finishes_group_removal_that_returned_a_partial_deletion_error(
     assert!(!result.retry && result.bytes_freed == 0, "{result:?}");
     assert!(result.skipped.iter().any(|s| s.contains("bytes freed unknown")), "{result:?}");
 }
+
+async fn interrupted_group_preflight_retry(fault: bool) {
+    let (_dir, mut runtime, group, tree) = super::build_cleanup_tests::building_group(None).await;
+    until(&mut runtime, |s| s.items[&group].phase == Phase::WaitingReview).await;
+    command(&runtime, Command::Cancel { item: group.clone(), reason: None });
+    let record = runtime.store.workflow_cleanups("w").unwrap().into_iter().rev()
+        .find(|r| r.effect.item == group).unwrap();
+    assert!(runtime.store.workflow_cleanup_begin(&record.effect, None).unwrap());
+    std::fs::remove_file(tree.join(".git")).unwrap();
+    let parked = tree.with_extension("parked");
+    if fault {
+        std::fs::rename(&tree, &parked).unwrap();
+        std::fs::write(&tree, b"temporary invalid filesystem binding").unwrap();
+    } else {
+        farcooler_store::testing::exec_for_tests(&runtime.store,
+            "INSERT INTO engine_cutover_quarantine VALUES('workspace:w','temporary test blocker')");
+    }
+    let root = runtime.root.clone();
+    drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    runtime.pump(100).await.unwrap();
+    assert!(tree.symlink_metadata().is_ok(), "preflight still prevents deletion");
+    let records = runtime.store.workflow_cleanups("w").unwrap();
+    let result = records.iter().find(|r| r.effect.id == record.effect.id).unwrap().result.as_ref().unwrap();
+    assert!(result.retry, "preflight must preserve reconciliation: {result:?}");
+    if fault {
+        std::fs::remove_file(&tree).unwrap();
+        std::fs::rename(&parked, &tree).unwrap();
+    } else {
+        farcooler_store::testing::exec_for_tests(&runtime.store,
+            "DELETE FROM engine_cutover_quarantine WHERE resource='workspace:w'");
+    }
+    runtime.release_builds(&["w".into()]).await.unwrap();
+    assert!(!tree.exists(), "a later sweep finishes the partly removed tree");
+    let records = runtime.store.workflow_cleanups("w").unwrap();
+    let result = records.iter().find(|r| r.effect.id == record.effect.id).unwrap().result.as_ref().unwrap();
+    assert!(!result.retry && result.bytes_freed == 0, "{result:?}");
+    assert!(result.skipped.iter().any(|s| s.contains("bytes freed unknown")), "{result:?}");
+}
+
+#[tokio::test]
+async fn recovery_retries_group_preflight_quarantine_after_losing_git_link() { interrupted_group_preflight_retry(false).await; }
+
+#[tokio::test]
+async fn recovery_retries_group_preflight_error_after_losing_git_link() { interrupted_group_preflight_retry(true).await; }
