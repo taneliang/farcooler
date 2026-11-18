@@ -1,0 +1,6 @@
+
+com.farcooler.core.RelayConnectionDeviceTest:.
+
+Time: 3.82
+
+OK (1 test)

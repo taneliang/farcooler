@@ -1054,6 +1054,7 @@ func dialConn(token, clientKey string, port uint16) (conn *clientConn, rc int) {
 	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
 	defer cancel()
 	if _, err := client.Ping(ctx); err != nil {
+		log.Printf("tailcat: dial ping failed: %v", err)
 		client.Close()
 		switch {
 		case !relayReachable(ci):

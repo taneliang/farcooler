@@ -1,0 +1,9 @@
+JVM tests: 1627 tests, 0 failures, 0 skipped
+ok  	farcooler/tailcat	9.999s
+?   	farcooler/tailcat/webtags	[no test files]
+
+ok  	farcooler/tailcat	9.999s
+?   	farcooler/tailcat/webtags	[no test files]
+
+Native builds: Android arm64 JNI+Go and Android x86_64 Go passed.
+Gradle: assembleDebug assembleInstrumented assembleAndroidTest passed.

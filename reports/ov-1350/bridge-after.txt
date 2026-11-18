@@ -1,0 +1,39 @@
+
+com.farcooler.core.NativeBridgeTest:
+Error in aGridTooSmallToBeATerminalIsClampedRatherThanHonoured(com.farcooler.core.NativeBridgeTest):
+java.lang.AssertionError: expected:<20> but was:<3>
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.failNotEquals(Assert.java:835)
+	at org.junit.Assert.assertEquals(Assert.java:120)
+	at org.junit.Assert.assertEquals(Assert.java:146)
+	at com.farcooler.core.NativeBridgeTest.aGridTooSmallToBeATerminalIsClampedRatherThanHonoured(NativeBridgeTest.kt:71)
+...
+Error in aNegativeDimensionSaturatesRatherThanWrapping(com.farcooler.core.NativeBridgeTest):
+java.lang.AssertionError: expected:<20> but was:<1>
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.failNotEquals(Assert.java:835)
+	at org.junit.Assert.assertEquals(Assert.java:120)
+	at org.junit.Assert.assertEquals(Assert.java:146)
+	at com.farcooler.core.NativeBridgeTest.aNegativeDimensionSaturatesRatherThanWrapping(NativeBridgeTest.kt:83)
+.......
+com.farcooler.core.RelayConnectionDeviceTest:.
+
+Time: 3.467
+There were 2 failures:
+1) aGridTooSmallToBeATerminalIsClampedRatherThanHonoured(com.farcooler.core.NativeBridgeTest)
+java.lang.AssertionError: expected:<20> but was:<3>
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.failNotEquals(Assert.java:835)
+	at org.junit.Assert.assertEquals(Assert.java:120)
+	at org.junit.Assert.assertEquals(Assert.java:146)
+	at com.farcooler.core.NativeBridgeTest.aGridTooSmallToBeATerminalIsClampedRatherThanHonoured(NativeBridgeTest.kt:71)
+2) aNegativeDimensionSaturatesRatherThanWrapping(com.farcooler.core.NativeBridgeTest)
+java.lang.AssertionError: expected:<20> but was:<1>
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.failNotEquals(Assert.java:835)
+	at org.junit.Assert.assertEquals(Assert.java:120)
+	at org.junit.Assert.assertEquals(Assert.java:146)
+	at com.farcooler.core.NativeBridgeTest.aNegativeDimensionSaturatesRatherThanWrapping(NativeBridgeTest.kt:83)
+
+FAILURES!!!
+Tests run: 13,  Failures: 2

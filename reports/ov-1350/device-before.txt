@@ -1,0 +1,60 @@
+
+com.farcooler.core.NativeBridgeTest:
+Error in aGridTooSmallToBeATerminalIsClampedRatherThanHonoured(com.farcooler.core.NativeBridgeTest):
+java.lang.AssertionError: expected:<20> but was:<3>
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.failNotEquals(Assert.java:835)
+	at org.junit.Assert.assertEquals(Assert.java:120)
+	at org.junit.Assert.assertEquals(Assert.java:146)
+	at com.farcooler.core.NativeBridgeTest.aGridTooSmallToBeATerminalIsClampedRatherThanHonoured(NativeBridgeTest.kt:71)
+...
+Error in aNegativeDimensionSaturatesRatherThanWrapping(com.farcooler.core.NativeBridgeTest):
+java.lang.AssertionError: expected:<20> but was:<1>
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.failNotEquals(Assert.java:835)
+	at org.junit.Assert.assertEquals(Assert.java:120)
+	at org.junit.Assert.assertEquals(Assert.java:146)
+	at com.farcooler.core.NativeBridgeTest.aNegativeDimensionSaturatesRatherThanWrapping(NativeBridgeTest.kt:83)
+.......
+com.farcooler.core.RelayConnectionDeviceTest:
+Error in aTunnelCarriesTheAndroidClientToTheRunner(com.farcooler.core.RelayConnectionDeviceTest):
+com.farcooler.core.UnreachedException: cannot open the tunnel: io
+	at com.farcooler.core.ClientCore.drain(ClientCore.kt:385)
+	at com.farcooler.core.ClientCore.access$drain(ClientCore.kt:98)
+	at com.farcooler.core.ClientCore$startPumping$1.invokeSuspend(ClientCore.kt:325)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1100)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:624)
+	at java.lang.Thread.run(Thread.java:1571)
+
+
+Time: 0.694
+There were 3 failures:
+1) aGridTooSmallToBeATerminalIsClampedRatherThanHonoured(com.farcooler.core.NativeBridgeTest)
+java.lang.AssertionError: expected:<20> but was:<3>
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.failNotEquals(Assert.java:835)
+	at org.junit.Assert.assertEquals(Assert.java:120)
+	at org.junit.Assert.assertEquals(Assert.java:146)
+	at com.farcooler.core.NativeBridgeTest.aGridTooSmallToBeATerminalIsClampedRatherThanHonoured(NativeBridgeTest.kt:71)
+2) aNegativeDimensionSaturatesRatherThanWrapping(com.farcooler.core.NativeBridgeTest)
+java.lang.AssertionError: expected:<20> but was:<1>
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.failNotEquals(Assert.java:835)
+	at org.junit.Assert.assertEquals(Assert.java:120)
+	at org.junit.Assert.assertEquals(Assert.java:146)
+	at com.farcooler.core.NativeBridgeTest.aNegativeDimensionSaturatesRatherThanWrapping(NativeBridgeTest.kt:83)
+3) aTunnelCarriesTheAndroidClientToTheRunner(com.farcooler.core.RelayConnectionDeviceTest)
+com.farcooler.core.UnreachedException: cannot open the tunnel: io
+	at com.farcooler.core.ClientCore.drain(ClientCore.kt:385)
+	at com.farcooler.core.ClientCore.access$drain(ClientCore.kt:98)
+	at com.farcooler.core.ClientCore$startPumping$1.invokeSuspend(ClientCore.kt:325)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1100)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:624)
+	at java.lang.Thread.run(Thread.java:1571)
+
+FAILURES!!!
+Tests run: 13,  Failures: 3
