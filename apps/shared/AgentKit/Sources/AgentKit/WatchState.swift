@@ -78,7 +78,8 @@ public struct WatchList: Sendable, Equatable {
 
         public var id: String {
             switch self {
-            case let .item(item): "item:\(item.key)"
+            // Keep the watch row identity stable across phone/watch versions.
+            case let .item(item): "item:\(item.runner)\u{1F}\(item.itemID)"
             case let .agent(agent): "agent:\(agent.id)"
             }
         }
