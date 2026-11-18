@@ -99,7 +99,8 @@
           {
             "guard": "wf1:e3e0cf8a46593f6a68052366c16326a4841672db0485313db6f86b9d62fc1e64",
             "kind": "Cancel",
-            "label": "Cancel Run"
+            "label": "Cancel Run",
+            "weight": "Destructive"
           }
         ],
         "attempt": 1,
@@ -233,7 +234,8 @@
           {
             "guard": "wf1:1a1887caf316bfca0f77eaaf18729c2bcf3089e555c9a39cbc93737f6e009e0d",
             "kind": "Cancel",
-            "label": "Cancel Run"
+            "label": "Cancel Run",
+            "weight": "Destructive"
           }
         ],
         "attempt": 1,
@@ -367,7 +369,8 @@
           {
             "guard": "wf1:f29bcb9d444bc06da5abee1d820d0b6b4c272ab8884f1dae29332ed67cd513a9",
             "kind": "Cancel",
-            "label": "Cancel Run"
+            "label": "Cancel Run",
+            "weight": "Destructive"
           }
         ],
         "attempt": 1,
@@ -501,7 +504,8 @@
           {
             "guard": "wf1:53c15308a4172d452a4f5880191abf52b5d55066d2392eeb359320725d266307",
             "kind": "Cancel",
-            "label": "Close Run"
+            "label": "Close Run",
+            "weight": "Destructive"
           }
         ],
         "attempt": 1,
