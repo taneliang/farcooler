@@ -257,11 +257,13 @@ impl Definition {
         }
         Ok(())
     }
-    /// The model each listed step runs with: the one picked at Start, or the step's default. `None` when a pick
-    /// names a step that lists no models, or a model the step doesn't list.
-    pub fn picked_models(&self, picks: &BTreeMap<String, String>) -> Option<BTreeMap<String, String>> {
-        if picks.iter().any(|(step, model)| !self.models.get(step).is_some_and(|list| list.contains(model))) { return None; }
-        Some(self.models.iter().map(|(step, list)| (step.clone(), picks.get(step).unwrap_or(&list[0]).clone())).collect())
+    /// The model each listed step runs with: the one picked at Start, or the step's default.
+    /// A refusal identifies the model and step when the step doesn't list that pick.
+    pub fn picked_models(&self, picks: &BTreeMap<String, String>) -> Result<BTreeMap<String, String>, Refusal> {
+        if let Some((step, model)) = picks.iter().find(|(step, model)| !self.models.get(*step).is_some_and(|list| list.contains(model))) {
+            return Err(Refusal::ModelRefused(format!("Model {model} is not listed for step {step}.")));
+        }
+        Ok(self.models.iter().map(|(step, list)| (step.clone(), picks.get(step).unwrap_or(&list[0]).clone())).collect())
     }
     /// Every join names a group, every group has a join, and each group's steps are sound.
     fn validate_groups(&self) -> Result<(), Refusal> {

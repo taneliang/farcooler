@@ -60,7 +60,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                 candidate: initial_candidate.clone(), last_evidence: None, stopping: None, cancel_reason: None, closed: None, failure: None, group_failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, landed: None, rework_history: Vec::new(),
                 back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                 members: Vec::new(), handed: Vec::new(), since_ms: 0, group_of: None, grouped_in: None,
-                models: definition.picked_models(&BTreeMap::new()).ok_or(Refusal::Definition)?, tree: None,
+                models: definition.picked_models(&BTreeMap::new())?, tree: None,
                 sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() };
             if ready(&next, &record, input) { enter(&mut record, item, input, &mut effects)?; }
             next.items.insert(item.clone(), record);
@@ -534,7 +534,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     definition.validate()?;
                     if definition.is_ticket() { return Err(Refusal::Invalid); }
                     if !valid_id(resource) || !valid_id(policy_pin) || dependencies.len() > 128 { return Err(Refusal::Invalid); }
-                    let picked = definition.picked_models(models).ok_or(Refusal::Invalid)?;
+                    let picked = definition.picked_models(models)?;
                     if tree.as_ref().is_some_and(|t| !t.valid()) { return Err(Refusal::Invalid); }
                     if matches!(definition.stages[0].kind, StageKind::Tracker) != initial_candidate.is_some()
                         || initial_candidate.as_ref().is_some_and(|c| !valid_id(c))

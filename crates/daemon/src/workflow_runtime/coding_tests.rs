@@ -428,7 +428,9 @@ async fn workflow_coding_two_tickets_start_with_different_models_and_each_build_
     let (dir, mut runtime) = configured(false, "pass").await;
     let published = runtime.coding.clone().unwrap();
     let mut definition = published.definition().unwrap();
-    definition.models.insert("build".into(), vec!["claude:opus".into(), "codex:gpt-6.2-sol".into()]);
+    // Use Main's published choices, so this catches a missing model in the real allowlist.
+    let bundle: serde_json::Value = serde_json::from_str(include_str!("../../../../.claude/agent/reports/ov-1071/workflow-main.json")).unwrap();
+    definition.models.insert("build".into(), serde_json::from_value(bundle["definition"]["models"]["build"].clone()).unwrap());
     let m = |id: &str, revision, sequence| Mutation { id: id.into(), revision, epoch: 1, sequence };
     let wire = |runtime: &Runtime, principal, action| runtime.wire_command("w", principal, action).unwrap();
     let ok = |value: &serde_json::Value| assert!(value.pointer("/receipt/result/Ok").is_some(), "{value}");
@@ -443,12 +445,12 @@ async fn workflow_coding_two_tickets_start_with_different_models_and_each_build_
             models: models.iter().map(|(s, m)| (s.to_string(), m.to_string())).collect(), worktree: None, with: vec![] })
     };
     let refused = start(&runtime, "ov-7", &[("build", "codex:gpt-4")], 2);
-    assert_eq!(refused.pointer("/receipt/result/Err").and_then(|e| e.as_str()), Some("Invalid"), "a model the step doesn't list: {refused}");
+    assert_eq!(refused.pointer("/receipt/result/Err/ModelRefused").and_then(|e| e.as_str()), Some("Model codex:gpt-4 is not listed for step build."), "{refused}");
     ok(&start(&runtime, "ov-7", &[("build", "codex:gpt-6.2-sol")], 3));
     ok(&start(&runtime, "ov-8", &[], 4));
     let state = runtime.state("w").unwrap().unwrap();
     assert_eq!(state.items["ov-7"].models["build"], "codex:gpt-6.2-sol");
-    assert_eq!(state.items["ov-8"].models["build"], "claude:opus", "no pick, the step's default");
+    assert_eq!(state.items["ov-8"].models["build"], "claude:sonnet", "no pick, the step's default");
     runtime.pump(2).await.unwrap(); // Only provision; never launch a real provider.
     let mut builds = std::collections::BTreeMap::new();
     for stored in runtime.store.workflow_outbox("w").unwrap().into_iter().filter(|s| s.active) {
@@ -464,7 +466,7 @@ async fn workflow_coding_two_tickets_start_with_different_models_and_each_build_
     assert_eq!(builds.len(), 2, "both builds are ready");
     assert_eq!(builds["ov-7"].effect.model.as_deref(), Some("codex:gpt-6.2-sol"));
     assert_eq!(runtime.coding_command(&builds["ov-7"]).unwrap().environment["FARCOOLER_WORKFLOW_MODEL"], "codex:gpt-6.2-sol");
-    assert_eq!(runtime.coding_command(&builds["ov-8"]).unwrap().environment["FARCOOLER_WORKFLOW_MODEL"], "claude:opus");
+    assert_eq!(runtime.coding_command(&builds["ov-8"]).unwrap().environment["FARCOOLER_WORKFLOW_MODEL"], "claude:sonnet");
     // A native harness with Claude's settings and Codex's project hooks both pinned runs either. (A native
     // publication needs live hooks; the launch is built from the same effect, so the harness is swapped after Start.)
     let pinned = |path: &Path| { std::fs::write(path, b"{\"hooks\":{}}").unwrap();
@@ -481,7 +483,7 @@ async fn workflow_coding_two_tickets_start_with_different_models_and_each_build_
     let codex = runtime.coding_command(&builds["ov-7"]).unwrap().argv.last().unwrap().clone();
     let claude = runtime.coding_command(&builds["ov-8"]).unwrap().argv.last().unwrap().clone();
     assert!(codex.contains("codex") && codex.contains("--model gpt-6.2-sol") && !codex.contains("sonnet"), "{codex}");
-    assert!(claude.contains("claude") && claude.contains("--model opus") && !claude.contains("sonnet"), "{claude}");
+    assert!(claude.contains("claude") && claude.contains("--model sonnet") && !claude.contains("gpt-6.2-sol"), "{claude}");
     assert_eq!(runtime.native_agent(&builds["ov-7"]).unwrap(), farcooler_agent_hooks::Agent::Codex, "its turn is read from Codex's hooks");
 }
 
@@ -660,7 +662,7 @@ async fn workflow_codex_bundle_publishes_and_starts_a_codex_build() {
     let start = |model: &str, sequence| runtime.wire_command("w", "orchestrator", Action::Start { mutation: m(&format!("start-{sequence}"), state.revision, sequence), item: "ov-7".into(),
         run: held.run.clone(), pin: held.pin.clone(), start_pin: pin.clone(), models: [("build".to_string(), model.to_string())].into(), worktree: None, with: vec![] }).unwrap();
     let refused = start("codex:gpt-4", 2);
-    assert_eq!(refused.pointer("/receipt/result/Err").and_then(|e| e.as_str()), Some("Invalid"), "a model the step doesn't list: {refused}");
+    assert_eq!(refused.pointer("/receipt/result/Err/ModelRefused").and_then(|e| e.as_str()), Some("Model codex:gpt-4 is not listed for step build."), "{refused}");
     ok(&start("codex:gpt-6.1-sol", 3));
     assert_eq!(runtime.state("w").unwrap().unwrap().items["ov-7"].models["build"], "codex:gpt-6.1-sol");
     // Provision, then the build: the engine copies the hooks into the worktree, and Codex launches with the model.

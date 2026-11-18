@@ -240,16 +240,18 @@
         "claude:sonnet",
         "claude:opus",
         "claude:haiku",
+        "codex:gpt-6.2-sol",
         "codex:gpt-6.1-sol",
         "codex:gpt-6.1-terra",
-        "codex:gpt-6.1-luna"
+        "codex:gpt-6-luna"
       ],
       "gate-0": [
         "claude:sonnet",
         "claude:opus",
+        "codex:gpt-6.2-sol",
         "codex:gpt-6.1-sol",
         "codex:gpt-6.1-terra",
-        "codex:gpt-6.1-luna"
+        "codex:gpt-6-luna"
       ]
     }
   },

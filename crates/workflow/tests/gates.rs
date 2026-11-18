@@ -104,7 +104,11 @@ fn the_orchestrator_picks_an_agent_gates_model_from_the_ones_it_lists() {
     let definition = three_gates();
     let pick = |step: &str, model: &str| definition.picked_models(&BTreeMap::from([(step.into(), model.into())]));
     assert_eq!(pick("agent-review", "codex:gpt-5.5").unwrap()["agent-review"], "codex:gpt-5.5");
-    assert_eq!(pick("agent-review", "codex:gpt-4"), None);
+    for (step, model) in [("agent-review", "codex:gpt-4"), ("missing-step", "codex:gpt-6.2-sol")] {
+        assert_eq!(serde_json::to_value(pick(step, model)).unwrap(), serde_json::json!({
+            "Err": { "ModelRefused": format!("Model {model} is not listed for step {step}.") }
+        }));
+    }
     // Only a step that starts an agent takes a model: a person or the orchestrator is no model.
     for kind in [StageKind::Review(Reviewer::Orchestrator("orchestrator".into())),
         StageKind::Review(Reviewer::Person("owner".into())), StageKind::Review(Reviewer::Dispatch)] {

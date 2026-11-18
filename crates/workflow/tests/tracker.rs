@@ -208,9 +208,12 @@ fn a_start_refuses_a_model_the_step_does_not_list_or_a_step_that_lists_none() {
     log.track("ov-1");
     let d = coding_with_models(&["claude:opus"]);
     for picks in [[("build", "claude:sonnet")], [("check", "claude:opus")], [("nowhere", "claude:opus")]] {
-        assert_eq!(log.try_run(start_with("ov-1", d.clone(), &picks), Grant::Controller), Err(Refusal::Invalid), "{picks:?}");
+        let [(step, model)] = picks;
+        assert_eq!(log.try_run(start_with("ov-1", d.clone(), &picks), Grant::Controller),
+            Err(Refusal::ModelRefused(format!("Model {model} is not listed for step {step}."))), "{picks:?}");
     }
-    assert_eq!(log.try_run(start_with("ov-1", coding(), &[("build", "claude:opus")]), Grant::Controller), Err(Refusal::Invalid),
+    assert_eq!(log.try_run(start_with("ov-1", coding(), &[("build", "claude:opus")]), Grant::Controller),
+        Err(Refusal::ModelRefused("Model claude:opus is not listed for step build.".into())),
         "a workflow that lists no models takes no pick");
     log.try_run(start_with("ov-1", coding(), &[]), Grant::Controller).unwrap();
     assert!(log.state.items["ov-1"].models.is_empty(), "nothing listed, nothing recorded: the configured harness runs");

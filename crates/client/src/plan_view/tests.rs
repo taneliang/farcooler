@@ -404,3 +404,24 @@ fn sol_62_model_words_for_all_plan_styles() {
         assert!(rendered.contains("GPT-6.2 Sol"), "{style}: {rendered}");
     }
 }
+
+/// ov-1356: the engine's Main model choices must stay priced and named in the UI.
+#[test]
+fn main_codex_models_are_accepted_priced_and_displayed() {
+    for text in [include_str!("../../../../.claude/agent/reports/ov-1071/workflow-main.json"),
+        include_str!("../../../../reports/ov-1341/workflow-main-draft.json")] {
+        let bundle: Value = serde_json::from_str(text).unwrap();
+        let definition: farcooler_workflow::Definition = serde_json::from_value(bundle["definition"].clone()).unwrap();
+        definition.validate().unwrap();
+        for (step, models) in &definition.models {
+            assert!(models.iter().any(|m| m == "codex:gpt-6.2-sol"), "{step} lacks 6.2 Sol");
+            for model in models.iter().filter(|m| m.starts_with("codex:")) {
+                let picks = [(step.clone(), model.clone())].into();
+                assert_eq!(&definition.picked_models(&picks).unwrap()[step], model);
+                let raw = model.strip_prefix("codex:").unwrap();
+                assert!(farcooler_core::usage::rates(raw).is_some(), "{model} has no price");
+                assert_ne!(words::model(raw), raw, "{model} has no display name");
+            }
+        }
+    }
+}
