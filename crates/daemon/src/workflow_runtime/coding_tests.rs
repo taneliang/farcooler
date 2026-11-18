@@ -444,8 +444,12 @@ async fn workflow_coding_two_tickets_start_with_different_models_and_each_build_
             run: held.run.clone(), pin: held.pin.clone(), start_pin: pin.clone(),
             models: models.iter().map(|(s, m)| (s.to_string(), m.to_string())).collect(), worktree: None, with: vec![] })
     };
+    let before = runtime.state("w").unwrap().unwrap();
     let refused = start(&runtime, "ov-7", &[("build", "codex:gpt-4")], 2);
     assert_eq!(refused.pointer("/receipt/result/Err/ModelRefused").and_then(|e| e.as_str()), Some("Model codex:gpt-4 is not listed for step build."), "{refused}");
+    assert_eq!(runtime.state("w").unwrap().unwrap(), before, "a refused pick leaves the ticket ready to start");
+    assert_eq!(start(&runtime, "ov-7", &[("build", "codex:gpt-4")], 2), refused,
+        "replaying the command keeps the receipt naming the refused model");
     ok(&start(&runtime, "ov-7", &[("build", "codex:gpt-6.2-sol")], 3));
     ok(&start(&runtime, "ov-8", &[], 4));
     let state = runtime.state("w").unwrap().unwrap();

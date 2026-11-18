@@ -549,8 +549,11 @@ mod tests {
         let args=["farcooler","workflow","start","00000000-0000-0000-0000-000000000000","ov-7","--start-pin","p","--run","run","--pin","pin",
             "--command-id","same","--revision","5","--epoch","1","--sequence","2"];
         let action=|extra:&[&str]| { let crate::Command::Workflow(cmd)=crate::Cli::try_parse_from(args.iter().chain(extra)).unwrap().command else {panic!()}; cmd.action() };
-        let Action::Start{models,..}=action(&["--model","build=codex:gpt-5.5"]).unwrap().1 else {panic!()};
-        assert_eq!(models,[("build".to_string(),"codex:gpt-5.5".to_string())].into());
+        for model in ["codex:gpt-5.5", "codex:gpt-6.1-sol", "codex:gpt-6.2-sol"] {
+            let pick = format!("build={model}");
+            let Action::Start{models,..}=action(&["--model",&pick]).unwrap().1 else {panic!()};
+            assert_eq!(models,[("build".to_string(),model.to_string())].into());
+        }
         let Action::Start{models,..}=action(&[]).unwrap().1 else {panic!()};
         assert!(models.is_empty());
         for bad in [&["--model","codex"][..],&["--model","build=a","--model","build=b"],&["--model","=codex"],&["--model","build="]] {

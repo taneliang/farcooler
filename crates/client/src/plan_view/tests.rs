@@ -415,12 +415,14 @@ fn main_codex_models_are_accepted_priced_and_displayed() {
         definition.validate().unwrap();
         for (step, models) in &definition.models {
             assert!(models.iter().any(|m| m == "codex:gpt-6.2-sol"), "{step} lacks 6.2 Sol");
-            for model in models.iter().filter(|m| m.starts_with("codex:")) {
+            for model in models {
                 let picks = [(step.clone(), model.clone())].into();
                 assert_eq!(&definition.picked_models(&picks).unwrap()[step], model);
-                let raw = model.strip_prefix("codex:").unwrap();
-                assert!(farcooler_core::usage::rates(raw).is_some(), "{model} has no price");
-                assert_ne!(words::model(raw), raw, "{model} has no display name");
+                // Claude's choices are moving harness aliases; Codex's are exact pricing/display IDs.
+                if let Some(raw) = model.strip_prefix("codex:") {
+                    assert!(farcooler_core::usage::rates(raw).is_some(), "{model} has no price");
+                    assert_ne!(words::model(raw), raw, "{model} has no display name");
+                }
             }
         }
     }
