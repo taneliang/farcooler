@@ -211,9 +211,10 @@ impl WorkflowCmd {
         })
     }
 }
+type RoutineBindings<'a> = (Uuid, &'a str, Option<(&'a mut Option<String>, &'a mut Option<String>)>, Option<&'a mut Option<String>>, &'a mut RoutineIdentity);
 impl WorkflowCmd {
     // None means this is a command whose bindings must remain explicitly inspected.
-    fn routine(&mut self) -> Option<(Uuid, &str, Option<(&mut Option<String>, &mut Option<String>)>, Option<&mut Option<String>>, &mut RoutineIdentity)> {
+    fn routine(&mut self) -> Option<RoutineBindings<'_>> {
         match self {
             Self::Queue {workspace,item,run,pin,identity} | Self::Leave {workspace,item,run,pin,identity}
             | Self::Retry {workspace,item,run,pin,identity} | Self::Cancel {workspace,item,run,pin,identity}
