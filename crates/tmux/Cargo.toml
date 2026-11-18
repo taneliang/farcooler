@@ -18,3 +18,4 @@ uuid.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+tracing-subscriber.workspace = true
