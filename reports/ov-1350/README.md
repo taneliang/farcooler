@@ -1,5 +1,30 @@
 # ov-1350: Android relay connection
 
+## Final disposition: accepted scope clarified
+
+The Nov 18 20:30 ticket ruling (`9c52a84b`), reiterated in `90a979ba`,
+supersedes finding `accdd821`: the emulator-to-Mac tunnel capture through the
+relay meets acceptance item 3. A signed-in preview account connection is the
+owner's check on a real phone after landing, outside this ticket's acceptance.
+The implementation, regression tests, reports and captures below are retained.
+Earlier blocked statements describe the investigation at that time, not the
+ticket's current disposition.
+
+Acceptance evidence:
+
+- Root cause: Android's denied netlink interface enumeration, shown in
+  [android-logcat.txt](android-logcat.txt), fixed by the Android Bionic getter.
+- Regression: [device-before.txt](device-before.txt) fails the tunnel test with
+  registration disabled; [device-after.txt](device-after.txt) passes with it restored.
+- Emulator-to-Mac relay connection: [round2-device-after.txt](round2-device-after.txt),
+  [round2-android-logcat.txt](round2-android-logcat.txt), and
+  [round2-connected.png](round2-connected.png) capture the successful run.
+
+Final review checks: `GOCACHE=/tmp/ov-1350-go-cache go test ./...` in
+`crates/tailcat/go` passes; `git diff --check` passes. This final change updates
+only the report to reflect the ruling; prior native/device/JVM results remain
+recorded below. No relay flags or deployments were changed.
+
 ## Fix round 2: preview sign-in setup corrected
 
 Newest ticket finding `accdd821` requires the authenticated preview account and
@@ -200,7 +225,7 @@ Only a run with the authenticated account response, matching Mac registration,
 successful tunnel/SSH and fleet reads completes this verification. A missing
 session, refused request or missing registration fails the test.
 
-Status: **BLOCKED** on authenticated preview test sign-in. The local native
+Historical status before the final ruling: **BLOCKED** on authenticated preview test sign-in. The local native
 failure is reproduced and fixed, its regression is red/green, and an actual
 emulator-to-Mac DERP connection is captured. The preview acceptance gap remains
 open; the two unrelated VT assertions are recorded above.
