@@ -143,8 +143,9 @@ struct WatchListTests {
             capturedAt: Date(), complete: true,
             needsYou: [ask(actions: [allow, deny]), decision()])
         let rows = WatchList(snapshot).rows
-        #expect(rows.map(\.id) == [
-            "item:r1\u{1F}ask:hook-ask-1", "item:r1\u{1F}decision:7", "agent:t2", "agent:t1",
+        #expect(rows == [
+            .item(ask(actions: [allow, deny])), .item(decision()),
+            .agent(agent("t2", status: "working", rank: 0)), .agent(agent("t1", status: "blocked", rank: 1)),
         ])
     }
 

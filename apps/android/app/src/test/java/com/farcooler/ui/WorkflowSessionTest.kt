@@ -20,7 +20,7 @@ class WorkflowSessionTest {
         var fixture = Json.parseToJsonElement(shared("workflow-presentation.json").readText()).jsonArray[0]
             .jsonObject.getValue("response").jsonObject.getValue("card").jsonObject
         val runs=fixture.getValue("runs").jsonArray.toMutableList()
-        val bAction=buildJsonObject{put("kind","RequestRework");put("label","Request Rework");put("guard","b-guard")}
+        val bAction=buildJsonObject{put("kind","RequestRework");put("label","Request Rework");put("guard","b-guard");put("weight","Secondary")}
         runs[0]=JsonObject(runs[0].jsonObject+mapOf("actions" to JsonArray(listOf(bAction)),"forms" to JsonArray(listOf(shared.getValue("form")))))
         fixture=JsonObject(fixture+("runs" to JsonArray(runs)))
         val run = WorkflowPresentations.decode(fixture.toString(), "workspace").runs.first()

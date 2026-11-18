@@ -63,7 +63,7 @@ class WorkflowRunsTest {
         val json = cards().first().replace("\"fence\":1", "\"fence\":9007199254740991")
         val run = WorkflowPresentations.decode(json, "workspace").runs.single()
         assertEquals(9007199254740991L, run.fence)
-        val raw = "{\"kind\":\"Approve\",\"guard\":\"exact\",\"label\":\"" + "Long shared label ".repeat(100) + "\"}"
+        val raw = "{\"kind\":\"Approve\",\"guard\":\"exact\",\"label\":\"" + "Long shared label ".repeat(100) + "\",\"weight\":\"Primary\"}"
         val action = Json.decodeFromString(WorkflowAction.serializer(), raw)
         assertEquals("Long shared label ".repeat(100), action.label)
         assertEquals(Json.parseToJsonElement(raw), action.json())
