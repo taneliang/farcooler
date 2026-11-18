@@ -578,6 +578,8 @@ AGENTKIT_SOURCES = [
     # conform to `TaskLink`'s protocols. See `TaskLinkTests` and
     # `NeedsYouTests`.
     "NeedsYou.swift",
+    "NeedsYouAggregate.swift",
+    "PlanViewPresenter.swift",
     # Who each item is for, and the question before answering for someone
     # else (ov-737): words over `NeedsYou.swift`'s concern, nothing else.
     "NeedsYouWhose.swift",
@@ -1032,9 +1034,12 @@ WATCH_AGENTKIT_SOURCES = [
     "FleetSnapshot.swift",
     # The items `FleetSnapshot.needsYou` holds, which the watch lists first.
     "NeedsYou.swift",
+    "NeedsYouAggregate.swift",
+    "PlanViewPresenter.swift",
     # Whose each of them is for, and the question before answering for
     # someone else (ov-739): the row's label and the confirm.
     "NeedsYouWhose.swift",
+    "WireTypes.swift",
     "SnapshotStore.swift",
     # The runner heartbeat (ov-71): the watch app keeps the pulse credential
     # the phone sends in its context, and asks the relay which runners went
@@ -1117,6 +1122,9 @@ WATCH_WIDGET_AGENTKIT_SOURCES = [
     "FleetSnapshot.swift",
     # The items `FleetSnapshot.needsYou` holds, which the complication counts.
     "NeedsYou.swift",
+    "NeedsYouAggregate.swift",
+    "PlanViewPresenter.swift",
+    "WireTypes.swift",
     "SnapshotStore.swift",
     # The complication asks the relay itself, as the phone's widget does
     # (ov-71), with the credential the watch app filed in this container.
@@ -1407,6 +1415,9 @@ activity_build_ids = {
         # The items `FleetSnapshot.needsYou` holds. Every target that compiles
         # `FleetSnapshot.swift` compiles this beside it; it's plain Foundation.
         "NeedsYou.swift",
+        "NeedsYouAggregate.swift",
+        "PlanViewPresenter.swift",
+        "WireTypes.swift",
         # Whose an agent's ask is, so a card leaves its buttons off for
         # someone else's (ov-739). `GlancePermissions.swift` reads it.
         "NeedsYouWhose.swift",
@@ -1447,7 +1458,7 @@ activity_build_ids = {
 notify_build_ids = {
     name: oid("notify-build/" + name)
     for name in NOTIFY_SOURCES
-    + ["FleetSnapshot.swift", "NeedsYou.swift", "SnapshotStore.swift", "TaskNotifications.swift"]
+    + ["FleetSnapshot.swift", "NeedsYou.swift", "NeedsYouAggregate.swift", "PlanViewPresenter.swift", "WireTypes.swift", "SnapshotStore.swift", "TaskNotifications.swift"]
 }
 
 # A fourth set, on exactly the reasoning above. `FleetSnapshot.swift` and
