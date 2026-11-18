@@ -391,6 +391,10 @@ async fn a_batch_folds_onto_the_remotes_main_when_the_local_main_is_stale() {
     let second = r.runtime.store.workflow_outbox("w").unwrap().into_iter()
         .find(|s| s.effect.item == "two" && s.effect.kind == EffectKind::Execute(StageKind::Provision)).unwrap();
     assert_eq!(r.runtime.item_base("w", &second.effect).unwrap(), newer, "each ticket samples the remote again");
+    let state = r.runtime.state("w").unwrap().unwrap();
+    let built = candidate_of(&state, "two").unwrap();
+    assert_eq!(adapters::git(&config.repository, &["rev-parse", &format!("{built}^")]).await.unwrap(), newer,
+        "the second ticket's build actually starts on the newly sampled remote head");
 }
 
 /// ov-1059: a ticket on a workspace whose own main is stale starts from the remote's main as it is now. Its base
