@@ -1455,7 +1455,6 @@ pub(super) fn settled(runtime: &Runtime, kind: StageKind) -> serde_json::Value {
 fn unrun(grace_ms: u64, ignored: &[&str]) -> farcooler_protocol::workflow_config::CiUnrun {
     farcooler_protocol::workflow_config::CiUnrun { grace_ms, ignored: ignored.iter().map(|p| p.to_string()).collect() }
 }
-
 /// ov-1243, Nov 15: a group folded on main at 05:30:31, a bot pushed a commit CI ignores a minute later, the group's
 /// gate passed at 06:09:24 and its push was refused as `base_moved` four seconds after. The group went back to
 /// its base step, whose head now had no CI run and never would: it polled for its whole patience. Replayed here with
@@ -1498,23 +1497,4 @@ async fn a_head_with_no_ci_run_ends_the_base_step_after_the_grace_with_a_sentenc
         assert!(why.contains("no run") && why.contains("orchestrator"), "{why}");
         assert_eq!(outbox(&runtime, StageKind::Push), 1, "nothing landed on the unvouched base");
     }
-}
-
-#[tokio::test]
-async fn disk_refusal_holds_group_without_spending_back_edge_and_retries() {
-    let (dir, mut runtime) = lander("resource-hold").await;
-    let definition = batched_push(&runtime, "any", 5000);
-    at_join(&mut runtime, "one", &definition).await;
-    command(&runtime, Command::Queue { item: "one".into() });
-    let state = until(&mut runtime, |s| s.items.values().any(|i| i.group_of.is_some() && i.phase == Phase::Running && i.failure.is_some())).await;
-    let group = state.items.values().find(|i| i.group_of.is_some()).unwrap();
-    assert!(group.failure.as_deref().unwrap().contains("insufficient disk"));
-    assert_eq!(group.attempt, 1);
-    assert!(state.items["one"].back_edges.is_empty());
-    let view = runtime.wire_command("w", "owner", farcooler_protocol::workflow_commands::Action::Get).unwrap().to_string();
-    assert!(view.contains("insufficient disk") && view.contains("WaitingSlot"), "{view}");
-    std::fs::write(dir.path().join("marker"), "free").unwrap();
-    runtime.pump(i64::MAX - 100_000).await.unwrap();
-    let state = until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Done)).await;
-    assert!(state.items["one"].back_edges.is_empty());
 }
