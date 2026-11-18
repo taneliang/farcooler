@@ -115,7 +115,9 @@ struct TeammateAddHarness: View {
                 let grant = manifest["granted_by"] as? String, let code = result["code"] as? String {
                 openedCode = code
                 postResult = "\(sealedPosts.count) post for scanned ceremony and \(account); opened build-box for \(grant)" // platform copy: DEBUG harness test readout
-            } else { postResult = "posted body did not open to the grant" // platform copy: DEBUG harness test readout }
+            } else {
+                postResult = "posted body did not open to the grant" // platform copy: DEBUG harness test readout
+            }
             return .posted
         }
         store.teamDirectory = { Self.has("-teammate-add-offline") ? nil : Self.directory }
