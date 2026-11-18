@@ -51,7 +51,10 @@ remain outside the checkout. Recovery also releases known finished groups left
 behind by older engines; unknown directories stay untouched.
 
 Run build-folder cleanup preserves tracked files, git metadata and everything outside those
-folders. It skips folders with open files, trees another live run uses, and
+folders. Selected `build/` directories include Gradle's generated `build/reports/`
+output. Keep durable evidence in the workspace's `reports/` directory, outside
+build output; reports nested in other output folders remain protected.
+It skips folders with open files, trees another live run uses, and
 Uncertain runs. Each attempt records bytes freed or a skip reason in the
 `workflow get` response's `build_cleanup` results, keyed by item and run. Repeating an engine read or recovering an
 interrupted attempt doesn't repeat deletion; an interrupted attempt reports

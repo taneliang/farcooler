@@ -149,11 +149,14 @@ impl Exec {
             if !meta.file_type().is_dir() { return Err("folder or ancestor is a symlink or not a directory".into()); }
         }
         let device = tree.symlink_metadata().map_err(|e| e.to_string())?.dev();
+        // Gradle generates reports inside its selected build/ output. Those reports are
+        // disposable too; the workspace reports/ evidence and other output stay protected.
+        let generated_reports = relative.file_name().is_some_and(|n| n == "build");
         let path = path.to_path_buf();
         tokio::task::spawn_blocking(move || {
             // Blocking deletion can outlive a cancelled async caller; retain the fence here too.
             let _held = held;
-            let bytes = size(&path, device).map_err(|e| e.to_string())?;
+            let bytes = size(&path, device, generated_reports).map_err(|e| e.to_string())?;
             std::fs::remove_dir_all(&path).map_err(|e| e.to_string())?;
             Ok(bytes)
         }).await.map_err(|e| e.to_string())?
@@ -184,11 +187,11 @@ fn expand(tree: &Path, pattern: &str) -> std::io::Result<Vec<PathBuf>> {
     }
     Ok(paths)
 }
-fn size(path: &Path, device: u64) -> std::io::Result<u64> {
+fn size(path: &Path, device: u64, generated_reports: bool) -> std::io::Result<u64> {
     let meta = path.symlink_metadata()?;
     if meta.dev() != device { return Err(std::io::Error::other("folder crosses a filesystem boundary")); }
     if path.file_name().is_some_and(|n| n.eq_ignore_ascii_case(".git")) { return Err(std::io::Error::other("contains git metadata")); }
-    if path.file_name().is_some_and(|n| n.eq_ignore_ascii_case("reports")) { return Err(std::io::Error::other("contains reports")); }
+    if !generated_reports && path.file_name().is_some_and(|n| n.eq_ignore_ascii_case("reports")) { return Err(std::io::Error::other("contains reports")); }
     if !meta.file_type().is_dir() { return Ok(meta.len()); }
     // Bare repositories have no `.git` component. Preserve their objects too, even when an
     // untracked cache holds them; a build-folder policy is never permission to delete commits.
@@ -196,6 +199,6 @@ fn size(path: &Path, device: u64) -> std::io::Result<u64> {
         return Err(std::io::Error::other("contains git metadata (bare repository)"));
     }
     let mut bytes = 0u64;
-    for entry in std::fs::read_dir(path)? { bytes = bytes.saturating_add(size(&entry?.path(), device)?); }
+    for entry in std::fs::read_dir(path)? { bytes = bytes.saturating_add(size(&entry?.path(), device, generated_reports)?); }
     Ok(bytes)
 }

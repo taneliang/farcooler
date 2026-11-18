@@ -577,27 +577,66 @@ async fn build_cleanup_defers_an_executing_effect_then_releases_after_it_settles
     assert_eq!(runtime.store.workflow_cleanups("w").unwrap()[0].result.as_ref().unwrap().bytes_freed, 8);
 }
 
-#[tokio::test]
-async fn build_cleanup_waiting_join_and_failed_runs_release_gradle_and_target() {
+async fn gradle_reports_cleanup(phase: Phase) {
     use super::coding_verbs_tests::{batched_push, lander, phase_of, until};
-    for failed in [false, true] {
-        let (_dir, mut runtime) = lander(if failed { "check-fail" } else { "pass" }).await;
-        std::fs::write(runtime.repository().join(".git/info/exclude"), "target/\napps/\n").unwrap();
-        let definition = batched_push(&runtime, "any", 5000);
-        enqueue(&mut runtime, "w", "one", definition);
-        until(&mut runtime, |s| s.items["one"].definition.stages[s.items["one"].stage].kind == StageKind::Check).await;
-        let tree = runtime.item_tree("w", "one");
-        for folder in ["target", "apps/android/build", "apps/android/app/build"] {
-            std::fs::create_dir_all(tree.join(folder)).unwrap();
-            std::fs::write(tree.join(folder).join("binary"), b"output").unwrap();
-        }
-        until(&mut runtime, |s| phase_of(s, "one") == Some(if failed { Phase::Failed } else { Phase::WaitingJoin })).await;
-        for folder in ["target", "apps/android/build", "apps/android/app/build"] {
-            assert!(!tree.join(folder).exists(), "{folder}, failed={failed}");
-        }
-        assert!(runtime.store.workflow_cleanups("w").unwrap().iter().any(|r|
-            r.result.as_ref().is_some_and(|r| r.bytes_freed == 18)));
+    let (_dir, mut runtime) = lander(if phase == Phase::Failed { "check-fail" } else { "pass" }).await;
+    std::fs::write(runtime.repository().join(".git/info/exclude"), "target/\napps/\nreports/\n").unwrap();
+    let definition = batched_push(&runtime, "any", 5000);
+    enqueue(&mut runtime, "w", "one", definition);
+    until(&mut runtime, |s| s.items["one"].definition.stages[s.items["one"].stage].kind == StageKind::Check).await;
+    let tree = runtime.item_tree("w", "one");
+    for folder in ["target", "apps/android/build", "apps/android/app/build"] {
+        std::fs::create_dir_all(tree.join(folder)).unwrap();
+        std::fs::write(tree.join(folder).join("binary"), b"output").unwrap();
     }
+    for folder in ["apps/android/build", "apps/android/app/build"] {
+        std::fs::create_dir_all(tree.join(folder).join("reports/tests/test")).unwrap();
+        std::fs::write(tree.join(folder).join("reports/tests/test/index.html"), b"generated report").unwrap();
+    }
+    // Durable evidence is outside the selected build folders, even if it has the same name.
+    std::fs::create_dir_all(tree.join("reports")).unwrap();
+    std::fs::write(tree.join("reports/evidence"), b"keep").unwrap();
+    if phase == Phase::Cancelled {
+        controller_command(&runtime, "w", Command::Cancel { item: "one".into(), reason: None });
+        runtime.pump(100).await.unwrap();
+    } else {
+        until(&mut runtime, |s| phase_of(s, "one") == Some(phase.clone())).await;
+    }
+    assert_eq!(phase_of(&runtime.state("w").unwrap().unwrap(), "one"), Some(phase.clone()));
+    for folder in ["target", "apps/android/build", "apps/android/app/build"] {
+        assert!(!tree.join(folder).exists(), "{folder}, phase={phase:?}");
+    }
+    assert_eq!(std::fs::read(tree.join("reports/evidence")).unwrap(), b"keep");
+    let board = runtime.wire_command("w", "owner", farcooler_protocol::workflow_commands::Action::Get).unwrap();
+    assert!(board["build_cleanup"].as_array().unwrap().iter().any(|r|
+        r["effect"]["item"] == "one" && r["result"]["bytes_freed"] == 50), "{board}");
+}
+
+#[tokio::test]
+async fn build_cleanup_waiting_join_releases_gradle_reports_and_target() { gradle_reports_cleanup(Phase::WaitingJoin).await; }
+
+#[tokio::test]
+async fn build_cleanup_failed_releases_gradle_reports_and_target() { gradle_reports_cleanup(Phase::Failed).await; }
+
+#[tokio::test]
+async fn build_cleanup_cancelled_releases_gradle_reports_and_target() { gradle_reports_cleanup(Phase::Cancelled).await; }
+
+#[tokio::test]
+async fn build_cleanup_gradle_reports_still_protects_tracked_files_and_git_metadata() {
+    let (_dir, mut runtime, tree) = building().await;
+    let tracked = tree.join("apps/android/app/build/reports/evidence");
+    std::fs::create_dir_all(tracked.parent().unwrap()).unwrap();
+    std::fs::write(&tracked, b"tracked evidence").unwrap();
+    adapters::git(&tree, &["add", "--", "apps/android/app/build/reports/evidence"]).await.unwrap();
+    let metadata = tree.join("apps/android/build/reports/nested/.git/objects");
+    std::fs::create_dir_all(&metadata).unwrap();
+    std::fs::write(metadata.join("commit"), b"keep commit").unwrap();
+    review(&mut runtime).await;
+    assert_eq!(std::fs::read(tracked).unwrap(), b"tracked evidence");
+    assert_eq!(std::fs::read(metadata.join("commit")).unwrap(), b"keep commit");
+    let result = runtime.store.workflow_cleanups("w").unwrap().remove(0).result.unwrap();
+    assert!(result.skipped.iter().any(|s| s.contains("tracked")), "{result:?}");
+    assert!(result.skipped.iter().any(|s| s.contains("git metadata")), "{result:?}");
 }
 
 #[tokio::test]
