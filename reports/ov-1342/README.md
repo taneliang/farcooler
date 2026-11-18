@@ -25,3 +25,9 @@ Rebased onto `origin/main` at `c62e46f2c`, retaining main's baseline entries and
 Rebuilt the iOS and watch simulator frameworks with `TMPDIR=/private/tmp CARGO_BUILD_JOBS=2 ./scripts/build-ios-frameworks.sh`, then ran the app scheme build above with derived data at `/private/tmp/ov1342-rebase-build2`. `/private/tmp/ov1342-rebase-build2.log` ends `** BUILD SUCCEEDED **`; its `SwiftCompile normal arm64` output names `NeedsYouAggregate.swift` in FarCooler, FarCoolerActivity, FarCoolerNotify, FarCoolerWatch, and FarCoolerWatchWidgets. The build ran outside the sandbox because Xcode's preview macro plugin could not run inside it.
 
 `TMPDIR=/private/tmp cargo test -p farcooler-client -j 2 needs_you_view` passed all five targeted aggregation tests on the rebased tree. Earlier cross-platform targeted test evidence is recorded in `reports/ov-1336/README.md`.
+
+## Watch device architecture investigation (not resolved)
+
+The simulator evidence above does not cover the default Release watch device build, which also requests `arm64_32`. A direct `cargo build --release -p farcooler-client --target arm64_32-apple-watchos -Z build-std` with `RUSTC_BOOTSTRAP=1`, `rust-src`, the watch SDK and deployment target 26.0 failed in `aws-lc-sys` 0.43.0: `p256.c` assigns functions using 32-bit limbs to pointers using 64-bit limbs. The log is `/private/tmp/ov1342-arm32-release.log`. Setting `AWS_LC_SYS_NO_ASM=1` instead fails because that dependency permits it only for an unoptimized build (`/private/tmp/ov1342-arm32.log`). No universal device framework or Release watch build was produced. The architecture finding remains open.
+
+`PATH=/usr/bin:/bin:/usr/sbin:/sbin TMPDIR=/private/tmp sh scripts/lint-gate.sh` passed on this tree; output is in `/private/tmp/ov1342-round2-lint.log`.
