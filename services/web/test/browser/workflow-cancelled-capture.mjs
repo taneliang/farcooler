@@ -47,6 +47,9 @@ for (const scheme of ['light', 'dark']) {
   const failed = { card: 'failed', open: true, phrase: 'could not be downloaded in time' }
   // A run waiting on the viewer: one sentence, its button right under it (ov-1060).
   const approval = { card: 'approval', phrase: 'Waiting for your approval' }
+  const uncertain = { card: 'uncertain', phrase: 'may or may not have finished' }
+  await shoot(`workflow-uncertain-phone-320-${scheme}`, { colorScheme: scheme, width: 320, height: 1500, mobile: true, ...uncertain })
+  await shoot(`workflow-uncertain-desktop-${scheme}`, { colorScheme: scheme, width: 1280, height: 800, mobile: false, ...uncertain })
   await shoot(`workflow-approval-phone-320-${scheme}`, { colorScheme: scheme, width: 320, height: 1500, mobile: true, ...approval })
   await shoot(`workflow-approval-desktop-${scheme}`, { colorScheme: scheme, width: 1280, height: 800, mobile: false, ...approval })
   await shoot(`workflow-failed-details-phone-320-${scheme}`, { colorScheme: scheme, width: 320, height: 1500, mobile: true, ...failed })
