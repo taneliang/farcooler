@@ -4,18 +4,20 @@ import android.content.Context
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.farcooler.account.Account
+import com.farcooler.account.RelayAnswer
+import com.farcooler.account.relayPost
 import com.farcooler.data.Identity
 import com.farcooler.data.NodeIdentity
 import com.farcooler.data.Reach
 import com.farcooler.data.Runner
 import com.farcooler.data.RunnerStore
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -37,6 +39,13 @@ class RelayConnectionDeviceTest {
             put("node_public", requireNotNull(NodeIdentity.mintIfNeeded()).second)
         }
         File(context.filesDir, "relay-offer.json").writeText(offer.toString())
+        if (InstrumentationRegistry.getArguments().getString("preparePreview") == "true") {
+            // Public channel settings only. Sign in through the app; never import or log tokens.
+            check(context.getSharedPreferences("farcooler.account", Context.MODE_PRIVATE).edit()
+                .putString("account.relay", PREVIEW_RELAY)
+                .putString("account.clientID", "client_01M03MXE27CHCZJJ0TMY7KCMAH")
+                .commit())
+        }
     }
 
     @Test
@@ -46,22 +55,30 @@ class RelayConnectionDeviceTest {
         val config = Json.parseToJsonElement(File(path!!).readText()).jsonObject
         assertTrue("this test must dial a tunnel", "token" in config && "host" !in config)
         assertTrue("the tunnel library must load", tunnelIsAvailable)
-        if (InstrumentationRegistry.getArguments().getString("previewProbe") == "true") {
-            // A read-only, unauthenticated request: record real preview bytes without an account token.
-            val probe = URL("https://relay-preview.farcooler.com/v1/account").openConnection() as HttpURLConnection
-            try {
-                probe.requestMethod = "POST"
-                probe.connectTimeout = 10_000
-                probe.readTimeout = 10_000
-                probe.doOutput = true
-                probe.setRequestProperty("Content-Type", "application/json")
-                probe.outputStream.use { it.write("{}".toByteArray()) }
-                val status = probe.responseCode
-                val body = (if (status >= 400) probe.errorStream else probe.inputStream)?.bufferedReader()?.use { it.readText() }
-                Log.i("RelayConnection", "preview relay: HTTP $status $body")
-            } finally {
-                probe.disconnect()
+        val arguments = InstrumentationRegistry.getArguments()
+        check(!arguments.containsKey("previewProbe")) {
+            "previewProbe only checked an unauthenticated 401; use previewAccount=true and previewMachineId"
+        }
+        if (arguments.getString("previewAccount") == "true") {
+            val context = InstrumentationRegistry.getInstrumentation().targetContext
+            val account = Account(context)
+            check(account.relay == PREVIEW_RELAY) { "Configure the disposable app for the preview relay first" }
+            val session = checkNotNull(account.accessToken()) {
+                "Sign the disposable emulator app into a preview test account before running preview verification"
             }
+            val machine = checkNotNull(arguments.getString("previewMachineId")) {
+                "previewMachineId must name the disposable Mac paired to the preview account"
+            }
+            val answer = relayPost("$PREVIEW_RELAY/v1/account", buildJsonObject {}, session)
+            // The successful account response contains metadata, never session or daemon tokens.
+            check(answer is RelayAnswer.Answered) {
+                "Authenticated preview account request failed: ${if (answer is RelayAnswer.Refused) answer.status else "unreachable"}"
+            }
+            Log.i("RelayConnection", "authenticated preview relay: HTTP 200 ${answer.body}")
+            assertTrue("the preview account must list the paired test Mac",
+                answer.body.getValue("machines").jsonArray.any {
+                    it.jsonObject.getValue("id").jsonPrimitive.content == machine
+                })
         }
         val client = ClientCore()
         try {
@@ -73,7 +90,11 @@ class RelayConnectionDeviceTest {
             }
             if (InstrumentationRegistry.getArguments().getString("showRunner") == "true") {
                 val context = InstrumentationRegistry.getInstrumentation().targetContext
-                RunnerStore(context).add(Runner(
+                val runners = RunnerStore(context)
+                // A rerun creates a new endpoint. Duplicate IDs select the old token,
+                // so replace only this test fixture before capturing the real UI.
+                runners.hosts.value.firstOrNull { it.id == "ov-1350-relay" }?.let(runners::remove)
+                runners.add(Runner(
                     id = "ov-1350-relay",
                     label = "ov-1350 Mac via relay",
                     reach = Reach.Tailcat(config.getValue("token").jsonPrimitive.content),
@@ -89,5 +110,9 @@ class RelayConnectionDeviceTest {
         } finally {
             client.close()
         }
+    }
+
+    private companion object {
+        const val PREVIEW_RELAY = "https://relay-preview.farcooler.com"
     }
 }

@@ -1,0 +1,9 @@
+Nov 18 fix round 1
+Go (host, cgo enabled): gofmt -l . (no output); go vet ./...; go test ./... PASS (9.979s)
+Go (host, CGO_ENABLED=0): go vet ./...; go test ./... PASS (9.994s)
+Gradle: assembleInstrumented assembleAndroidTest PASS; final assembleAndroidTest PASS
+Device prepareThePhone prepareRelay=true preparePreview=true: PASS
+Device aTunnelCarriesTheAndroidClientToTheRunner with new Mac endpoint and showRunner=true: PASS (2.766s)
+Device previewAccount=true: BLOCKED/FAIL (no preview account session), not counted as success
+App UI: connected to fresh Mac over DERP, screenshot inspected; signed-out preview state visible
+No production code changed in this round. Original native red/green captures are retained.
