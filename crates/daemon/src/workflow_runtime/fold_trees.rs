@@ -106,7 +106,9 @@ impl Exec {
             let _held = held;
             let device = path.symlink_metadata().map_err(|e| e.to_string())?.dev();
             let bytes = group_bytes(&path, device, true).map_err(|e| e.to_string())?;
-            std::fs::remove_dir_all(&path).map_err(|e| e.to_string())?;
+            // An I/O error can leave a partially removed tree, just like cancellation.
+            // The next attempt must use its Git registration and cannot reconstruct bytes.
+            std::fs::remove_dir_all(&path).map_err(|e| format!("{}: {e}", build_cleanup::GROUP_INTERRUPTED))?;
             Ok::<_, String>(bytes)
         }).await.map_err(|e| e.to_string())??;
         let _ = crate::git::git(&self.root, &["--git-dir", &common, "worktree", "prune"]).await;

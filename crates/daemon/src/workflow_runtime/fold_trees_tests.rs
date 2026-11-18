@@ -267,3 +267,34 @@ async fn recovery_settles_interrupted_cleanup_after_registration_is_already_gone
     assert!(!result.retry && result.bytes_freed == 0, "{result:?}");
     assert!(result.skipped.iter().any(|s| s.contains("bytes freed unknown")), "{result:?}");
 }
+
+#[tokio::test]
+async fn recovery_finishes_group_removal_that_returned_a_partial_deletion_error() {
+    let (_dir, mut runtime, group, tree) = super::build_cleanup_tests::building_group(None).await;
+    until(&mut runtime, |s| s.items[&group].phase == Phase::WaitingReview).await;
+    let protected = tree.join("protected");
+    std::fs::create_dir(&protected).unwrap();
+    std::fs::write(protected.join("output"), b"remaining output").unwrap();
+    std::fs::set_permissions(&protected, std::fs::Permissions::from_mode(0o555)).unwrap();
+    command(&runtime, Command::Cancel { item: group.clone(), reason: None });
+    runtime.release_builds(&["w".into()]).await.unwrap();
+    // Restore permissions before assertions so even a failed test can remove its fixture.
+    std::fs::set_permissions(&protected, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let records = runtime.store.workflow_cleanups("w").unwrap();
+    let record = records.iter().rev().find(|r| r.effect.item == group).unwrap();
+    let result = record.result.as_ref().unwrap();
+    assert!(result.retry, "a filesystem refusal leaves removal unfinished: {result:?}");
+    assert!(result.skipped.iter().any(|s| s.contains("bytes freed unknown")),
+        "remove_dir_all may have deleted files before returning an error: {result:?}");
+    // Directory enumeration order varies: model loss of the link if it survived the error.
+    if tree.join(".git").exists() { std::fs::remove_file(tree.join(".git")).unwrap(); }
+    let root = runtime.root.clone();
+    drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    runtime.pump(100).await.unwrap();
+    assert!(!tree.exists(), "recovery completes the remaining deletion without a .git link");
+    let records = runtime.store.workflow_cleanups("w").unwrap();
+    let result = records.iter().find(|r| r.effect.id == record.effect.id).unwrap().result.as_ref().unwrap();
+    assert!(!result.retry && result.bytes_freed == 0, "{result:?}");
+    assert!(result.skipped.iter().any(|s| s.contains("bytes freed unknown")), "{result:?}");
+}

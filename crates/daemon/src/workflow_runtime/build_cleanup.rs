@@ -2,6 +2,8 @@
 use super::*;
 use farcooler_workflow::cleanup::{CleanupEffect, CleanupResult, valid_folder};
 
+pub(super) const GROUP_INTERRUPTED: &str = "group tree cleanup interrupted; bytes freed unknown";
+
 /// Retry on a monotonic deadline, only while a transient cleanup blocker remains.
 pub(super) async fn wait_for_retry(deadline: Option<tokio::time::Instant>) {
     match deadline {
@@ -32,17 +34,17 @@ impl Exec {
                 }
                 if !self.store.workflow_cleanup_begin(&effect, record.result.as_ref())? { continue; }
                 let reconcile = record.result.as_ref().is_some_and(|r|
-                    r.skipped.iter().any(|s| s == "group tree cleanup interrupted; bytes freed unknown"));
+                    r.skipped.iter().any(|s| s == GROUP_INTERRUPTED));
                 let mut result = match self.release_build_attempt(&effect, || {}, reconcile).await {
                     Ok(result) => result,
                     Err(error) => CleanupResult { retry: false, bytes_freed: 0, skipped: vec![format!("cleanup unavailable: {error}")] },
                 };
                 // Completed folders are absent on retry; preserve their byte count exactly once.
-                if reconcile {
+                if reconcile || result.skipped.iter().any(|s| s.starts_with(GROUP_INTERRUPTED)) {
                     // Neither the remaining size nor zero is a known total for the lost attempt.
                     // Keep the existing wire convention: zero plus an explicit unknown-byte reason.
                     result.bytes_freed = 0;
-                    result.skipped.push("group tree cleanup interrupted; bytes freed unknown".into());
+                    result.skipped.push(GROUP_INTERRUPTED.into());
                 } else {
                     result.bytes_freed = result.bytes_freed.saturating_add(record.result.map_or(0, |r| r.bytes_freed));
                 }
