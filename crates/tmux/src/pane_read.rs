@@ -164,7 +164,7 @@ fn identity_of(path: &std::path::Path) -> Option<FileIdentity> {
 /// socket that is not there, and `no server running on /tmp/tmux-501/x` (or the
 /// same `error connecting` with `Connection refused`) for one a server left
 /// behind. `None` for any other failure.
-fn silent_socket(stderr: &str) -> Option<PathBuf> {
+pub(crate) fn silent_socket(stderr: &str) -> Option<PathBuf> {
     let line = stderr.lines().next()?.trim_end();
     let path = if let Some(rest) = line.strip_prefix("no server running on ") {
         rest

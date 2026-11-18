@@ -86,6 +86,43 @@ async fn a_pane_the_runner_never_reads_again_fails_the_build_with_why_on_the_ite
 /// A real retained builder survives both a gate already running at launch and one arriving mid-turn.
 #[tokio::test]
 async fn a_landing_gate_keeps_a_native_builds_pane_until_it_resumes_and_finishes() {
+    // A child harness lets the actual tmux client fail without changing this process's
+    // environment or the fanout daemon's probes. The two failures used to report Gone,
+    // causing native_turn to fail and quiesce_native to kill the still-live builder.
+    if std::env::var_os("FC_PROBE_INJECTED").is_none() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let tmux = farcooler_core::programs::find("tmux").unwrap();
+        let wrapper = dir.path().join("tmux");
+        let script = r#"#!/bin/sh
+if [ "$PPID" = "$FC_PROBE_OWNER" ] && [ "$5" = display-message ]; then
+    case "$9" in '#{pane_dead}'*)
+        count="$FC_PROBE_DIR/$2"
+        n=$(cat "$count" 2>/dev/null || echo 0)
+        if [ "$n" -lt 2 ]; then
+            echo $((n + 1)) > "$count"
+            echo injected >> "$FC_PROBE_DIR/injected"
+            echo 'error connecting to server (Interrupted system call)' >&2
+            exit 1
+        fi;;
+    esac
+fi
+exec REAL_TMUX "$@"
+"#;
+        std::fs::write(&wrapper, script.replace("REAL_TMUX", &crate::service::shell_quote(tmux.to_str().unwrap()))).unwrap();
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let test = "workflow_runtime::coding_native::unread_tests::a_landing_gate_keeps_a_native_builds_pane_until_it_resumes_and_finishes";
+        let output = std::process::Command::new("/bin/sh")
+            .args(["-c", "export FC_PROBE_OWNER=$$; exec \"$@\"", "probe-owner"])
+            .arg(std::env::current_exe().unwrap()).args(["--exact", test, "--nocapture"])
+            .env("FC_PROBE_INJECTED", "1").env("FC_PROBE_DIR", dir.path())
+            .env("PATH", format!("{}:{}", dir.path().display(), std::env::var("PATH").unwrap_or_default()))
+            .output().unwrap();
+        assert!(output.status.success(), "{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        assert_eq!(std::fs::read_to_string(dir.path().join("injected")).unwrap().lines().count(), 8,
+            "both pane probes failed in all four native gate scenarios");
+        return;
+    }
     for (agent, gate_first) in [("claude", false), ("claude", true), ("codex", false), ("codex", true)] {
         let (dir, mut runtime, _fake) = super::tests::native_agent("pass", agent).await;
         let script = dir.path().join("interactive.py");

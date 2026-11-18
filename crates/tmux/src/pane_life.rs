@@ -6,7 +6,7 @@
 //! `display-message`, so a stream waiting on a dead pane costs one tmux
 //! process per look and nothing else.
 
-use farcooler_core::{Result, tags};
+use farcooler_core::{DomainError, Result, tags};
 use uuid::Uuid;
 
 use crate::server::TmuxServer;
@@ -27,17 +27,28 @@ pub enum PaneLife {
 impl TmuxServer {
     /// What `pane_id` is now, for terminal `terminal`.
     ///
-    /// `Err` only when tmux could not be asked (it did not start, or did not
-    /// answer in time). A tmux that answers that it has no such pane, or no
-    /// server, is `Gone`.
+    /// A failed client is unknown, unless tmux explicitly reports a missing pane
+    /// or server. Load or a signaled client must never masquerade as a closed pane
+    /// and make a native runner tear down a live builder (ov-1357).
     pub async fn pane_life(&self, pane_id: &str, terminal: Uuid) -> Result<PaneLife> {
         let format = format!("#{{pane_dead}}\t#{{{}}}", tags::TERMINAL_ID);
         let out = self.run(&["display-message", "-p", "-t", pane_id, &format]).await?;
-        if !out.ok() {
-            return Ok(PaneLife::Gone);
-        }
-        Ok(parse(&out.stdout, terminal))
+        probe(out, terminal)
     }
+}
+
+fn probe(out: crate::server::Output, terminal: Uuid) -> Result<PaneLife> {
+    if !out.ok() {
+        // Only a normal error exit with an explicit absence proves Gone. A failed
+        // client alone is not proof that the program in the pane exited.
+        let missing = out.status == Some(1) && (crate::pane_read::silent_socket(&out.stderr).is_some()
+            || out.stderr.trim().strip_prefix("can't find pane: ").is_some_and(|pane| !pane.is_empty()));
+        if missing { return Ok(PaneLife::Gone); }
+        tracing::warn!(%terminal, status = ?out.status, stderr = %out.stderr.chars().take(1000).collect::<String>(),
+            "tmux pane probe failed without proving absence");
+        return Err(DomainError::TmuxUnavailable);
+    }
+    Ok(parse(&out.stdout, terminal))
 }
 
 fn parse(line: &str, terminal: Uuid) -> PaneLife {
@@ -67,3 +78,7 @@ mod tests {
         assert_eq!(parse(&format!("?\t{mine}"), mine), PaneLife::Gone);
     }
 }
+
+#[cfg(test)]
+#[path = "pane_life_tests.rs"]
+mod probe_tests;
