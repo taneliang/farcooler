@@ -233,6 +233,8 @@ fn lands(definition: &Definition, config: &CodingConfig) -> Vec<String> {
 fn approvers(definition: &Definition) -> Vec<String> {
     let mut lines = Vec::new();
     for s in steps(definition) {
+        let path_route = definition.stages.iter().find(|route| matches!(route.kind, StageKind::Route)
+            && matches!(route.routes.get("ask"), Some(farcooler_workflow::Target::Step(id)) if id == &s.id));
         // An approval step is a decider too, and moving it to someone else must show (ov-1002 review F6).
         match &s.progression {
             farcooler_workflow::Progression::AwaitApproval { principal } if principal == "owner" =>
@@ -242,6 +244,17 @@ fn approvers(definition: &Definition) -> Vec<String> {
             farcooler_workflow::Progression::Automatic => {}
         }
         match &s.kind {
+            StageKind::Review(Reviewer::Person(p)) if path_route.is_some() => {
+                let who = if p == "owner" { "You".to_string() } else { code(p) };
+                let verb = if p == "owner" { "approve" } else { "approves" };
+                let rules = path_route.and_then(|r| r.operation.arguments.iter().find_map(|a| crate::path_routes::PathRules::read(a)));
+                if let Some(rules) = rules {
+                    let entries = rules.rules.iter().map(|(glob, route)| format!("{}: {}", code(glob), code(route))).collect::<Vec<_>>().join(", ");
+                    lines.push(format!("{who} {verb} tickets routed to {} before they land. Path rules (first match per file): {entries}; otherwise {}. The most careful file decides.", code("ask"), code(&rules.default)));
+                } else {
+                    lines.push(format!("{who} {verb} tickets routed to {} before they land.", code("ask")));
+                }
+            }
             StageKind::Review(Reviewer::Person(p)) if p == "owner" => lines.push("You approve each ticket before it lands.".into()),
             StageKind::Review(Reviewer::Person(p)) => lines.push(format!("{} approves each ticket before it lands.", code(p))),
             StageKind::Review(Reviewer::Dispatch) => lines.push("The configured reviewer reviews each ticket.".into()),
@@ -323,7 +336,11 @@ fn in_full(config: &CodingConfig, live: Option<&CodingConfig>) -> Vec<String> {
         let to = remote.as_deref().map_or("the landing repository".to_string(), code);
         lines.push(format!("Pull requests open in {} on GitHub, against {}. Their branches are pushed to {to}. They're opened by running {}.", code(repository), code(base), exactly(gh, "pull requests")));
     }
-    lines.push(format!("Code is read from {} from commit {}, and its landing ref there is {}.", code(&repository.to_string_lossy()), code(base), code(landing_ref)));
+    if let Some(remote) = landing.as_ref().filter(|l| crate::workflow_runtime::coding::landing_url(l).is_some()) {
+        lines.push(format!("Code is read from {}. Each ticket starts from {} on the landing remote {} as it is when the ticket starts. The configured baseline is {}.", code(&repository.to_string_lossy()), code(&remote.target), code(&remote.repository.to_string_lossy()), code(base)));
+    } else {
+        lines.push(format!("Code is read from {}. Each ticket starts from local ref {} as it is when the ticket starts. The configured baseline is {}.", code(&repository.to_string_lossy()), code(landing_ref), code(base)));
+    }
     match landing {
         Some(CodingLanding { job, repository, target, config_digest }) if config_digest.is_empty() => lines.push(format!(
             "Code lands on {} at {}, as job {}. The push signs in with your own git and ssh settings.",
@@ -346,7 +363,9 @@ pub fn headline(bundle: &Bundle) -> String {
     let checking = match n { 0 => "no checks".to_string(), 1 => "1 check must pass".into(), n => format!("{n} checks must pass") };
     let landing = if steps(&bundle.definition).any(|s| matches!(s.kind, StageKind::OpenPr)) { "each ticket opens a pull request" } else { "tickets push to the branch" };
     let who = approvers(&bundle.definition);
-    let approval = if who.iter().any(|l| l.starts_with("You ")) { "you approve each ticket" }
+    let approval = if who.iter().any(|l| l.starts_with("You approve each ticket")) { "you approve each ticket" }
+        else if who.iter().any(|l| l.starts_with("You approve tickets routed")) { "you approve tickets routed to ask" }
+        else if who.iter().any(|l| l.starts_with("You ")) { "you approve a step" }
         else if who.iter().any(|l| l.starts_with("An agent")) { "an agent reviews each ticket" }
         else if who.iter().any(|l| l.starts_with("The orchestrator")) { "the orchestrator reviews each ticket" }
         else if who.is_empty() { "nobody approves tickets" } else { "someone else approves tickets" };
@@ -410,6 +429,27 @@ mod tests {
             assert!(text.contains(want), "missing {want:?} in:\n{text}");
         }
     }
+    #[test]
+    fn path_approval_names_only_the_ask_route() {
+        let options = Options { routes: vec!["secure/**=ask".into()], ..Options::default() };
+        let b = lt::template("batched-push", &config(), &["make check".into()], &[], &options).unwrap();
+        let text = summarize("", &b, None, None);
+        assert!(text.contains("You approve tickets routed to `ask` before they land."), "{text}");
+        assert!(text.contains("`secure/**`: `ask`; otherwise `push`"), "{text}");
+        assert!(!text.contains("You approve each ticket"), "{text}");
+        assert!(headline(&b).contains("you approve tickets routed to ask"));
+    }
+
+    #[test]
+    fn remote_suggestion_describes_the_head_selected_at_start() {
+        let mut cfg = config();
+        cfg.landing = Some(farcooler_protocol::workflow_config::CodingLanding { job: "land".into(), repository: "ssh://git@example.com/o/r.git".into(), target: "refs/heads/main".into(), config_digest: String::new() });
+        let b = lt::template("batched-push", &cfg, &["make check".into()], &[], &Options::default()).unwrap();
+        let text = summarize("", &b, None, None);
+        assert!(text.contains("Each ticket starts from `refs/heads/main` on the landing remote `ssh://git@example.com/o/r.git` as it is when the ticket starts."), "{text}");
+        assert!(!text.contains("from commit"), "{text}");
+    }
+
     #[test]
     fn an_uncapped_batch_says_every_ready_ticket_lands_together() {
         let b = bundle("batched-push", &["make check"], &[], Some(0));

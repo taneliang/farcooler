@@ -33,7 +33,7 @@ In full, exactly as it runs:
 - No reviewer command.
 - CI is the `ci` workflow on `push` in `o/r` on GitHub, read by running `/bin/sh` `-c` `true`, with no environment variables, for up to 1 s.
 - Pull requests open in `far-cooler/overnight` on GitHub, against `main`. Their branches are pushed to `ssh://git@example.com/far-cooler/overnight.git`. They're opened by running `/bin/sh` `-c` `gh pr create --fill`, with no environment variables, for up to 1 s.
-- Code is read from `/r` from commit `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`, and its landing ref there is `refs/heads/main`.
+- Code is read from `/r`. Each ticket starts from local ref `refs/heads/main` as it is when the ticket starts. The configured baseline is `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`.
 - Code lands on `refs/heads/main` in `/srv/landing.git`, as job `landing-1`. Where that repository pushes is fixed by its config, digest `wf1:0123456789abcdef`.
 - Field changes (environment values hidden):
 - `/adapter/config/base`: (absent) → `"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`

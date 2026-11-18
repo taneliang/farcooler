@@ -16,7 +16,7 @@ mod scheduling;
 mod adapters;
 mod process_logs;
 mod script_hooks;
-mod coding;
+pub(crate) mod coding;
 mod coding_review_policy;
 mod service_owner;
 mod coding_execute;

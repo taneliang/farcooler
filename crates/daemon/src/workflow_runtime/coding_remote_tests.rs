@@ -379,6 +379,16 @@ async fn a_batch_folds_onto_the_remotes_main_when_the_local_main_is_stale() {
     assert_eq!(fact(&r.runtime, StageKind::Fold)["detail"]["base"], moved.as_str(), "{}", fact(&r.runtime, StageKind::Fold));
     assert!(adapters::git(&r.bare, &["cat-file", "-e", &format!("{pushed}:landed-elsewhere.txt")]).await.is_ok(), "the other lander's work is kept");
     assert_eq!(adapters::git(&config.repository, &["rev-parse", &config.landing_ref]).await.unwrap(), local, "the local main is left as it was");
+    let other = r._dir.path().join("elsewhere");
+    std::fs::write(other.join("another.txt"), "another change\n").unwrap();
+    plain_git(&other, &["add", "another.txt"]);
+    plain_git(&other, &["-c", "user.name=T", "-c", "user.email=t@localhost", "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "another change"]);
+    plain_git(&other, &["-c", "core.hooksPath=/dev/null", "push", "--quiet", "origin", "HEAD:refs/heads/main"]);
+    let newer = head(&r.bare).await;
+    at_join(&mut r.runtime, "two", &definition).await;
+    let second = r.runtime.store.workflow_outbox("w").unwrap().into_iter()
+        .find(|s| s.effect.item == "two" && s.effect.kind == EffectKind::Execute(StageKind::Provision)).unwrap();
+    assert_eq!(r.runtime.item_base("w", &second.effect).unwrap(), newer, "each ticket samples the remote again");
 }
 
 /// ov-1059: a ticket on a workspace whose own main is stale starts from the remote's main as it is now. Its base

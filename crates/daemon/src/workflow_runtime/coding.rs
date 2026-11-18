@@ -349,7 +349,7 @@ pub(super) fn worktree_hooks<'a>(config: &'a CodingConfig, agent: &str) -> Optio
         .or_else(|| project_hooks.as_ref().filter(|h| h.path == config.repository.join(relative)))
 }
 /// The URL of a landing that is a network remote (ov-1026), or `None` for a local bare repository.
-pub(super) fn landing_url(landing: &CodingLanding) -> Option<&str> {
+pub(crate) fn landing_url(landing: &CodingLanding) -> Option<&str> {
     landing.repository.to_str().filter(|r| r.starts_with("ssh://") || r.starts_with("https://"))
 }
 /// An `ssh://` or `https://` URL the engine may hand git. A token in the URL would be written to receipts and
