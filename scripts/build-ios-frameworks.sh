@@ -23,6 +23,8 @@ WITH_DEVICE=0
 
 SIM_SDK="$DEVELOPER_DIR/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk"
 DEVICE_SDK="$DEVELOPER_DIR/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk"
+WATCH_SIM_SDK="$DEVELOPER_DIR/Platforms/WatchSimulator.platform/Developer/SDKs/WatchSimulator.sdk"
+WATCH_DEVICE_SDK="$DEVELOPER_DIR/Platforms/WatchOS.platform/Developer/SDKs/WatchOS.sdk"
 
 OUT="apps/ios/Frameworks"
 rm -rf "$OUT"
@@ -88,6 +90,17 @@ for CRATE in farcooler-vt farcooler-client farcooler-review; do
       SDKROOT="$DEVICE_SDK" cargo build --release -p "$CRATE" --target aarch64-apple-ios
     fi
     ARGS+=(-library "target/aarch64-apple-ios/release/$LIB" -headers "$STAGE")
+  fi
+
+  if [ "$CRATE" = "farcooler-client" ]; then
+    echo "==> $CRATE for the watch simulator"
+    WATCHOS_DEPLOYMENT_TARGET=26.0 SDKROOT="$WATCH_SIM_SDK" cargo build --release -p "$CRATE" --target aarch64-apple-watchos-sim
+    ARGS+=(-library "target/aarch64-apple-watchos-sim/release/$LIB" -headers "$STAGE")
+    if [ "$WITH_DEVICE" = "1" ]; then
+      echo "==> $CRATE for the watch device"
+      WATCHOS_DEPLOYMENT_TARGET=26.0 SDKROOT="$WATCH_DEVICE_SDK" cargo build --release -p "$CRATE" --target aarch64-apple-watchos
+      ARGS+=(-library "target/aarch64-apple-watchos/release/$LIB" -headers "$STAGE")
+    fi
   fi
 
   echo "==> Packaging FarCooler$(tr '[:lower:]' '[:upper:]' <<< "${NAME:0:1}")${NAME:1}.xcframework"
