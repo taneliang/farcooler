@@ -16,6 +16,21 @@ pub struct Identity {
 impl Identity {
     fn mutation(&self) -> Mutation { Mutation { id:self.command_id.clone(),revision:self.revision,epoch:self.epoch,sequence:self.sequence } }
 }
+/// Optional bindings for routine verbs. Supply all of them to retain an inspected command.
+#[derive(Args, Clone)]
+pub struct RoutineIdentity {
+    #[arg(long)] pub command_id: Option<String>,
+    #[arg(long)] pub revision: Option<u64>,
+    #[arg(long)] pub epoch: Option<u64>,
+    #[arg(long)] pub sequence: Option<u64>,
+}
+impl RoutineIdentity {
+    fn mutation(&self) -> Result<Mutation, Box<dyn std::error::Error>> {
+        Ok(Mutation { id:self.command_id.clone().ok_or("missing --command-id")?, revision:self.revision.ok_or("missing --revision")?,
+            epoch:self.epoch.ok_or("missing --epoch")?, sequence:self.sequence.ok_or("missing --sequence")? })
+    }
+    fn explicit(&self) -> bool { self.command_id.is_some() || self.revision.is_some() || self.epoch.is_some() || self.sequence.is_some() }
+}
 #[derive(Args)]
 pub struct Publication {
     /// Why this workflow changes. Required for an orchestrator publication.
@@ -43,7 +58,7 @@ impl Publication {
         Ok(Action::Publish { reason:self.reason.clone(), notifications, adapter, mutation:self.identity.mutation(),expected_pin:self.expected_pin.clone(),definition })
     }
 }
-#[derive(Subcommand)]
+#[derive(Subcommand, Clone)]
 pub enum WorkflowCmd {
     /// Read current state; --full includes definitions and notification history.
     Get { workspace: Uuid, #[arg(long)] full: bool },
@@ -67,7 +82,7 @@ pub enum WorkflowCmd {
     Rework { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,
         #[arg(long)] evidence:std::path::PathBuf,#[arg(long)] reason:String,#[command(flatten)] identity:Identity },
     /// Request cancellation of the inspected run.
-    Cancel { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
+    Cancel { workspace:Uuid,item:String,#[arg(long)] run:Option<String>,#[arg(long)] pin:Option<String>,#[command(flatten)] identity:RoutineIdentity },
     /// Close an Uncertain cancellation after you have checked that its processes have ended and its external
     /// effects are accounted for. Owner in person only. --reason records what was lost and what you checked.
     /// Then reopen the ticket to run it again. A push must be settled with `settle` instead.
@@ -79,24 +94,24 @@ pub enum WorkflowCmd {
         #[arg(long,required_unless_present="continues_under",conflicts_with="continues_under")] sha:Option<String>,
         #[arg(long,required_unless_present="sha")] continues_under:Option<String>,#[command(flatten)] identity:Identity },
     /// Run a failed item's step again, within its published retry allowance.
-    Retry { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
+    Retry { workspace:Uuid,item:String,#[arg(long)] run:Option<String>,#[arg(long)] pin:Option<String>,#[command(flatten)] identity:RoutineIdentity },
     /// Settle a run whose worktree step is Uncertain because its git never finished, or a cancel waiting on one. The
     /// runner looks first: with nothing of the tree there (no directory, no worktree git lists, no branch it would
     /// have made), the step fails and can be retried; anything there is named, to take away by hand first.
     Resolve { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
     /// Queue a ticket waiting at its join step into the open group for that step.
-    Queue { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
+    Queue { workspace:Uuid,item:String,#[arg(long)] run:Option<String>,#[arg(long)] pin:Option<String>,#[command(flatten)] identity:RoutineIdentity },
     /// Take a queued ticket out of a group that has not left yet.
-    Leave { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
+    Leave { workspace:Uuid,item:String,#[arg(long)] run:Option<String>,#[arg(long)] pin:Option<String>,#[command(flatten)] identity:RoutineIdentity },
     /// Settle a push whose outcome was lost, after looking at the target yourself. The runner reads the
     /// target first and refuses a word it contradicts. Pass `--landed true` if the commit is on the target.
     Settle { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[arg(long, action = clap::ArgAction::Set, required = true)] landed:bool,#[command(flatten)] identity:Identity },
     /// Bring a ticket under the engine with no run: it sits in Backlog until the orchestrator moves it.
-    Track { workspace:Uuid,item:String,#[arg(long)] column:Option<String>,#[command(flatten)] identity:Identity },
+    Track { workspace:Uuid,item:String,#[arg(long)] column:Option<String>,#[command(flatten)] identity:RoutineIdentity },
     /// Move a tracked ticket to a column: backlog, todo, doing, review or decision; done or cancelled close it.
     Move { workspace:Uuid,item:String,#[arg(long)] to:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
     /// Start a run on a tracked ticket under the published definition `--start-pin`.
-    Start { workspace:Uuid,item:String,#[arg(long)] start_pin:String,#[arg(long)] run:String,#[arg(long)] pin:String,
+    Start { workspace:Uuid,item:String,#[arg(long)] start_pin:Option<String>,#[arg(long)] run:Option<String>,#[arg(long)] pin:Option<String>,
         /// A build step's model, as `<step>=<model>` (`build=codex:gpt-5.5`), from the ones the workflow lists. Once per
         /// step; a step left out runs with its default.
         #[arg(long="model",value_name="STEP=MODEL")] models:Vec<String>,
@@ -110,13 +125,13 @@ pub enum WorkflowCmd {
         /// Another tracked ticket at rest that this run takes on as well: one agent, one branch and one pull request
         /// for all of them, and its card goes where the run goes. Repeat for more.
         #[arg(long="with",value_name="KEY")] with:Vec<String>,
-        #[command(flatten)] identity:Identity },
+        #[command(flatten)] identity:RoutineIdentity },
     /// Send a run back to its build step, which starts again in the same worktree. The agent is told --reason.
     /// Taken while the run waits for a review, an approval or its landing group, or has failed, or while its build is
     /// Uncertain once that build's agent has ended.
-    SendBack { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,
+    SendBack { workspace:Uuid,item:String,#[arg(long)] run:Option<String>,#[arg(long)] pin:Option<String>,
         /// Why, for the agent: what to change. At most 4096 bytes; the first 1500 are in its brief.
-        #[arg(long)] reason:String,#[command(flatten)] identity:Identity },
+        #[arg(long)] reason:String,#[command(flatten)] identity:RoutineIdentity },
     /// Close a failed run as landed, when its commit is already on the target branch. The runner reads the remote
     /// first and refuses a commit that is not on the target there. Taken only while the run is Failed.
     Landed { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,
@@ -169,32 +184,84 @@ impl WorkflowCmd {
                 };
                 (workspace,Action::Close { mutation:identity.mutation(),item,run,pin,resolution })
             }
-            Self::Cancel { workspace,item,run,pin,identity } => (workspace,Action::Cancel { mutation:identity.mutation(),item,run,pin }),
-            Self::Queue { workspace,item,run,pin,identity } => (workspace,Action::Queue { mutation:identity.mutation(),item,run,pin }),
-            Self::Leave { workspace,item,run,pin,identity } => (workspace,Action::Leave { mutation:identity.mutation(),item,run,pin }),
+            Self::Cancel { workspace,item,run,pin,identity } => (workspace,Action::Cancel { mutation:identity.mutation()?,item,run:run.ok_or("missing --run")?,pin:pin.ok_or("missing --pin")? }),
+            Self::Queue { workspace,item,run,pin,identity } => (workspace,Action::Queue { mutation:identity.mutation()?,item,run:run.ok_or("missing --run")?,pin:pin.ok_or("missing --pin")? }),
+            Self::Leave { workspace,item,run,pin,identity } => (workspace,Action::Leave { mutation:identity.mutation()?,item,run:run.ok_or("missing --run")?,pin:pin.ok_or("missing --pin")? }),
             Self::Settle { workspace,item,run,pin,landed,identity } => (workspace,Action::Settle { mutation:identity.mutation(),item,run,pin,landed }),
-            Self::Track { workspace,item,column,identity } => (workspace,Action::Track { mutation:identity.mutation(),item,column }),
+            Self::Track { workspace,item,column,identity } => (workspace,Action::Track { mutation:identity.mutation()?,item,column }),
             Self::Move { workspace,item,to,run,pin,identity } => (workspace,Action::Move { mutation:identity.mutation(),item,run,pin,to }),
-            Self::Start { workspace,item,start_pin,run,pin,models,worktree,branch,adopt,with,identity } => (workspace,Action::Start { mutation:identity.mutation(),item,run,pin,start_pin,models:picks(&models)?,
+            Self::Start { workspace,item,start_pin,run,pin,models,worktree,branch,adopt,with,identity } => (workspace,Action::Start { mutation:identity.mutation()?,item,run:run.ok_or("missing --run")?,pin:pin.ok_or("missing --pin")?,start_pin:start_pin.ok_or("missing --start-pin")?,models:picks(&models)?,
                 worktree:worktree.zip(branch).map(|(name,branch)| farcooler_protocol::workflow_commands::NamedTree { name,branch,adopt }),with }),
             Self::SendBack { workspace,item,run,pin,reason,identity } => {
                 if !farcooler_protocol::workflow_commands::valid_rework_reason(&reason) {
                     return Err("The reason must say something, in at most 4096 bytes, with no control characters but tabs and line breaks.".into());
                 }
-                (workspace,Action::SendBack { mutation:identity.mutation(),item,run,pin,reason })
+                (workspace,Action::SendBack { mutation:identity.mutation()?,item,run:run.ok_or("missing --run")?,pin:pin.ok_or("missing --pin")?,reason })
             }
             Self::Landed { workspace,item,run,pin,sha,identity } => {
                 if sha.len()!=40 || !sha.bytes().all(|b| b.is_ascii_hexdigit()) { return Err("--sha must be the full 40-character commit hash.".into()); }
                 (workspace,Action::Landed { mutation:identity.mutation(),item,run,pin,sha })
             }
             Self::Reopen { workspace,item,column,identity } => (workspace,Action::Reopen { mutation:identity.mutation(),item,column }),
-            Self::Retry { workspace,item,run,pin,identity } => (workspace,Action::Retry { mutation:identity.mutation(),item,run,pin }),
+            Self::Retry { workspace,item,run,pin,identity } => (workspace,Action::Retry { mutation:identity.mutation()?,item,run:run.ok_or("missing --run")?,pin:pin.ok_or("missing --pin")? }),
             Self::Pause { .. } | Self::Resume { .. } => return Err("steering is a live step command".into()),
             Self::Resolve { workspace,item,run,pin,identity } => (workspace,Action::Resolve { mutation:identity.mutation(),item,run,pin }),
             Self::Watch { .. } => return Err("watch is a stream, not a command".into()),
             Self::Verdict { .. } => return Err("a verdict is written where the review step reads it, not sent".into()),
         })
     }
+}
+impl WorkflowCmd {
+    // None means this is a command whose bindings must remain explicitly inspected.
+    fn routine(&mut self) -> Option<(Uuid, &str, Option<(&mut Option<String>, &mut Option<String>)>, Option<&mut Option<String>>, &mut RoutineIdentity)> {
+        match self {
+            Self::Queue {workspace,item,run,pin,identity} | Self::Leave {workspace,item,run,pin,identity}
+            | Self::Retry {workspace,item,run,pin,identity} | Self::Cancel {workspace,item,run,pin,identity}
+            | Self::SendBack {workspace,item,run,pin,identity,..} => Some((*workspace,item,Some((run,pin)),None,identity)),
+            Self::Start {workspace,item,run,pin,start_pin,identity,..} => Some((*workspace,item,Some((run,pin)),Some(start_pin),identity)),
+            Self::Track {workspace,item,identity,..} => Some((*workspace,item,None,None,identity)),
+            _ => None,
+        }
+    }
+    fn prepare_routine(&mut self, snapshot:&serde_json::Value) -> Result<(), Box<dyn std::error::Error>> {
+        let (_, item, bindings, start_pin, identity) = self.routine().ok_or("not a routine verb")?;
+        let state = &snapshot["state"];
+        let revision = if state.is_null() { 0 } else { state["revision"].as_u64().ok_or("missing workflow revision")? };
+        let epoch = if state.is_null() { 1 } else { state["epoch"].as_u64().ok_or("missing workflow epoch")? };
+        let sequence = state["source_sequences"].as_object().map(|m| m.values().filter_map(|v|v.as_u64()).max().unwrap_or(0)).unwrap_or(0)
+            .checked_add(1).ok_or("workflow sequence exhausted")?;
+        if let Some((run,pin)) = bindings {
+            let current = state["items"].get(item).ok_or("ticket is not tracked")?;
+            *run = Some(current["run"].as_str().ok_or("missing ticket run")?.into());
+            *pin = Some(current["pin"].as_str().ok_or("missing ticket pin")?.into());
+        }
+        if let Some(start_pin) = start_pin { *start_pin = Some(snapshot["configuration"]["pin"].as_str().ok_or("no workflow has been published")?.into()); }
+        *identity = RoutineIdentity { command_id:Some(Uuid::now_v7().to_string()),revision:Some(revision),epoch:Some(epoch),sequence:Some(sequence) };
+        Ok(())
+    }
+}
+trait RoutineTransport {
+    async fn read(&mut self, workspace:Uuid) -> Result<serde_json::Value, Box<dyn std::error::Error>>;
+    async fn write(&mut self, workspace:Uuid, action:&Action) -> Result<serde_json::Value, Box<dyn std::error::Error>>;
+}
+impl RoutineTransport for crate::Link {
+    async fn read(&mut self, workspace:Uuid) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+        read_deadline(ask(self, workspace, &Action::Get)).await?
+    }
+    async fn write(&mut self, workspace:Uuid, action:&Action) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+        ask(self, workspace, action).await
+    }
+}
+async fn run_routine(transport:&mut impl RoutineTransport, workspace:Uuid, cmd:&WorkflowCmd) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    for attempt in 0..=3 {
+        let snapshot = transport.read(workspace).await?;
+        let mut prepared = cmd.clone();
+        prepared.prepare_routine(&snapshot)?;
+        let (_, action) = prepared.action()?;
+        let value = transport.write(workspace, &action).await?;
+        if value.pointer("/receipt/result/Err").and_then(|v|v.as_str()) != Some("Stale") || attempt == 3 { return Ok(value); }
+    }
+    unreachable!()
 }
 /// `<step>=<model>` pairs, each step once.
 fn picks(given:&[String]) -> Result<std::collections::BTreeMap<String,String>,Box<dyn std::error::Error>> {
@@ -316,6 +383,17 @@ pub async fn workflow(runner:Option<&str>,cmd:WorkflowCmd,json:bool) -> Fallible
     if let WorkflowCmd::Rollback { workspace, reason } = cmd {
         let mut link = crate::connect_to(runner).await?;
         return publication_change(&mut link,workspace,None,reason,json).await;
+    }
+    let mut cmd = cmd;
+    if let Some((workspace, _, bindings, start_pin, identity)) = cmd.routine() {
+        let explicit = identity.explicit() || bindings.as_ref().is_some_and(|(r,p)| r.is_some() || p.is_some()) || start_pin.as_ref().is_some_and(|p| p.is_some());
+        if !explicit {
+            let mut link = crate::connect_to(runner).await?;
+            let value = run_routine(&mut link, workspace, &cmd).await?;
+            if json { println!("{value}"); } else { println!("{}",serde_json::to_string_pretty(&value)?); }
+            if value.pointer("/receipt/result/Err").is_some() { return Err("workflow command refused; receipt shown above".into()); }
+            return Ok(());
+        }
     }
     let (workspace,action) = cmd.action()?;
     let mut link = crate::connect_to(runner).await?;
@@ -660,5 +738,41 @@ mod ov1179_cli_tests {
         assert!(cmd.check().is_err(),"never silently drop a grant or combine partial settings writes");
         let parsed=crate::Cli::try_parse_from(["farcooler","workflow","rollback","00000000-0000-0000-0000-000000000001"]).unwrap();
         assert!(matches!(parsed.command,crate::Command::Workflow(WorkflowCmd::Rollback {..})));
+    }
+}
+
+#[cfg(test)]
+mod routine_tests {
+    use super::*;
+    use clap::Parser;
+    #[derive(Default)]
+    struct Racing { actions: Vec<Action>, stale: usize }
+    impl RoutineTransport for Racing {
+        async fn read(&mut self, _:Uuid) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+            Ok(serde_json::json!({"state":{"revision":self.actions.len(),"epoch":1,"source_sequences":{"wire:owner":4},"items":{"ov-1":{"run":"r","pin":"p"}}},"configuration":{"pin":"current"}}))
+        }
+        async fn write(&mut self, _:Uuid, action:&Action) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+            self.actions.push(action.clone());
+            Ok(if self.actions.len() <= self.stale { serde_json::json!({"receipt":{"result":{"Err":"Stale"}}}) } else { serde_json::json!({"receipt":{"result":{"Ok":null}}}) })
+        }
+    }
+    #[tokio::test]
+    async fn queue_resolves_and_retries_stale_at_most_three_times() {
+        let ws="00000000-0000-0000-0000-000000000001";
+        let crate::Command::Workflow(cmd)=crate::Cli::try_parse_from(["farcooler","workflow","queue",ws,"ov-1"]).unwrap().command else { panic!() };
+        for stale in [2, 5] {
+            let mut racing=Racing { stale, ..Default::default() };
+            let reply=run_routine(&mut racing,Uuid::parse_str(ws).unwrap(),&cmd).await.unwrap();
+            assert_eq!(racing.actions.len(), if stale==2 {3} else {4});
+            assert_eq!(reply.pointer("/receipt/result/Err").is_some(),stale==5);
+            let mut ids=std::collections::HashSet::new();
+            for (n,action) in racing.actions.iter().enumerate() {
+                let Action::Queue { mutation, item, run, pin }=action else { panic!() };
+                assert_eq!((item.as_str(),run.as_str(),pin.as_str()),("ov-1","r","p"));
+                assert_eq!((mutation.revision,mutation.epoch,mutation.sequence),(n as u64,1,5));
+                assert!(ids.insert(&mutation.id));
+            }
+        }
+        for verb in ["approve","review"] { assert!(crate::Cli::try_parse_from(["farcooler","workflow",verb,ws,"ov-1"]).is_err()); }
     }
 }
