@@ -159,10 +159,6 @@ public struct NeedsYouItem: Hashable, Sendable, Decodable, Identifiable {
     /// The subject's other, less urgent signals. Informational: an item with
     /// `also` is still one item, and counts once.
     public var also: [NeedsYouKind]
-    /// Whether it adds to a count or breaks the all-clear. An FYI (a member
-    /// kept a ruling, ov-756) is read and never acted on, so it is a row in
-    /// the list and nothing more.
-    public var isCounted: Bool { NeedsYou.aggregate([runner: [self]]).rows.first?.counted ?? false }
     /// Where it sorts: smaller first. `Terminal.rank`'s scale, a tier per kind
     /// and then the oldest first, and a duration rather than a clock reading,
     /// which is what lets two runners' items be compared at all.
@@ -293,58 +289,10 @@ public enum NeedsYou {
     /// `farcooler_core::feed`'s.
     static let tierSpan: UInt32 = 100_000_000
 
-    /// Every runner's items in one list: by rank, then by runner.
-    ///
-    /// Rank, not `since`, because a rank is a duration measured on its own
-    /// runner and a `since` is a reading of that runner's clock: a build box
-    /// whose clock runs two minutes slow would otherwise put its newest ask
-    /// ahead of an older one on the studio. The runner name breaks ties so the
-    /// order doesn't shuffle between reads. A kind this build doesn't know
-    /// sorts after every kind it does, whatever its rank.
-    ///
-    /// Each item comes back with its `runner` set to its key here.
-    ///
-    /// A pull request that wants a review is the GitHub login's, not a
-    /// runner's: two runners signed in as one login list the same one under
-    /// the same id (`pr-review:<hash of its URL>`), and it is one thing to do.
-    /// So it appears once, from the runner that has waited longest (the lowest
-    /// rank), and the other runner's copy is dropped (ov-315).
-    public static func merge(_ runners: [String: [NeedsYouItem]]) -> [NeedsYouItem] {
-        aggregate(runners).rows.compactMap { row in
-            guard var item = runners[row.key.runner_id]?.first(where: { $0.itemID == row.key.item_id }) else { return nil }
-            item.runner = row.key.runner_id
-            return item
-        }
-    }
-
     /// What an older runner's section says in place of what it can't send.
     public static func olderRunnerNote(runner: String) -> String {
         "Update Far Cooler on \(runner) to see decisions and asks here."
     }
-}
-
-extension Collection where Element == NeedsYouItem {
-    /// How many items are counted under `workspaceID`.
-    ///
-    /// Items, not signals: an ask with a decision in its `also` is one thing
-    /// to act on and counts once. The badge on a workspace's row is this
-    /// number, and the Needs You total is `count`.
-    ///
-    /// A workspace id is a runner's uuid, so this needs no runner to tell two
-    /// workspaces apart.
-    public func count(in workspaceID: String) -> Int {
-        Int(NeedsYou.aggregate(Array(self)).workspace_counts.filter { $0.id == workspaceID }.reduce(0) { $0 + $1.count })
-    }
-
-    /// How many items with no workspace belong to `repositoryID`: its
-    /// Unclaimed group's count.
-    public func unclaimedCount(inRepository repositoryID: String) -> Int {
-        Int(NeedsYou.aggregate(Array(self)).unclaimed_counts.filter { $0.id == repositoryID }.reduce(0) { $0 + $1.count })
-    }
-
-    /// How many items count toward a total, a badge or the all-clear: every
-    /// one but an FYI, which is read and never acted on (ov-756).
-    public var countedTotal: Int { Int(NeedsYou.aggregate(Array(self)).counted_total) }
 }
 
 // MARK: - Whose an item is
@@ -378,7 +326,7 @@ public struct NeedsYouConcern: Hashable, Sendable, Codable {
 
 extension NeedsYouItem {
     /// Whether it is someone else's: filed under Everyone Else.
-    public var isOthers: Bool { NeedsYou.aggregate([runner: [self]]).rows.first?.group == "others" }
+    public var isOthers: Bool { concern.map { !$0.yours } ?? false }
 
     /// Whose an Everyone Else row says it is: a member's name, else "Owner" for the
     /// runner's owner. Nil for the reader's own and nobody's, which say nothing.
@@ -406,14 +354,7 @@ extension NeedsYou {
     public static let yoursTitle = "Yours"
     public static let othersTitle = "Everyone Else"
 
-    /// `merged` split into the reader's own (and nobody's) and everyone
-    /// else's, in the order it came.
-    public static func grouped(_ merged: [NeedsYouItem]) -> Groups {
-        let view = aggregate(merged)
-        let yours = view.yours.compactMap { key in merged.first { $0.runner == key.runner_id && $0.itemID == key.item_id } }
-        let others = view.others.compactMap { key in merged.first { $0.runner == key.runner_id && $0.itemID == key.item_id } }
-        return Groups(yours: yours, others: others, isSplit: view.split)
-    }
+
 }
 
 // MARK: - Older runners

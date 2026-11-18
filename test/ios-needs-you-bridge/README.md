@@ -10,4 +10,4 @@ swiftc -module-cache-path /private/tmp/needs-you-module-cache \
 /private/tmp/needs-you-bridge-test
 ```
 
-This runs the watch and extension adapter sources with the same forced static symbol link as their generated targets. It checks a populated list, another person's ask and duplicate-ID recovery. Target builds must also be checked for the symbol because this host executable does not run on a watch or extension.
+This runs the phone adapter sources with the static Rust client. The watch and extensions compile the data types without the adapter or Rust client. It checks a populated list, another person's ask and duplicate-ID recovery.

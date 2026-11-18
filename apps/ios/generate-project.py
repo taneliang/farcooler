@@ -1034,8 +1034,6 @@ WATCH_AGENTKIT_SOURCES = [
     "FleetSnapshot.swift",
     # The items `FleetSnapshot.needsYou` holds, which the watch lists first.
     "NeedsYou.swift",
-    "NeedsYouAggregate.swift",
-    "PlanViewPresenter.swift",
     # Whose each of them is for, and the question before answering for
     # someone else (ov-739): the row's label and the confirm.
     "NeedsYouWhose.swift",
@@ -1122,8 +1120,6 @@ WATCH_WIDGET_AGENTKIT_SOURCES = [
     "FleetSnapshot.swift",
     # The items `FleetSnapshot.needsYou` holds, which the complication counts.
     "NeedsYou.swift",
-    "NeedsYouAggregate.swift",
-    "PlanViewPresenter.swift",
     "WireTypes.swift",
     "SnapshotStore.swift",
     # The complication asks the relay itself, as the phone's widget does
@@ -1335,13 +1331,13 @@ KEYS = [
     # "build that target first". Without the dependency the app can be built
     # against a stale extension, or none at all, and the only symptom is a Live
     # Activity that never appears.
-    "activityTarget", "activityProduct", "activityGroup", "activitySourcesPhase", "activityFrameworksPhase",
+    "activityTarget", "activityProduct", "activityGroup", "activitySourcesPhase",
     "activityConfigList", "activityDebug", "activityRelease", "embedPhase",
     "activityDependency", "activityProxy",
     # The notification service extension: the same nine objects the activity
     # extension needs, for the same reasons. It is a second .appex embedded in
     # the same Embed Foundation Extensions phase.
-    "notifyTarget", "notifyProduct", "notifyGroup", "notifySourcesPhase", "notifyFrameworksPhase",
+    "notifyTarget", "notifyProduct", "notifyGroup", "notifySourcesPhase",
     "notifyConfigList", "notifyDebug", "notifyRelease",
     "notifyDependency", "notifyProxy",
     # The watchOS app: the same nine objects again, but `watchEmbedPhase` is a
@@ -1351,7 +1347,7 @@ KEYS = [
     # 13. Putting the watch app in the extensions' phase builds perfectly and
     # then fails at install or at launch, which is why it gets its own object
     # here rather than sharing one.
-    "watchTarget", "watchProduct", "watchGroup", "watchSourcesPhase", "watchFrameworksPhase",
+    "watchTarget", "watchProduct", "watchGroup", "watchSourcesPhase",
     "watchConfigList", "watchDebug", "watchRelease", "watchEmbedPhase",
     "watchDependency", "watchProxy",
     # The watch's own resources phase, carrying the asset catalog. A watch app
@@ -1369,7 +1365,7 @@ KEYS = [
     # watch app has to be told to build this before embedding it, or it embeds
     # whatever was there last.
     "watchWidgetTarget", "watchWidgetProduct", "watchWidgetGroup",
-    "watchWidgetSourcesPhase", "watchWidgetFrameworksPhase", "watchWidgetConfigList", "watchWidgetDebug",
+    "watchWidgetSourcesPhase", "watchWidgetConfigList", "watchWidgetDebug",
     "watchWidgetRelease", "watchWidgetEmbedPhase", "watchWidgetDependency",
     "watchWidgetProxy",
     # Real-device interaction regressions. The target depends on the app but is
@@ -1415,8 +1411,6 @@ activity_build_ids = {
         # The items `FleetSnapshot.needsYou` holds. Every target that compiles
         # `FleetSnapshot.swift` compiles this beside it; it's plain Foundation.
         "NeedsYou.swift",
-        "NeedsYouAggregate.swift",
-        "PlanViewPresenter.swift",
         "WireTypes.swift",
         # Whose an agent's ask is, so a card leaves its buttons off for
         # someone else's (ov-739). `GlancePermissions.swift` reads it.
@@ -1458,7 +1452,7 @@ activity_build_ids = {
 notify_build_ids = {
     name: oid("notify-build/" + name)
     for name in NOTIFY_SOURCES
-    + ["FleetSnapshot.swift", "NeedsYou.swift", "NeedsYouAggregate.swift", "PlanViewPresenter.swift", "WireTypes.swift", "SnapshotStore.swift", "TaskNotifications.swift"]
+    + ["FleetSnapshot.swift", "NeedsYou.swift", "WireTypes.swift", "SnapshotStore.swift", "TaskNotifications.swift"]
 }
 
 # A fourth set, on exactly the reasoning above. `FleetSnapshot.swift` and
@@ -1608,11 +1602,6 @@ def build_files():
             f"\t\t{build_ids[name]} /* {name} in Frameworks */ = {{isa = PBXBuildFile; "
             f"fileRef = {ids[name]}; }};"
         )
-    for target in ("activity", "notify", "watch", "watchWidget"):
-        lines.append(
-            f"\t\t{oid(target + '-client-build')} /* client in Frameworks */ = "
-            f"{{isa = PBXBuildFile; fileRef = {ids['farcooler_client.xcframework']}; }};"
-        )
     for name in FONTS + [WORKFLOW_FIXTURE]:
         lines.append(
             f"\t\t{build_ids[name]} /* {name} in Resources */ = {{isa = PBXBuildFile; "
@@ -1686,10 +1675,6 @@ resource_list = "\n".join(
     f"\t\t\t\t{build_ids[n]} /* {n} in Resources */," for n in FONTS + [ASSET_CATALOG, WORKFLOW_FIXTURE]
 )
 source_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in SOURCES)
-extra_framework_phases = "\n".join(
-    f"\t\t{P[target + 'FrameworksPhase']} = {{isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = ({oid(target + '-client-build')}, ); runOnlyForDeploymentPostprocessing = 0; }};"
-    for target in ("activity", "notify", "watch", "watchWidget")
-)
 framework_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in FRAMEWORKS)
 font_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in FONTS)
 ceremony_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in CEREMONY_SOURCES)
@@ -1849,7 +1834,7 @@ TARGET_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
 
 # The widget extension's settings, deliberately NOT sharing TARGET_COMMON.
 #
-# It links the client presenter, without the phone target’s headers. What it must share is
+# It links no Rust core. What it must share is
 # the version pair: an extension whose CFBundleVersion disagrees with the app it
 # is embedded in is refused at INSTALL time, not at build time, so the mismatch
 # only ever shows up on a device.
@@ -1883,8 +1868,7 @@ TARGET_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
 # CODE_SIGN_ENTITLEMENTS: an extension that requests no entitlements gets none,
 # so the App Group grant has to be asked for here too. The app's entitlement
 # does not cover the .appex inside it.
-ACTIVITY_COMMON = f"""\t\t\t\tOTHER_LDFLAGS = "$(inherited) -lc++ -Wl,-u,_farcooler_client_plan_view";
-\t\t\t\tMARKETING_VERSION = {version("marketing")};
+ACTIVITY_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
 \t\t\t\tCURRENT_PROJECT_VERSION = {version("build")};
 \t\t\t\tFARCOOLER_APP_NAME = "{version("app-name-short")}";
 \t\t\t\tFARCOOLER_APP_GROUP = {APP_GROUP};
@@ -1908,8 +1892,7 @@ ACTIVITY_COMMON = f"""\t\t\t\tOTHER_LDFLAGS = "$(inherited) -lc++ -Wl,-u,_farcoo
 # FARCOOLER_APP_GROUP are all required for exactly the reasons written there.
 # What is NOT here is FARCOOLER_URL_SCHEME: this extension draws nothing and
 # has no tap target to deep-link from.
-NOTIFY_COMMON = f"""\t\t\t\tOTHER_LDFLAGS = "$(inherited) -lc++ -Wl,-u,_farcooler_client_plan_view";
-\t\t\t\tMARKETING_VERSION = {version("marketing")};
+NOTIFY_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
 \t\t\t\tCURRENT_PROJECT_VERSION = {version("build")};
 \t\t\t\tFARCOOLER_APP_NAME = "{version("app-name-short")}";
 \t\t\t\tFARCOOLER_APP_GROUP = {APP_GROUP};
@@ -1981,8 +1964,7 @@ NOTIFY_COMMON = f"""\t\t\t\tOTHER_LDFLAGS = "$(inherited) -lc++ -Wl,-u,_farcoole
 # naming it. Without this file `FileManager.containerURL(for…)` returns nil on a
 # signed build, `SnapshotStore.read()` answers "nothing known", and the watch is
 # permanently empty with nothing anywhere saying why.
-WATCH_COMMON = f"""\t\t\t\tOTHER_LDFLAGS = "$(inherited) -lc++ -Wl,-u,_farcooler_client_plan_view";
-\t\t\t\tMARKETING_VERSION = {version("marketing")};
+WATCH_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
 \t\t\t\tCURRENT_PROJECT_VERSION = {version("build")};
 \t\t\t\tFARCOOLER_APP_NAME = "{version("app-name-short")}";
 \t\t\t\tFARCOOLER_APP_GROUP = {APP_GROUP};
@@ -2053,8 +2035,7 @@ WATCH_COMMON = f"""\t\t\t\tOTHER_LDFLAGS = "$(inherited) -lc++ -Wl,-u,_farcooler
 # CODE_SIGN_ENTITLEMENTS: an extension that requests no entitlements gets none.
 # The watch app's App Group grant does not cover the .appex inside it, and
 # naming a group is not being granted one.
-WATCH_WIDGET_COMMON = f"""\t\t\t\tOTHER_LDFLAGS = "$(inherited) -lc++ -Wl,-u,_farcooler_client_plan_view";
-\t\t\t\tMARKETING_VERSION = {version("marketing")};
+WATCH_WIDGET_COMMON = f"""\t\t\t\tMARKETING_VERSION = {version("marketing")};
 \t\t\t\tCURRENT_PROJECT_VERSION = {version("build")};
 \t\t\t\tFARCOOLER_APP_NAME = "{version("app-name-short")}";
 \t\t\t\tFARCOOLER_APP_GROUP = {APP_GROUP};
@@ -2114,7 +2095,6 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tfiles = ();
 \t\t\trunOnlyForDeploymentPostprocessing = 0;
 \t\t}};
-{extra_framework_phases}
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -2260,7 +2240,6 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tbuildConfigurationList = {P['activityConfigList']};
 \t\t\tbuildPhases = (
 \t\t\t\t{P['activitySourcesPhase']},
-\t\t\t\t{P['activityFrameworksPhase']},
 \t\t\t);
 \t\t\tbuildRules = ();
 \t\t\tdependencies = ();
@@ -2274,7 +2253,6 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tbuildConfigurationList = {P['notifyConfigList']};
 \t\t\tbuildPhases = (
 \t\t\t\t{P['notifySourcesPhase']},
-\t\t\t\t{P['notifyFrameworksPhase']},
 \t\t\t);
 \t\t\tbuildRules = ();
 \t\t\tdependencies = ();
@@ -2288,7 +2266,6 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tbuildConfigurationList = {P['watchConfigList']};
 \t\t\tbuildPhases = (
 \t\t\t\t{P['watchSourcesPhase']},
-\t\t\t\t{P['watchFrameworksPhase']},
 \t\t\t\t{P['watchResourcesPhase']},
 \t\t\t\t{P['watchWidgetEmbedPhase']},
 \t\t\t);
@@ -2306,7 +2283,6 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\tbuildConfigurationList = {P['watchWidgetConfigList']};
 \t\t\tbuildPhases = (
 \t\t\t\t{P['watchWidgetSourcesPhase']},
-\t\t\t\t{P['watchWidgetFrameworksPhase']},
 \t\t\t);
 \t\t\tbuildRules = ();
 \t\t\tdependencies = ();
