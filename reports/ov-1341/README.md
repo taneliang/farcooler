@@ -16,6 +16,10 @@ self-tests or the separate CI baseline-growth check. The builder brief is bounde
 to 4096 bytes, so exceptionally long output may be truncated; the full process
 log remains in the gate receipt.
 
-Measured in this worktree with `/usr/bin/time -p scripts/lint-gate.sh`:
-32.90 seconds elapsed (all scans passed). A synthetic failing lint also returned
-nonzero, printed its diagnostic, and did not prevent a later lint from running.
+The lint check pins HOME and PATH for the runner, matching the landing check.
+Measured with `/usr/bin/time -p /usr/bin/env -i HOME=/Users/e-liang
+PATH=/opt/homebrew/bin:/Users/e-liang/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin
+/bin/sh scripts/lint-gate.sh`: 10.80 seconds elapsed, all scans passed. Under
+the same cleared environment, a synthetic failing lint returned nonzero and
+printed its diagnostic. The workflow reducer test verifies that a rejected check
+passes its brief to the next build.
