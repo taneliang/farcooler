@@ -9,6 +9,7 @@
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
+        <activity android:name=".ui.WorkflowFixtureActivity" android:exported="true" />
         <!--
             §03's matrix. See `ui/GlanceMatrixActivity.kt` for what it is for and
             how to launch it.

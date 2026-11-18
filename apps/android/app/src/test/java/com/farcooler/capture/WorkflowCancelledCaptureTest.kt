@@ -40,5 +40,6 @@ class WorkflowCancelledCaptureTest {
     @Test fun `a cancelled run says why, narrow`() = shoot("cancelled", false, "workflow-cancelled-narrow")
     /** A run that waits on the viewer: one sentence and its button, above the steps (ov-1060). */
     @Test fun `an approval is one block with its button, narrow`() = shoot("approval", false, "workflow-approval-narrow")
+    @Test fun `an uncertain run with evidence, narrow`() = shoot("uncertain", false, "workflow-uncertain-narrow")
     @Test fun `a failed run with Details open, narrow`() = shoot("failed", true, "workflow-failed-details-narrow")
 }
