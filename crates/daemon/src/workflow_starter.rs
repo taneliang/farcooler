@@ -293,25 +293,12 @@ pub fn repin_definition(definition: &farcooler_workflow::Definition, before: &Co
     found.then_some(next)
 }
 
-fn native_files(config: &CodingConfig) -> [Option<&LaunchFile>; 3] {
+fn pinned_digests(config: &CodingConfig) -> [Option<&str>; 3] {
     match &config.harness {
         CodingHarness::Native { settings, project_hooks, codex_hooks, .. } =>
-            [settings.as_ref(), project_hooks.as_ref(), codex_hooks.as_ref()],
+            [settings, project_hooks, codex_hooks].map(|file| file.as_ref().map(|f| f.digest.as_str())),
         CodingHarness::Command(_) => [None; 3],
     }
-}
-
-fn pinned_digests(config: &CodingConfig) -> [Option<&str>; 3] {
-    native_files(config).map(|file| file.map(|f| f.digest.as_str()))
-}
-
-/// A publication refreshed pinned launch files. Ordinary definition or command edits keep the existing run pins.
-pub(crate) fn changes_file_pins(before: &CodingConfig, after: &CodingConfig) -> bool {
-    fn local_config(config: &CodingConfig) -> Option<(&Path, &str)> {
-        config.landing.as_ref().filter(|landing| landing_is_local(landing))
-            .map(|landing| (landing.repository.as_path(), landing.config_digest.as_str()))
-    }
-    native_files(before) != native_files(after) || local_config(before) != local_config(after)
 }
 
 /// The checkout a `.git` directory belongs to, when it is a main checkout's own directory.

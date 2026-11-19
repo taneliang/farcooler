@@ -157,12 +157,11 @@ impl Runtime {
         Ok(bundle.adapter.map(|AdapterConfiguration::Coding(config)| config))
     }
     pub(super) fn pending_repin(&self, workspace: &str, item: &Item, effect: &Effect) -> Result<Option<Command>> {
-        use crate::workflow_starter::{changes_file_pins, engine_repinned};
+        use crate::workflow_starter::engine_repinned;
 
-        let (true, Some(old), EffectKind::Execute(_)) = (self.service_mode, &self.coding, &effect.kind) else { return Ok(None) };
+        if !self.service_mode || !matches!(effect.kind, EffectKind::Execute(_)) { return Ok(None); }
         let Some(current) = self.store.workflow_configuration(workspace)? else { return Ok(None) };
-        let Some(AdapterConfiguration::Coding(new)) = &current.adapter else { return Ok(None) };
-        if current.pin == item.policy_pin || !changes_file_pins(old, new) { return Ok(None); }
+        if current.pin == item.policy_pin { return Ok(None); }
         let previous = self.store.workflow_bundle(&item.policy_pin)?.ok_or(Error::Refused("missing item bundle"))?;
         // Use the same app-owned files as publication admission, but require exact
         // equality for every other setting, including routes, approvals and notifications.

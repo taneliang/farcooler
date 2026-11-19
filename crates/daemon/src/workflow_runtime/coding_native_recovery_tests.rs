@@ -159,8 +159,13 @@ async fn ov1379_only_an_engine_hooks_repin_carries_the_pending_build() {
     use farcooler_protocol::{workflow_commands::{Action, Mutation}, workflow_config::AdapterConfiguration};
     use farcooler_store::workflow_publication::configuration_pin;
 
-    for (app_owned, changed_definition) in [(true, false), (true, true), (false, false)] {
-        let carries = app_owned && !changed_definition;
+    for (app_owned, repin_files, changed_definition) in [
+        (true, true, false),  // Engine hooks only.
+        (true, true, true),   // Engine hooks and a definition change.
+        (false, true, false), // Owner settings only.
+        (true, false, true),  // Definition only, with the old hooks still valid.
+    ] {
+        let carries = app_owned && repin_files && !changed_definition;
         let (dir, configured, _fake) = tests::native("pass").await;
         let svc = crate::service::Service::open_in(dir.path().join("state")).await.unwrap();
         let repo_root = svc.store.create_repository_root(svc.host_id, dir.path().to_str().unwrap(), 0).unwrap();
@@ -201,8 +206,13 @@ async fn ov1379_only_an_engine_hooks_repin_carries_the_pending_build() {
             edited.push(b'\n');
             std::fs::write(&old_file, edited).unwrap();
         }
-        let next = repin(&svc, &config, Repin::Everything);
-        let mut next_definition = repin_definition(&definition, &config, &next).unwrap();
+        let (next, mut next_definition) = if repin_files {
+            let next = repin(&svc, &config, Repin::Everything);
+            let next_definition = repin_definition(&definition, &config, &next).unwrap();
+            (next, next_definition)
+        } else {
+            (config, definition)
+        };
         if changed_definition { next_definition.send_backs = Some(1); }
         let adapter = AdapterConfiguration::Coding(next);
         let next_pin = configuration_pin(&next_definition, Some(&adapter));
@@ -216,10 +226,11 @@ async fn ov1379_only_an_engine_hooks_repin_carries_the_pending_build() {
         let state = finish(&mut runtime, &workspace).await;
         let item = &state.items["one"];
         if !carries {
-            assert_eq!(item.phase, Phase::Failed);
+            assert_eq!(item.phase, Phase::Failed, "{item:?}");
             assert_eq!(item.policy_pin, old_pin);
             assert!(item.failure.as_deref().is_some_and(|s| s.contains("Carry")), "{item:?}");
             assert!(!dir.path().join("started").exists());
+            assert!(!tree.join("result.txt").exists());
         } else {
             assert_eq!(item.phase, Phase::Done, "{item:?}");
             assert_eq!(item.policy_pin, next_pin);

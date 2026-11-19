@@ -157,13 +157,10 @@ async fn workflow_service_ordinary_socket_config_pins_rework_restart_and_offline
         accepted(&call(&mut link,workspace,Action::Enqueue {mutation:mutation("e",0,1),item:"a".into(),pin:pin.clone()}).await);
         let snapshot=get(&mut link,workspace).await;
         assert_eq!(snapshot["state"]["items"]["a"]["phase"],"WaitingApproval");
-        let mut other=config.clone(); other.checks[0].environment.insert("MODE".into(),"check-fail".into());
-        let revision=snapshot["state"]["revision"].as_u64().unwrap();
-        accepted(&call(&mut link,workspace,Action::Publish { reason:None, notifications:None,mutation:mutation("b",revision,2),expected_pin:Some(pin.clone()),definition:other.definition().unwrap(),adapter:Some(Box::new(AdapterConfiguration::Coding(other)))}).await);
         drop(link);host.close().await;
         let host=Host::open(dir.path()).await;let mut link=host.connect().await;
         assert_eq!(call(&mut link,workspace,publish.clone()).await,receipt);
-        let mut sequence=2; let mut approvals=0;
+        let mut sequence=1; let mut approvals=0;
         let mut link = Some(link);
         common::wait_until(tokio::time::Instant::now() + std::time::Duration::from_secs(60),
             std::time::Duration::from_millis(10), async || {
@@ -205,6 +202,8 @@ async fn workflow_service_ordinary_socket_config_pins_rework_restart_and_offline
         assert!(approvals>0); if gates { assert!(approvals>=definition.stages.len()); }
         let effects=host.service.store.workflow_outbox(&workspace.to_string()).unwrap();
         assert!(effects.iter().all(|e| e.effect.policy_pin==pin));
+        let mut other=config.clone(); other.checks[0].environment.insert("MODE".into(),"check-fail".into());
+        accepted(&call(&mut link,workspace,Action::Publish { reason:None, notifications:None,mutation:mutation("b",state.revision,sequence+1),expected_pin:Some(pin.clone()),definition:other.definition().unwrap(),adapter:Some(Box::new(AdapterConfiguration::Coding(other)))}).await);
         assert_eq!(call(&mut link,workspace,publish).await,receipt,"committed retry survives changed ref and current B");
         drop(link);host.close().await;
     }
