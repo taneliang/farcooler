@@ -307,7 +307,7 @@ async fn a_native_gate_leaves_other_panes_and_reused_ttys_alone() {
 /// when fish handles SIGCHLD. Widen the gap between signals to make the gate's race deterministic.
 #[tokio::test]
 async fn a_fish_builder_survives_a_gate_with_delayed_signals() {
-    use crate::service::shell_quote;
+    use farcooler_core::shell::shell_quote;
     use farcooler_tmux::PaneLife;
 
     let Some(fish) = farcooler_core::programs::find("fish") else {

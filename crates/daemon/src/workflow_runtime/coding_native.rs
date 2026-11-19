@@ -183,13 +183,13 @@ fn gone(pid: i32) -> bool {
 fn native_launch(command: &CodingCommand) -> String {
     let mut launch = String::from("env -i");
     for (key, value) in &command.environment {
-        launch.push(' '); launch.push_str(&crate::service::shell_quote(&format!("{key}={value}")));
+        launch.push(' '); launch.push_str(&farcooler_core::shell::shell_quote(&format!("{key}={value}")));
     }
-    for arg in &command.argv { launch.push(' '); launch.push_str(&crate::service::shell_quote(arg)); }
+    for arg in &command.argv { launch.push(' '); launch.push_str(&farcooler_core::shell::shell_quote(arg)); }
     // Retained PTY stdin, not null: read gates launch until tags and owner are durable.
     // tmux automatically continues a stopped pane leader. Keep this waiting shell as the leader,
     // and pause only its agent child and descendants; the shell runs no work of its own.
-    format!("exec /bin/sh -c {}", crate::service::shell_quote(&format!("read -r workflow_start; {launch}; status=$?; exit \"$status\"")))
+    format!("exec /bin/sh -c {}", farcooler_core::shell::shell_quote(&format!("read -r workflow_start; {launch}; status=$?; exit \"$status\"")))
 }
 
 impl Exec {

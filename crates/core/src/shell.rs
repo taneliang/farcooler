@@ -119,6 +119,40 @@ fn from_passwd() -> Option<String> {
     }
 }
 
+/// Wrap a value so a shell treats it as exactly one word.
+///
+/// Single quotes, because inside them a shell interprets nothing at all — no
+/// variable expansion, no globbing, no command substitution. A single quote
+/// itself is closed, escaped and reopened; so is a backslash, for fish (below).
+///
+/// This exists for paths that Far Cooler did not choose: a worktree under
+/// `~/My Projects` splits into two arguments unquoted, which takes agent mode
+/// down entirely for anyone whose directories have spaces in them.
+///
+/// **A backslash is taken out of the quotes too**, and that is for fish. A
+/// pane's command is parsed by the user's login shell (tmux's `default-shell`
+/// is pinned to it, and the payload goes to `<login shell> -ilc`), and fish
+/// is the one shell here whose single quotes are not inert: inside them `\\`
+/// is one backslash and `\'` is a quote. So `'a\\b'` reads as `a\b` to fish
+/// and `a\\b` to sh, and a backslash before a closing quote ends nothing in
+/// sh but escapes the quote in fish. Written OUTSIDE the quotes as `\\`, a
+/// backslash is one backslash to every shell there is, which is what makes
+/// this one function right under both. It mattered little while the only
+/// things quoted were paths; a prompt somebody typed can hold anything.
+pub fn shell_quote(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('\'');
+    for c in value.chars() {
+        match c {
+            '\'' => out.push_str(r"'\''"),
+            '\\' => out.push_str(r"'\\'"),
+            c => out.push(c),
+        }
+    }
+    out.push('\'');
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

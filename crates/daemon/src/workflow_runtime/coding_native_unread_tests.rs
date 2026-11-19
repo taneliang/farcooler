@@ -110,7 +110,7 @@ if [ "$PPID" = "$FC_PROBE_OWNER" ] && [ "$5" = display-message ]; then
 fi
 exec REAL_TMUX "$@"
 "#;
-        std::fs::write(&wrapper, script.replace("REAL_TMUX", &crate::service::shell_quote(tmux.to_str().unwrap()))).unwrap();
+        std::fs::write(&wrapper, script.replace("REAL_TMUX", &farcooler_core::shell::shell_quote(tmux.to_str().unwrap()))).unwrap();
         std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o700)).unwrap();
         let test = "workflow_runtime::coding_native::unread_tests::a_landing_gate_keeps_a_native_builds_pane_until_it_resumes_and_finishes";
         let output = std::process::Command::new("/bin/sh")
@@ -200,7 +200,7 @@ async fn four_native_builders_keep_their_panes_through_a_landing() {
         let mut args = args.borrow_mut();
         let agent = args.take().unwrap();
         let launch = if let Some(fish) = farcooler_core::programs::find("fish") {
-            let command = agent.iter().map(|arg| crate::service::shell_quote(arg)).collect::<Vec<_>>().join(" ");
+            let command = agent.iter().map(|arg| farcooler_core::shell::shell_quote(arg)).collect::<Vec<_>>().join(" ");
             vec![fish.to_string_lossy().into_owned(), "--no-config".into(), "-ilc".into(), command]
         } else {
             let mut launch = vec!["/bin/sh".into(), "-c".into(), "\"$@\"; status=$?; exit \"$status\"".into(), "builder".into()];
