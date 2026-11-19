@@ -1,20 +1,24 @@
-# ov-1341: lint before review
+# Main's checks before review
 
-`workflow-main-draft.json` is a proposed replacement for the Main bundle in
-`.claude/agent/reports/ov-1071/workflow-main.json`. It adds check 1 and a
-`lint` Check immediately before the existing agent `gate-0`, routing rejection
-back to build. The existing folded landing gate remains. The adapter pin has
-been recomputed for the changed checks. This is a draft based on that checked-in
-bundle: compare it with the currently published bundle before proposing it, and
-rebase the change if that bundle has moved. The owner must approve publication
-of the changed command. Publish only after this ticket's code and script are on
-the runner's landing base and the runner has been updated.
+`.claude/agent/reports/ov-1071/workflow-main.json` configures
+`scripts/daemon-layers.py` and `scripts/file-size-budget.py` after build and
+before agent review (ov-1368). `workflow-main-draft.json` also runs the lint
+gate (ov-1341) after those checks. Each Check routes a nonzero exit back to
+build with the command's diagnostic.
 
-The gate discovers every `scripts/*-lint.py`, runs the CI channel variants for
+The checked-in bundles have new adapter pins. Compare the bundle to the
+currently published definition before asking the owner to approve publication.
+Publish after the updated runner and scripts are available.
+
+The lint gate discovers every `scripts/*-lint.py`, runs the CI channel variants for
 proto, and reports each failed lint's output. It runs scans, not the lints'
 self-tests or the separate CI baseline-growth check. The builder brief is bounded
 to 4096 bytes, so exceptionally long output may be truncated; the full process
 log remains in the gate receipt.
+
+The two ov-1368 checks have 12-second timeouts and one attempt each. Five
+sequential runs of both commands in a full worktree, using their configured
+environment and the runner's PATH handling, took 4.41–9.07 seconds per pair.
 
 The lint check pins HOME and PATH for the runner, matching the landing check.
 Measured with `/usr/bin/time -p /usr/bin/env -i HOME=/Users/e-liang

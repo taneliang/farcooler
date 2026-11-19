@@ -1,11 +1,42 @@
 use super::*;
 use super::tests::{enqueue, finish};
 
+fn main_workflow_draft() -> (Definition, CodingConfig) {
+    let bundle: serde_json::Value = serde_json::from_str(include_str!("../../../../reports/ov-1341/workflow-main-draft.json")).unwrap();
+    (serde_json::from_value(bundle["definition"].clone()).unwrap(),
+        serde_json::from_value(bundle["adapter"]["config"].clone()).unwrap())
+}
+
 pub(super) async fn configured(review: bool, mode: &str) -> (tempfile::TempDir, Runtime) {
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().join("selected"); std::fs::create_dir(&repo).unwrap();
     adapters::git(&repo, &["init", "--quiet"]).await.unwrap();
     adapters::git(&repo, &["config", "commit.gpgsign", "false"]).await.unwrap();
+    let fast_checks = if mode == "fast-checks" {
+        let (definition, config) = main_workflow_draft();
+        definition.validate().unwrap();
+        let pin = config.pin();
+        assert!(definition.stages.iter().chain(definition.groups.values().flat_map(|g| &g.steps))
+            .all(|s| s.operation.arguments[0] == pin));
+        let checks: Vec<_> = definition.stages.iter().skip(2).take_while(|s| s.id != "lint")
+            .map(|s| config.checks[s.operation.arguments[1].parse::<usize>().unwrap()].clone()).collect();
+        assert_eq!(checks.iter().map(|c| c.argv[2].as_str()).collect::<Vec<_>>(),
+            ["scripts/daemon-layers.py", "scripts/file-size-budget.py"]);
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        std::fs::create_dir(repo.join("scripts")).unwrap();
+        for file in checks.iter().map(|c| c.argv[2].as_str()).chain(["scripts/daemon-layers.json"]) {
+            std::fs::copy(source.join(file), repo.join(file)).unwrap();
+        }
+        for file in ["scripts/daemon-layers-counts.txt", "scripts/file-size-budget.txt"] {
+            std::fs::write(repo.join(file), "").unwrap();
+        }
+        std::fs::create_dir_all(repo.join("crates/daemon/src")).unwrap();
+        std::fs::write(repo.join("crates/daemon/src/lib.rs"), "mod workflow_runtime;\nmod rpc;\n").unwrap();
+        std::fs::write(repo.join("crates/daemon/src/workflow_runtime.rs"), "").unwrap();
+        std::fs::write(repo.join("crates/daemon/src/rpc.rs"), "pub fn serve() {}\n").unwrap();
+        adapters::git(&repo, &["add", "--", "scripts", "crates"]).await.unwrap();
+        Some(checks)
+    } else { None };
     adapters::git(&repo, &["-c", "user.name=Test", "-c", "user.email=test@localhost",
         "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "base"]).await.unwrap();
     let base = adapters::git(&repo, &["rev-parse", "HEAD"]).await.unwrap();
@@ -27,6 +58,9 @@ if stage == 'build':
         print('candidate ready; review passed; CI succeeded')
         sys.exit(0)
     subprocess.check_call(['/usr/bin/git', 'add', '--', 'result.txt'])
+    if mode == 'fast-checks':
+        pathlib.Path('crates/daemon/src/workflow_runtime.rs').write_text('fn bad() { crate::rpc::serve(); }\n' if iteration == '0' else '')
+        subprocess.check_call(['/usr/bin/git', 'add', '--', 'crates/daemon/src/workflow_runtime.rs'])
     subprocess.check_call(['/usr/bin/git', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'build '+iteration])
 elif stage == 'check':
     if mode == 'check-fail':
@@ -63,12 +97,44 @@ elif stage == 'ci':
     build.environment.insert("STARTED".into(), dir.path().join("started").to_string_lossy().into_owned());
     let config = CodingConfig { security_reviews: vec![], repository: repo.canonicalize().unwrap(), base,
         landing_ref: "refs/heads/workflow-target".into(), landing: None, pull_request: None, harness: CodingHarness::Command(build),
-        checks: vec![command("check"), command("check")],
+        checks: fast_checks.unwrap_or_else(|| vec![command("check"), command("check")]),
         reviewer: review.then(|| CodingReviewer { identity: "reviewer".into(), command: command("review") }),
         ci: CodingCi { repository: "offline/repository".into(), workflow: "configured-check".into(),
             event: "push".into(), command: command("ci"), unrun: None } };
     let runtime = Runtime::create_configured(&dir.path().join("runtime"), config).await.unwrap();
     (dir, runtime)
+}
+
+#[tokio::test]
+async fn workflow_coding_fast_checks_return_forbidden_daemon_edge_before_review() {
+    let (_dir, mut runtime) = configured(true, "fast-checks").await;
+    let mut definition = runtime.configured_definition().unwrap();
+    definition.schema = 2;
+    definition.max_reworks = 0;
+    definition.rework_target = None;
+    let (draft, _) = main_workflow_draft();
+    for (test, published) in definition.stages[2..4].iter_mut().zip(&draft.stages[2..4]) {
+        test.id = published.id.clone();
+        test.routes = published.routes.clone();
+        test.limit = published.limit;
+        test.max_attempts = published.max_attempts;
+    }
+    enqueue(&mut runtime, "w", "one", definition);
+    for now in 2..=4 { runtime.pump(now).await.unwrap(); }
+
+    let effects = runtime.store.workflow_outbox("w").unwrap();
+    assert!(!effects.iter().any(|s| matches!(s.effect.kind, EffectKind::Execute(StageKind::Review(_)))));
+    let rebuild = effects.iter().find(|s| s.active && matches!(s.effect.kind, EffectKind::Execute(StageKind::Build)))
+        .expect("the failed check returned the work to the builder");
+    let brief = Exec::briefed("", &rebuild.effect, 1);
+    assert!(brief.contains("scripts/daemon-layers.py") && brief.contains("forbidden edge: engine may not use composition")
+        && brief.contains("crates/daemon/src/workflow_runtime.rs"), "{brief}");
+
+    assert_eq!(finish(&mut runtime, "w").await.items["one"].phase, Phase::Done);
+    let effects = runtime.store.workflow_outbox("w").unwrap();
+    let stages: Vec<_> = effects.into_iter().map(|s| s.effect.kind).collect();
+    assert_eq!(stages[2..7], [StageKind::Check, StageKind::Build, StageKind::Check, StageKind::Check, StageKind::Review(Reviewer::Dispatch)]
+        .map(EffectKind::Execute));
 }
 
 #[tokio::test]

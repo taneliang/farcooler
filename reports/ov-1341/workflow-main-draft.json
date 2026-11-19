@@ -11,7 +11,7 @@
         "operation": {
           "adapter_version": "coding-worktree/v1",
           "arguments": [
-            "wf1:973224c33e28f95103a3af7e3fb358ac70ab8644ca79ebda943202129c278f7b",
+            "wf1:f24d221a7627302be6dfb4f680c7f95294ea12f37d034530cc2bc347cddac80d",
             ""
           ],
           "environment": {}
@@ -25,11 +25,51 @@
         "operation": {
           "adapter_version": "coding-harness/v1",
           "arguments": [
-            "wf1:973224c33e28f95103a3af7e3fb358ac70ab8644ca79ebda943202129c278f7b",
+            "wf1:f24d221a7627302be6dfb4f680c7f95294ea12f37d034530cc2bc347cddac80d",
             ""
           ],
           "environment": {}
         }
+      },
+      {
+        "id": "daemon-layers",
+        "kind": "Check",
+        "progression": "Automatic",
+        "max_attempts": 1,
+        "operation": {
+          "adapter_version": "coding-check/v1",
+          "arguments": [
+            "wf1:f24d221a7627302be6dfb4f680c7f95294ea12f37d034530cc2bc347cddac80d",
+            "2"
+          ],
+          "environment": {}
+        },
+        "routes": {
+          "rejected": {
+            "Step": "build"
+          }
+        },
+        "limit": 4
+      },
+      {
+        "id": "file-size-budget",
+        "kind": "Check",
+        "progression": "Automatic",
+        "max_attempts": 1,
+        "operation": {
+          "adapter_version": "coding-check/v1",
+          "arguments": [
+            "wf1:f24d221a7627302be6dfb4f680c7f95294ea12f37d034530cc2bc347cddac80d",
+            "3"
+          ],
+          "environment": {}
+        },
+        "routes": {
+          "rejected": {
+            "Step": "build"
+          }
+        },
+        "limit": 4
       },
       {
         "id": "lint",
@@ -39,7 +79,7 @@
         "operation": {
           "adapter_version": "coding-check/v1",
           "arguments": [
-            "wf1:973224c33e28f95103a3af7e3fb358ac70ab8644ca79ebda943202129c278f7b",
+            "wf1:f24d221a7627302be6dfb4f680c7f95294ea12f37d034530cc2bc347cddac80d",
             "1"
           ],
           "environment": {}
@@ -61,7 +101,7 @@
         "operation": {
           "adapter_version": "coding-review/v1",
           "arguments": [
-            "wf1:973224c33e28f95103a3af7e3fb358ac70ab8644ca79ebda943202129c278f7b",
+            "wf1:f24d221a7627302be6dfb4f680c7f95294ea12f37d034530cc2bc347cddac80d",
             "agent",
             "{\"prompt\":\"Review it against the lane rules in /Users/e-liang/Dev/overnight/.claude/agent/reports/lanes/rules.md as well as the ticket. Every acceptance item is met and shown by a test that fails without the change. Nothing breaks the rules: no cargo fmt churn, stash, amend or `add -A`; heavy runs went through `scripts/heavy`; tests that build git repos pass under CI-like git. For UI work, judge polish from the captures in .claude/agent/reports/<ticket>/ at the narrowest width with long real content, light and dark, not just whether it works, and a UI change with no captures isn't ready. Net hand-written app lines should go down. Pass only what you'd land on main.\",\"models\":[[\"crates/workflow/**\",\"claude:opus\"],[\"crates/daemon/src/workflow_runtime/**\",\"claude:opus\"],[\"crates/daemon/src/workflow_runtime.rs\",\"claude:opus\"],[\"crates/daemon/src/workflow_*.rs\",\"claude:opus\"],[\"crates/protocol/src/workflow_*.rs\",\"claude:opus\"],[\"crates/store/src/workflow*\",\"claude:opus\"],[\"crates/daemon/src/landing_templates.rs\",\"claude:opus\"],[\"crates/daemon/src/path_routes.rs\",\"claude:opus\"],[\"crates/daemon/src/review_agent.rs\",\"claude:opus\"],[\"crates/transport/**\",\"claude:opus\"],[\"crates/fence/**\",\"claude:opus\"],[\"crates/ceremony/**\",\"claude:opus\"],[\"services/relay/**\",\"claude:opus\"],[\"crates/daemon/src/*key*\",\"claude:opus\"],[\"crates/daemon/src/*sign_in*\",\"claude:opus\"],[\"crates/daemon/src/*grant*\",\"claude:opus\"],[\"crates/daemon/src/*scope*\",\"claude:opus\"],[\"crates/daemon/src/*trust*\",\"claude:opus\"],[\"crates/daemon/src/member_*\",\"claude:opus\"],[\"crates/daemon/src/people_roles*\",\"claude:opus\"],[\"crates/daemon/src/tunnel_gate*\",\"claude:opus\"],[\"crates/cli/src/node_key*\",\"claude:opus\"]]}"
           ],
@@ -82,7 +122,7 @@
         "operation": {
           "adapter_version": "coding-route/v1",
           "arguments": [
-            "wf1:973224c33e28f95103a3af7e3fb358ac70ab8644ca79ebda943202129c278f7b",
+            "wf1:f24d221a7627302be6dfb4f680c7f95294ea12f37d034530cc2bc347cddac80d",
             "{\"default\":\"push\",\"rules\":[[\"services/site/public/**\",\"ask\"]]}"
           ],
           "environment": {}
@@ -108,7 +148,7 @@
         "operation": {
           "adapter_version": "coding-review/v1",
           "arguments": [
-            "wf1:973224c33e28f95103a3af7e3fb358ac70ab8644ca79ebda943202129c278f7b",
+            "wf1:f24d221a7627302be6dfb4f680c7f95294ea12f37d034530cc2bc347cddac80d",
             "person:owner"
           ],
           "environment": {}
@@ -133,7 +173,7 @@
         "operation": {
           "adapter_version": "coding-join/v1",
           "arguments": [
-            "wf1:973224c33e28f95103a3af7e3fb358ac70ab8644ca79ebda943202129c278f7b",
+            "wf1:f24d221a7627302be6dfb4f680c7f95294ea12f37d034530cc2bc347cddac80d",
             "landing"
           ],
           "environment": {}
@@ -160,7 +200,7 @@
             "operation": {
               "adapter_version": "coding-await-base/v1",
               "arguments": [
-                "wf1:973224c33e28f95103a3af7e3fb358ac70ab8644ca79ebda943202129c278f7b",
+                "wf1:f24d221a7627302be6dfb4f680c7f95294ea12f37d034530cc2bc347cddac80d",
                 "green",
                 "60000",
                 "10800000"
@@ -179,7 +219,7 @@
             "operation": {
               "adapter_version": "coding-fold/v1",
               "arguments": [
-                "wf1:973224c33e28f95103a3af7e3fb358ac70ab8644ca79ebda943202129c278f7b",
+                "wf1:f24d221a7627302be6dfb4f680c7f95294ea12f37d034530cc2bc347cddac80d",
                 ""
               ],
               "environment": {}
@@ -201,7 +241,7 @@
             "operation": {
               "adapter_version": "coding-gate/v1",
               "arguments": [
-                "wf1:973224c33e28f95103a3af7e3fb358ac70ab8644ca79ebda943202129c278f7b",
+                "wf1:f24d221a7627302be6dfb4f680c7f95294ea12f37d034530cc2bc347cddac80d",
                 "0"
               ],
               "environment": {}
@@ -223,7 +263,7 @@
             "operation": {
               "adapter_version": "coding-push/v1",
               "arguments": [
-                "wf1:973224c33e28f95103a3af7e3fb358ac70ab8644ca79ebda943202129c278f7b",
+                "wf1:f24d221a7627302be6dfb4f680c7f95294ea12f37d034530cc2bc347cddac80d",
                 "refs/heads/main"
               ],
               "environment": {}
@@ -243,7 +283,7 @@
             "operation": {
               "adapter_version": "coding-await-ci/v1",
               "arguments": [
-                "wf1:973224c33e28f95103a3af7e3fb358ac70ab8644ca79ebda943202129c278f7b",
+                "wf1:f24d221a7627302be6dfb4f680c7f95294ea12f37d034530cc2bc347cddac80d",
                 "taneliang/farcooler",
                 "60000",
                 "10800000",
@@ -338,6 +378,30 @@
             "PATH": "/opt/homebrew/bin:/Users/e-liang/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin"
           },
           "timeout_ms": 120000
+        },
+        {
+          "argv": [
+            "/usr/bin/env",
+            "python3",
+            "scripts/daemon-layers.py"
+          ],
+          "environment": {
+            "HOME": "/Users/e-liang",
+            "PATH": "/opt/homebrew/bin:/Users/e-liang/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+          },
+          "timeout_ms": 12000
+        },
+        {
+          "argv": [
+            "/usr/bin/env",
+            "python3",
+            "scripts/file-size-budget.py"
+          ],
+          "environment": {
+            "HOME": "/Users/e-liang",
+            "PATH": "/opt/homebrew/bin:/Users/e-liang/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+          },
+          "timeout_ms": 12000
         }
       ],
       "reviewer": null,

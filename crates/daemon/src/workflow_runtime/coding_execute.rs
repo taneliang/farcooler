@@ -741,9 +741,6 @@ impl Exec {
                 job: plain(&command.argv.join(" "), 256), first_line: plain(first, 1000), split: false,
             };
             if binding.effect.members.is_empty() {
-                if matches!(binding.effect.kind, EffectKind::Execute(StageKind::Check)) {
-                    return Ok(Outcome::RejectedWithBrief(evidence, bounded_gate_brief(&failure.job, &output)));
-                }
                 return Ok(Outcome::RejectedWithDetails(evidence, failure));
             }
             let diagnostics = gate_diagnostics(&output);
@@ -761,7 +758,7 @@ impl Exec {
                     members.push(member.item.clone());
                 }
             }
-            let brief = bounded_gate_brief(&failure.job, &diagnostics);
+            let brief = bounded_gate_brief(&format!("Landing gate failed: {}", failure.job), &diagnostics);
             Outcome::GateRejected { evidence, members, brief, failure }
         })
     }
@@ -856,6 +853,7 @@ impl Exec {
         if super::coding_verbs::is_verb(kind) { return self.reconcile_verb(binding, kind).await; }
         if matches!(kind, StageKind::Run) { return self.reconcile_run(binding).await; }
         let mut facts = Vec::new();
+        let mut check_rejection = None;
         if matches!(kind, StageKind::Provision | StageKind::Build | StageKind::Review(Reviewer::Agent)) && self.unstarted_path(binding).try_exists()? {
             let unstarted: Unstarted = serde_json::from_slice(&self.bytes(&self.unstarted_path(binding))?)?;
             if unstarted.binding != *binding { return Err(Error::Refused("foreign unstarted refusal")); }
@@ -898,9 +896,23 @@ impl Exec {
                     return Ok(Outcome::SafeFailureBecause(reason));
                 }
             }
-            // Even a dirty interrupted build can settle cancellation once this
-            // exact owned group has been reaped; it supplies no candidate success.
-            if fact.exit != Some(0) { return Ok(Outcome::SafeFailure); }
+            if fact.exit != Some(0) {
+                // A routed ticket check can reject a candidate using its settled diagnostic.
+                // Interruptions and legacy checks keep their existing retry behavior.
+                let routed_check = fact.exit.is_some() && matches!(kind, StageKind::Check)
+                    && self.state(&binding.workspace)?.is_some_and(|state| {
+                        state.items.get(&binding.effect.item)
+                            .filter(|item| item.group_of.is_none() && item.pending.as_ref() == Some(&binding.effect.id))
+                            .and_then(|item| item.definition.stages.get(item.stage))
+                            .is_some_and(|stage| stage.routes.contains_key("rejected"))
+                    });
+                if !routed_check { return Ok(Outcome::SafeFailure); }
+                let output = self.bytes(&self.process_log(binding))?;
+                let command = fact.argv.join(" ");
+                let (job, _) = cut_at(&command, 256);
+                check_rejection = Some(bounded_gate_brief(&format!("Check failed: {job}"),
+                    &String::from_utf8_lossy(&output)));
+            }
             facts.extend(raw);
         }
         let tree = self.tree(binding);
@@ -921,7 +933,7 @@ impl Exec {
                 return Ok(Outcome::SafeFailureBecause(refused.to_string())),
             other => other?,
         };
-        let mut passed = true;
+        let mut passed = check_rejection.is_none();
         match kind {
             StageKind::Provision => {
                 // An adopted branch starts at its own work (ov-968); the build brings it onto the base.
@@ -995,7 +1007,11 @@ impl Exec {
         let manifest = digest(&(binding, &candidate, &facts, passed));
         let evidence = Evidence { candidate, manifest: manifest.clone(), receipt: digest(&("coding-receipt/v1", manifest)),
             policy_pin: binding.effect.policy_pin.clone() };
-        Ok(if passed { Outcome::Passed(evidence) } else { Outcome::Rejected(evidence) })
+        Ok(match check_rejection {
+            Some(brief) => Outcome::RejectedWithBrief(evidence, brief),
+            None if passed => Outcome::Passed(evidence),
+            None => Outcome::Rejected(evidence),
+        })
     }
 }
 
@@ -1041,8 +1057,8 @@ pub(super) fn diagnostic_names(diagnostics: &str, path: &str) -> bool {
             && diagnostics[n + path.len()..].chars().next().is_none_or(|c| !path_char(c))
     })
 }
-pub(super) fn bounded_gate_brief(job: &str, diagnostics: &str) -> String {
-    let text = format!("Landing gate failed: {job}\nRepair the failing checks, run the affected tests and commit the result.\n{diagnostics}");
+pub(super) fn bounded_gate_brief(heading: &str, diagnostics: &str) -> String {
+    let text = format!("{heading}\nRepair the failing checks, run the affected tests and commit the result.\n{diagnostics}");
     let mut brief = String::new();
     for c in text.chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t')) {
         if brief.len() + c.len_utf8() > farcooler_workflow::MAX_REWORK_REASON_BYTES { break; }
