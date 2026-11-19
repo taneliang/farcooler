@@ -763,17 +763,6 @@ async fn workflow_start_reuses_a_failed_tickets_branch_with_a_new_model() {
     let failure = get["state"]["items"][key]["reason"].as_str().unwrap();
     assert!(failure.starts_with("gate-0:") && failure.contains("rejected") && failure.contains("receipt"), "{get}");
     assert_eq!(get["state"]["items"][key]["send_back_refused"], refusal);
-    let task_id = crate::wire::id_bytes(task.id);
-    let mut plan = farcooler_protocol::v1::Plan {
-        cards: vec![farcooler_protocol::v1::PlanCard { task_id: task_id.clone(), key: key.into(), ..Default::default() }],
-        lines: vec![farcooler_protocol::v1::TicketLine { task_id, ..Default::default() }],
-        ..Default::default()
-    };
-    crate::plan_run::annotate(&failed, &mut plan, &runtime.store.workflow_send_back_refusals(&failed).unwrap());
-    let run = plan.lines[0].run.as_ref().unwrap();
-    assert_eq!(run.reason.as_deref(), Some(failure));
-    assert_eq!(run.send_back_refused.as_deref(), Some(refusal));
-
     let head = adapters::git(Path::new(&tree.path), &["rev-parse", "HEAD"]).await.unwrap();
     let again = start(&failed, "restart", "claude:sonnet", true);
     let adopted = runtime.prepare_start(&board, "owner", &again).await.unwrap().unwrap();

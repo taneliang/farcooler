@@ -125,7 +125,7 @@ async fn an_agent_that_never_gives_a_verdict_fails_the_run_and_one_that_rejects_
             assert!(journal.is_file(), "{journal:?}");
             assert!(reason.starts_with("agent-review:") && reason.contains("without recording a verdict")
                 && reason.contains(journal.file_name().unwrap().to_str().unwrap()), "{reason}");
-            assert_eq!(crate::plan_run::run_of(&state, "one").unwrap().reason.as_deref(), Some(reason));
+            assert_eq!(item.failed_reason().as_deref(), Some(reason));
         }
         assert_eq!(adapters::git(&runtime.repository(), &["rev-parse", runtime.landing_ref()]).await.unwrap(),
             runtime.coding.as_ref().unwrap().base, "{mode}: nothing landed");
@@ -187,7 +187,7 @@ async fn the_verdict_command_writes_the_receipt_the_gate_reads() {
     let reason = get["state"]["items"][key]["reason"].as_str().unwrap();
     assert!(reason.starts_with("agent-review:") && reason.contains(finding)
         && reason.contains(receipt.file_name().unwrap().to_str().unwrap()), "{get}");
-    assert_eq!(crate::plan_run::run_of(&state, key).unwrap().reason.as_deref(), Some(reason));
+    assert_eq!(state.items[key].failed_reason().as_deref(), Some(reason));
     runtime.observe(&workspace, &binding.effect, rejected, false, 40).unwrap();
     let notes = runtime.store.notes_for(task.id, Some(NoteKind::Finding)).unwrap();
     assert_eq!(notes.len(), 1, "{notes:?}");

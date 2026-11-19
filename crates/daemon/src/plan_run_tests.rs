@@ -1,6 +1,7 @@
 //! What a ticket's run says on the wire: phase, stage and who it waits on.
 
-use super::run_of;
+use super::{annotate, run_of};
+use farcooler_protocol::v1 as pb;
 use farcooler_workflow::{Progression, State};
 use farcooler_workflow::{step, Command, Definition, Grant, Input, Phase, Reviewer, StageKind};
 
@@ -94,6 +95,26 @@ fn a_failed_and_an_uncertain_run_say_so_with_no_gate() {
         assert_eq!(run.stage_kind, "\"Provision\"", "still the stage it stopped on");
         assert_eq!(run.reason.is_some(), word == "Failed");
     }
+}
+
+#[test]
+fn a_failed_ticket_line_carries_the_cause_and_the_send_back_refusal() {
+    let cause = "agent-review: fix the missing check (receipt review.json)";
+    let refusal = "agent-review: reached the back-edge limit of 2 (receipt wire:owner:deny)";
+    let state = edited(|item| {
+        item.phase = Phase::Failed;
+        item.reason = Some(cause.into());
+    });
+    let task_id = bytes::Bytes::from_static(&[1; 16]);
+    let mut plan = pb::Plan {
+        cards: vec![pb::PlanCard { task_id: task_id.clone(), key: "OV-310".into(), ..Default::default() }],
+        lines: vec![pb::TicketLine { task_id, ..Default::default() }],
+        ..Default::default()
+    };
+    annotate(&state, &mut plan, &[("ov-310".into(), refusal.into())].into());
+    let run = plan.lines[0].run.as_ref().unwrap();
+    assert_eq!(run.reason.as_deref(), Some(cause));
+    assert_eq!(run.send_back_refused.as_deref(), Some(refusal));
 }
 
 #[test]
