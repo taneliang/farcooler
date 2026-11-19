@@ -1681,56 +1681,73 @@ def _self_test():
         sdk.mkdir()
         for package in re.findall(r"'((?:ndk|platforms|build-tools);[^']+)'", text):
             (sdk / package.replace(";", "/")).mkdir(parents=True, exist_ok=True)
-        env = {"PATH": str(badbin), "JAVA_HOME": jdk11, "ANDROID_HOME": str(sdk)}
-        try:
-            toolchain_preflight(["relay"], ROOT, env, "darwin", "arm64", [], [])
-            node_error = ""
-        except ValueError as e:
-            node_error = str(e)
-        expect("Intel node fails first with a fix", "Node 24 for arm64" in node_error and "nvm install" in node_error, True)
-        try:
-            toolchain_preflight(["android"], ROOT, env, "darwin", "arm64", [], [jdk11])
-            java_error = ""
-        except ValueError as e:
-            java_error = str(e)
-        expect("JDK 11 fails first with a fix", "JDK 17" in java_error and "JAVA_HOME" in java_error, True)
-        selected = toolchain_preflight(["relay", "android"], ROOT, env, "darwin", "arm64", [str(goodbin / "node")], [jdk11, jdk17, jdk21])
-        expect("native node and JDK 17 replace broken PATH tools", (selected["PATH"].split(os.pathsep)[0], selected["JAVA_HOME"], selected["ANDROID_HOME"]), (str(goodbin), jdk17, str(sdk)))
-        try:
-            toolchain_preflight(["android"], ROOT, {**env, "ANDROID_HOME": str(t / "missing")}, "darwin", "arm64", [], [jdk17, jdk21])
-            sdk_error = ""
-        except ValueError as e:
-            sdk_error = str(e)
-        expect("missing SDK fails with a fix", "ANDROID_HOME" in sdk_error, True)
-        broken = fake_jdk("broken", "17.0.9")
-        (pathlib.Path(broken) / "bin").mkdir()
-        broken_java = pathlib.Path(broken) / "bin/java"
-        broken_java.write_text("#!/bin/sh\necho 'Bad CPU type' >&2\nexit 126\n")
-        broken_java.chmod(0o755)
-        selected = toolchain_preflight(["android"], ROOT, {**env, "JAVA_HOME": broken}, "darwin", "arm64", [], [broken, jdk17, jdk21])
-        expect("unusable Java falls back to a working JDK", (selected["JAVA_HOME"], selected["CAPTURE_JDK"]), (jdk17, jdk21))
-        try:
-            toolchain_preflight(["android"], ROOT, {**env, "JAVA_HOME": jdk17}, "darwin", "arm64", [], [jdk17])
-            capture_error = ""
-        except ValueError as e:
-            capture_error = str(e)
-        expect("JDK 17 alone fails preflight with a capture install hint", "JDK 21" in capture_error and "install" in capture_error, True)
+        # These are synthetic toolchains: avoid scheduling shell processes under load,
+        # while still exercising the real executable-output and version checks.
         from unittest import mock
-        with mock.patch.dict(os.environ, {"JAVA_HOME": jdk17, "ANDROID_HOME": str(sdk)}), \
-             mock.patch.object(sys.modules[__name__], "jdk_candidates", return_value=[jdk17]), \
-             mock.patch.object(sys.modules[__name__], "jobs_for", return_value={"android": []}), \
-             mock.patch.object(sys.modules[__name__], "run_jobs") as jobs, \
-             mock.patch.object(sys.modules[__name__], "print_summary"):
-            status = main(["--worktree", str(ROOT), "--base", "HEAD", "--only", "android"])
-            expect("JDK 17-only gate fails before jobs run", (status, jobs.called), (1, False))
-        incomplete = t / "incomplete-sdk"
-        incomplete.mkdir()
-        try:
-            toolchain_preflight(["android"], ROOT, {**env, "ANDROID_HOME": str(incomplete)}, "darwin", "arm64", [], [jdk17, jdk21])
-            package_error = ""
-        except ValueError as e:
-            package_error = str(e)
-        expect("missing SDK versions name the install command", "sdkmanager" in package_error and "platforms;" in package_error, True)
+        real_run = subprocess.run
+        def fake_tool_run(args, *a, **kw):
+            executable = pathlib.Path(args[0])
+            if executable in (bin11 / "java", bin17 / "java", bin21 / "java"):
+                version = {bin11: "11.0.12", bin17: "17.0.9", bin21: "21.0.1"}[executable.parent]
+                return subprocess.CompletedProcess(args, 0, "", f'openjdk version "{version}"\n')
+            if executable in (badbin / "node", goodbin / "node"):
+                arch = "x64" if executable.parent == badbin else "arm64"
+                return subprocess.CompletedProcess(args, 0, f"24.1.0 {arch}\n", "")
+            if executable == t / "broken" / "bin/java":
+                return subprocess.CompletedProcess(args, 126, "", "Bad CPU type\n")
+            return real_run(args, *a, **kw)
+
+        with mock.patch.object(subprocess, "run", side_effect=fake_tool_run):
+            env = {"PATH": str(badbin), "JAVA_HOME": jdk11, "ANDROID_HOME": str(sdk)}
+            try:
+                toolchain_preflight(["relay"], ROOT, env, "darwin", "arm64", [], [])
+                node_error = ""
+            except ValueError as e:
+                node_error = str(e)
+            expect("Intel node fails first with a fix", "Node 24 for arm64" in node_error and "nvm install" in node_error, True)
+            try:
+                toolchain_preflight(["android"], ROOT, env, "darwin", "arm64", [], [jdk11])
+                java_error = ""
+            except ValueError as e:
+                java_error = str(e)
+            expect("JDK 11 fails first with a fix", "JDK 17" in java_error and "JAVA_HOME" in java_error, True)
+            selected = toolchain_preflight(["relay", "android"], ROOT, env, "darwin", "arm64", [str(goodbin / "node")], [jdk11, jdk17, jdk21])
+            expect("native node and JDK 17 replace broken PATH tools", (selected["PATH"].split(os.pathsep)[0], selected["JAVA_HOME"], selected["ANDROID_HOME"]), (str(goodbin), jdk17, str(sdk)))
+            try:
+                toolchain_preflight(["android"], ROOT, {**env, "ANDROID_HOME": str(t / "missing")}, "darwin", "arm64", [], [jdk17, jdk21])
+                sdk_error = ""
+            except ValueError as e:
+                sdk_error = str(e)
+            expect("missing SDK fails with a fix", "ANDROID_HOME" in sdk_error, True)
+            broken = fake_jdk("broken", "17.0.9")
+            (pathlib.Path(broken) / "bin").mkdir()
+            broken_java = pathlib.Path(broken) / "bin/java"
+            broken_java.write_text("#!/bin/sh\necho 'Bad CPU type' >&2\nexit 126\n")
+            broken_java.chmod(0o755)
+            selected = toolchain_preflight(["android"], ROOT, {**env, "JAVA_HOME": broken}, "darwin", "arm64", [], [broken, jdk17, jdk21])
+            expect("unusable Java falls back to a working JDK", (selected["JAVA_HOME"], selected["CAPTURE_JDK"]), (jdk17, jdk21))
+            try:
+                toolchain_preflight(["android"], ROOT, {**env, "JAVA_HOME": jdk17}, "darwin", "arm64", [], [jdk17])
+                capture_error = ""
+            except ValueError as e:
+                capture_error = str(e)
+            expect("JDK 17 alone fails preflight with a capture install hint", "JDK 21" in capture_error and "install" in capture_error, True)
+            from unittest import mock
+            with mock.patch.dict(os.environ, {"JAVA_HOME": jdk17, "ANDROID_HOME": str(sdk)}), \
+                 mock.patch.object(sys.modules[__name__], "jdk_candidates", return_value=[jdk17]), \
+                 mock.patch.object(sys.modules[__name__], "jobs_for", return_value={"android": []}), \
+                 mock.patch.object(sys.modules[__name__], "run_jobs") as jobs, \
+                 mock.patch.object(sys.modules[__name__], "print_summary"):
+                status = main(["--worktree", str(ROOT), "--base", "HEAD", "--only", "android"])
+                expect("JDK 17-only gate fails before jobs run", (status, jobs.called), (1, False))
+            incomplete = t / "incomplete-sdk"
+            incomplete.mkdir()
+            try:
+                toolchain_preflight(["android"], ROOT, {**env, "ANDROID_HOME": str(incomplete)}, "darwin", "arm64", [], [jdk17, jdk21])
+                package_error = ""
+            except ValueError as e:
+                package_error = str(e)
+            expect("missing SDK versions name the install command", "sdkmanager" in package_error and "platforms;" in package_error, True)
         bindir = t / "bin"
         bindir.mkdir()
         empty = str(t / "empty")

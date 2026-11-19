@@ -21,15 +21,33 @@ class BenchmarkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             ready = root / "ready"
+            collector_ready = root / "collector-ready"
             (root / "scripts").mkdir()
             (root / "scripts/landing-gate").write_text('echo $$ > ready\nexec sleep 30\n')
             (root / "reports/ov-1110").mkdir(parents=True)
             (root / "reports/ov-1110/historical-gate.txt").write_text("")
-            script = ('import importlib.util, pathlib, signal, sys; '
-                      's=importlib.util.spec_from_file_location("benchmark",sys.argv[1]); '
-                      'b=importlib.util.module_from_spec(s); s.loader.exec_module(b); '
-                      'b.ROOT=pathlib.Path(sys.argv[2]); b.identity=lambda repo: {"head":"fixture"}; '
-                      'sys.argv=["benchmark","--out",sys.argv[3]]; sys.exit(b.main())')
+            # Signal only once the collector enters its protected wait, not merely
+            # when the trial starts (which can precede Popen returning under load).
+            script = """
+import importlib.util, pathlib, sys
+s = importlib.util.spec_from_file_location("benchmark", sys.argv[1])
+b = importlib.util.module_from_spec(s)
+s.loader.exec_module(b)
+b.ROOT = pathlib.Path(sys.argv[2])
+b.identity = lambda repo: {"head": "fixture"}
+popen = b.subprocess.Popen
+def start(*args, **kwargs):
+    child = popen(*args, **kwargs)
+    wait = child.wait
+    def ready_wait(*args, **kwargs):
+        (b.ROOT / "collector-ready").touch()
+        return wait(*args, **kwargs)
+    child.wait = ready_wait
+    return child
+b.subprocess.Popen = start
+sys.argv = ["benchmark", "--out", sys.argv[3]]
+sys.exit(b.main())
+"""
             output = root.parent / (root.name + "-evidence")
             child = subprocess.Popen([sys.executable, "-c", script, str(Path(benchmark.__file__)), str(root), str(output)],
                                      env={k: v for k, v in os.environ.items() if k not in {
@@ -38,9 +56,9 @@ class BenchmarkTests(unittest.TestCase):
                                      stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             try:
                 until = time.monotonic() + 10
-                while not ready.exists() and child.poll() is None and time.monotonic() < until:
+                while not (ready.exists() and collector_ready.exists()) and child.poll() is None and time.monotonic() < until:
                     time.sleep(0.01)
-                self.assertTrue(ready.exists(), "real trial did not start")
+                self.assertTrue(ready.exists() and collector_ready.exists(), "real trial did not start")
                 child.terminate()
                 self.assertEqual(child.wait(timeout=10), 130, child.stderr.read().decode())
                 result = json.loads((output / "trial-1/result.json").read_text())
