@@ -10,7 +10,7 @@ const FRAME_CAP: usize = 1 << 20;
 
 fn effect(workspace: &str, n: usize) -> CleanupEffect {
     CleanupEffect { id: format!("cleanup-{n:04}"), workspace: workspace.into(), revision: n as u64, item: format!("ov-{n}"), run: format!("run-{n}"),
-        tree: None, folders: (0..12).map(|f| format!("/Users/someone/Library/Application Support/worktrees/overnight/ov-{n}/target/debug/build-{f}")).collect(), uncertain: false }
+        restart: None, tree: None, folders: (0..12).map(|f| format!("/Users/someone/Library/Application Support/worktrees/overnight/ov-{n}/target/debug/build-{f}")).collect(), uncertain: false }
 }
 
 async fn busy() -> (impl Sized, tempfile::TempDir, std::sync::Arc<crate::service::Service>, uuid::Uuid, Runtime) {
