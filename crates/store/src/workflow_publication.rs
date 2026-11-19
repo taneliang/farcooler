@@ -302,9 +302,13 @@ impl Store {
         tx.commit()?;
         drop(conn);
         self.announce_board_moves(&moved);
-        // An app's command (Approve, Retry, Cancel...) arrives here, not through `workflow_apply_by`, and moves
-        // the run the plan card shows (ov-1040). A receipt answered from the cache returned above: no news.
-        if let Some(workspace) = applied { if receipt.result.is_ok() { self.announce_commit(&workspace); } }
+        // Open plans show both accepted run changes and committed send-back refusal reasons.
+        // Cached receipts return before this point.
+        match (applied, &receipt.result) {
+            (Some(workspace), Ok(_)) => self.announce_commit(&workspace),
+            (_, Err(Refusal::SendBackRefused(_))) => self.announce_commit(workspace),
+            _ => {}
+        }
         Ok(receipt)
     }
 }

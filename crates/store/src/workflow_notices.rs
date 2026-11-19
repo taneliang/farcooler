@@ -222,8 +222,8 @@ impl Store {
     pub fn set_workflow_board_listener(&self, listener: Option<crate::workflow_projection::BoardListener>) {
         *self.workflow_board_listener.lock().unwrap_or_else(|e| e.into_inner()) = listener;
     }
-    /// The daemon's hook for every accepted workflow command: called after the commit with the workspace, so a
-    /// run that moved can tell open plans to re-read (ov-1040).
+    /// The daemon's hook after an accepted workflow command or a send-back refusal is committed.
+    /// Open plans can then re-read what the run shows.
     pub fn set_workflow_commit_listener(&self, listener: Option<crate::workflow_projection::CommitListener>) {
         *self.workflow_commit_listener.lock().unwrap_or_else(|e| e.into_inner()) = listener;
     }

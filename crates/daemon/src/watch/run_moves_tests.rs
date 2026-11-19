@@ -78,3 +78,68 @@ async fn a_run_that_moves_announces_the_plan_changed() {
     assert!(again.result.is_ok());
     assert_eq!(changed(&mut events), 0, "a receipt answered from the cache is not news");
 }
+
+#[tokio::test]
+async fn a_send_back_refusal_announces_the_plan_changed() {
+    use farcooler_protocol::{
+        v1::event::Payload,
+        workflow_commands::{Action, Mutation},
+    };
+    use farcooler_store::workflow_publication::Write;
+
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let board = svc.store.ensure_main_workspace(repo).unwrap();
+    let watcher = Watcher::new(svc.clone());
+    let workspace = board.id.to_string();
+    let item = "ov-310".to_string();
+    let mut definition = Definition::coding();
+    definition.stages.remove(0);
+    definition.stages[0].progression = Progression::AwaitApproval { principal: "owner".into() };
+    let mut input = Input {
+        schema: 1,
+        id: "enqueue".into(),
+        workspace: workspace.clone(),
+        expected_revision: 0,
+        epoch: 1,
+        source: "fixture".into(),
+        source_sequence: 1,
+        now_ms: 1,
+        grant: Grant::Controller,
+        command: Command::Enqueue {
+            item: item.clone(), definition, policy_pin: "policy".into(), resource: "resource".into(),
+            dependencies: Default::default(), initial_candidate: None,
+        },
+        busy_resources: Default::default(),
+    };
+    assert!(svc.store.workflow_apply(&input).unwrap().result.is_ok());
+    let state = svc.store.workflow_state(&workspace).unwrap().unwrap();
+    let run = &state.items[&item];
+    assert_eq!(run.phase, Phase::WaitingApproval);
+    assert!(svc.store.workflow_send_back_refusals(&state).unwrap().is_empty());
+    let mut events = watcher.subscribe();
+
+    let reason = "Fix the failing check.".to_string();
+    input.expected_revision = state.revision;
+    input.command = Command::SendBack { item: item.clone(), reason: reason.clone() };
+    for (request, sequence, latest) in [("first", 2, "first"), ("second", 3, "second"), ("first", 2, "second")] {
+        let id = format!("wire:owner:{request}");
+        input.id = id.clone();
+        input.source_sequence = sequence;
+        let action = Action::SendBack {
+            mutation: Mutation { id: request.into(), revision: state.revision, epoch: state.epoch, sequence },
+            item: item.clone(), run: run.run.clone(), pin: run.pin.clone(), reason: reason.clone(),
+        };
+        let payload = serde_json::to_string(&("owner", action)).unwrap();
+        let receipt = svc.store.workflow_wire_write(&workspace, &id, &payload, Write::Apply(&input)).unwrap();
+        let cause = "stage-1: The build could not start because it requires approval.";
+        assert_eq!(receipt.send_back_reason().unwrap(), format!("{cause} (receipt {id})"));
+        assert_eq!(svc.store.workflow_state(&workspace).unwrap().unwrap(), state);
+        let refusals = svc.store.workflow_send_back_refusals(&state).unwrap();
+        assert_eq!(refusals[&item], format!("{cause} (receipt wire:owner:{latest})"));
+        if request == latest {
+            assert!(matches!(events.try_recv().map(|event| event.payload), Ok(Some(Payload::PlanChanged(_)))),
+                "an open plan should be told when the displayed reason changes ({id})");
+        }
+        assert!(events.try_recv().is_err(), "a displayed change should be announced only once");
+    }
+}

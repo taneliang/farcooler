@@ -56,13 +56,14 @@ pub fn annotate(state: &State, wire: &mut pb::Plan, refusals: &std::collections:
     }
 }
 
-/// What every run of `state` says on the plan, as one number: it differs when a run's step, phase or gate does.
-pub(crate) fn signature(state: &State) -> u64 {
+/// What every run of `state` says on the plan, as one number.
+pub(crate) fn signature(state: &State, refusals: &std::collections::BTreeMap<String, String>) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     for key in state.items.keys() {
         if let Some(run) = run_of(state, key) {
-            (key, run.run, run.phase, run.stage_kind, run.gate, run.gate_principal, run.reason).hash(&mut hasher);
+            (key, run.run, run.phase, run.stage_kind, run.gate, run.gate_principal, run.reason, refusals.get(key))
+                .hash(&mut hasher);
         }
     }
     hasher.finish()
