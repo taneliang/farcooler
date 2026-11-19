@@ -36,6 +36,65 @@ fn admit_item(store: &Store, state: &State, key: &str) {
 }
 
 #[test]
+fn a_rejected_review_records_a_finding_for_the_lead_and_its_followers() {
+    use crate::models::{Actor, NoteKind};
+
+    let store = Store::open_in_memory().unwrap();
+    let repo = store.register_repository_for_test("Shared review");
+    let board = store.ensure_main_workspace(repo).unwrap();
+    let workspace = board.id.to_string();
+    let [lead, first, second, unrelated] = ["Lead", "First follower", "Second follower", "Unrelated"]
+        .map(|title| store.create_task(board.id, title, Actor::User).unwrap());
+    let tracker = Definition::ticket();
+    let ticket_pin = store.workflow_ticket_bundle(&tracker).unwrap();
+    let current = || store.workflow_state(&workspace).unwrap().unwrap();
+    let control = |command| {
+        let revision = store.workflow_state(&workspace).unwrap().map_or(0, |state| state.revision);
+        let receipt = store.workflow_apply(&Input {
+            id: format!("control-{revision}"), command, expected_revision: revision, source_sequence: revision + 1,
+            ..enqueue(&workspace, "unused")
+        }).unwrap();
+        assert!(receipt.result.is_ok(), "{receipt:?}");
+    };
+    for ticket in [&lead, &first, &second, &unrelated] {
+        control(Command::Enqueue { item: ticket.key.clone(), definition: tracker.clone(), policy_pin: ticket_pin.clone(),
+            resource: ticket.key.clone(), dependencies: BTreeSet::new(), initial_candidate: Some(tracker.pin()) });
+    }
+    let mut definition = Definition::coding();
+    definition.stages[3].kind = StageKind::Review(Reviewer::Agent);
+    control(Command::Start { item: lead.key.clone(), definition, policy_pin: "policy-1".into(), resource: lead.key.clone(),
+        dependencies: BTreeSet::new(), initial_candidate: None, models: Default::default(), tree: None,
+        with: vec![first.key.clone(), second.key.clone()], start_load: None });
+
+    let evidence = |receipt: &str| Evidence {
+        candidate: "candidate".into(), manifest: "manifest".into(), receipt: receipt.into(), policy_pin: "policy-1".into(),
+    };
+    for _ in 0..3 {
+        let state = current();
+        admit_item(&store, &state, &lead.key);
+        let receipt = store.workflow_apply(&observe_item(&state, &lead.key, Outcome::Passed(evidence("step")))).unwrap();
+        assert!(receipt.result.is_ok(), "{receipt:?}");
+    }
+    let reviewing = current();
+    let run = &reviewing.items[&lead.key].run;
+    admit_item(&store, &reviewing, &lead.key);
+    let finding = "Cover the caller's cancellation path.";
+    let verdict = observe_item(&reviewing, &lead.key, Outcome::ReviewRejected {
+        evidence: evidence("review.json"), summary: finding.into(), receipt: "review.json".into(),
+    });
+    let receipt = store.workflow_apply(&verdict).unwrap();
+    assert!(receipt.result.is_ok(), "{receipt:?}");
+    assert_eq!(store.workflow_apply(&verdict).unwrap(), receipt);
+    for ticket in [lead, first, second] {
+        let notes = store.notes_for(ticket.id, Some(NoteKind::Finding)).unwrap();
+        assert_eq!(notes.len(), 1, "{}: {notes:?}", ticket.title);
+        assert_eq!(notes[0].body, finding);
+        assert_eq!(notes[0].extra, serde_json::json!({ "run": run, "receipt": "review.json" }));
+    }
+    assert!(store.notes_for(unrelated.id, Some(NoteKind::Finding)).unwrap().is_empty());
+}
+
+#[test]
 fn a_landing_group_review_keeps_findings_and_briefs_for_rework() {
     use crate::models::{Actor, NoteKind};
 
@@ -44,6 +103,7 @@ fn a_landing_group_review_keeps_findings_and_briefs_for_rework() {
     let board = store.ensure_main_workspace(repo).unwrap();
     let workspace = board.id.to_string();
     let tickets = ["First fix", "Second fix"].map(|title| store.create_task(board.id, title, Actor::User).unwrap());
+    let follower = store.create_task(board.id, "Follows the first fix", Actor::User).unwrap();
 
     let mut definition = Definition::coding();
     definition.schema = 2;
@@ -89,9 +149,17 @@ fn a_landing_group_review_keeps_findings_and_briefs_for_rework() {
     };
     // Hold the landing resource while both tickets join the same group.
     assert!(store.workflow_apply(&enqueue("other", "landing-target")).unwrap().result.is_ok());
-    for ticket in &tickets {
-        control(Command::Enqueue { item: ticket.key.clone(), definition: definition.clone(), policy_pin: "policy-1".into(),
-            resource: ticket.key.clone(), dependencies: BTreeSet::new(), initial_candidate: None });
+    let tracker = Definition::ticket();
+    let ticket_pin = store.workflow_ticket_bundle(&tracker).unwrap();
+    for ticket in tickets.iter().chain([&follower]) {
+        control(Command::Enqueue { item: ticket.key.clone(), definition: tracker.clone(), policy_pin: ticket_pin.clone(),
+            resource: ticket.key.clone(), dependencies: BTreeSet::new(), initial_candidate: Some(tracker.pin()) });
+    }
+    for (index, ticket) in tickets.iter().enumerate() {
+        let with = if index == 0 { vec![follower.key.clone()] } else { vec![] };
+        control(Command::Start { item: ticket.key.clone(), definition: definition.clone(), policy_pin: "policy-1".into(),
+            resource: ticket.key.clone(), dependencies: BTreeSet::new(), initial_candidate: None, models: Default::default(),
+            tree: None, with, start_load: None });
         for _ in 0..2 {
             settle(&current(), &ticket.key, Outcome::Passed(evidence(&ticket.key, "ticket-step")));
         }
@@ -124,9 +192,9 @@ fn a_landing_group_review_keeps_findings_and_briefs_for_rework() {
             let build = rebuilds.iter().find(|stored| stored.effect.item == item).unwrap();
             assert_eq!(build.effect.brief.as_deref(), Some(finding));
         }
-        for ticket in &tickets {
+        for ticket in tickets.iter().chain([&follower]) {
             let notes = store.notes_for(ticket.id, Some(NoteKind::Finding)).unwrap();
-            assert_eq!(notes.len(), index + 1, "{notes:?}");
+            assert_eq!(notes.len(), index + 1, "{}: {notes:?}", ticket.title);
             assert!(notes.iter().any(|note| note.body == finding && note.extra["run"] == *run
                 && note.extra["receipt"] == receipt_name), "{notes:?}");
         }

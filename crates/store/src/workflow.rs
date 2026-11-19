@@ -503,10 +503,14 @@ fn record_review_finding(tx: &Transaction<'_>, before: &State, input: &Input) ->
     let Outcome::ReviewRejected { summary, receipt, .. } = outcome else { return Ok(()) };
     // The verdict may split a group or hand its members back, so use the membership that was reviewed.
     let reviewed = before.items.get(item).filter(|item| item.group_of.is_some());
-    let tickets: Vec<&str> = match reviewed {
+    let leads: Vec<&str> = match reviewed {
         Some(group) => group.members.iter().map(|member| member.item.as_str()).collect(),
         None => vec![item.as_str()],
     };
+    let tickets = leads.into_iter().flat_map(|lead| {
+        let followers = before.items.get(lead).into_iter().flat_map(|item| &item.followers);
+        std::iter::once(lead).chain(followers.map(String::as_str))
+    });
     let mut task_for = tx.prepare(
         "SELECT task_id FROM workflow_owned_items WHERE workspace=?1 AND item=?2 AND task_id IS NOT NULL",
     )?;
