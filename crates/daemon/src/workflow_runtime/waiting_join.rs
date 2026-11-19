@@ -3,6 +3,8 @@ use super::{adapters, coding, now, Error, Exec, Result, Runtime};
 use farcooler_protocol::workflow_commands::{Action, MAX_BYTES};
 use farcooler_workflow::{digest, valid_id, Command, Grant, Item, JoinRefresh, Phase};
 use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsStr;
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -143,7 +145,7 @@ impl Exec {
             if git_dir.join(name).try_exists()? { return Err(Error::Refused("waiting worktree has a Git operation in progress")); }
         }
         if adapters::git(&tree, &["symbolic-ref", "HEAD"]).await? != branch
-            || !adapters::git(&tree, &["status", "--porcelain", "--untracked-files=all"]).await?.is_empty()
+            || !waiting_worktree_clean(&canonical).await?
         {
             return Err(Error::Refused("waiting worktree branch changed or is dirty"));
         }
@@ -172,6 +174,38 @@ impl Exec {
         }
         Ok(Some((base.into(), JoinRefresh::Rebased { candidate })))
     }
+}
+
+async fn waiting_worktree_clean(tree: &Path) -> Result<bool> {
+    // Guarded status reports moved gitlinks but deliberately skips changes inside submodules.
+    // Inspect each initialized checkout directly so the guard can pin its hooks and filters.
+    let deadline = tokio::time::Instant::now() + crate::git::timeout();
+    let mut pending = vec![tree.to_path_buf()];
+    let error = || Error::Refused("could not check waiting worktree status");
+    while let Some(directory) = pending.pop() {
+        let status = crate::git::git_bytes_by(deadline, &directory, &["status", "--porcelain", "--untracked-files=all"])
+            .await.map_err(|_| error())?;
+        if !status.ok { return Err(error()); }
+        if !status.stdout.is_empty() { return Ok(false); }
+
+        let index = crate::git::git_bytes_by(deadline, &directory, &["ls-files", "--stage", "-z"])
+            .await.map_err(|_| error())?;
+        if !index.ok { return Err(error()); }
+        for entry in index.stdout.split(|byte| *byte == 0).filter(|entry| entry.starts_with(b"160000 ")) {
+            let path = entry.splitn(2, |byte| *byte == b'\t').nth(1).ok_or_else(error)?;
+            let module = directory.join(OsStr::from_bytes(path));
+            match module.join(".git").symlink_metadata() {
+                Ok(_) => {
+                    let checkout = module.canonicalize()?;
+                    if checkout == directory || !checkout.starts_with(&directory) { return Err(error()); }
+                    pending.push(checkout);
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => return Err(err.into()),
+            }
+        }
+    }
+    Ok(true)
 }
 
 async fn ancestor(tree: &Path, base: &str, candidate: &str) -> Result<bool> {
