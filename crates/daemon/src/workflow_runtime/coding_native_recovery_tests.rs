@@ -156,16 +156,25 @@ async fn workflow_service_changed_pinned_file_names_it_on_the_item() {
 #[tokio::test]
 async fn ov1379_only_an_engine_hooks_repin_carries_the_pending_build() {
     use crate::workflow_starter::{repin, repin_definition, Repin};
-    use farcooler_protocol::{workflow_commands::{Action, Mutation}, workflow_config::AdapterConfiguration};
-    use farcooler_store::workflow_publication::configuration_pin;
+    use farcooler_protocol::{workflow_commands::{Action, Mutation}, workflow_config::{AdapterConfiguration, NoticePoint, NotificationPolicy}};
+    use farcooler_store::workflow_publication::notification_configuration_pin;
 
-    for (app_owned, repin_files, changed_definition) in [
-        (true, true, false),  // Engine hooks only.
-        (true, true, true),   // Engine hooks and a definition change.
-        (false, true, false), // Owner settings only.
-        (true, false, true),  // Definition only, with the old hooks still valid.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Change { None, Command, Approval, Route, Notification }
+
+    for (app_owned, repin_files, change) in [
+        (true, true, Change::None),
+        (false, true, Change::None),
+        (true, false, Change::Command),
+        (true, true, Change::Command),
+        (true, false, Change::Approval),
+        (true, true, Change::Approval),
+        (true, false, Change::Route),
+        (true, true, Change::Route),
+        (true, false, Change::Notification),
+        (true, true, Change::Notification),
     ] {
-        let carries = app_owned && repin_files && !changed_definition;
+        let carries = app_owned && repin_files && change == Change::None;
         let (dir, configured, _fake) = tests::native("pass").await;
         let svc = crate::service::Service::open_in(dir.path().join("state")).await.unwrap();
         let repo_root = svc.store.create_repository_root(svc.host_id, dir.path().to_str().unwrap(), 0).unwrap();
@@ -178,19 +187,27 @@ async fn ov1379_only_an_engine_hooks_repin_carries_the_pending_build() {
         let old_file = svc.root_dir().canonicalize().unwrap().join(
             if app_owned { "workflow-claude-hooks.json" } else { "owner-settings.json" });
         let text = serde_json::to_vec(&crate::hook_install::claude_settings(&runtime.root.join("h.sock"))).unwrap();
-        std::fs::write(&old_file, &text).unwrap();
-        let CodingHarness::Native { settings, .. } = &mut config.harness else { unreachable!() };
-        *settings = Some(LaunchFile { path: old_file.clone(), digest: digest(&text) });
-        let definition = config.definition().unwrap();
+        if repin_files {
+            std::fs::write(&old_file, &text).unwrap();
+            let CodingHarness::Native { settings, .. } = &mut config.harness else { unreachable!() };
+            *settings = Some(LaunchFile { path: old_file.clone(), digest: digest(&text) });
+        } else {
+            config.harness = CodingHarness::Command(CodingCommand {
+                argv: vec!["/usr/bin/false".into()], environment: Default::default(), timeout_ms: 5000,
+            });
+        }
+        let mut definition = config.definition().unwrap();
+        definition.schema = 2;
+        let notices = NotificationPolicy { points: [NoticePoint::StageChanged].into() };
         let old_adapter = AdapterConfiguration::Coding(config.clone());
-        let old_pin = configuration_pin(&definition, Some(&old_adapter));
+        let old_pin = notification_configuration_pin(&definition, Some(&old_adapter), Some(&notices));
         let mutation = |id: &str, revision, sequence| Mutation { id: id.into(), revision, epoch: 1, sequence };
-        let publish = |runtime: &mut Runtime, id: &str, revision, sequence, expected_pin, definition, adapter| {
-            let reply = runtime.wire_command(&workspace, "owner", Action::Publish { reason: None, notifications: None,
+        let publish = |runtime: &mut Runtime, id: &str, revision, sequence, expected_pin, definition, adapter, notifications| {
+            let reply = runtime.wire_command(&workspace, "owner", Action::Publish { reason: None, notifications,
                 mutation: mutation(id, revision, sequence), expected_pin, definition, adapter: Some(Box::new(adapter)) }).unwrap();
-            assert!(reply.pointer("/receipt/result/Ok").is_some(), "{reply}");
+            assert!(reply.pointer("/receipt/result/Ok").is_some(), "{change:?}, file re-pin {repin_files}: {reply}");
         };
-        publish(&mut runtime, "before", 0, 1, None, definition.clone(), old_adapter);
+        publish(&mut runtime, "before", 0, 1, None, definition.clone(), old_adapter, Some(notices.clone()));
         runtime.wire_command(&workspace, "owner", Action::Enqueue { mutation: mutation("enqueue", 0, 1),
             item: "one".into(), pin: old_pin.clone() }).unwrap();
         runtime.pump(2).await.unwrap();
@@ -206,18 +223,20 @@ async fn ov1379_only_an_engine_hooks_repin_carries_the_pending_build() {
             edited.push(b'\n');
             std::fs::write(&old_file, edited).unwrap();
         }
-        let (next, mut next_definition) = if repin_files {
-            let next = repin(&svc, &config, Repin::Everything);
-            let next_definition = repin_definition(&definition, &config, &next).unwrap();
-            (next, next_definition)
-        } else {
-            (config, definition)
-        };
-        if changed_definition { next_definition.send_backs = Some(1); }
+        let mut next = if repin_files { repin(&svc, &config, Repin::Everything) } else { config.clone() };
+        if change == Change::Command { next.checks[0].argv.push("different argument".into()); }
+        let mut next_definition = repin_definition(&definition, &config, &next).unwrap();
+        let mut next_notices = notices;
+        match change {
+            Change::Approval => next_definition.stages[1].progression = Progression::AwaitApproval { principal: "owner".into() },
+            Change::Route => { next_definition.stages[1].routes.insert("rejected".into(), Target::Done); }
+            Change::Notification => { next_notices.points.insert(NoticePoint::Done); }
+            Change::None | Change::Command => {}
+        }
         let adapter = AdapterConfiguration::Coding(next);
-        let next_pin = configuration_pin(&next_definition, Some(&adapter));
+        let next_pin = notification_configuration_pin(&next_definition, Some(&adapter), Some(&next_notices));
         assert_ne!(next_pin, old_pin);
-        publish(&mut runtime, "after", state.revision, 2, Some(old_pin.clone()), next_definition, adapter);
+        publish(&mut runtime, "after", state.revision, 2, Some(old_pin.clone()), next_definition, adapter, Some(next_notices));
         if carries { std::fs::write(&old_file, "overwritten by an app update").unwrap(); }
 
         let root = runtime.root.clone();
@@ -225,22 +244,23 @@ async fn ov1379_only_an_engine_hooks_repin_carries_the_pending_build() {
         let mut runtime = Runtime::open_service(&root, svc.store.clone()).unwrap();
         let state = finish(&mut runtime, &workspace).await;
         let item = &state.items["one"];
+        let effects = runtime.store.workflow_outbox(&workspace).unwrap();
+        let old_build = effects.iter().find(|s| s.effect.id == original.id).unwrap();
+        assert_eq!(old_build.effect, original);
+        assert_eq!(old_build.dispatch_state, "suppressed");
         if !carries {
-            assert_eq!(item.phase, Phase::Failed, "{item:?}");
+            assert_eq!(item.phase, Phase::Failed, "{change:?}, file re-pin {repin_files}: {item:?}");
             assert_eq!(item.policy_pin, old_pin);
             assert!(item.failure.as_deref().is_some_and(|s| s.contains("Carry")), "{item:?}");
+            assert!(!effects.iter().any(|s| s.effect.policy_pin == next_pin));
             assert!(!dir.path().join("started").exists());
             assert!(!tree.join("result.txt").exists());
         } else {
             assert_eq!(item.phase, Phase::Done, "{item:?}");
             assert_eq!(item.policy_pin, next_pin);
-            let effects = runtime.store.workflow_outbox(&workspace).unwrap();
             let provision = effects.iter().find(|s| s.effect.kind == EffectKind::Execute(StageKind::Provision)).unwrap();
             assert_eq!(provision.effect.policy_pin, old_pin);
             assert_eq!(provision.dispatch_state, "settled");
-            let old_build = effects.iter().find(|s| s.effect.id == original.id).unwrap();
-            assert_eq!(old_build.effect, original);
-            assert_eq!(old_build.dispatch_state, "suppressed");
             let build = effects.iter().find(|s| s.effect.kind == original.kind && s.effect.policy_pin == next_pin).unwrap();
             assert_eq!(build.effect.run, original.run);
             assert_eq!(build.dispatch_state, "settled");

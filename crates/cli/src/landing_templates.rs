@@ -3,7 +3,7 @@
 //! which the owner and the workspace's orchestrator do (ov-1267).
 use clap::Args;
 use farcooler_daemon::landing_templates::{self as lt, Bundle, Extra};
-use farcooler_protocol::workflow_config::AdapterConfiguration;
+use farcooler_protocol::workflow_config::{AdapterConfiguration, NotificationPolicy};
 use lt::Template;
 use uuid::Uuid;
 
@@ -84,17 +84,30 @@ pub fn held(get: &serde_json::Value) -> Result<Held, Box<dyn std::error::Error>>
         source: configuration.pointer("/definition/source").and_then(|s| s.as_str()).map(String::from), adapter, suggested: Ok(None) })
 }
 
+#[derive(serde::Serialize)]
+pub struct Repinned {
+    #[serde(flatten)]
+    pub bundle: Bundle,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    notifications: Option<NotificationPolicy>,
+}
+
 /// `workspace re-pin` (ov-1259): the published definition with its adapter pinned to the files as they are now, both of
 /// which the runner computes (`repinned_definition`, `repinned_adapter`). `None` when every pin still holds, so there is nothing to publish.
-pub fn repinned(get: &serde_json::Value) -> Result<Option<Bundle>, Box<dyn std::error::Error>> {
-    get.get("configuration").filter(|c| !c.is_null()).ok_or("This workspace has no published workflow to re-pin.")?;
+pub fn repinned(get: &serde_json::Value) -> Result<Option<Repinned>, Box<dyn std::error::Error>> {
+    let configuration = get.get("configuration").filter(|c| !c.is_null()).ok_or("This workspace has no published workflow to re-pin.")?;
     let Some(adapter) = get.get("repinned_adapter").filter(|a| !a.is_null()) else {
         if get.get("engine_codex_hooks").is_none() { return Err("This runner is too old to re-pin a workflow. Update Far Cooler on it first.".into()); }
         return Ok(None);
     };
     // The definition names the adapter's pin in every step, so the runner re-pins it too.
     let definition = get.get("repinned_definition").ok_or("the runner sent no re-pinned definition")?;
-    Ok(Some(Bundle { definition: serde_json::from_value(definition.clone())?, adapter: serde_json::from_value(adapter.clone())? }))
+    let notifications = configuration.get("notifications").filter(|policy| !policy.is_null())
+        .cloned().map(serde_json::from_value).transpose()?;
+    Ok(Some(Repinned {
+        bundle: Bundle { definition: serde_json::from_value(definition.clone())?, adapter: serde_json::from_value(adapter.clone())? },
+        notifications,
+    }))
 }
 
 /// Why a re-pin draft is filed, when the person gives no reason of their own.
@@ -117,7 +130,7 @@ pub fn template(name: &str, held: &Held, commands: &[String], gates: &Gates, rou
 
 /// Print or write a draft, and say how to publish it. The words go to standard error so `--json`
 /// output and a redirected draft stay clean.
-pub fn deliver(bundle: &Bundle, notes: &[String], held: &Held, workspace: Uuid, out: &Output) -> Result<(), Box<dyn std::error::Error>> {
+pub fn deliver(bundle: &impl serde::Serialize, notes: &[String], held: &Held, workspace: Uuid, out: &Output) -> Result<(), Box<dyn std::error::Error>> {
     let text = serde_json::to_string_pretty(bundle)?;
     match &out.out {
         Some(path) => {
@@ -206,12 +219,18 @@ mod tests {
         let definition = serde_json::to_value(lt::template("ticket-push", &fresh, &["make check".into()], &[], &Default::default()).unwrap().definition).unwrap();
         reply["repinned_definition"] = definition.clone();
         reply["repinned_adapter"] = serde_json::to_value(AdapterConfiguration::Coding(fresh.clone())).unwrap();
+        let legacy = serde_json::to_value(repinned(&reply).unwrap().unwrap()).unwrap();
+        assert!(legacy.get("notifications").is_none());
+        let notices = serde_json::json!({"points": ["stage_changed"]});
+        reply["configuration"]["notifications"] = notices.clone();
         let held = held(&reply).unwrap();
         assert_eq!(held.adapter.as_ref(), Some(&fresh));
         assert_eq!(held.pin.as_deref(), Some("wf1:abc"), "still drafted against the published pin");
-        let bundle = repinned(&reply).unwrap().unwrap();
-        assert_eq!(bundle.adapter, AdapterConfiguration::Coding(fresh));
-        assert_eq!(serde_json::to_value(&bundle.definition).unwrap(), definition);
+        let repin = repinned(&reply).unwrap().unwrap();
+        let export = serde_json::to_value(&repin).unwrap();
+        assert_eq!(export["definition"], definition);
+        assert_eq!(export["adapter"], serde_json::to_value(AdapterConfiguration::Coding(fresh)).unwrap());
+        assert_eq!(export["notifications"], notices);
     }
     #[test]
     fn the_list_names_all_four_templates() {

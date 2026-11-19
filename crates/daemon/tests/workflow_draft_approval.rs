@@ -504,6 +504,8 @@ async fn an_approved_draft_announces_its_publication_to_the_owner() {
 /// `workflow get` says the re-pinned adapter, which `workspace re-pin` and `landing-template` draft on.
 #[tokio::test]
 async fn an_update_that_changes_the_engines_hooks_files_a_repin_draft_and_strands_nothing() {
+    use farcooler_protocol::workflow_config::{NoticePoint, NotificationPolicy};
+
     if as_a_person("an_update_that_changes_the_engines_hooks_files_a_repin_draft_and_strands_nothing").await { return; }
     let (dir, mut config) = configured().await;
     let host = Host::open(dir.path()).await;
@@ -518,7 +520,8 @@ async fn an_update_that_changes_the_engines_hooks_files_a_repin_draft_and_strand
         plugin_dir: None, prompt: "Work the ticket.".into(), process: CodingCommand { argv: vec![], environment: Default::default(), timeout_ms: 60_000 } };
     let live = bundle(&config, "ticket-push", "make check");
     let state = call(&mut link, ws, Action::Get).await;
-    let receipt = call(&mut link, ws, Action::Publish { reason: None, notifications: None, adapter: Some(Box::new(live.adapter.clone())), expected_pin: None,
+    let notices = NotificationPolicy { points: [NoticePoint::StageChanged].into() };
+    let receipt = call(&mut link, ws, Action::Publish { reason: None, notifications: Some(notices.clone()), adapter: Some(Box::new(live.adapter.clone())), expected_pin: None,
         definition: live.definition.clone(), mutation: Mutation { id: "older".into(), revision: state["state"]["revision"].as_u64().unwrap_or(0), epoch: 1, sequence: 1 } }).await;
     assert!(receipt.pointer("/receipt/result/Ok").is_some(), "{receipt}");
     let published = pin(&host);
@@ -543,6 +546,13 @@ async fn an_update_that_changes_the_engines_hooks_files_a_repin_draft_and_strand
     let got = call(&mut link, ws, Action::Get).await;
     assert_eq!(got["repinned_adapter"]["config"]["harness"]["Native"]["settings"]["digest"], serde_json::json!(fresh.digest), "{got}");
     assert_eq!(got["repinned_definition"], serde_json::json!(filed[0].definition), "{got}");
+    let (_, words) = asked(&host, card.id);
+    say(&mut link, card.id, pb::TaskNoteKind::Answer, "user", &words).await;
+    settles(&host, card.id, TaskStatus::Done).await;
+    let current = host.service.store.workflow_configuration(&ws.to_string()).unwrap().unwrap();
+    assert_eq!(current.definition, filed[0].definition);
+    assert_eq!(current.adapter.as_ref(), Some(&filed[0].adapter));
+    assert_eq!(current.notifications, Some(notices));
     drop(link);
     host.close().await;
 }

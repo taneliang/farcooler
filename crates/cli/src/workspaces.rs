@@ -700,17 +700,17 @@ async fn workspace_via(
         WorkspaceCmd::RePin { workspace, propose, reason, output, repo } => {
             let (ws, _) = named(&mut link, repo.as_deref(), &workspace, env).await?;
             let get = crate::workflow::get_published(&mut link, uuid_of(&ws.id)).await?;
-            let Some(bundle) = crate::landing_templates::repinned(&get)? else {
+            let Some(repin) = crate::landing_templates::repinned(&get)? else {
                 eprintln!("Every file the published workflow pins still matches. Nothing to re-pin.");
                 return Ok(());
             };
             if propose {
-                let action = crate::landing_templates::propose_action(reason.as_deref().unwrap_or(crate::landing_templates::REPIN_REASON), bundle);
+                let action = crate::landing_templates::propose_action(reason.as_deref().unwrap_or(crate::landing_templates::REPIN_REASON), repin.bundle);
                 let reply = crate::workflow::ask(&mut link, uuid_of(&ws.id), &action).await?;
                 crate::landing_templates::print_draft(&reply, json)?;
             } else {
                 let held = crate::landing_templates::held(&get)?;
-                crate::landing_templates::deliver(&bundle, &[], &held, uuid_of(&ws.id), &output)?;
+                crate::landing_templates::deliver(&repin, &[], &held, uuid_of(&ws.id), &output)?;
             }
         }
 
