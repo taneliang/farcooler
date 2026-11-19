@@ -76,7 +76,7 @@ class ProcessGuardTests(unittest.TestCase):
                         "m.run([sys.executable, 'nextest.py'], kill=False, grace=0)\n")
             owner_code = (f"import sys, os\nfrom pathlib import Path\nsys.path.insert(0, {str(SCRIPTS)!r})\n"
                           "from process_guard_test import load\n" + body)
-            bystander = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
+            bystander = subprocess.Popen([sys.executable, '-c', 'import time\nwhile True: time.sleep(60)'])
             owner = subprocess.Popen([sys.executable, '-c', owner_code], cwd=root,
                                      env={**os.environ, 'FC_GUARD_FINISH': '1' if killed == 'finished' else '',
                                           'FC_GUARD_OUTER': '1' if entry == 'leak-wrapper' else ''},

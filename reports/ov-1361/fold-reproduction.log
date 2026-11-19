@@ -1,0 +1,760 @@
+RUN 1 Thu Nov 19 02:24:10 UTC 2026 10:24  up 7 days, 10:32, 1 user, load averages: 6.45 10.93 16.22
+test_ci_unchanged_and_local_bundle_consumers_explicit (__main__.LandingTests) ... ok
+test_clippy_is_independent_and_failure_is_required (__main__.LandingTests) ... ok
+test_cpu_budget_reaches_real_steps_without_changing_the_checks (__main__.LandingTests) ... ok
+test_engine_entry_point_keeps_optimized_policy_and_normal_admission (__main__.LandingTests) ... ok
+test_environment_files_are_private_and_steps_keep_exports (__main__.LandingTests) ... ok
+test_every_script_and_workflow_has_reviewed_users_or_explicit_full (__main__.LandingTests) ... ok
+test_evidence_names_selected_and_skipped_binaries_and_reads_back (__main__.LandingTests)
+ov-1278: each gate run saves the test binaries it selected and skipped; a red main is traced by reading them. ... ok
+test_fixture_hooks_do_not_inherit_the_agents_private_route (__main__.LandingTests) ... ok
+test_full_rust_forces_the_whole_suite_in_both_modes (__main__.LandingTests)
+ov-1278: selection is the default in both modes; --full-rust beats it in both, and the evidence says so. ... ok
+test_gate_script_consumers_and_unknowns_stay_covered (__main__.LandingTests) ... ok
+test_git_reads_keep_the_watched_index_stable_and_real_writes_work (__main__.LandingTests) ... ok
+test_landing_fail_fast_stops_queued_families_and_apple_jobs (__main__.LandingTests) ... ok
+test_new_script_or_workflow_fails_coverage_and_defaults_full (__main__.LandingTests) ... ok
+test_parallelism_is_bounded_and_apple_is_serial (__main__.LandingTests) ... ok
+test_plain_runner_can_be_loaded_without_optional_landing_policy (__main__.LandingTests) ... ok
+test_real_affected_failure_and_unaffected_ci_failure (__main__.LandingTests) ... ok
+test_real_failure_proof_without_optional_nextest (__main__.LandingTests) ... ok
+test_real_workspace_leaf_narrows_and_shared_inputs_select_everything (__main__.LandingTests)
+ov-1268: the lane gate skips Rust tests a change cannot affect, using this repo's real crate graph. ... ok
+test_retry_diff_runs_only_script_checks (__main__.LandingTests) ... ok
+test_reviewed_script_selections (__main__.LandingTests) ... ok
+test_reviewed_scripts_keep_new_direct_consumers (__main__.LandingTests) ... ok
+test_three_file_fold_plan_uses_group_base_and_only_reached_rust_binaries (__main__.LandingTests)
+ov-1305: execute the planner with a stale remote ref and a pinned group base. ... ok
+test_worker_exception_is_red_and_other_rows_survive (__main__.LandingTests) ... ok
+test_workflow_changes_keep_lightweight_validation (__main__.LandingTests) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 13.124s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+EXIT 0
+RUN 2 Thu Nov 19 02:24:23 UTC 2026 10:24  up 7 days, 10:33, 1 user, load averages: 6.14 10.64 16.02
+test_ci_unchanged_and_local_bundle_consumers_explicit (__main__.LandingTests) ... ok
+test_clippy_is_independent_and_failure_is_required (__main__.LandingTests) ... ok
+test_cpu_budget_reaches_real_steps_without_changing_the_checks (__main__.LandingTests) ... ok
+test_engine_entry_point_keeps_optimized_policy_and_normal_admission (__main__.LandingTests) ... ok
+test_environment_files_are_private_and_steps_keep_exports (__main__.LandingTests) ... ok
+test_every_script_and_workflow_has_reviewed_users_or_explicit_full (__main__.LandingTests) ... ok
+test_evidence_names_selected_and_skipped_binaries_and_reads_back (__main__.LandingTests)
+ov-1278: each gate run saves the test binaries it selected and skipped; a red main is traced by reading them. ... ok
+test_fixture_hooks_do_not_inherit_the_agents_private_route (__main__.LandingTests) ... ok
+test_full_rust_forces_the_whole_suite_in_both_modes (__main__.LandingTests)
+ov-1278: selection is the default in both modes; --full-rust beats it in both, and the evidence says so. ... ok
+test_gate_script_consumers_and_unknowns_stay_covered (__main__.LandingTests) ... ok
+test_git_reads_keep_the_watched_index_stable_and_real_writes_work (__main__.LandingTests) ... ok
+test_landing_fail_fast_stops_queued_families_and_apple_jobs (__main__.LandingTests) ... ok
+test_new_script_or_workflow_fails_coverage_and_defaults_full (__main__.LandingTests) ... ok
+test_parallelism_is_bounded_and_apple_is_serial (__main__.LandingTests) ... ok
+test_plain_runner_can_be_loaded_without_optional_landing_policy (__main__.LandingTests) ... ok
+test_real_affected_failure_and_unaffected_ci_failure (__main__.LandingTests) ... ok
+test_real_failure_proof_without_optional_nextest (__main__.LandingTests) ... ok
+test_real_workspace_leaf_narrows_and_shared_inputs_select_everything (__main__.LandingTests)
+ov-1268: the lane gate skips Rust tests a change cannot affect, using this repo's real crate graph. ... ok
+test_retry_diff_runs_only_script_checks (__main__.LandingTests) ... ok
+test_reviewed_script_selections (__main__.LandingTests) ... ok
+test_reviewed_scripts_keep_new_direct_consumers (__main__.LandingTests) ... ok
+test_three_file_fold_plan_uses_group_base_and_only_reached_rust_binaries (__main__.LandingTests)
+ov-1305: execute the planner with a stale remote ref and a pinned group base. ... ok
+test_worker_exception_is_red_and_other_rows_survive (__main__.LandingTests) ... ok
+test_workflow_changes_keep_lightweight_validation (__main__.LandingTests) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 12.632s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+EXIT 0
+RUN 3 Thu Nov 19 02:24:36 UTC 2026 10:24  up 7 days, 10:33, 1 user, load averages: 7.21 10.66 15.94
+test_ci_unchanged_and_local_bundle_consumers_explicit (__main__.LandingTests) ... ok
+test_clippy_is_independent_and_failure_is_required (__main__.LandingTests) ... ok
+test_cpu_budget_reaches_real_steps_without_changing_the_checks (__main__.LandingTests) ... ok
+test_engine_entry_point_keeps_optimized_policy_and_normal_admission (__main__.LandingTests) ... ok
+test_environment_files_are_private_and_steps_keep_exports (__main__.LandingTests) ... ok
+test_every_script_and_workflow_has_reviewed_users_or_explicit_full (__main__.LandingTests) ... ok
+test_evidence_names_selected_and_skipped_binaries_and_reads_back (__main__.LandingTests)
+ov-1278: each gate run saves the test binaries it selected and skipped; a red main is traced by reading them. ... ok
+test_fixture_hooks_do_not_inherit_the_agents_private_route (__main__.LandingTests) ... ok
+test_full_rust_forces_the_whole_suite_in_both_modes (__main__.LandingTests)
+ov-1278: selection is the default in both modes; --full-rust beats it in both, and the evidence says so. ... ok
+test_gate_script_consumers_and_unknowns_stay_covered (__main__.LandingTests) ... ok
+test_git_reads_keep_the_watched_index_stable_and_real_writes_work (__main__.LandingTests) ... ok
+test_landing_fail_fast_stops_queued_families_and_apple_jobs (__main__.LandingTests) ... ok
+test_new_script_or_workflow_fails_coverage_and_defaults_full (__main__.LandingTests) ... ok
+test_parallelism_is_bounded_and_apple_is_serial (__main__.LandingTests) ... ok
+test_plain_runner_can_be_loaded_without_optional_landing_policy (__main__.LandingTests) ... ok
+test_real_affected_failure_and_unaffected_ci_failure (__main__.LandingTests) ... ok
+test_real_failure_proof_without_optional_nextest (__main__.LandingTests) ... ok
+test_real_workspace_leaf_narrows_and_shared_inputs_select_everything (__main__.LandingTests)
+ov-1268: the lane gate skips Rust tests a change cannot affect, using this repo's real crate graph. ... ok
+test_retry_diff_runs_only_script_checks (__main__.LandingTests) ... ok
+test_reviewed_script_selections (__main__.LandingTests) ... ok
+test_reviewed_scripts_keep_new_direct_consumers (__main__.LandingTests) ... ok
+test_three_file_fold_plan_uses_group_base_and_only_reached_rust_binaries (__main__.LandingTests)
+ov-1305: execute the planner with a stale remote ref and a pinned group base. ... ok
+test_worker_exception_is_red_and_other_rows_survive (__main__.LandingTests) ... ok
+test_workflow_changes_keep_lightweight_validation (__main__.LandingTests) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 14.062s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+EXIT 0
+RUN 4 Thu Nov 19 02:24:50 UTC 2026 10:24  up 7 days, 10:33, 1 user, load averages: 7.40 10.58 15.85
+test_ci_unchanged_and_local_bundle_consumers_explicit (__main__.LandingTests) ... ok
+test_clippy_is_independent_and_failure_is_required (__main__.LandingTests) ... ok
+test_cpu_budget_reaches_real_steps_without_changing_the_checks (__main__.LandingTests) ... ok
+test_engine_entry_point_keeps_optimized_policy_and_normal_admission (__main__.LandingTests) ... ok
+test_environment_files_are_private_and_steps_keep_exports (__main__.LandingTests) ... ok
+test_every_script_and_workflow_has_reviewed_users_or_explicit_full (__main__.LandingTests) ... ok
+test_evidence_names_selected_and_skipped_binaries_and_reads_back (__main__.LandingTests)
+ov-1278: each gate run saves the test binaries it selected and skipped; a red main is traced by reading them. ... ok
+test_fixture_hooks_do_not_inherit_the_agents_private_route (__main__.LandingTests) ... ok
+test_full_rust_forces_the_whole_suite_in_both_modes (__main__.LandingTests)
+ov-1278: selection is the default in both modes; --full-rust beats it in both, and the evidence says so. ... ok
+test_gate_script_consumers_and_unknowns_stay_covered (__main__.LandingTests) ... ok
+test_git_reads_keep_the_watched_index_stable_and_real_writes_work (__main__.LandingTests) ... ok
+test_landing_fail_fast_stops_queued_families_and_apple_jobs (__main__.LandingTests) ... ok
+test_new_script_or_workflow_fails_coverage_and_defaults_full (__main__.LandingTests) ... ok
+test_parallelism_is_bounded_and_apple_is_serial (__main__.LandingTests) ... ok
+test_plain_runner_can_be_loaded_without_optional_landing_policy (__main__.LandingTests) ... ok
+test_real_affected_failure_and_unaffected_ci_failure (__main__.LandingTests) ... ok
+test_real_failure_proof_without_optional_nextest (__main__.LandingTests) ... ok
+test_real_workspace_leaf_narrows_and_shared_inputs_select_everything (__main__.LandingTests)
+ov-1268: the lane gate skips Rust tests a change cannot affect, using this repo's real crate graph. ... ok
+test_retry_diff_runs_only_script_checks (__main__.LandingTests) ... ok
+test_reviewed_script_selections (__main__.LandingTests) ... ok
+test_reviewed_scripts_keep_new_direct_consumers (__main__.LandingTests) ... ok
+test_three_file_fold_plan_uses_group_base_and_only_reached_rust_binaries (__main__.LandingTests)
+ov-1305: execute the planner with a stale remote ref and a pinned group base. ... ok
+test_worker_exception_is_red_and_other_rows_survive (__main__.LandingTests) ... ok
+test_workflow_changes_keep_lightweight_validation (__main__.LandingTests) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 16.133s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+EXIT 0
+RUN 5 Thu Nov 19 02:25:06 UTC 2026 10:25  up 7 days, 10:33, 1 user, load averages: 8.36 10.59 15.73
+test_ci_unchanged_and_local_bundle_consumers_explicit (__main__.LandingTests) ... ok
+test_clippy_is_independent_and_failure_is_required (__main__.LandingTests) ... ok
+test_cpu_budget_reaches_real_steps_without_changing_the_checks (__main__.LandingTests) ... ok
+test_engine_entry_point_keeps_optimized_policy_and_normal_admission (__main__.LandingTests) ... ok
+test_environment_files_are_private_and_steps_keep_exports (__main__.LandingTests) ... ok
+test_every_script_and_workflow_has_reviewed_users_or_explicit_full (__main__.LandingTests) ... ok
+test_evidence_names_selected_and_skipped_binaries_and_reads_back (__main__.LandingTests)
+ov-1278: each gate run saves the test binaries it selected and skipped; a red main is traced by reading them. ... ok
+test_fixture_hooks_do_not_inherit_the_agents_private_route (__main__.LandingTests) ... ok
+test_full_rust_forces_the_whole_suite_in_both_modes (__main__.LandingTests)
+ov-1278: selection is the default in both modes; --full-rust beats it in both, and the evidence says so. ... ok
+test_gate_script_consumers_and_unknowns_stay_covered (__main__.LandingTests) ... ok
+test_git_reads_keep_the_watched_index_stable_and_real_writes_work (__main__.LandingTests) ... ok
+test_landing_fail_fast_stops_queued_families_and_apple_jobs (__main__.LandingTests) ... ok
+test_new_script_or_workflow_fails_coverage_and_defaults_full (__main__.LandingTests) ... ok
+test_parallelism_is_bounded_and_apple_is_serial (__main__.LandingTests) ... ok
+test_plain_runner_can_be_loaded_without_optional_landing_policy (__main__.LandingTests) ... ok
+test_real_affected_failure_and_unaffected_ci_failure (__main__.LandingTests) ... ok
+test_real_failure_proof_without_optional_nextest (__main__.LandingTests) ... ok
+test_real_workspace_leaf_narrows_and_shared_inputs_select_everything (__main__.LandingTests)
+ov-1268: the lane gate skips Rust tests a change cannot affect, using this repo's real crate graph. ... ok
+test_retry_diff_runs_only_script_checks (__main__.LandingTests) ... ok
+test_reviewed_script_selections (__main__.LandingTests) ... ok
+test_reviewed_scripts_keep_new_direct_consumers (__main__.LandingTests) ... ok
+test_three_file_fold_plan_uses_group_base_and_only_reached_rust_binaries (__main__.LandingTests)
+ov-1305: execute the planner with a stale remote ref and a pinned group base. ... ok
+test_worker_exception_is_red_and_other_rows_survive (__main__.LandingTests) ... ok
+test_workflow_changes_keep_lightweight_validation (__main__.LandingTests) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 14.396s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+EXIT 0
+RUN 6 Thu Nov 19 02:25:21 UTC 2026 10:25  up 7 days, 10:34, 1 user, load averages: 8.39 10.48 15.60
+test_ci_unchanged_and_local_bundle_consumers_explicit (__main__.LandingTests) ... ok
+test_clippy_is_independent_and_failure_is_required (__main__.LandingTests) ... ok
+test_cpu_budget_reaches_real_steps_without_changing_the_checks (__main__.LandingTests) ... ok
+test_engine_entry_point_keeps_optimized_policy_and_normal_admission (__main__.LandingTests) ... ok
+test_environment_files_are_private_and_steps_keep_exports (__main__.LandingTests) ... ok
+test_every_script_and_workflow_has_reviewed_users_or_explicit_full (__main__.LandingTests) ... ok
+test_evidence_names_selected_and_skipped_binaries_and_reads_back (__main__.LandingTests)
+ov-1278: each gate run saves the test binaries it selected and skipped; a red main is traced by reading them. ... ok
+test_fixture_hooks_do_not_inherit_the_agents_private_route (__main__.LandingTests) ... ok
+test_full_rust_forces_the_whole_suite_in_both_modes (__main__.LandingTests)
+ov-1278: selection is the default in both modes; --full-rust beats it in both, and the evidence says so. ... ok
+test_gate_script_consumers_and_unknowns_stay_covered (__main__.LandingTests) ... ok
+test_git_reads_keep_the_watched_index_stable_and_real_writes_work (__main__.LandingTests) ... ok
+test_landing_fail_fast_stops_queued_families_and_apple_jobs (__main__.LandingTests) ... ok
+test_new_script_or_workflow_fails_coverage_and_defaults_full (__main__.LandingTests) ... ok
+test_parallelism_is_bounded_and_apple_is_serial (__main__.LandingTests) ... ok
+test_plain_runner_can_be_loaded_without_optional_landing_policy (__main__.LandingTests) ... ok
+test_real_affected_failure_and_unaffected_ci_failure (__main__.LandingTests) ... ok
+test_real_failure_proof_without_optional_nextest (__main__.LandingTests) ... ok
+test_real_workspace_leaf_narrows_and_shared_inputs_select_everything (__main__.LandingTests)
+ov-1268: the lane gate skips Rust tests a change cannot affect, using this repo's real crate graph. ... ok
+test_retry_diff_runs_only_script_checks (__main__.LandingTests) ... ok
+test_reviewed_script_selections (__main__.LandingTests) ... ok
+test_reviewed_scripts_keep_new_direct_consumers (__main__.LandingTests) ... ok
+test_three_file_fold_plan_uses_group_base_and_only_reached_rust_binaries (__main__.LandingTests)
+ov-1305: execute the planner with a stale remote ref and a pinned group base. ... ok
+test_worker_exception_is_red_and_other_rows_survive (__main__.LandingTests) ... ok
+test_workflow_changes_keep_lightweight_validation (__main__.LandingTests) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 17.106s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+EXIT 0
+RUN 7 Thu Nov 19 02:25:38 UTC 2026 10:25  up 7 days, 10:34, 1 user, load averages: 9.94 10.72 15.59
+test_ci_unchanged_and_local_bundle_consumers_explicit (__main__.LandingTests) ... ok
+test_clippy_is_independent_and_failure_is_required (__main__.LandingTests) ... ok
+test_cpu_budget_reaches_real_steps_without_changing_the_checks (__main__.LandingTests) ... ok
+test_engine_entry_point_keeps_optimized_policy_and_normal_admission (__main__.LandingTests) ... ok
+test_environment_files_are_private_and_steps_keep_exports (__main__.LandingTests) ... ok
+test_every_script_and_workflow_has_reviewed_users_or_explicit_full (__main__.LandingTests) ... ok
+test_evidence_names_selected_and_skipped_binaries_and_reads_back (__main__.LandingTests)
+ov-1278: each gate run saves the test binaries it selected and skipped; a red main is traced by reading them. ... ok
+test_fixture_hooks_do_not_inherit_the_agents_private_route (__main__.LandingTests) ... ok
+test_full_rust_forces_the_whole_suite_in_both_modes (__main__.LandingTests)
+ov-1278: selection is the default in both modes; --full-rust beats it in both, and the evidence says so. ... ok
+test_gate_script_consumers_and_unknowns_stay_covered (__main__.LandingTests) ... ok
+test_git_reads_keep_the_watched_index_stable_and_real_writes_work (__main__.LandingTests) ... ok
+test_landing_fail_fast_stops_queued_families_and_apple_jobs (__main__.LandingTests) ... ok
+test_new_script_or_workflow_fails_coverage_and_defaults_full (__main__.LandingTests) ... ok
+test_parallelism_is_bounded_and_apple_is_serial (__main__.LandingTests) ... ok
+test_plain_runner_can_be_loaded_without_optional_landing_policy (__main__.LandingTests) ... ok
+test_real_affected_failure_and_unaffected_ci_failure (__main__.LandingTests) ... ok
+test_real_failure_proof_without_optional_nextest (__main__.LandingTests) ... ok
+test_real_workspace_leaf_narrows_and_shared_inputs_select_everything (__main__.LandingTests)
+ov-1268: the lane gate skips Rust tests a change cannot affect, using this repo's real crate graph. ... ok
+test_retry_diff_runs_only_script_checks (__main__.LandingTests) ... ok
+test_reviewed_script_selections (__main__.LandingTests) ... ok
+test_reviewed_scripts_keep_new_direct_consumers (__main__.LandingTests) ... ok
+test_three_file_fold_plan_uses_group_base_and_only_reached_rust_binaries (__main__.LandingTests)
+ov-1305: execute the planner with a stale remote ref and a pinned group base. ... ok
+test_worker_exception_is_red_and_other_rows_survive (__main__.LandingTests) ... ok
+test_workflow_changes_keep_lightweight_validation (__main__.LandingTests) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 16.328s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+EXIT 0
+RUN 8 Thu Nov 19 02:25:54 UTC 2026 10:25  up 7 days, 10:34, 1 user, load averages: 9.90 10.67 15.49
+test_ci_unchanged_and_local_bundle_consumers_explicit (__main__.LandingTests) ... ok
+test_clippy_is_independent_and_failure_is_required (__main__.LandingTests) ... ok
+test_cpu_budget_reaches_real_steps_without_changing_the_checks (__main__.LandingTests) ... ok
+test_engine_entry_point_keeps_optimized_policy_and_normal_admission (__main__.LandingTests) ... ok
+test_environment_files_are_private_and_steps_keep_exports (__main__.LandingTests) ... ok
+test_every_script_and_workflow_has_reviewed_users_or_explicit_full (__main__.LandingTests) ... ok
+test_evidence_names_selected_and_skipped_binaries_and_reads_back (__main__.LandingTests)
+ov-1278: each gate run saves the test binaries it selected and skipped; a red main is traced by reading them. ... ok
+test_fixture_hooks_do_not_inherit_the_agents_private_route (__main__.LandingTests) ... ok
+test_full_rust_forces_the_whole_suite_in_both_modes (__main__.LandingTests)
+ov-1278: selection is the default in both modes; --full-rust beats it in both, and the evidence says so. ... ok
+test_gate_script_consumers_and_unknowns_stay_covered (__main__.LandingTests) ... ok
+test_git_reads_keep_the_watched_index_stable_and_real_writes_work (__main__.LandingTests) ... ok
+test_landing_fail_fast_stops_queued_families_and_apple_jobs (__main__.LandingTests) ... ok
+test_new_script_or_workflow_fails_coverage_and_defaults_full (__main__.LandingTests) ... ok
+test_parallelism_is_bounded_and_apple_is_serial (__main__.LandingTests) ... ok
+test_plain_runner_can_be_loaded_without_optional_landing_policy (__main__.LandingTests) ... ok
+test_real_affected_failure_and_unaffected_ci_failure (__main__.LandingTests) ... ok
+test_real_failure_proof_without_optional_nextest (__main__.LandingTests) ... ok
+test_real_workspace_leaf_narrows_and_shared_inputs_select_everything (__main__.LandingTests)
+ov-1268: the lane gate skips Rust tests a change cannot affect, using this repo's real crate graph. ... ok
+test_retry_diff_runs_only_script_checks (__main__.LandingTests) ... ok
+test_reviewed_script_selections (__main__.LandingTests) ... ok
+test_reviewed_scripts_keep_new_direct_consumers (__main__.LandingTests) ... ok
+test_three_file_fold_plan_uses_group_base_and_only_reached_rust_binaries (__main__.LandingTests)
+ov-1305: execute the planner with a stale remote ref and a pinned group base. ... ok
+test_worker_exception_is_red_and_other_rows_survive (__main__.LandingTests) ... ok
+test_workflow_changes_keep_lightweight_validation (__main__.LandingTests) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 14.452s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+EXIT 0
+RUN 9 Thu Nov 19 02:26:09 UTC 2026 10:26  up 7 days, 10:34, 1 user, load averages: 10.03 10.65 15.40
+test_ci_unchanged_and_local_bundle_consumers_explicit (__main__.LandingTests) ... ok
+test_clippy_is_independent_and_failure_is_required (__main__.LandingTests) ... ok
+test_cpu_budget_reaches_real_steps_without_changing_the_checks (__main__.LandingTests) ... ok
+test_engine_entry_point_keeps_optimized_policy_and_normal_admission (__main__.LandingTests) ... ok
+test_environment_files_are_private_and_steps_keep_exports (__main__.LandingTests) ... ok
+test_every_script_and_workflow_has_reviewed_users_or_explicit_full (__main__.LandingTests) ... ok
+test_evidence_names_selected_and_skipped_binaries_and_reads_back (__main__.LandingTests)
+ov-1278: each gate run saves the test binaries it selected and skipped; a red main is traced by reading them. ... ok
+test_fixture_hooks_do_not_inherit_the_agents_private_route (__main__.LandingTests) ... ok
+test_full_rust_forces_the_whole_suite_in_both_modes (__main__.LandingTests)
+ov-1278: selection is the default in both modes; --full-rust beats it in both, and the evidence says so. ... ok
+test_gate_script_consumers_and_unknowns_stay_covered (__main__.LandingTests) ... ok
+test_git_reads_keep_the_watched_index_stable_and_real_writes_work (__main__.LandingTests) ... ok
+test_landing_fail_fast_stops_queued_families_and_apple_jobs (__main__.LandingTests) ... ok
+test_new_script_or_workflow_fails_coverage_and_defaults_full (__main__.LandingTests) ... ok
+test_parallelism_is_bounded_and_apple_is_serial (__main__.LandingTests) ... ok
+test_plain_runner_can_be_loaded_without_optional_landing_policy (__main__.LandingTests) ... ok
+test_real_affected_failure_and_unaffected_ci_failure (__main__.LandingTests) ... ok
+test_real_failure_proof_without_optional_nextest (__main__.LandingTests) ... ok
+test_real_workspace_leaf_narrows_and_shared_inputs_select_everything (__main__.LandingTests)
+ov-1268: the lane gate skips Rust tests a change cannot affect, using this repo's real crate graph. ... ok
+test_retry_diff_runs_only_script_checks (__main__.LandingTests) ... ok
+test_reviewed_script_selections (__main__.LandingTests) ... ok
+test_reviewed_scripts_keep_new_direct_consumers (__main__.LandingTests) ... ok
+test_three_file_fold_plan_uses_group_base_and_only_reached_rust_binaries (__main__.LandingTests)
+ov-1305: execute the planner with a stale remote ref and a pinned group base. ... ok
+test_worker_exception_is_red_and_other_rows_survive (__main__.LandingTests) ... ok
+test_workflow_changes_keep_lightweight_validation (__main__.LandingTests) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 12.957s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+EXIT 0
+RUN 10 Thu Nov 19 02:26:22 UTC 2026 10:26  up 7 days, 10:35, 1 user, load averages: 9.63 10.54 15.27
+test_ci_unchanged_and_local_bundle_consumers_explicit (__main__.LandingTests) ... ok
+test_clippy_is_independent_and_failure_is_required (__main__.LandingTests) ... ok
+test_cpu_budget_reaches_real_steps_without_changing_the_checks (__main__.LandingTests) ... ok
+test_engine_entry_point_keeps_optimized_policy_and_normal_admission (__main__.LandingTests) ... ok
+test_environment_files_are_private_and_steps_keep_exports (__main__.LandingTests) ... ok
+test_every_script_and_workflow_has_reviewed_users_or_explicit_full (__main__.LandingTests) ... ok
+test_evidence_names_selected_and_skipped_binaries_and_reads_back (__main__.LandingTests)
+ov-1278: each gate run saves the test binaries it selected and skipped; a red main is traced by reading them. ... ok
+test_fixture_hooks_do_not_inherit_the_agents_private_route (__main__.LandingTests) ... ok
+test_full_rust_forces_the_whole_suite_in_both_modes (__main__.LandingTests)
+ov-1278: selection is the default in both modes; --full-rust beats it in both, and the evidence says so. ... ok
+test_gate_script_consumers_and_unknowns_stay_covered (__main__.LandingTests) ... ok
+test_git_reads_keep_the_watched_index_stable_and_real_writes_work (__main__.LandingTests) ... ok
+test_landing_fail_fast_stops_queued_families_and_apple_jobs (__main__.LandingTests) ... ok
+test_new_script_or_workflow_fails_coverage_and_defaults_full (__main__.LandingTests) ... ok
+test_parallelism_is_bounded_and_apple_is_serial (__main__.LandingTests) ... ok
+test_plain_runner_can_be_loaded_without_optional_landing_policy (__main__.LandingTests) ... ok
+test_real_affected_failure_and_unaffected_ci_failure (__main__.LandingTests) ... ok
+test_real_failure_proof_without_optional_nextest (__main__.LandingTests) ... ok
+test_real_workspace_leaf_narrows_and_shared_inputs_select_everything (__main__.LandingTests)
+ov-1268: the lane gate skips Rust tests a change cannot affect, using this repo's real crate graph. ... ok
+test_retry_diff_runs_only_script_checks (__main__.LandingTests) ... ok
+test_reviewed_script_selections (__main__.LandingTests) ... ok
+test_reviewed_scripts_keep_new_direct_consumers (__main__.LandingTests) ... ok
+test_three_file_fold_plan_uses_group_base_and_only_reached_rust_binaries (__main__.LandingTests)
+ov-1305: execute the planner with a stale remote ref and a pinned group base. ... ok
+test_worker_exception_is_red_and_other_rows_survive (__main__.LandingTests) ... ok
+test_workflow_changes_keep_lightweight_validation (__main__.LandingTests) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 11.863s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+EXIT 0
+RUN 11 Thu Nov 19 02:26:34 UTC 2026 10:26  up 7 days, 10:35, 1 user, load averages: 9.70 10.52 15.21
+test_ci_unchanged_and_local_bundle_consumers_explicit (__main__.LandingTests) ... ok
+test_clippy_is_independent_and_failure_is_required (__main__.LandingTests) ... ok
+test_cpu_budget_reaches_real_steps_without_changing_the_checks (__main__.LandingTests) ... ok
+test_engine_entry_point_keeps_optimized_policy_and_normal_admission (__main__.LandingTests) ... ok
+test_environment_files_are_private_and_steps_keep_exports (__main__.LandingTests) ... ok
+test_every_script_and_workflow_has_reviewed_users_or_explicit_full (__main__.LandingTests) ... ok
+test_evidence_names_selected_and_skipped_binaries_and_reads_back (__main__.LandingTests)
+ov-1278: each gate run saves the test binaries it selected and skipped; a red main is traced by reading them. ... ok
+test_fixture_hooks_do_not_inherit_the_agents_private_route (__main__.LandingTests) ... ok
+test_full_rust_forces_the_whole_suite_in_both_modes (__main__.LandingTests)
+ov-1278: selection is the default in both modes; --full-rust beats it in both, and the evidence says so. ... ok
+test_gate_script_consumers_and_unknowns_stay_covered (__main__.LandingTests) ... ok
+test_git_reads_keep_the_watched_index_stable_and_real_writes_work (__main__.LandingTests) ... ok
+test_landing_fail_fast_stops_queued_families_and_apple_jobs (__main__.LandingTests) ... ok
+test_new_script_or_workflow_fails_coverage_and_defaults_full (__main__.LandingTests) ... ok
+test_parallelism_is_bounded_and_apple_is_serial (__main__.LandingTests) ... ok
+test_plain_runner_can_be_loaded_without_optional_landing_policy (__main__.LandingTests) ... ok
+test_real_affected_failure_and_unaffected_ci_failure (__main__.LandingTests) ... ok
+test_real_failure_proof_without_optional_nextest (__main__.LandingTests) ... ok
+test_real_workspace_leaf_narrows_and_shared_inputs_select_everything (__main__.LandingTests)
+ov-1268: the lane gate skips Rust tests a change cannot affect, using this repo's real crate graph. ... ok
+test_retry_diff_runs_only_script_checks (__main__.LandingTests) ... ok
+test_reviewed_script_selections (__main__.LandingTests) ... ok
+test_reviewed_scripts_keep_new_direct_consumers (__main__.LandingTests) ... ok
+test_three_file_fold_plan_uses_group_base_and_only_reached_rust_binaries (__main__.LandingTests)
+ov-1305: execute the planner with a stale remote ref and a pinned group base. ... ok
+test_worker_exception_is_red_and_other_rows_survive (__main__.LandingTests) ... ok
+test_workflow_changes_keep_lightweight_validation (__main__.LandingTests) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 13.232s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+EXIT 0
+RUN 12 Thu Nov 19 02:26:47 UTC 2026 10:26  up 7 days, 10:35, 1 user, load averages: 9.54 10.45 15.10
+test_ci_unchanged_and_local_bundle_consumers_explicit (__main__.LandingTests) ... ok
+test_clippy_is_independent_and_failure_is_required (__main__.LandingTests) ... ok
+test_cpu_budget_reaches_real_steps_without_changing_the_checks (__main__.LandingTests) ... ok
+test_engine_entry_point_keeps_optimized_policy_and_normal_admission (__main__.LandingTests) ... ok
+test_environment_files_are_private_and_steps_keep_exports (__main__.LandingTests) ... ok
+test_every_script_and_workflow_has_reviewed_users_or_explicit_full (__main__.LandingTests) ... ok
+test_evidence_names_selected_and_skipped_binaries_and_reads_back (__main__.LandingTests)
+ov-1278: each gate run saves the test binaries it selected and skipped; a red main is traced by reading them. ... ok
+test_fixture_hooks_do_not_inherit_the_agents_private_route (__main__.LandingTests) ... ok
+test_full_rust_forces_the_whole_suite_in_both_modes (__main__.LandingTests)
+ov-1278: selection is the default in both modes; --full-rust beats it in both, and the evidence says so. ... ok
+test_gate_script_consumers_and_unknowns_stay_covered (__main__.LandingTests) ... ok
+test_git_reads_keep_the_watched_index_stable_and_real_writes_work (__main__.LandingTests) ... ok
+test_landing_fail_fast_stops_queued_families_and_apple_jobs (__main__.LandingTests) ... ok
+test_new_script_or_workflow_fails_coverage_and_defaults_full (__main__.LandingTests) ... ok
+test_parallelism_is_bounded_and_apple_is_serial (__main__.LandingTests) ... ok
+test_plain_runner_can_be_loaded_without_optional_landing_policy (__main__.LandingTests) ... ok
+test_real_affected_failure_and_unaffected_ci_failure (__main__.LandingTests) ... ok
+test_real_failure_proof_without_optional_nextest (__main__.LandingTests) ... ok
+test_real_workspace_leaf_narrows_and_shared_inputs_select_everything (__main__.LandingTests)
+ov-1268: the lane gate skips Rust tests a change cannot affect, using this repo's real crate graph. ... ok
+test_retry_diff_runs_only_script_checks (__main__.LandingTests) ... ok
+test_reviewed_script_selections (__main__.LandingTests) ... ok
+test_reviewed_scripts_keep_new_direct_consumers (__main__.LandingTests) ... ok
+test_three_file_fold_plan_uses_group_base_and_only_reached_rust_binaries (__main__.LandingTests)
+ov-1305: execute the planner with a stale remote ref and a pinned group base. ... ok
+test_worker_exception_is_red_and_other_rows_survive (__main__.LandingTests) ... ok
+test_workflow_changes_keep_lightweight_validation (__main__.LandingTests) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 15.886s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+EXIT 0
+RUN 13 Thu Nov 19 02:27:03 UTC 2026 10:27  up 7 days, 10:35, 1 user, load averages: 11.91 10.93 15.19
+test_ci_unchanged_and_local_bundle_consumers_explicit (__main__.LandingTests) ... ok
+test_clippy_is_independent_and_failure_is_required (__main__.LandingTests) ... ok
+test_cpu_budget_reaches_real_steps_without_changing_the_checks (__main__.LandingTests) ... ok
+test_engine_entry_point_keeps_optimized_policy_and_normal_admission (__main__.LandingTests) ... ok
+test_environment_files_are_private_and_steps_keep_exports (__main__.LandingTests) ... ok
+test_every_script_and_workflow_has_reviewed_users_or_explicit_full (__main__.LandingTests) ... ok
+test_evidence_names_selected_and_skipped_binaries_and_reads_back (__main__.LandingTests)
+ov-1278: each gate run saves the test binaries it selected and skipped; a red main is traced by reading them. ... ok
+test_fixture_hooks_do_not_inherit_the_agents_private_route (__main__.LandingTests) ... ok
+test_full_rust_forces_the_whole_suite_in_both_modes (__main__.LandingTests)
+ov-1278: selection is the default in both modes; --full-rust beats it in both, and the evidence says so. ... ok
+test_gate_script_consumers_and_unknowns_stay_covered (__main__.LandingTests) ... ok
+test_git_reads_keep_the_watched_index_stable_and_real_writes_work (__main__.LandingTests) ... ok
+test_landing_fail_fast_stops_queued_families_and_apple_jobs (__main__.LandingTests) ... ok
+test_new_script_or_workflow_fails_coverage_and_defaults_full (__main__.LandingTests) ... ok
+test_parallelism_is_bounded_and_apple_is_serial (__main__.LandingTests) ... ok
+test_plain_runner_can_be_loaded_without_optional_landing_policy (__main__.LandingTests) ... ok
+test_real_affected_failure_and_unaffected_ci_failure (__main__.LandingTests) ... ok
+test_real_failure_proof_without_optional_nextest (__main__.LandingTests) ... ok
+test_real_workspace_leaf_narrows_and_shared_inputs_select_everything (__main__.LandingTests)
+ov-1268: the lane gate skips Rust tests a change cannot affect, using this repo's real crate graph. ... ok
+test_retry_diff_runs_only_script_checks (__main__.LandingTests) ... ok
+test_reviewed_script_selections (__main__.LandingTests) ... ok
+test_reviewed_scripts_keep_new_direct_consumers (__main__.LandingTests) ... ok
+test_three_file_fold_plan_uses_group_base_and_only_reached_rust_binaries (__main__.LandingTests)
+ov-1305: execute the planner with a stale remote ref and a pinned group base. ... ok
+test_worker_exception_is_red_and_other_rows_survive (__main__.LandingTests) ... ok
+test_workflow_changes_keep_lightweight_validation (__main__.LandingTests) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 19.153s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+EXIT 0
+RUN 14 Thu Nov 19 02:27:23 UTC 2026 10:27  up 7 days, 10:36, 1 user, load averages: 13.64 11.42 15.27
+test_ci_unchanged_and_local_bundle_consumers_explicit (__main__.LandingTests) ... ok
+test_clippy_is_independent_and_failure_is_required (__main__.LandingTests) ... ok
+test_cpu_budget_reaches_real_steps_without_changing_the_checks (__main__.LandingTests) ... ok
+test_engine_entry_point_keeps_optimized_policy_and_normal_admission (__main__.LandingTests) ... ok
+test_environment_files_are_private_and_steps_keep_exports (__main__.LandingTests) ... ok
+test_every_script_and_workflow_has_reviewed_users_or_explicit_full (__main__.LandingTests) ... ok
+test_evidence_names_selected_and_skipped_binaries_and_reads_back (__main__.LandingTests)
+ov-1278: each gate run saves the test binaries it selected and skipped; a red main is traced by reading them. ... ok
+test_fixture_hooks_do_not_inherit_the_agents_private_route (__main__.LandingTests) ... ok
+test_full_rust_forces_the_whole_suite_in_both_modes (__main__.LandingTests)
+ov-1278: selection is the default in both modes; --full-rust beats it in both, and the evidence says so. ... ok
+test_gate_script_consumers_and_unknowns_stay_covered (__main__.LandingTests) ... ok
+test_git_reads_keep_the_watched_index_stable_and_real_writes_work (__main__.LandingTests) ... ok
+test_landing_fail_fast_stops_queued_families_and_apple_jobs (__main__.LandingTests) ... ok
+test_new_script_or_workflow_fails_coverage_and_defaults_full (__main__.LandingTests) ... ok
+test_parallelism_is_bounded_and_apple_is_serial (__main__.LandingTests) ... ok
+test_plain_runner_can_be_loaded_without_optional_landing_policy (__main__.LandingTests) ... ok
+test_real_affected_failure_and_unaffected_ci_failure (__main__.LandingTests) ... ok
+test_real_failure_proof_without_optional_nextest (__main__.LandingTests) ... ok
+test_real_workspace_leaf_narrows_and_shared_inputs_select_everything (__main__.LandingTests)
+ov-1268: the lane gate skips Rust tests a change cannot affect, using this repo's real crate graph. ... ok
+test_retry_diff_runs_only_script_checks (__main__.LandingTests) ... ok
+test_reviewed_script_selections (__main__.LandingTests) ... ok
+test_reviewed_scripts_keep_new_direct_consumers (__main__.LandingTests) ... ok
+test_three_file_fold_plan_uses_group_base_and_only_reached_rust_binaries (__main__.LandingTests)
+ov-1305: execute the planner with a stale remote ref and a pinned group base. ... ok
+test_worker_exception_is_red_and_other_rows_survive (__main__.LandingTests) ... ok
+test_workflow_changes_keep_lightweight_validation (__main__.LandingTests) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 16.043s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+EXIT 0
+RUN 15 Thu Nov 19 02:27:39 UTC 2026 10:27  up 7 days, 10:36, 1 user, load averages: 13.42 11.47 15.22
+test_ci_unchanged_and_local_bundle_consumers_explicit (__main__.LandingTests) ... ok
+test_clippy_is_independent_and_failure_is_required (__main__.LandingTests) ... ok
+test_cpu_budget_reaches_real_steps_without_changing_the_checks (__main__.LandingTests) ... ok
+test_engine_entry_point_keeps_optimized_policy_and_normal_admission (__main__.LandingTests) ... ok
+test_environment_files_are_private_and_steps_keep_exports (__main__.LandingTests) ... ok
+test_every_script_and_workflow_has_reviewed_users_or_explicit_full (__main__.LandingTests) ... ok
+test_evidence_names_selected_and_skipped_binaries_and_reads_back (__main__.LandingTests)
+ov-1278: each gate run saves the test binaries it selected and skipped; a red main is traced by reading them. ... ok
+test_fixture_hooks_do_not_inherit_the_agents_private_route (__main__.LandingTests) ... ok
+test_full_rust_forces_the_whole_suite_in_both_modes (__main__.LandingTests)
+ov-1278: selection is the default in both modes; --full-rust beats it in both, and the evidence says so. ... ok
+test_gate_script_consumers_and_unknowns_stay_covered (__main__.LandingTests) ... ok
+test_git_reads_keep_the_watched_index_stable_and_real_writes_work (__main__.LandingTests) ... ok
+test_landing_fail_fast_stops_queued_families_and_apple_jobs (__main__.LandingTests) ... ok
+test_new_script_or_workflow_fails_coverage_and_defaults_full (__main__.LandingTests) ... ok
+test_parallelism_is_bounded_and_apple_is_serial (__main__.LandingTests) ... ok
+test_plain_runner_can_be_loaded_without_optional_landing_policy (__main__.LandingTests) ... ok
+test_real_affected_failure_and_unaffected_ci_failure (__main__.LandingTests) ... ok
+test_real_failure_proof_without_optional_nextest (__main__.LandingTests) ... ok
+test_real_workspace_leaf_narrows_and_shared_inputs_select_everything (__main__.LandingTests)
+ov-1268: the lane gate skips Rust tests a change cannot affect, using this repo's real crate graph. ... ok
+test_retry_diff_runs_only_script_checks (__main__.LandingTests) ... ok
+test_reviewed_script_selections (__main__.LandingTests) ... ok
+test_reviewed_scripts_keep_new_direct_consumers (__main__.LandingTests) ... ok
+test_three_file_fold_plan_uses_group_base_and_only_reached_rust_binaries (__main__.LandingTests)
+ov-1305: execute the planner with a stale remote ref and a pinned group base. ... ok
+test_worker_exception_is_red_and_other_rows_survive (__main__.LandingTests) ... ok
+test_workflow_changes_keep_lightweight_validation (__main__.LandingTests) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 13.115s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+EXIT 0
+RUN 16 Thu Nov 19 02:27:52 UTC 2026 10:27  up 7 days, 10:36, 1 user, load averages: 12.33 11.32 15.10
+test_ci_unchanged_and_local_bundle_consumers_explicit (__main__.LandingTests) ... ok
+test_clippy_is_independent_and_failure_is_required (__main__.LandingTests) ... ok
+test_cpu_budget_reaches_real_steps_without_changing_the_checks (__main__.LandingTests) ... ok
+test_engine_entry_point_keeps_optimized_policy_and_normal_admission (__main__.LandingTests) ... ok
+test_environment_files_are_private_and_steps_keep_exports (__main__.LandingTests) ... ok
+test_every_script_and_workflow_has_reviewed_users_or_explicit_full (__main__.LandingTests) ... ok
+test_evidence_names_selected_and_skipped_binaries_and_reads_back (__main__.LandingTests)
+ov-1278: each gate run saves the test binaries it selected and skipped; a red main is traced by reading them. ... ok
+test_fixture_hooks_do_not_inherit_the_agents_private_route (__main__.LandingTests) ... ok
+test_full_rust_forces_the_whole_suite_in_both_modes (__main__.LandingTests)
+ov-1278: selection is the default in both modes; --full-rust beats it in both, and the evidence says so. ... ok
+test_gate_script_consumers_and_unknowns_stay_covered (__main__.LandingTests) ... ok
+test_git_reads_keep_the_watched_index_stable_and_real_writes_work (__main__.LandingTests) ... ok
+test_landing_fail_fast_stops_queued_families_and_apple_jobs (__main__.LandingTests) ... ok
+test_new_script_or_workflow_fails_coverage_and_defaults_full (__main__.LandingTests) ... ok
+test_parallelism_is_bounded_and_apple_is_serial (__main__.LandingTests) ... ok
+test_plain_runner_can_be_loaded_without_optional_landing_policy (__main__.LandingTests) ... ok
+test_real_affected_failure_and_unaffected_ci_failure (__main__.LandingTests) ... ok
+test_real_failure_proof_without_optional_nextest (__main__.LandingTests) ... ok
+test_real_workspace_leaf_narrows_and_shared_inputs_select_everything (__main__.LandingTests)
+ov-1268: the lane gate skips Rust tests a change cannot affect, using this repo's real crate graph. ... ok
+test_retry_diff_runs_only_script_checks (__main__.LandingTests) ... ok
+test_reviewed_script_selections (__main__.LandingTests) ... ok
+test_reviewed_scripts_keep_new_direct_consumers (__main__.LandingTests) ... ok
+test_three_file_fold_plan_uses_group_base_and_only_reached_rust_binaries (__main__.LandingTests)
+ov-1305: execute the planner with a stale remote ref and a pinned group base. ... ok
+test_worker_exception_is_red_and_other_rows_survive (__main__.LandingTests) ... ok
+test_workflow_changes_keep_lightweight_validation (__main__.LandingTests) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 13.031s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+EXIT 0
+RUN 17 Thu Nov 19 02:28:05 UTC 2026 10:28  up 7 days, 10:36, 1 user, load averages: 11.59 11.19 15.01
+test_ci_unchanged_and_local_bundle_consumers_explicit (__main__.LandingTests) ... ok
+test_clippy_is_independent_and_failure_is_required (__main__.LandingTests) ... ok
+test_cpu_budget_reaches_real_steps_without_changing_the_checks (__main__.LandingTests) ... ok
+test_engine_entry_point_keeps_optimized_policy_and_normal_admission (__main__.LandingTests) ... ok
+test_environment_files_are_private_and_steps_keep_exports (__main__.LandingTests) ... ok
+test_every_script_and_workflow_has_reviewed_users_or_explicit_full (__main__.LandingTests) ... ok
+test_evidence_names_selected_and_skipped_binaries_and_reads_back (__main__.LandingTests)
+ov-1278: each gate run saves the test binaries it selected and skipped; a red main is traced by reading them. ... ok
+test_fixture_hooks_do_not_inherit_the_agents_private_route (__main__.LandingTests) ... ok
+test_full_rust_forces_the_whole_suite_in_both_modes (__main__.LandingTests)
+ov-1278: selection is the default in both modes; --full-rust beats it in both, and the evidence says so. ... ok
+test_gate_script_consumers_and_unknowns_stay_covered (__main__.LandingTests) ... ok
+test_git_reads_keep_the_watched_index_stable_and_real_writes_work (__main__.LandingTests) ... ok
+test_landing_fail_fast_stops_queued_families_and_apple_jobs (__main__.LandingTests) ... ok
+test_new_script_or_workflow_fails_coverage_and_defaults_full (__main__.LandingTests) ... ok
+test_parallelism_is_bounded_and_apple_is_serial (__main__.LandingTests) ... ok
+test_plain_runner_can_be_loaded_without_optional_landing_policy (__main__.LandingTests) ... ok
+test_real_affected_failure_and_unaffected_ci_failure (__main__.LandingTests) ... ok
+test_real_failure_proof_without_optional_nextest (__main__.LandingTests) ... ok
+test_real_workspace_leaf_narrows_and_shared_inputs_select_everything (__main__.LandingTests)
+ov-1268: the lane gate skips Rust tests a change cannot affect, using this repo's real crate graph. ... ok
+test_retry_diff_runs_only_script_checks (__main__.LandingTests) ... ok
+test_reviewed_script_selections (__main__.LandingTests) ... ok
+test_reviewed_scripts_keep_new_direct_consumers (__main__.LandingTests) ... ok
+test_three_file_fold_plan_uses_group_base_and_only_reached_rust_binaries (__main__.LandingTests)
+ov-1305: execute the planner with a stale remote ref and a pinned group base. ... ok
+test_worker_exception_is_red_and_other_rows_survive (__main__.LandingTests) ... ok
+test_workflow_changes_keep_lightweight_validation (__main__.LandingTests) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 14.525s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+EXIT 0
+RUN 18 Thu Nov 19 02:28:20 UTC 2026 10:28  up 7 days, 10:37, 1 user, load averages: 13.09 11.53 15.06
+test_ci_unchanged_and_local_bundle_consumers_explicit (__main__.LandingTests) ... ok
+test_clippy_is_independent_and_failure_is_required (__main__.LandingTests) ... ok
+test_cpu_budget_reaches_real_steps_without_changing_the_checks (__main__.LandingTests) ... ok
+test_engine_entry_point_keeps_optimized_policy_and_normal_admission (__main__.LandingTests) ... ok
+test_environment_files_are_private_and_steps_keep_exports (__main__.LandingTests) ... ok
+test_every_script_and_workflow_has_reviewed_users_or_explicit_full (__main__.LandingTests) ... ok
+test_evidence_names_selected_and_skipped_binaries_and_reads_back (__main__.LandingTests)
+ov-1278: each gate run saves the test binaries it selected and skipped; a red main is traced by reading them. ... ok
+test_fixture_hooks_do_not_inherit_the_agents_private_route (__main__.LandingTests) ... ok
+test_full_rust_forces_the_whole_suite_in_both_modes (__main__.LandingTests)
+ov-1278: selection is the default in both modes; --full-rust beats it in both, and the evidence says so. ... ok
+test_gate_script_consumers_and_unknowns_stay_covered (__main__.LandingTests) ... ok
+test_git_reads_keep_the_watched_index_stable_and_real_writes_work (__main__.LandingTests) ... ok
+test_landing_fail_fast_stops_queued_families_and_apple_jobs (__main__.LandingTests) ... ok
+test_new_script_or_workflow_fails_coverage_and_defaults_full (__main__.LandingTests) ... ok
+test_parallelism_is_bounded_and_apple_is_serial (__main__.LandingTests) ... ok
+test_plain_runner_can_be_loaded_without_optional_landing_policy (__main__.LandingTests) ... ok
+test_real_affected_failure_and_unaffected_ci_failure (__main__.LandingTests) ... ok
+test_real_failure_proof_without_optional_nextest (__main__.LandingTests) ... ok
+test_real_workspace_leaf_narrows_and_shared_inputs_select_everything (__main__.LandingTests)
+ov-1268: the lane gate skips Rust tests a change cannot affect, using this repo's real crate graph. ... ok
+test_retry_diff_runs_only_script_checks (__main__.LandingTests) ... ok
+test_reviewed_script_selections (__main__.LandingTests) ... ok
+test_reviewed_scripts_keep_new_direct_consumers (__main__.LandingTests) ... ok
+test_three_file_fold_plan_uses_group_base_and_only_reached_rust_binaries (__main__.LandingTests)
+ov-1305: execute the planner with a stale remote ref and a pinned group base. ... ok
+test_worker_exception_is_red_and_other_rows_survive (__main__.LandingTests) ... ok
+test_workflow_changes_keep_lightweight_validation (__main__.LandingTests) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 13.430s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+EXIT 0
+RUN 19 Thu Nov 19 02:28:33 UTC 2026 10:28  up 7 days, 10:37, 1 user, load averages: 11.53 11.26 14.90
+test_ci_unchanged_and_local_bundle_consumers_explicit (__main__.LandingTests) ... ok
+test_clippy_is_independent_and_failure_is_required (__main__.LandingTests) ... ok
+test_cpu_budget_reaches_real_steps_without_changing_the_checks (__main__.LandingTests) ... ok
+test_engine_entry_point_keeps_optimized_policy_and_normal_admission (__main__.LandingTests) ... ok
+test_environment_files_are_private_and_steps_keep_exports (__main__.LandingTests) ... ok
+test_every_script_and_workflow_has_reviewed_users_or_explicit_full (__main__.LandingTests) ... ok
+test_evidence_names_selected_and_skipped_binaries_and_reads_back (__main__.LandingTests)
+ov-1278: each gate run saves the test binaries it selected and skipped; a red main is traced by reading them. ... ok
+test_fixture_hooks_do_not_inherit_the_agents_private_route (__main__.LandingTests) ... ok
+test_full_rust_forces_the_whole_suite_in_both_modes (__main__.LandingTests)
+ov-1278: selection is the default in both modes; --full-rust beats it in both, and the evidence says so. ... ok
+test_gate_script_consumers_and_unknowns_stay_covered (__main__.LandingTests) ... ok
+test_git_reads_keep_the_watched_index_stable_and_real_writes_work (__main__.LandingTests) ... ok
+test_landing_fail_fast_stops_queued_families_and_apple_jobs (__main__.LandingTests) ... ok
+test_new_script_or_workflow_fails_coverage_and_defaults_full (__main__.LandingTests) ... ok
+test_parallelism_is_bounded_and_apple_is_serial (__main__.LandingTests) ... ok
+test_plain_runner_can_be_loaded_without_optional_landing_policy (__main__.LandingTests) ... ok
+test_real_affected_failure_and_unaffected_ci_failure (__main__.LandingTests) ... ok
+test_real_failure_proof_without_optional_nextest (__main__.LandingTests) ... ok
+test_real_workspace_leaf_narrows_and_shared_inputs_select_everything (__main__.LandingTests)
+ov-1268: the lane gate skips Rust tests a change cannot affect, using this repo's real crate graph. ... ok
+test_retry_diff_runs_only_script_checks (__main__.LandingTests) ... ok
+test_reviewed_script_selections (__main__.LandingTests) ... ok
+test_reviewed_scripts_keep_new_direct_consumers (__main__.LandingTests) ... ok
+test_three_file_fold_plan_uses_group_base_and_only_reached_rust_binaries (__main__.LandingTests)
+ov-1305: execute the planner with a stale remote ref and a pinned group base. ... ok
+test_worker_exception_is_red_and_other_rows_survive (__main__.LandingTests) ... ok
+test_workflow_changes_keep_lightweight_validation (__main__.LandingTests) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 13.775s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+EXIT 0
+RUN 20 Thu Nov 19 02:28:47 UTC 2026 10:28  up 7 days, 10:37, 1 user, load averages: 11.20 11.20 14.82
+test_ci_unchanged_and_local_bundle_consumers_explicit (__main__.LandingTests) ... ok
+test_clippy_is_independent_and_failure_is_required (__main__.LandingTests) ... ok
+test_cpu_budget_reaches_real_steps_without_changing_the_checks (__main__.LandingTests) ... ok
+test_engine_entry_point_keeps_optimized_policy_and_normal_admission (__main__.LandingTests) ... ok
+test_environment_files_are_private_and_steps_keep_exports (__main__.LandingTests) ... ok
+test_every_script_and_workflow_has_reviewed_users_or_explicit_full (__main__.LandingTests) ... ok
+test_evidence_names_selected_and_skipped_binaries_and_reads_back (__main__.LandingTests)
+ov-1278: each gate run saves the test binaries it selected and skipped; a red main is traced by reading them. ... ok
+test_fixture_hooks_do_not_inherit_the_agents_private_route (__main__.LandingTests) ... ok
+test_full_rust_forces_the_whole_suite_in_both_modes (__main__.LandingTests)
+ov-1278: selection is the default in both modes; --full-rust beats it in both, and the evidence says so. ... ok
+test_gate_script_consumers_and_unknowns_stay_covered (__main__.LandingTests) ... ok
+test_git_reads_keep_the_watched_index_stable_and_real_writes_work (__main__.LandingTests) ... ok
+test_landing_fail_fast_stops_queued_families_and_apple_jobs (__main__.LandingTests) ... ok
+test_new_script_or_workflow_fails_coverage_and_defaults_full (__main__.LandingTests) ... ok
+test_parallelism_is_bounded_and_apple_is_serial (__main__.LandingTests) ... ok
+test_plain_runner_can_be_loaded_without_optional_landing_policy (__main__.LandingTests) ... ok
+test_real_affected_failure_and_unaffected_ci_failure (__main__.LandingTests) ... ok
+test_real_failure_proof_without_optional_nextest (__main__.LandingTests) ... ok
+test_real_workspace_leaf_narrows_and_shared_inputs_select_everything (__main__.LandingTests)
+ov-1268: the lane gate skips Rust tests a change cannot affect, using this repo's real crate graph. ... ok
+test_retry_diff_runs_only_script_checks (__main__.LandingTests) ... ok
+test_reviewed_script_selections (__main__.LandingTests) ... ok
+test_reviewed_scripts_keep_new_direct_consumers (__main__.LandingTests) ... ok
+test_three_file_fold_plan_uses_group_base_and_only_reached_rust_binaries (__main__.LandingTests)
+ov-1305: execute the planner with a stale remote ref and a pinned group base. ... ok
+test_worker_exception_is_red_and_other_rows_survive (__main__.LandingTests) ... ok
+test_workflow_changes_keep_lightweight_validation (__main__.LandingTests) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 14.009s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+EXIT 0

@@ -21,6 +21,19 @@ for a fixture's `env python3` shebang. Subsequent runs use the native
 `self-test-load.log`.
 
 A subsequent unsandboxed run (`self-test-load-20.log`) passed five consecutive
-runs at start/end one-minute loads above 15. The execution session was
-interrupted during run six, so this is not a completed 20-run validation. The
+runs at start/end one-minute loads above 15. Run six failed in process_guard_test.py:98 because the bystander exited normally after its 60-second sleep; it was not signaled. The bystander now waits indefinitely until explicit cleanup. This was not a completed 20-run validation. The
 sandboxed attempt could not run process-guard tests because it blocks `ps`.
+
+A controlled reproduction (`probe-reproduction.log`) confirms that a delayed fake Java executable is rejected by the unchanged 0.5-second deadline, while the same executable passes without the delay. This demonstrates a plausible mechanism, but the original run did not record probe timing, so it does not establish its actual cause.
+
+The affected fold c45e00e57 was checked out and its 24-test landing-policy suite
+run 20 times with the pre-queue's clean environment and verbose output. All 20
+passed; `fold-reproduction.log` retains the full output and load readings. This
+does not identify the original error. The earlier wrapper overwrote its captured
+output on each command and preserved only the final six lines on failure.
+
+The final candidate passed 20 consecutive self-tests at natural load; complete
+output, 30-second load samples, and exit statuses are in `final-streak.log`.
+Several one-minute load readings were below 15, so this does not meet the later
+review request for load above 15 throughout. No synthetic load was generated,
+in accordance with the manager's ruling.
