@@ -121,12 +121,11 @@ async fn a_first_pause_that_cannot_be_recorded_stops_nothing() {
     let child = builder();
     let _guard = y.builder(group(&child));
     read_only(dir.path(), true);
-    let gate = y.gate();
+    assert!(y.admit_gate().await.is_err(), "a gate cannot start without a durable pause");
     std::thread::sleep(Duration::from_millis(100));
     assert!(running(&child), "no record, no stop: {:?}", states(&child));
     assert!(!y.paused());
     read_only(dir.path(), false);
-    drop(gate);
     end(child);
 }
 

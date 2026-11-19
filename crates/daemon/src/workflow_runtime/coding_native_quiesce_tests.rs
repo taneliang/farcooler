@@ -11,11 +11,13 @@ async fn owned_pane(command: &str) -> (tempfile::TempDir, Runtime, Host, NativeO
     let host = Host(server(&runtime.root, &binding)); let id = terminal(&binding);
     let window = host.0.create_terminal_window(id, id, "quiesce fixture", dir.path().to_str().unwrap(), command).await.unwrap();
     let pane = host.0.list_tagged_panes().await.unwrap().into_iter().find(|p| p.pane_id == window.pane_id).unwrap();
-    let owner = NativeOwner { binding, terminal: id, pane: pane.pane_id.clone(), tty: pane.tty.clone(), supervisor: None };
+    let pid = pane.stamp.pid;
+    let supervisor = crate::effect_runner::Owner { pid, started: crate::effect_runner::Owner::started_at(pid).unwrap() };
+    let owner = NativeOwner { binding, terminal: id, pane: pane.pane_id.clone(), tty: pane.tty.clone(), supervisor: Some(supervisor) };
     (dir, runtime, host, owner)
 }
 fn on_tty(owner: &NativeOwner) -> Vec<i32> {
-    snapshot().unwrap().under_tty(owner.tty.trim_start_matches("/dev/"))
+    owner.processes(&snapshot().unwrap()).unwrap()
 }
 async fn closed(host: &Host, owner: &NativeOwner) -> bool {
     host.0.pane_life(&owner.pane, owner.terminal).await.unwrap() == farcooler_tmux::PaneLife::Gone
@@ -33,7 +35,8 @@ async fn the_runner_stopping_a_live_owner_first_ends_and_closes_it() {
 
 #[tokio::test]
 async fn an_owner_that_exited_before_quiescence_looked_is_quiescent() {
-    let (_dir, runtime, host, owner) = owned_pane("/usr/bin/true").await;
+    let (_dir, runtime, host, owner) = owned_pane("/bin/sleep 30").await;
+    unsafe { libc::kill(owner.supervisor.as_ref().unwrap().pid as i32, libc::SIGKILL); }
     assert!(super::super::wait_until(tokio::time::Instant::now() + Duration::from_secs(10), Duration::from_millis(10),
         || on_tty(&owner).is_empty()).await);
     for _ in 0..500 {
@@ -48,8 +51,6 @@ async fn an_owner_that_exited_before_quiescence_looked_is_quiescent() {
 #[tokio::test]
 async fn a_dead_panes_reassigned_tty_cannot_end_another_native_pane() {
     let (_owner_dir, runtime, host, mut owner) = owned_pane("/bin/sleep 30").await;
-    let pid = host.0.list_tagged_panes().await.unwrap().into_iter().find(|p| p.pane_id == owner.pane).unwrap().stamp.pid;
-    let original = crate::effect_runner::Owner { pid, started: crate::effect_runner::Owner::started_at(pid).unwrap() };
     let pids = on_tty(&owner);
     assert!(!pids.is_empty());
     for pid in pids { unsafe { libc::kill(pid, libc::SIGKILL); } }
@@ -63,9 +64,10 @@ async fn a_dead_panes_reassigned_tty_cannot_end_another_native_pane() {
     // Model the tty number being handed out again regardless of which PTY
     // numbers concurrent tests have open when the kernel allocates ours.
     owner.tty.clone_from(&other.tty);
+    let original = owner.supervisor.take();
     let result = runtime.quiesce_native(&owner).await;
     assert!(result.is_err(), "a legacy owner cannot prove quiescence on its busy former tty");
-    owner.supervisor = Some(original);
+    owner.supervisor = original;
     runtime.quiesce_native(&owner).await.unwrap();
     assert!(closed(&host, &owner).await);
     assert_eq!(other_host.0.pane_life(&other.pane, other.terminal).await.unwrap(),

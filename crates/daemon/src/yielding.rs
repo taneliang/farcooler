@@ -76,7 +76,7 @@ impl HeldClock {
     pub(crate) fn held(&self) -> Duration { self.0.held(self.1).0 }
 }
 
-fn signal(target: &Target, sig: i32) {
+fn signal(target: &Target, sig: i32) -> bool {
     match target {
         Target::Group { pid, started } => {
             // The leader is the identity: a group whose leader started at another time is not ours.
@@ -85,41 +85,63 @@ fn signal(target: &Target, sig: i32) {
             }
         }
         Target::Tty(tty) => {
-            let Some(raw) = crate::proc_table::snapshot() else { return };
+            let Some(raw) = crate::proc_table::snapshot() else { return false };
             for pid in crate::foreground::parse(&raw).under_tty(tty.trim_start_matches("/dev/")) {
                 if pid > 1 && pid != std::process::id() as i32 { unsafe { libc::kill(pid, sig); } }
             }
         }
         Target::Native { tty, supervisor, started } => {
-            if started.is_empty() || !crate::effect_runner::Owner::started_at(*supervisor).is_ok_and(|actual| actual == *started) { return; }
-            let Some(raw) = crate::proc_table::snapshot() else { return };
-            signal_native(&crate::foreground::parse(&raw), tty, *supervisor as i32, sig, |pid, sig| {
+            match crate::effect_runner::Owner::started_at(*supervisor) {
+                Ok(actual) if actual != *started => return true,
+                Ok(_) => {},
+                Err(_) => return false,
+            }
+            let Some(raw) = crate::proc_table::snapshot() else { return false };
+            return signal_native(&crate::foreground::parse(&raw), tty, *supervisor as i32, sig, |pid, sig| {
                 unsafe { libc::kill(pid, sig); }
             });
         }
     }
+    true
 }
 
-fn signal_native(table: &crate::foreground::Foreground, tty: &str, supervisor: i32, sig: i32, mut send: impl FnMut(i32, i32)) {
+fn signal_native(table: &crate::foreground::Foreground, tty: &str, supervisor: i32, sig: i32, mut send: impl FnMut(i32, i32)) -> bool {
     let mut pids = table.under_tty(tty.trim_start_matches("/dev/"));
     // A recycled tty belongs to another run. Never signal it, even if the old shell still exists elsewhere.
-    if !pids.contains(&supervisor) { return; }
+    if !pids.contains(&supervisor) { return true; }
     pids.retain(|&pid| pid > 1 && pid != supervisor && pid != std::process::id() as i32);
     let ordered = table.parent_first(&pids);
     if sig == libc::SIGCONT {
         // An interactive login shell can see a stopped foreground job and exit
         // successfully. Resume its children before letting it handle SIGCHLD.
         for (pid, _) in ordered.into_iter().rev() { send(pid, sig); }
-        return;
+        return true;
     }
-    // A stop request is asynchronous. If the parent's stop is still pending,
-    // the next gate sweep can visit its children after the parent has stopped.
+    // If we sent a stop, check a fresh process table before admitting the gate.
+    // A parent may have forked after this snapshot but before it stopped.
+    // The supervisor alone may still be releasing the native launch barrier.
+    let mut settled = !ordered.is_empty();
     let mut stopped = std::collections::HashSet::new();
     for (pid, parent) in ordered {
-        if parent.is_some_and(|parent| !stopped.contains(&parent)) { continue; }
-        if !crate::proc_table::stopped_or_gone(pid) { send(pid, sig); }
-        if crate::proc_table::stopped_or_gone(pid) { stopped.insert(pid); }
+        if parent.is_some_and(|parent| !stopped.contains(&parent)) {
+            settled = false;
+            continue;
+        }
+        if crate::proc_table::stopped_or_gone(pid) {
+            stopped.insert(pid);
+        } else {
+            send(pid, sig);
+            settled = false;
+            if crate::proc_table::stopped_or_gone(pid) { stopped.insert(pid); }
+        }
     }
+    settled
+}
+
+fn stop_builders(state: &State) -> bool {
+    let mut settled = true;
+    for b in state.builders.values() { settled &= signal(&b.target, libc::SIGSTOP); }
+    settled
 }
 
 impl Yielding {
@@ -143,6 +165,22 @@ impl Yielding {
         let mut id = 0;
         self.change(|s| { s.next += 1; id = s.next; s.gates.insert(id, ()); });
         GateGuard(self.clone(), id)
+    }
+    /// Hold builders and confirm the stops took effect before admitting gate work.
+    pub(crate) async fn admit_gate(&self) -> std::io::Result<GateGuard> {
+        let gate = self.gate();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            {
+                let state = self.0.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                if !state.paused { return Err(std::io::Error::other("could not record the builder pause")); }
+                if stop_builders(&state) { return Ok(gate); }
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(std::io::Error::other("native builders did not stop before the landing gate"));
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     }
     /// A builder started. It stops at once if a gate is running.
     pub(crate) fn builder(&self, target: Target) -> BuilderGuard {
@@ -186,13 +224,13 @@ impl Yielding {
         // written, nothing new is stopped and whatever was stopped is continued: a builder never stays stopped with
         // no record that a restarted daemon could resume it from.
         if let Err(e) = self.write(state) {
-            tracing::warn!(error = %e, "could not record the builders to pause; they keep running during this gate");
+            tracing::warn!(error = %e, "could not record the builders to pause");
             for b in state.builders.values().filter(|b| !b.manual) { signal(&b.target, libc::SIGCONT); }
             state.paused = false;
             return;
         }
         // Also covers a builder that is new, and children a native agent forked before it stopped.
-        for b in state.builders.values() { signal(&b.target, libc::SIGSTOP); }
+        stop_builders(state);
         state.paused = true;
         if !state.ticking { state.ticking = true; self.tick(); }
     }
@@ -221,7 +259,7 @@ impl Yielding {
                 let Some(inner) = weak.upgrade() else { return };
                 let mut state = inner.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 if state.gates.is_empty() || !state.paused { state.ticking = false; return; }
-                for b in state.builders.values() { signal(&b.target, libc::SIGSTOP); }
+                stop_builders(&state);
             }
         });
     }

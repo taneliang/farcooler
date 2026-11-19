@@ -194,15 +194,21 @@ async fn four_native_builders_keep_their_panes_through_a_landing() {
     let definition = batched_push(&runtime, "any", 5000);
     let old_head = remote_head(&runtime).await;
     at_join(&mut runtime, "landing", &definition).await;
-    // The native fixture normally replaces the entire login command to avoid
-    // the user's startup files. Bring back the shell that exhibited the loss.
-    if let Some(fish) = farcooler_core::programs::find("fish") {
-        TEST_ARGV.with(|args| {
-            let mut args = args.borrow_mut();
-            let command = args.as_ref().unwrap().iter().map(|arg| crate::service::shell_quote(arg)).collect::<Vec<_>>().join(" ");
-            *args = Some(vec![fish.to_string_lossy().into_owned(), "--no-config".into(), "-ilc".into(), command]);
-        });
-    }
+    // Keep a shell between the pane supervisor and the agent on both platforms.
+    // Use the login shell that exhibited the loss when it is available.
+    TEST_ARGV.with(|args| {
+        let mut args = args.borrow_mut();
+        let agent = args.take().unwrap();
+        let launch = if let Some(fish) = farcooler_core::programs::find("fish") {
+            let command = agent.iter().map(|arg| crate::service::shell_quote(arg)).collect::<Vec<_>>().join(" ");
+            vec![fish.to_string_lossy().into_owned(), "--no-config".into(), "-ilc".into(), command]
+        } else {
+            let mut launch = vec!["/bin/sh".into(), "-c".into(), "\"$@\"; status=$?; exit \"$status\"".into(), "builder".into()];
+            launch.extend(agent);
+            launch
+        };
+        *args = Some(launch);
+    });
     let items = ["builder-one", "builder-two", "builder-three", "builder-four"];
     let script = dir.path().join("interactive.py");
     let source = std::fs::read_to_string(&script).unwrap();
@@ -221,18 +227,18 @@ if item.startswith('builder-'):
     let adapter = dir.path().join("adapter.py");
     let source = std::fs::read_to_string(&adapter).unwrap();
     let gate = r#"elif stage == 'gate':
-    import time
     shared = pathlib.Path(os.environ['MARKER']).parent
     pids = [p.read_text() for p in sorted(shared.glob('builder-*'))]
     assert len(pids) == 4, pids
-    deadline = time.monotonic() + 5
-    while True:
-        states = [subprocess.check_output(['/bin/ps', '-o', 'stat=', '-p', pid], text=True).strip() for pid in pids]
-        if all(state.startswith('T') for state in states):
-            break
-        assert time.monotonic() < deadline, states
-        time.sleep(.02)
-    print('landing gate held four builders: ' + repr(list(zip(pids, states))), flush=True)
+    states = subprocess.check_output(['/bin/ps', '-o', 'pid=,stat=', '-p', ','.join(pids)], text=True)
+    observed = dict(line.split() for line in states.splitlines())
+    entry = 'landing gate entry: ' + repr([(pid, observed.get(pid)) for pid in pids])
+    print(entry, flush=True)
+    if not all(observed.get(pid, '').startswith('T') for pid in pids):
+        failure = shared / 'gate-entry.tmp'
+        failure.write_text(entry)
+        failure.rename(shared / 'gate-entry-failed')
+        raise AssertionError(entry)
 "#;
     assert!(source.contains("elif stage == 'gate':\n"));
     std::fs::write(adapter, source.replacen("elif stage == 'gate':\n", gate, 1)).unwrap();
@@ -276,6 +282,9 @@ if item.startswith('builder-'):
         loop {
             let state = handle.state("w").await.unwrap().unwrap();
             if phase_of(&state, "landing") == Some(Phase::Done) { break; }
+            if let Ok(entry) = std::fs::read_to_string(dir.path().join("gate-entry-failed")) {
+                panic!("a builder was still running when the gate started: {entry}");
+            }
             for item in items {
                 assert_eq!(phase_of(&state, item), Some(Phase::Running), "{item} lost its native build");
             }
@@ -299,7 +308,7 @@ if item.startswith('builder-'):
     let gate_log = std::fs::read_dir(root.join("receipts")).unwrap().filter_map(|entry| {
         let path = entry.unwrap().path();
         path.extension().is_some_and(|ext| ext == "output").then(|| std::fs::read_to_string(path).ok()).flatten()
-    }).find(|output| output.contains("landing gate held four builders")).unwrap();
+    }).find(|output| output.contains("landing gate entry:")).unwrap();
     eprint!("{gate_log}");
     eprintln!("landing pushed {old_head} -> {new_head}; all four original builds passed");
 }

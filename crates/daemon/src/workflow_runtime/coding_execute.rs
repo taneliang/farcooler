@@ -394,6 +394,18 @@ impl Exec {
             let head = self.git_recorded(binding, &self.tree(binding), &["rev-parse", "HEAD"]).await?;
             durable(&self.build_start_path(binding), &serde_json::to_vec(&BuildStart { binding: binding.clone(), head })?)?;
         }
+        // Settle the pause before writing launch evidence or starting a landing gate.
+        let landing_gate = matches!(binding.effect.kind, EffectKind::Execute(StageKind::Run)) && self.state(&binding.workspace)?
+            .is_some_and(|s| s.items.get(&binding.effect.item).is_some_and(|i| i.group_of.is_some()));
+        let _gate = if landing_gate {
+            let gate = self.yielding.admit_gate().await.inspect_err(|error| {
+                tracing::warn!(effect = %binding.effect.id, %error, "landing gate could not pause its builders");
+            })?;
+            if *cancel.borrow() {
+                return Err(Error::Io(std::io::Error::new(std::io::ErrorKind::Interrupted, "landing gate cancelled before launch")));
+            }
+            Some(gate)
+        } else { None };
         let log = self.process_log(binding);
         // Each admitted effect is invoked at most once. A preexisting artifact is
         // evidence to reconcile, never permission to append a new invocation.
@@ -420,9 +432,6 @@ impl Exec {
             }
             None => None,
         };
-        // A landing gate (a Run of a landing group) keeps every builder paused for as long as it runs.
-        let _gate = (matches!(binding.effect.kind, EffectKind::Execute(StageKind::Run)) && self.state(&binding.workspace)?
-            .is_some_and(|s| s.items.get(&binding.effect.item).is_some_and(|i| i.group_of.is_some()))).then(|| self.yielding.gate());
         let exit = async {
             Ok::<_, Error>(if self.is_native_agent(binding) {
                 self.run_native(binding, &command, cancel).await?
