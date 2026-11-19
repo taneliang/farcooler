@@ -243,7 +243,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                         // The build it goes back to is told why (ov-968).
                         item.brief = Some(reason.clone());
                     }
-                    finish(&mut item, id, input, *passed, evidence, Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
+                    finish(&mut item, id, input, *passed, evidence, None, Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
                 }
                 Command::Observe { effect, run, fence, outcome, .. }
                 | Command::Resolve { effect, run, fence, outcome, .. } => {
@@ -365,7 +365,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                                     item.pending = None; item.last_evidence = Some(evidence.clone());
                                     item.phase = Phase::Failed;
                                 } else {
-                                    take_route(&mut item, id, input, ("conflict", Some(evidence)), Target::Step(step),
+                                    take_route(&mut item, id, input, ("conflict", Some(evidence)), Target::Step(step), None,
                                         Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
                                 }
                             } else {
@@ -442,8 +442,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                             if item.run.starts_with("cancel:") || !matches!(item.definition.stages[item.stage].kind, StageKind::Review(_))
                                 || !valid_rework_reason(summary) || !valid_id(receipt) { return Err(Refusal::Evidence); }
                             evidence_matches(&item, evidence)?;
-                            item.brief = Some(summary.clone());
-                            finish(&mut item, id, input, false, evidence,
+                            finish(&mut item, id, input, false, evidence, Some(summary),
                                 Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
                             if item.phase == Phase::Failed { describe_failure(&mut item, summary, Some(receipt)); }
                         }
@@ -460,7 +459,8 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                                 if item.group_of.is_some() || item.definition.stages[item.stage].kind != StageKind::Check || !valid_rework_reason(brief) { return Err(Refusal::Evidence); }
                                 item.brief = Some(brief.clone());
                             }
-                            finish(&mut item, id, input, matches!(outcome, Outcome::Passed(_)), evidence, Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
+                            finish(&mut item, id, input, matches!(outcome, Outcome::Passed(_)), evidence, None,
+                                Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
                         }
                         Outcome::SafeFailure | Outcome::SafeFailureBecause(_) | Outcome::SafeFailureWithReceipt { .. } => {
                             if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
@@ -799,7 +799,8 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
         let result = if label == "landed" { group.pushed.clone() } else { group.candidate.clone() };
         let rebase = (label == "rejected" && group.definition.stages[group.stage].kind == StageKind::Fold)
             .then(|| group.brief.clone()).flatten();
-        let gate_brief = (label == "rejected" && matches!(group.definition.stages[group.stage].kind, StageKind::Run | StageKind::Check))
+        let gate_brief = (label == "rejected" && matches!(group.definition.stages[group.stage].kind,
+            StageKind::Run | StageKind::Check | StageKind::Review(_)))
             .then(|| group.brief.clone()).flatten();
         let group_reason = group.failed_reason();
         let members = std::mem::take(&mut group.members);
@@ -826,8 +827,8 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                 ticket.fence = ticket.fence.checked_add(1).ok_or(Refusal::Limit)?;
                 ticket.phase = Phase::Blocked;
             } else {
-                route(&mut ticket, &member.item, input, label, None, Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
                 if let Some(brief) = &gate_brief { ticket.brief = Some(brief.clone()); }
+                route(&mut ticket, &member.item, input, label, None, Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
                 if ticket.phase == Phase::Failed && let Some(reason) = &group_reason {
                     describe_failure(&mut ticket, &format!("Group {gid} failed at {reason}"), None);
                 }
@@ -1080,11 +1081,14 @@ fn evidence_matches(item: &Item, e: &Evidence) -> Result<(), Refusal> {
 }
 /// What a step may leave behind besides the item itself: new effects, and groups to open on a split.
 struct Out<'a> { room: bool, effects: &'a mut Vec<Effect>, spawn: &'a mut Vec<(String, Vec<Member>)> }
-fn finish(item: &mut Item, id: &str, input: &Input, passed: bool, evidence: &Evidence, out: Out) -> Result<(), Refusal>
+fn finish(item: &mut Item, id: &str, input: &Input, passed: bool, evidence: &Evidence, brief: Option<&str>, out: Out) -> Result<(), Refusal>
 {
     if item.definition.schema == 2 {
-        return route(item, id, input, if passed { "passed" } else { "rejected" }, Some(evidence), out);
+        let label = if passed { "passed" } else { "rejected" };
+        let target = target_of(item, label);
+        return take_route(item, id, input, (label, Some(evidence)), target, brief, out);
     }
+    if let Some(brief) = brief { item.brief = Some(brief.to_owned()); }
     item.pending = None;
     item.last_evidence = Some(evidence.clone());
     // A build that passed has answered why it was sent back.
@@ -1146,12 +1150,12 @@ fn room(next: &State, spawn: &[(String, Vec<Member>)]) -> bool { next.items.len(
 fn route(item: &mut Item, id: &str, input: &Input, label: &str, evidence: Option<&Evidence>, out: Out) -> Result<(), Refusal>
 {
     let target = target_of(item, label);
-    take_route(item, id, input, (label, evidence), target, out)
+    take_route(item, id, input, (label, evidence), target, None, out)
 }
 /// Take an already selected route. A diagnosed fold conflict retries the whole healthy batch
 /// through the split's back edge, spending the same published retry budget.
 fn take_route(item: &mut Item, id: &str, input: &Input, answer: (&str, Option<&Evidence>),
-    mut target: Target, out: Out) -> Result<(), Refusal>
+    mut target: Target, brief: Option<&str>, out: Out) -> Result<(), Refusal>
 {
     let (label, evidence) = answer;
     item.pending = None;
@@ -1161,6 +1165,8 @@ fn take_route(item: &mut Item, id: &str, input: &Input, answer: (&str, Option<&E
     let from_join = matches!(stage.kind, StageKind::Join { .. });
     let fold_conflict = stage.kind == StageKind::Fold && label == "conflict";
     if item.group_of.is_some() { item.brief = None; }
+    // Install this verdict's brief before routing can launch a rework build.
+    if let Some(brief) = brief { item.brief = Some(brief.to_owned()); }
     if let Some(evidence) = evidence {
         item.last_evidence = Some(evidence.clone());
         if label != "rejected" && makes_candidate(&stage.kind) { item.candidate = Some(evidence.candidate.clone()); }

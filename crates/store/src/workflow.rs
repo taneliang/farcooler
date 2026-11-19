@@ -441,7 +441,7 @@ fn apply_in_snapshot(tx: &Transaction<'_>, input: &Input, payload: &str, by: Opt
                 crate::workflow_notices::select(tx, &admitted, &state, &transition.state)?;
                 moved.extend(crate::workflow_projection::project(tx, &input.workspace, &transition.state, by)?);
                 crate::workflow_projection::start_load_event(tx, &admitted, by)?;
-                record_review_finding(tx, input)?;
+                record_review_finding(tx, &state, input)?;
                 crate::workflow_effects::reserve(tx, &transition.state)?;
                 // Never erase operation history. Cancellation/rework makes old intents inert.
                 tx.execute("UPDATE workflow_outbox SET active = 0 WHERE workspace = ?1", [&input.workspace])?;
@@ -493,22 +493,30 @@ fn apply_in_snapshot(tx: &Transaction<'_>, input: &Input, payload: &str, by: Opt
         Ok((receipt, applied))
 }
 
-/// Keep the verified verdict with the ticket in the same commit that accepts it, including when it sends work back.
-fn record_review_finding(tx: &Transaction<'_>, input: &Input) -> Result<()> {
+/// Keep the verified verdict with the reviewed tickets in the same transaction that accepts it.
+fn record_review_finding(tx: &Transaction<'_>, before: &State, input: &Input) -> Result<()> {
     use crate::models::{Actor, NoteKind, get_uuid};
     use farcooler_workflow::Outcome;
 
     let (Command::Observe { item, run, outcome, .. } | Command::Resolve { item, run, outcome, .. }) = &input.command
         else { return Ok(()) };
     let Outcome::ReviewRejected { summary, receipt, .. } = outcome else { return Ok(()) };
-    let task = tx.query_row(
+    // The verdict may split a group or hand its members back, so use the membership that was reviewed.
+    let reviewed = before.items.get(item).filter(|item| item.group_of.is_some());
+    let tickets: Vec<&str> = match reviewed {
+        Some(group) => group.members.iter().map(|member| member.item.as_str()).collect(),
+        None => vec![item.as_str()],
+    };
+    let mut task_for = tx.prepare(
         "SELECT task_id FROM workflow_owned_items WHERE workspace=?1 AND item=?2 AND task_id IS NOT NULL",
-        params![input.workspace, item], |row| get_uuid(row, 0),
-    ).optional()?;
-    if let Some(task) = task {
-        crate::tasks::insert_note(tx, task, NoteKind::Finding, Actor::Runner, summary,
-            &serde_json::json!({"run":run, "receipt":receipt}), None)
-            .map_err(|error| WorkflowError::Board(error.to_string()))?;
+    )?;
+    let details = serde_json::json!({"run":run, "receipt":receipt});
+    for ticket in tickets {
+        let task = task_for.query_row(params![input.workspace, ticket], |row| get_uuid(row, 0)).optional()?;
+        if let Some(task) = task {
+            crate::tasks::insert_note(tx, task, NoteKind::Finding, Actor::Runner, summary, &details, None)
+                .map_err(|error| WorkflowError::Board(error.to_string()))?;
+        }
     }
     Ok(())
 }

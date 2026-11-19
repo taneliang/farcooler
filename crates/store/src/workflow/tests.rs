@@ -14,19 +14,127 @@ fn temp() -> std::path::PathBuf {
     path.join("fixture.db")
 }
 fn observation(state: &State, outcome: Outcome) -> Input {
-    let item = &state.items["item"];
+    observe_item(state, "item", outcome)
+}
+fn observe_item(state: &State, key: &str, outcome: Outcome) -> Input {
+    let item = &state.items[key];
     let effect = item.pending.clone().unwrap();
     Input { busy_resources: BTreeSet::new(), schema: 1, id: format!("result-{}", state.revision), workspace: state.workspace.clone(),
         expected_revision: state.revision, epoch: state.epoch, source: "adapter".into(),
         source_sequence: state.revision, now_ms: 2000,
         grant: Grant::Operation { effect: effect.clone(), run: item.run.clone(), fence: item.fence },
-        command: Command::Observe { item: "item".into(), effect, run: item.run.clone(), fence: item.fence, outcome } }
+        command: Command::Observe { item: key.into(), effect, run: item.run.clone(), fence: item.fence, outcome } }
 }
 fn admit(store: &Store, state: &State) {
-    let effect = state.items["item"].pending.as_ref().unwrap();
+    admit_item(store, state, "item");
+}
+fn admit_item(store: &Store, state: &State, key: &str) {
+    let effect = state.items[key].pending.as_ref().unwrap();
     let claim = store.workflow_claim_effect(&state.workspace, effect, "fixture-runtime", state.revision,
         state.epoch, 1000, 2000).unwrap().unwrap();
     assert!(store.workflow_admit_effect(&claim, 1001).unwrap());
+}
+
+#[test]
+fn a_landing_group_review_keeps_findings_and_briefs_for_rework() {
+    use crate::models::{Actor, NoteKind};
+
+    let store = Store::open_in_memory().unwrap();
+    let repo = store.register_repository_for_test("Landing review");
+    let board = store.ensure_main_workspace(repo).unwrap();
+    let workspace = board.id.to_string();
+    let tickets = ["First fix", "Second fix"].map(|title| store.create_task(board.id, title, Actor::User).unwrap());
+
+    let mut definition = Definition::coding();
+    definition.schema = 2;
+    definition.max_reworks = 0;
+    definition.rework_target = None;
+    let build = definition.stages[1].clone();
+    let mut review = definition.stages[3].clone();
+    review.id = "group-review".into();
+    review.kind = StageKind::Review(Reviewer::Agent);
+    review.routes.insert("rejected".into(), Target::Step(build.id.clone()));
+    review.limit = 1;
+    let mut join = definition.stages[2].clone();
+    join.id = "join".into();
+    join.kind = StageKind::Join { group: "landing".into(), adopt: false };
+    join.routes.insert("rejected".into(), Target::Step(build.id.clone()));
+    join.limit = 1;
+    definition.stages.truncate(2);
+    definition.stages.push(join);
+    definition.groups.insert("landing".into(), GroupDef {
+        limit: None, exclusive: "landing-target".into(), steps: vec![build, review],
+    });
+    definition.validate().unwrap();
+
+    let current = || store.workflow_state(&workspace).unwrap().unwrap();
+    let control = |command| {
+        let revision = store.workflow_state(&workspace).unwrap().map_or(0, |state| state.revision);
+        let receipt = store.workflow_apply(&Input {
+            id: format!("control-{revision}"), command, expected_revision: revision, source_sequence: revision + 1,
+            ..enqueue(&workspace, "unused")
+        }).unwrap();
+        assert!(receipt.result.is_ok(), "{receipt:?}");
+    };
+    let settle = |state: &State, key, outcome| {
+        admit_item(&store, state, key);
+        let input = observe_item(state, key, outcome);
+        let receipt = store.workflow_apply(&input).unwrap();
+        assert!(receipt.result.is_ok(), "{receipt:?}");
+        assert_eq!(store.workflow_apply(&input).unwrap(), receipt, "replaying the verdict must not duplicate notes");
+        receipt
+    };
+    let evidence = |candidate: &str, receipt: &str| Evidence {
+        candidate: candidate.into(), manifest: "manifest".into(), receipt: receipt.into(), policy_pin: "policy-1".into(),
+    };
+    // Hold the landing resource while both tickets join the same group.
+    assert!(store.workflow_apply(&enqueue("other", "landing-target")).unwrap().result.is_ok());
+    for ticket in &tickets {
+        control(Command::Enqueue { item: ticket.key.clone(), definition: definition.clone(), policy_pin: "policy-1".into(),
+            resource: ticket.key.clone(), dependencies: BTreeSet::new(), initial_candidate: None });
+        for _ in 0..2 {
+            settle(&current(), &ticket.key, Outcome::Passed(evidence(&ticket.key, "ticket-step")));
+        }
+        control(Command::Queue { item: ticket.key.clone() });
+    }
+    for _ in 0..2 {
+        let holder = store.workflow_state("other").unwrap().unwrap();
+        settle(&holder, "item", Outcome::SafeFailure);
+    }
+    control(Command::Advance);
+    let group = current().items[&tickets[0].key].grouped_in.clone().unwrap();
+    assert_eq!(current().items[&group].members.len(), 2);
+
+    for (index, (candidate, receipt_name, finding)) in [
+        ("candidate-1", "review-1.json", "Keep the caller's deadline."),
+        ("candidate-2", "review-2.json", "Handle the exhausted deadline."),
+    ].into_iter().enumerate() {
+        settle(&current(), &group, Outcome::Passed(evidence(candidate, "group-build")));
+        let reviewing = current();
+        let run = &reviewing.items[&group].run;
+        let receipt = settle(&reviewing, &group, Outcome::ReviewRejected {
+            evidence: evidence(candidate, receipt_name), summary: finding.into(), receipt: receipt_name.into(),
+        });
+        let outbox = store.workflow_outbox(&workspace).unwrap();
+        let rebuilds: Vec<_> = outbox.iter().filter(|stored| receipt.effects.contains(&stored.effect.id)
+            && stored.effect.kind == EffectKind::Execute(StageKind::Build)).collect();
+        let expected: Vec<_> = if index == 0 { vec![group.as_str()] } else { tickets.iter().map(|ticket| ticket.key.as_str()).collect() };
+        assert_eq!(rebuilds.len(), expected.len());
+        for item in expected {
+            let build = rebuilds.iter().find(|stored| stored.effect.item == item).unwrap();
+            assert_eq!(build.effect.brief.as_deref(), Some(finding));
+        }
+        for ticket in &tickets {
+            let notes = store.notes_for(ticket.id, Some(NoteKind::Finding)).unwrap();
+            assert_eq!(notes.len(), index + 1, "{notes:?}");
+            assert!(notes.iter().any(|note| note.body == finding && note.extra["run"] == *run
+                && note.extra["receipt"] == receipt_name), "{notes:?}");
+        }
+        if index == 1 {
+            let reason = current().items[&group].failed_reason().unwrap();
+            assert!(reason.starts_with("group-review:") && reason.contains(finding) && reason.contains(receipt_name), "{reason}");
+        }
+    }
 }
 #[test]
 fn workflow_atomic_reopen_duplicate_payload_and_replay() {
