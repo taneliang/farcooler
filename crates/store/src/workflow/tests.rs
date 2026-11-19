@@ -65,16 +65,31 @@ fn ov1379_repin_and_admission_cannot_both_consume_an_effect() {
     for admitted in [false, true] {
         let store = Store::open_in_memory().unwrap();
         let definition = Definition::coding();
+        let old_pin = definition.pin();
         store.workflow_wire_write("workspace", "publish", "publish", Write::Publish {
             expected_pin: None, definition: &definition, adapter: None, notifications: None, revision: 0,
         }).unwrap();
-        store.workflow_apply(&enqueue("workspace", "resource")).unwrap();
+        let mut input = enqueue("workspace", "resource");
+        let Command::Enqueue { policy_pin, .. } = &mut input.command else { unreachable!() };
+        *policy_pin = old_pin.clone();
+        store.workflow_apply(&input).unwrap();
         let state = store.workflow_state("workspace").unwrap().unwrap();
         let item = &state.items["item"];
         let effect = item.pending.clone().unwrap();
         let claim = store.workflow_claim_effect("workspace", &effect, "runner", state.revision,
             state.epoch, 1000, 2000).unwrap().unwrap();
-        if admitted { assert!(store.workflow_admit_effect(&claim, 1001).unwrap()); }
+        if admitted { assert!(store.workflow_admit_published_effect(&claim, 1001).unwrap()); }
+
+        let mut definition = definition;
+        definition.send_backs = Some(1);
+        let published = store.workflow_wire_write("workspace", "publish-next", "publish-next", Write::Publish {
+            expected_pin: Some(&old_pin), definition: &definition, adapter: None, notifications: None, revision: state.revision,
+        }).unwrap();
+        assert_eq!(published.result, Ok(state.revision));
+        if !admitted {
+            assert!(!store.workflow_admit_published_effect(&claim, 1001).unwrap(),
+                "a publication between claim and admission fences the old step even before the runtime reclassifies it");
+        }
 
         let receipt = store.workflow_apply(&Input {
             id: "repin".into(), source: "runtime".into(), source_sequence: 1, expected_revision: state.revision,
@@ -90,7 +105,7 @@ fn ov1379_repin_and_admission_cannot_both_consume_an_effect() {
             assert_eq!(replay, state);
         } else {
             assert_eq!(receipt.result, Ok(state.revision + 1));
-            assert!(!store.workflow_admit_effect(&claim, 1001).unwrap());
+            assert!(!store.workflow_admit_published_effect(&claim, 1001).unwrap());
             let replacement = &replay.items["item"];
             assert_ne!(replacement.pending, item.pending);
             assert_eq!(replacement.run, item.run);

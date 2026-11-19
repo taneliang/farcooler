@@ -156,18 +156,20 @@ impl Runtime {
         }
         Ok(bundle.adapter.map(|AdapterConfiguration::Coding(config)| config))
     }
-    pub(super) fn pending_repin(&self, workspace: &str, item: &Item, effect: &Effect) -> Result<Option<Command>> {
+    pub(super) fn pending_repin(&self, workspace: &str, item: &Item, effect: &Effect, binding_valid: bool) -> Result<Option<Command>> {
         use crate::workflow_starter::engine_repinned;
 
         if !self.service_mode || !matches!(effect.kind, EffectKind::Execute(_)) { return Ok(None); }
         let Some(current) = self.store.workflow_configuration(workspace)? else { return Ok(None) };
         if current.pin == item.policy_pin { return Ok(None); }
-        let previous = self.store.workflow_bundle(&item.policy_pin)?.ok_or(Error::Refused("missing item bundle"))?;
         // Use the same app-owned files as publication admission, but require exact
         // equality for every other setting, including routes, approvals and notifications.
-        let compatible = self.root.parent().and_then(|root| engine_repinned(root, &previous)).is_some_and(|engine| {
-            engine.adapter == current.adapter && engine.definition == current.definition && engine.notifications == current.notifications
-        });
+        let compatible = if binding_valid {
+            let previous = self.store.workflow_bundle(&item.policy_pin)?.ok_or(Error::Refused("missing item bundle"))?;
+            self.root.parent().and_then(|root| engine_repinned(root, &previous)).is_some_and(|engine| {
+                engine.adapter == current.adapter && engine.definition == current.definition && engine.notifications == current.notifications
+            })
+        } else { false };
         Ok(Some(Command::RepinPending { item: effect.item.clone(), effect: effect.id.clone(),
             policy_pin: current.pin, definition: compatible.then(|| Box::new(current.definition)) }))
     }

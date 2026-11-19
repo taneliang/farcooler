@@ -117,6 +117,16 @@ impl Store {
     /// Persists the uncertain-effect boundary before any adapter call. Expiry after
     /// this point never permits re-execution, even by the same owner.
     pub fn workflow_admit_effect(&self, claim: &EffectClaim, now_ms: i64) -> Result<bool> {
+        self.admit_effect(claim, now_ms, false)
+    }
+
+    /// A new publication can leave the workflow revision unchanged, so also check
+    /// the selected bundle before admitting an unstarted Execute effect.
+    pub fn workflow_admit_published_effect(&self, claim: &EffectClaim, now_ms: i64) -> Result<bool> {
+        self.admit_effect(claim, now_ms, true)
+    }
+
+    fn admit_effect(&self, claim: &EffectClaim, now_ms: i64, check_publication: bool) -> Result<bool> {
         let mut conn=self.conn();
         let tx=conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if claim.authority_incarnation!=self.engine_incarnation || !crate::engine_cutover::engine_allowed(&tx,self.engine_incarnation)? { return Ok(false); }
@@ -129,13 +139,16 @@ impl Store {
              AND lease_owner = ?3 AND lease_generation = ?4 AND lease_until > ?5
              AND resource_generation = ?6
              AND EXISTS (SELECT 1 FROM workflow_states s WHERE s.workspace = ?1 AND s.revision = ?7 AND s.epoch = ?8)
+             AND (?9 = 0 OR json_type(workflow_outbox.payload, '$.kind.Execute') IS NULL
+                OR NOT EXISTS (SELECT 1 FROM workflow_bundle_selections s WHERE s.workspace = ?1
+                    AND s.pin != json_extract(workflow_outbox.payload, '$.policy_pin')))
              AND ((?6 = 0 AND json_type(workflow_outbox.payload, '$.kind.Decide') = 'object')
                 OR EXISTS (SELECT 1 FROM workflow_resources r WHERE r.workspace = ?1 AND r.generation = ?6
                  AND r.resource = json_extract(workflow_outbox.payload, '$.resource')
                  AND r.run = json_extract(workflow_outbox.payload, '$.run')
                  AND r.fence = json_extract(workflow_outbox.payload, '$.fence')))",
             params![claim.workspace, claim.effect, claim.owner, claim.lease_generation, now_ms,
-                claim.resource_generation, claim.revision, claim.epoch],
+                claim.resource_generation, claim.revision, claim.epoch, check_publication],
         )?;
         tx.commit()?;
         Ok(n == 1)

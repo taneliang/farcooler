@@ -6,7 +6,7 @@ use std::fs::{File, OpenOptions};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use farcooler_store::{Store, workflow::{Receipt, WorkflowError}};
+use farcooler_store::{Store, workflow::{Receipt, WorkflowError}, workflow_effects::EffectClaim};
 use farcooler_workflow::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -715,6 +715,10 @@ impl Runtime {
         }
         Ok(count)
     }
+    fn admit_effect(&self, claim: &EffectClaim, now_ms: i64) -> Result<bool> {
+        Ok(if self.service_mode { self.store.workflow_admit_published_effect(claim, now_ms)? }
+            else { self.store.workflow_admit_effect(claim, now_ms)? })
+    }
     /// Recover or start every effect that is ready and not already running, within its pool's places. What finds
     /// its pool full is noted as waiting, in the order it would start (ov-1198).
     async fn launch_ready(&mut self, workspaces: &[String], now_ms: i64, running: &mut Vec<Running>,
@@ -805,7 +809,7 @@ impl Runtime {
                     waiting.push(Placed::new(workspace, &effect, pool));
                     continue;
                 }
-                if selected.is_ok() && let Some(command) = self.pending_repin(workspace, item, &effect)? {
+                if let Some(command) = self.pending_repin(workspace, item, &effect, selected.is_ok())? {
                     // Re-pinning replaces only an unstarted outbox entry. The next scan
                     // validates and claims the new entry through ordinary admission.
                     if self.internal(workspace, command, Grant::Controller, clock())?.result.is_ok() { *count += 1; }
@@ -839,7 +843,7 @@ impl Runtime {
                         // No external operation was invoked. Persist the refusal
                         // through the normal admission/observation fence, so Get
                         // exposes Failed rather than silently abandoning the item.
-                        if self.store.workflow_admit_effect(&claim, clock())? {
+                        if self.admit_effect(&claim, clock())? {
                             // A refusal that is a sentence (an unreadable landing remote, ov-1059) stays on the run.
                             let outcome = if matches!(effect.kind, EffectKind::Stop { .. }) {
                                 Outcome::Uncertain
@@ -851,7 +855,7 @@ impl Runtime {
                         continue;
                     }
                 };
-                if !self.store.workflow_admit_effect(&claim, clock())? { continue; }
+                if !self.admit_effect(&claim, clock())? { continue; }
                 let activity = std::sync::Arc::new(execution::Activity::default());
                 self.activities.lock().unwrap().insert((workspace.clone(), effect.id.clone()), activity.clone());
                 let binding = Binding::new(workspace, &effect, claim.resource_generation, item.iteration, &base);
