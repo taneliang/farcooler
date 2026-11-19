@@ -30,3 +30,20 @@ The subsequent commit only adds this report and log.
 The historical JDK rejection and 24-test error remain unverified for the reasons
 above. The reviewer requires an explicit owner revision if their causes cannot
 be established; a revision has been requested and must not be assumed.
+
+Fix round 2: the process-guard bystander reads a parent-owned pipe until EOF.
+An outer finally closes the pipe and waits for the bystander even if owner
+startup or its cleanup raises; parent process exit also closes the pipe. The
+fixture remains alive through the assertion without a fixed time limit.
+
+`fix-round-2-streak.log` records four passes followed by a failure in the
+no-lock overlap assertion on run five. There was a roughly 30-minute gap
+between periodic samples during that run; the log does not establish why.
+`fix-round-2-retry.log` records a fresh 20 consecutive full self-test passes on
+code SHA c8dec951afeae22debdcf5a4b084998dc3d5d125, with start, periodic and
+end load samples and exit statuses. No synthetic load was generated.
+
+The original JDK rejection and 24-test error remain unverified. The prior
+request for an explicit acceptance revision has not been granted in the ticket
+record; inherited acceptance line 1 remains open pending owner revision or
+original diagnostics.
