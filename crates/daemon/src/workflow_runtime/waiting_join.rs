@@ -124,6 +124,9 @@ impl Exec {
             Some(tree) => (PathBuf::from(&tree.path), format!("refs/heads/{}", tree.branch)),
             None => (self.item_tree(workspace, key), format!("refs/heads/wf-{}", &digest(&(workspace, key))[4..])),
         };
+        let Ok(_tree) = self.tree_lock(&tree).try_read_owned() else {
+            return Err(Error::Refused("waiting worktree is being cleaned"));
+        };
         let canonical = tree.canonicalize()?;
         let common = adapters::git(&tree, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).await?;
         let top = adapters::git(&tree, &["rev-parse", "--show-toplevel"]).await?;

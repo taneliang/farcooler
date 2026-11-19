@@ -218,9 +218,8 @@ pub struct Exec {
     /// When this copy was started, by the sweep's clock and by the monotonic one, so a wait measures
     /// its patience on the same clock its effect was created on.
     launched: Option<(i64, std::time::Instant)>,
-    /// Every executing effect's tree, including stops and short work with no agent place.
-    /// Cleanup runs on the same dispatch loop and defers until those futures have settled.
-    active_trees: std::sync::Arc<std::sync::Mutex<BTreeSet<PathBuf>>>,
+    /// Cleanup takes exclusive access to a tree. Dispatch only tries the lock, so other trees can proceed.
+    tree_locks: build_cleanup::TreeLocks,
     /// Set by the Service: makes a run's named worktree one the app lists (ov-967).
     pub host: Option<WorktreeHost>,
     /// One first download of a landing remote's main at a time, per remote, shared by every copy (ov-1058 review 3):
@@ -231,6 +230,8 @@ pub struct Exec {
     pub(super) user_home: Option<PathBuf>,
     #[cfg(test)]
     pub(super) build_free_bytes: Option<u64>,
+    #[cfg(test)]
+    cleanup_check: Option<std::sync::Arc<(tokio::sync::Notify, tokio::sync::Notify)>>,
     /// Builders pause while a landing gate runs, in every copy (ov-1214).
     pub(crate) yielding: crate::yielding::Yielding,
 }
@@ -403,7 +404,7 @@ impl Runtime {
         let runtime = Self { inbox, send, next_lease: None, next_cleanup: None, continuous: false,
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
             exec: Exec { yielding: crate::yielding::Yielding::at(&root), activities: Default::default(), places: std::sync::Arc::new(std::sync::Mutex::new(Places::load(&root)?)), root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, host: None,
-                seeding: Default::default(), active_trees: Default::default(), #[cfg(test)] user_home: None, #[cfg(test)] build_free_bytes: Some(u64::MAX) },
+                seeding: Default::default(), tree_locks: Default::default(), #[cfg(test)] user_home: None, #[cfg(test)] build_free_bytes: Some(u64::MAX), #[cfg(test)] cleanup_check: None },
             notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None, trees_recovered: false, cancel_refused: Default::default(), recovery: Default::default(), scheduling: Default::default(),
             _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
         runtime.validate_native_host()?;
@@ -414,7 +415,6 @@ impl Runtime {
     pub fn set_effect_cap(&mut self, cap: usize) { self.places().agent = cap.max(1); }
     /// Record what holds a place now, for `workflow get`.
     fn note_holding(&self, running: &[Running]) {
-        *self.active_trees.lock().unwrap() = running.iter().map(|j| self.tree(&j.binding)).collect();
         self.places().holding = running.iter().filter_map(|j| j.pool.map(|pool| Placed::new(&j.workspace, &j.effect, pool))).collect();
     }
     pub fn command_handle(&self, controller: &Controller) -> Result<CommandHandle> {
@@ -510,7 +510,6 @@ impl Runtime {
     /// ready now and waits for it; the service loop also starts follow-on effects as each ends.
     pub async fn pump(&mut self, now_ms: i64) -> Result<usize> {
         #[cfg(test)] { self.sweeps += 1; }
-        self.next_lease = Some(now_ms.saturating_add(1_000));
         // The inbox is read while effects run, so cancels and decisions are never held up.
         let (_, placeholder) = mpsc::channel(1);
         let mut inbox = std::mem::replace(&mut self.inbox, placeholder);
@@ -601,18 +600,37 @@ impl Runtime {
         }
         let mut stopping = false;
         let mut scan = true;
+        let mut cleanup_requested = true;
+        let mut cleanup = None;
         loop {
-            let retry = self.exec.release_builds(&workspaces).await?;
-            self.next_cleanup = retry.then(|| tokio::time::Instant::now() + Duration::from_secs(1));
             // Ended groups' candidate branches leave the landing remote (ov-1269), off this loop.
             self.exec.sweep_candidate_branches();
             if scan {
                 scan = self.continuous;
                 let current = self.store.workflow_workspaces()?;
                 for workspace in &current { self.refresh_groups(workspace, clock())?; }
-                self.launch_ready(&current, clock(), running, futures, &mut count).await?;
+                let before = count;
+                let scan_at = clock();
+                // Idle polling is due one second after the latest scan. A long cleanup
+                // can leave this sweep open for several scans.
+                self.next_lease = Some(scan_at.saturating_add(1_000));
+                self.launch_ready(&current, scan_at, running, futures, &mut count).await?;
+                cleanup_requested |= count != before;
             }
-            if running.is_empty() { break; }
+            // A round may walk many trees (ov-1376). Coalesce requests while it is running
+            // and keep dispatching commands and effects, even if cleanup is the only work left.
+            if cleanup_requested && cleanup.is_none() {
+                let exec = self.exec.clone();
+                let mut task = BackgroundTask::new(async move {
+                    let workspaces = exec.store.workflow_workspaces()?;
+                    exec.release_builds(&workspaces).await
+                });
+                task.start();
+                cleanup = Some(task);
+                cleanup_requested = false;
+                self.next_cleanup = None;
+            }
+            if running.is_empty() && cleanup.is_none() { break; }
             let mut shutdown = self.shutdown.clone();
             let event = tokio::select! {
                 _ = tokio::time::sleep(Duration::from_secs(1)), if self.continuous && !stopping => Event::Tick,
@@ -624,22 +642,34 @@ impl Runtime {
                     }
                 }, if !stopping => Event::Shutdown,
                 message = inbox.recv() => Event::Message(message),
+                result = async { cleanup.as_mut().expect("cleanup in progress").await }, if cleanup.is_some() => Event::CleanupFinished(result),
                 _ = build_cleanup::wait_for_retry(self.next_cleanup), if !stopping => Event::CleanupRetry,
             };
             match event {
                 Event::Tick => { scan = true; }
-                Event::CleanupRetry => {},
+                Event::CleanupRetry => { cleanup_requested = true; }
+                Event::CleanupFinished(result) => {
+                    cleanup = None;
+                    self.next_cleanup = result?.then(|| tokio::time::Instant::now() + Duration::from_secs(1));
+                    // A pending effect may have been waiting for cleanup to release its tree.
+                    scan = self.continuous && !stopping;
+                }
                 Event::Shutdown => {
                     stopping = true;
+                    scan = false;
                     for job in running.iter() { job.cancel.send_replace(true); }
                 }
                 Event::Message(message) => {
                     if let Some(message) = message {
+                        let read_only = matches!(message, Inbox::State(..));
                         self.receive(message).await;
-                        // A cancel may have ended a group.
-                        self.exec.prune_trees(&workspaces, false).await;
+                        if !read_only {
+                            // A cancel may have ended a group.
+                            self.exec.prune_trees(&workspaces, false).await;
+                            cleanup_requested = true;
+                        }
                         // A command may have started work, and a long wait must not hold it back.
-                        scan = scan || self.continuous;
+                        scan |= self.continuous && !stopping;
                         for job in running.iter() {
                             if self.state(&job.workspace)?.is_some_and(|s| s.items.get(&job.effect.item)
                                 .is_some_and(|i| i.phase == Phase::Cancelling)) {
@@ -678,8 +708,8 @@ impl Runtime {
                     count += 1;
                     // Not at the end of the sweep, which a long gate elsewhere may hold for hours.
                     self.exec.prune_trees(&workspaces, false).await;
-                    scan = scan || self.continuous;
-                    if stopping { scan = false; }
+                    cleanup_requested = true;
+                    scan |= self.continuous && !stopping;
                 }
             }
         }
@@ -726,6 +756,8 @@ impl Runtime {
                     && now_ms < effect.created_ms.saturating_add(60_000) { continue; }
                 let selected = self.select_item_configuration(workspace, &effect.item, item);
                 if matches!(stored.dispatch_state.as_str(), "admitted" | "uncertain") {
+                    let tree = self.effect_tree(workspace, &effect);
+                    let Ok(_tree) = self.tree_lock(&tree).try_read_owned() else { continue };
                     if let Err(error) = selected {
                         if stored.dispatch_state != "uncertain" {
                             tracing::warn!(effect = %effect.id, %error, "retained configuration unavailable; ownership remains uncertain");
@@ -773,6 +805,8 @@ impl Runtime {
                     waiting.push(Placed::new(workspace, &effect, pool));
                     continue;
                 }
+                let tree = self.effect_tree(workspace, &effect);
+                let Ok(tree) = self.tree_lock(&tree).try_read_owned() else { continue };
                 let Some(claim) = self.store.workflow_claim_effect(workspace, &effect.id,
                     &format!("runtime:{}", self.instance), state.revision, state.epoch,
                     clock(), clock().saturating_add(30_000))? else {
@@ -832,7 +866,7 @@ impl Runtime {
                     else if exec.coding.is_some() { exec.execute_coding(&run_workspace, &run_binding, cancelled).await }
                     else { exec.execute(&run_workspace, &run_binding).await }
                 })));
-                running.push(Running { workspace: workspace.clone(), effect, binding, cancel, pool });
+                running.push(Running { workspace: workspace.clone(), effect, binding, cancel, pool, _tree: tree });
             }
             self.recovery.keep_only(workspace, &uncertain);
         }
@@ -1016,10 +1050,12 @@ struct Running {
     cancel: tokio::sync::watch::Sender<bool>,
     /// The places it holds; None for a stop or a wait on the base, CI or a pull request, which take none.
     pool: Option<Pool>,
+    _tree: tokio::sync::OwnedRwLockReadGuard<()>,
 }
 enum Event {
     Tick,
     CleanupRetry,
+    CleanupFinished(Result<bool>),
     Finished(usize, Result<Outcome>),
     Shutdown,
     Message(Option<Inbox>),
@@ -1036,46 +1072,55 @@ enum Event {
 /// then, as before, so a sweep cut off mid-effect (a crash, in the tests) releases its locks and kills its
 /// children before anything opens the runtime again, not whenever an aborted task is next scheduled.
 fn effect_slot(effect: impl std::future::Future<Output = Result<Outcome>> + Send + 'static) -> Slot {
-    Some(Box::pin(EffectTask { effect: std::sync::Arc::new(std::sync::Mutex::new(Some(Box::pin(effect)))), task: None }))
+    Some(Box::pin(BackgroundTask::new(effect)))
 }
-type Effecting = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Outcome>> + Send>>;
-struct EffectTask {
-    effect: std::sync::Arc<std::sync::Mutex<Option<Effecting>>>,
-    task: Option<tokio::task::JoinHandle<Option<Result<Outcome>>>>,
+type Work<T> = std::pin::Pin<Box<dyn std::future::Future<Output = Result<T>> + Send>>;
+struct BackgroundTask<T> {
+    work: std::sync::Arc<std::sync::Mutex<Option<Work<T>>>>,
+    task: Option<tokio::task::JoinHandle<Option<Result<T>>>>,
 }
-/// One poll of `effect`, which is gone once it has finished or its slot was dropped.
-fn poll_effect(effect: &std::sync::Mutex<Option<Effecting>>, cx: &mut std::task::Context<'_>)
-    -> std::task::Poll<Option<Result<Outcome>>>
-{
-    let mut effect = effect.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let Some(running) = effect.as_mut() else { return std::task::Poll::Ready(None) };
-    let polled = running.as_mut().poll(cx);
-    if polled.is_ready() { *effect = None; }
-    polled.map(Some)
+impl<T: Send + 'static> BackgroundTask<T> {
+    fn new(work: impl std::future::Future<Output = Result<T>> + Send + 'static) -> Self {
+        Self { work: std::sync::Arc::new(std::sync::Mutex::new(Some(Box::pin(work)))), task: None }
+    }
+    fn start(&mut self) {
+        // Cleanup starts here so even its first poll runs outside dispatch.
+        let work = self.work.clone();
+        self.task = Some(tokio::spawn(std::future::poll_fn(move |cx| Self::poll_work(&work, cx))));
+    }
+    /// One poll of the work, which is gone once it finishes or its owner is dropped.
+    fn poll_work(work: &std::sync::Mutex<Option<Work<T>>>, cx: &mut std::task::Context<'_>)
+        -> std::task::Poll<Option<Result<T>>>
+    {
+        let mut work = work.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(running) = work.as_mut() else { return std::task::Poll::Ready(None) };
+        let polled = running.as_mut().poll(cx);
+        if polled.is_ready() { *work = None; }
+        polled.map(Some)
+    }
 }
-impl std::future::Future for EffectTask {
-    type Output = Result<Outcome>;
+impl<T: Send + 'static> std::future::Future for BackgroundTask<T> {
+    type Output = Result<T>;
     fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
         if self.task.is_none() {
-            if let std::task::Poll::Ready(outcome) = poll_effect(&self.effect, cx) {
-                return std::task::Poll::Ready(outcome.unwrap_or(Err(Error::Refused("effect dropped"))));
+            if let std::task::Poll::Ready(result) = Self::poll_work(&self.work, cx) {
+                return std::task::Poll::Ready(result.unwrap_or(Err(Error::Refused("workflow task dropped"))));
             }
-            let effect = self.effect.clone();
-            self.task = Some(tokio::spawn(std::future::poll_fn(move |cx| poll_effect(&effect, cx))));
+            self.start();
         }
         let task = self.task.as_mut().expect("spawned above");
         std::pin::Pin::new(task).poll(cx).map(|joined| match joined {
             Ok(Some(outcome)) => outcome,
-            // A panic in an effect ends the loop, as it did when the loop polled it.
+            // A panic in the work ends the loop, as it did when the loop polled it.
             Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
-            Ok(None) | Err(_) => Err(Error::Refused("effect dropped")),
+            Ok(None) | Err(_) => Err(Error::Refused("workflow task dropped")),
         })
     }
 }
-impl Drop for EffectTask {
+impl<T> Drop for BackgroundTask<T> {
     fn drop(&mut self) {
-        let effect = self.effect.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
-        drop(effect);
+        let work = self.work.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+        drop(work);
         if let Some(task) = &self.task { task.abort(); }
     }
 }

@@ -218,11 +218,11 @@ async fn build_cleanup_delayed_intent_cannot_delete_a_later_builds_output() {
     runtime.exec.release_builds(&["w".into()]).await.unwrap();
     assert!(runtime.store.workflow_cleanups("w").unwrap()[0].result.as_ref().unwrap().retry);
     drop(handle);
-    runtime.active_trees.lock().unwrap().insert(tree.clone());
+    let active = runtime.tree_lock(&tree).try_read_owned().unwrap();
     runtime.exec.release_builds(&["w".into()]).await.unwrap();
     assert!(runtime.store.workflow_cleanups("w").unwrap()[0].result.as_ref().unwrap().retry);
     assert!(tree.join("target/deep/output").exists());
-    runtime.active_trees.lock().unwrap().clear();
+    drop(active);
     controller_command(&runtime, "w", Command::SendBack { item: "one".into(), reason: "try again".into() });
     runtime.exec.release_builds(&["w".into()]).await.unwrap();
     assert!(tree.join("target/deep/output").exists());
@@ -567,11 +567,11 @@ async fn build_cleanup_defers_an_executing_effect_then_releases_after_it_settles
     std::fs::create_dir_all(tree.join("target/deep")).unwrap();
     std::fs::write(tree.join("target/deep/output"), b"compiled").unwrap();
     controller_command(&runtime, "w", Command::Cancel { item: "one".into(), reason: None });
-    runtime.active_trees.lock().unwrap().insert(tree.clone());
+    let active = runtime.tree_lock(&tree).try_read_owned().unwrap();
     runtime.release_builds(&["w".into()]).await.unwrap();
     assert!(tree.join("target/deep/output").exists());
     assert!(runtime.store.workflow_cleanups("w").unwrap().last().unwrap().result.is_none(), "defer rather than lose cleanup");
-    runtime.active_trees.lock().unwrap().clear();
+    drop(active);
     runtime.release_builds(&["w".into()]).await.unwrap();
     assert!(!tree.join("target").exists());
     assert_eq!(runtime.store.workflow_cleanups("w").unwrap()[0].result.as_ref().unwrap().bytes_freed, 8);
@@ -688,7 +688,7 @@ async fn scheduled_cleanup(with_running_effect: bool) {
     let open = File::open(tree.join("target/output")).unwrap();
     if with_running_effect { enqueue(&mut runtime, "w", "running", definition); }
     let store = runtime.store.clone();
-    let active = runtime.active_trees.clone();
+    let exec = runtime.exec.clone();
     let started = dir.path().join("started");
     let (stop, shutdown) = tokio::sync::watch::channel(false);
     let task = tokio::spawn(async move { runtime.run(shutdown).await.unwrap(); runtime });
@@ -706,7 +706,8 @@ async fn scheduled_cleanup(with_running_effect: bool) {
         while tree.join("target").exists() { tokio::time::sleep(Duration::from_millis(20)).await; }
     }).await.is_ok();
     if with_running_effect {
-        assert!(!active.lock().unwrap().is_empty(), "cleanup must run before the other effect ends");
+        assert!(exec.tree_lock(&exec.item_tree("w", "running")).try_write().is_err(),
+            "cleanup must run before the other effect ends");
     }
     // Once cleanup settles, idle runtimes must go back to sleeping without periodic sweeps.
     if released && !with_running_effect { tokio::time::sleep(Duration::from_millis(1200)).await; }
@@ -724,6 +725,66 @@ async fn build_cleanup_scheduled_retry_when_runtime_is_idle() { scheduled_cleanu
 
 #[tokio::test]
 async fn build_cleanup_scheduled_retry_while_another_effect_runs() { scheduled_cleanup(true).await; }
+
+#[tokio::test]
+async fn build_cleanup_admits_a_new_start_while_the_open_file_check_is_slow() {
+    use super::admission_tests::{factory, mutation, ok, request};
+    use farcooler_protocol::{v1::Scope, workflow_commands::Action};
+    use farcooler_transport::{Handler, Peer};
+
+    let (_dir, mut runtime, tree) = building().await;
+    let output = tree.join("target/deep/output");
+    let open = File::open(&output).unwrap();
+    review(&mut runtime).await;
+    drop(open);
+    assert!(output.exists(), "an open file should leave cleanup pending");
+    let (_service_dir, service, repo) = crate::test_support::fixture().await;
+    let workspace = service.store.ensure_main_workspace(repo).unwrap().id;
+    let board = workspace.to_string();
+    let publish = runtime.wire_command(&board, "owner", Action::Publish {
+        mutation: mutation("publish", 0, 1), expected_pin: None, definition: coding_definition(true),
+        adapter: None, reason: None, notifications: None,
+    }).unwrap();
+    assert!(publish.pointer("/receipt/result/Ok").is_some(), "{publish}");
+    assert_eq!(runtime.track_tickets(&[(board.clone(), "fresh".into(), "todo".into())]).unwrap(), 1);
+    let state = runtime.state(&board).unwrap().unwrap();
+    let fresh = &state.items["fresh"];
+    let start = Action::Start {
+        mutation: mutation("start-during-cleanup", state.revision, 2), item: "fresh".into(),
+        run: fresh.run.clone(), pin: fresh.pin.clone(),
+        start_pin: runtime.store.workflow_configuration(&board).unwrap().unwrap().pin,
+        models: Default::default(), worktree: None, with: Vec::new(),
+    };
+    let rpc = factory(&service, &runtime, Peer { client_id: None, scope: Scope::Control }, None);
+    let handle = runtime.command_handle(&runtime.controller()).unwrap();
+    let check = std::sync::Arc::new((tokio::sync::Notify::new(), tokio::sync::Notify::new()));
+    runtime.cleanup_check = Some(check.clone());
+    let (stop, shutdown) = tokio::sync::watch::channel(false);
+    let task = tokio::spawn(async move { runtime.run(shutdown).await.unwrap(); });
+    tokio::time::timeout(Duration::from_secs(15), check.0.notified()).await.unwrap();
+    let started = tokio::time::timeout(Duration::from_secs(10), async {
+        ok(&rpc.handle(request(workspace, &start)).await);
+        // Provision actually ran: the loop admitted the effect as well as answering Start.
+        while handle.state(&board).await.unwrap().unwrap().items["fresh"].stage == 0 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(output.exists(), "the original cleanup should still be in progress");
+    }).await;
+    check.1.notify_one();
+    stop.send(true).unwrap();
+    task.await.unwrap();
+    started.expect("the new start waited for cleanup's open-file check");
+    assert!(!output.exists(), "cleanup should finish after the check resumes");
+}
+
+#[tokio::test]
+async fn build_cleanup_holds_effects_on_the_same_tree_until_it_finishes() {
+    let (_dir, mut runtime, tree) = building().await;
+    let cleanup = runtime.tree_lock(&tree).try_write_owned().unwrap();
+    assert_eq!(runtime.pump(3).await.unwrap(), 0, "the build must wait for its tree");
+    drop(cleanup);
+    review(&mut runtime).await;
+}
 
 #[tokio::test]
 async fn build_cleanup_recovery_releases_a_group_tree_retained_by_an_older_engine() {

@@ -181,9 +181,12 @@ impl Exec {
         durable(&self.journal_path(&journal.binding.effect), &serde_json::to_vec(&value)?)
     }
     pub(super) fn tree(&self, binding: &Binding) -> PathBuf {
+        self.effect_tree(&binding.workspace, &binding.effect)
+    }
+    pub(super) fn effect_tree(&self, workspace: &str, effect: &Effect) -> PathBuf {
         // A worktree the orchestrator named at Start (ov-967), or the run's private one.
-        if let Some(tree) = &binding.effect.tree { return PathBuf::from(&tree.path); }
-        self.item_tree(&binding.workspace, &binding.effect.item)
+        if let Some(tree) = &effect.tree { return PathBuf::from(&tree.path); }
+        self.item_tree(workspace, &effect.item)
     }
     /// A run's private tree, `tree-wf1-<hex>`. One made before ov-1081 as `tree-wf1:<hex>` keeps that name while it
     /// stands: an agent or gate already running there reports and reads that path. A fold makes its tree anew, so a

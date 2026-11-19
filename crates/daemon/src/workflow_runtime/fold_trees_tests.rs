@@ -145,10 +145,10 @@ async fn a_cancelled_group_keeps_its_tree_until_the_running_effect_settles() {
     std::fs::create_dir_all(tree.join("target")).unwrap();
     std::fs::write(tree.join("target/binary"), b"busy").unwrap();
     command(&runtime, Command::Cancel { item: group.clone(), reason: None });
-    runtime.active_trees.lock().unwrap().insert(tree.clone());
+    let active = runtime.tree_lock(&tree).try_read_owned().unwrap();
     runtime.release_builds(&["w".into()]).await.unwrap();
     assert!(tree.join("target/binary").exists(), "an in-flight gate still owns the tree");
-    runtime.active_trees.lock().unwrap().clear();
+    drop(active);
     runtime.release_builds(&["w".into()]).await.unwrap();
     assert!(!tree.exists(), "the cancellation releases the tree after the effect joins");
     let board = runtime.wire_command("w", "owner", farcooler_protocol::workflow_commands::Action::Get).unwrap();
@@ -234,10 +234,10 @@ async fn recovery_rechecks_safety_and_keeps_unknown_bytes_across_retries() {
     runtime.release_builds(&["w".into()]).await.unwrap();
     assert!(tree.join("nested/.git").exists(), "recovery still protects nested repositories");
     std::fs::remove_dir_all(tree.join("nested")).unwrap();
-    runtime.active_trees.lock().unwrap().insert(tree.clone());
+    let active = runtime.tree_lock(&tree).try_read_owned().unwrap();
     runtime.release_builds(&["w".into()]).await.unwrap();
     assert!(tree.exists(), "an active effect still blocks recovery");
-    runtime.active_trees.lock().unwrap().clear();
+    drop(active);
     runtime.release_builds(&["w".into()]).await.unwrap();
     assert!(!tree.exists());
     let results = runtime.store.workflow_cleanups("w").unwrap();

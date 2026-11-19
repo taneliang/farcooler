@@ -1,10 +1,41 @@
 //! Non-gating build output release, driven by the engine's durable cleanup outbox.
 use super::*;
 use farcooler_workflow::cleanup::{CleanupEffect, CleanupResult, valid_folder};
+use std::{collections::BTreeMap, sync::{Arc, Mutex, Weak}};
+use tokio::sync::{OwnedMutexGuard, OwnedRwLockWriteGuard, RwLock};
 
 const OUTPUT_INTERRUPTED: &str = "build output cleanup interrupted; bytes freed unknown";
 
 pub(super) const GROUP_INTERRUPTED: &str = "group tree cleanup interrupted; bytes freed unknown";
+
+#[derive(Clone, Default)]
+pub(super) struct TreeLocks(Arc<Mutex<BTreeMap<PathBuf, Weak<RwLock<()>>>>>);
+
+impl Exec {
+    pub(super) fn tree_lock(&self, tree: &Path) -> Arc<RwLock<()>> {
+        let mut key = tree.canonicalize().unwrap_or_else(|_| tree.to_path_buf());
+        // An old private checkout switches names once removed. Fence both names until pruning finishes.
+        if key.parent() == Some(self.root.as_path())
+            && let Some(legacy) = key.file_name().and_then(|name| name.to_str()).and_then(|name| name.strip_prefix("tree-wf1:"))
+        {
+            key = self.root.join(format!("tree-wf1-{legacy}"));
+        }
+        let mut locks = self.tree_locks.0.lock().unwrap();
+        locks.retain(|_, lock| lock.strong_count() > 0);
+        let entry = locks.entry(key).or_default();
+        entry.upgrade().unwrap_or_else(|| {
+            let lock = Arc::new(RwLock::new(()));
+            *entry = Arc::downgrade(&lock);
+            lock
+        })
+    }
+}
+
+/// Also retained by blocking deletion, which can outlive a cancelled async caller.
+pub(super) struct CleanupFences {
+    _tree: OwnedRwLockWriteGuard<()>,
+    _repository: Option<OwnedMutexGuard<()>>,
+}
 
 /// Retry on a monotonic deadline, only while a transient cleanup blocker remains.
 pub(super) async fn wait_for_retry(deadline: Option<tokio::time::Instant>) {
@@ -27,17 +58,16 @@ impl Exec {
                 if record.result.as_ref().is_some_and(|r| !r.retry) { continue; }
                 let effect = record.effect;
                 let tree = effect.tree.as_ref().map_or_else(|| self.item_tree(workspace, &effect.item), |t| PathBuf::from(&t.path));
-                // Defer, rather than settle a skip: a cancellation can end the item before its
-                // already-running future is joined. Its output is released on the next pass.
-                if self.active_trees.lock().unwrap().iter().any(|p| p == &tree
-                    || p.canonicalize().ok().zip(tree.canonicalize().ok()).is_some_and(|(a,b)| a == b)) {
-                    retry |= record.result.as_ref().is_some_and(|r| r.retry);
+                // Retry rather than settle a skip. A cancellation can end the item before its
+                // already-running future is joined, and a waiting branch can also be in use.
+                let Ok(held) = self.tree_lock(&tree).try_write_owned() else {
+                    retry = true;
                     continue;
-                }
+                };
                 if !self.store.workflow_cleanup_begin(&effect, record.result.as_ref())? { continue; }
                 let reconcile = record.result.as_ref().is_some_and(|r|
                     r.skipped.iter().any(|s| s == GROUP_INTERRUPTED));
-                let mut result = match self.release_build_attempt(&effect, || {}, reconcile).await {
+                let mut result = match self.release_build_attempt(&effect, &tree, held, || {}, reconcile).await {
                     Ok(result) => result,
                     Err(error) => CleanupResult { retry: false, bytes_freed: 0, skipped: vec![format!("cleanup unavailable: {error}")] },
                 };
@@ -70,18 +100,22 @@ impl Exec {
     }
     #[cfg(test)]
     pub(super) async fn release_build_checked(&self, effect: &CleanupEffect, after_check: impl FnOnce()) -> Result<CleanupResult> {
-        self.release_build_attempt(effect, after_check, false).await
+        let tree = effect.tree.as_ref().map_or_else(|| self.item_tree(&effect.workspace, &effect.item), |t| PathBuf::from(&t.path));
+        let held = self.tree_lock(&tree).try_write_owned().map_err(|_| Error::Refused("cleanup tree is busy"))?;
+        self.release_build_attempt(effect, &tree, held, after_check, false).await
     }
-    async fn release_build_attempt(&self, effect: &CleanupEffect, after_check: impl FnOnce(), reconcile: bool) -> Result<CleanupResult> {
+    async fn release_build_attempt(&self, effect: &CleanupEffect, tree: &Path, tree_guard: OwnedRwLockWriteGuard<()>,
+        after_check: impl FnOnce(), reconcile: bool) -> Result<CleanupResult>
+    {
         let skip = |why: &str| CleanupResult { retry: false, bytes_freed: 0, skipped: vec![why.into()] };
         // The service shares this fence with provision_named, adoption and worktree.create.
-        // The isolated runtime instead owns writer.lock for its lifetime and serializes claims
-        // on its dispatch loop. A service missing its shared fence must fail closed.
-        let held = if let Some(host) = &self.host {
+        // The per-tree fence also protects against dispatching effects in either runtime.
+        // A service missing its shared repository fence must fail closed.
+        let repository_guard = if let Some(host) = &self.host {
             let board = Uuid::parse_str(&effect.workspace).map_err(|_| Error::Refused("cleanup workspace unavailable"))?;
             let repository = self.store.get_workspace(board).map_err(|_| Error::Refused("cleanup repository unavailable"))?.repository_id;
             match host.lock(repository).try_lock_owned() {
-                Ok(guard) => Some(std::sync::Arc::new(guard)),
+                Ok(guard) => Some(guard),
                 Err(_) => return Ok(CleanupResult { retry: true, ..skip("worktree provision/claim fence is busy") }),
             }
         } else if self.service_mode {
@@ -92,13 +126,13 @@ impl Exec {
         // neither made nor may delete (ov-1263).
         if effect.tree.as_ref().is_some_and(|t| t.adopted) { return Ok(skip("worktree is adopted; its output is a person's")); }
         if let Some(why) = self.store.workflow_cleanup_skip(effect)? { return Ok(skip(&why)); }
-        let tree = effect.tree.as_ref().map_or_else(|| self.item_tree(&effect.workspace, &effect.item), |t| PathBuf::from(&t.path));
+        let held = Arc::new(CleanupFences { _tree: tree_guard, _repository: repository_guard });
         let group_recovery = reconcile && effect.tree.is_none() && self.ended_group(effect)?;
         let exists = tree.try_exists()?;
         if !exists && !group_recovery { return Ok(skip("worktree is absent")); }
         // Recovery may find .git already removed. Its registration is checked before deletion.
         // A main checkout, symlink or moved binding is still never ours to clean.
-        let canonical = if exists { tree.canonicalize()? } else { tree.clone() };
+        let canonical = if exists { tree.canonicalize()? } else { tree.to_path_buf() };
         let linked = match tree.join(".git").symlink_metadata() {
             Ok(meta) => meta.file_type().is_file(),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => group_recovery,
@@ -124,7 +158,7 @@ impl Exec {
         }
         after_check();
         if group_recovery {
-            return Ok(match self.release_group_tree(&tree, held, effect, true).await {
+            return Ok(match self.release_group_tree(tree, held, effect, true).await {
                 Ok(_) => CleanupResult { retry: false, bytes_freed: 0, skipped: Vec::new() },
                 Err(why) => CleanupResult { retry: true, bytes_freed: 0, skipped: vec![why] },
             });
@@ -133,7 +167,7 @@ impl Exec {
         let mut paths = BTreeSet::new();
         for pattern in &effect.folders {
             if !valid_folder(pattern) { result.skipped.push(format!("{pattern}: unsafe folder")); continue; }
-            match expand(&tree, pattern) {
+            match expand(tree, pattern) {
                 Ok(found) => paths.extend(found),
                 Err(error) => result.skipped.push(format!("{pattern}: {error}")),
             }
@@ -142,9 +176,9 @@ impl Exec {
         let mut removed: Vec<PathBuf> = Vec::new();
         for path in paths {
             if removed.iter().any(|p| path.starts_with(p)) { continue; }
-            let label = path.strip_prefix(&tree).unwrap().to_string_lossy().into_owned();
+            let label = path.strip_prefix(tree).unwrap().to_string_lossy().into_owned();
             let mut retry = false;
-            let answer = self.release_folder(&tree, &path, held.clone(), &mut retry).await;
+            let answer = self.release_folder(tree, &path, held.clone(), &mut retry).await;
             result.retry |= retry;
             match answer {
                 Ok(bytes) => { result.bytes_freed = result.bytes_freed.saturating_add(bytes); removed.push(path); }
@@ -152,7 +186,7 @@ impl Exec {
             }
         }
         if !result.retry && self.ended_group(effect)? && effect.tree.is_none() {
-            let released = self.release_group_tree(&tree, held, effect, false).await;
+            let released = self.release_group_tree(tree, held, effect, false).await;
             match released {
                 Ok(bytes) => result.bytes_freed = result.bytes_freed.saturating_add(bytes),
                 Err(why) => { result.retry = true; result.skipped.push(why); }
@@ -161,7 +195,7 @@ impl Exec {
         if result.skipped.iter().any(|s| s.contains(OUTPUT_INTERRUPTED)) { result.bytes_freed = 0; }
         Ok(result)
     }
-    async fn release_folder(&self, tree: &Path, path: &Path, held: Option<std::sync::Arc<tokio::sync::OwnedMutexGuard<()>>>, retry: &mut bool) -> std::result::Result<u64, String> {
+    async fn release_folder(&self, tree: &Path, path: &Path, held: Arc<CleanupFences>, retry: &mut bool) -> std::result::Result<u64, String> {
         // A configured output may have become source. Refuse tracked files, even inside a listed folder.
         let relative = path.strip_prefix(tree).map_err(|e| e.to_string())?;
         let spec = format!(":(literal){}", relative.to_string_lossy());
@@ -169,6 +203,11 @@ impl Exec {
         if !tracked.ok || !tracked.stdout.is_empty() { return Err("contains tracked files or git could not check".into()); }
         // No deletion has started: contention or an unavailable open-file check is safe to retry.
         *retry = true;
+        #[cfg(test)]
+        if let Some(check) = &self.cleanup_check {
+            check.0.notify_one();
+            check.1.notified().await;
+        }
         let mut command = tokio::process::Command::new("lsof");
         command.args(["-nP", "-F", "p", "+D"]).arg(path).kill_on_drop(true);
         let output = tokio::time::timeout(Duration::from_secs(30), command.output()).await

@@ -2,8 +2,7 @@
 use super::*;
 
 impl Exec {
-    /// Kept at every former tree-pruning call site, including recovery and cancellation.
-    /// Durable cleanup waits for running effects and retains commits before removing a checkout.
+    /// Recover cleanup intents and maintain process logs and legacy targets.
     pub(super) async fn prune_trees(&self, workspaces: &[String], recovering: bool) {
         if recovering {
             for workspace in workspaces {
@@ -17,9 +16,6 @@ impl Exec {
         }
         if let Err(error) = self.release_run_targets().await {
             tracing::warn!(%error, "could not prune ended builders’ output");
-        }
-        if let Err(error) = self.release_builds(workspaces).await {
-            tracing::warn!(%error, "could not release build output");
         }
     }
 }
@@ -66,7 +62,7 @@ impl Exec {
     /// Groups own disposable engine paths, never adopted or named worktrees. The same checkout
     /// is used for folding and gates; no output is parked for the next group.
     pub(super) async fn release_group_tree(&self, tree: &Path,
-        held: Option<std::sync::Arc<tokio::sync::OwnedMutexGuard<()>>>,
+        held: std::sync::Arc<build_cleanup::CleanupFences>,
         effect: &farcooler_workflow::cleanup::CleanupEffect, reconcile: bool) -> std::result::Result<u64, String> {
         if tree != self.item_tree(&effect.workspace, &effect.item) || tree.parent() != Some(self.root.as_path()) {
             return Err("group tree is outside the engine root".into());
@@ -101,9 +97,10 @@ impl Exec {
             return Err("group open-file check could not establish safety".into());
         }
         let path = tree.to_path_buf();
+        let deletion_fences = held.clone();
         let bytes = tokio::task::spawn_blocking(move || {
             // Deletion can outlive cancellation of this future; retain the claim fence too.
-            let _held = held;
+            let _held = deletion_fences;
             let device = path.symlink_metadata().map_err(|e| e.to_string())?.dev();
             let bytes = group_bytes(&path, device, true).map_err(|e| e.to_string())?;
             // An I/O error can leave a partially removed tree, just like cancellation.
