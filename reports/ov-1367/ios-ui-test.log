@@ -1,0 +1,9 @@
+  waiting: 5-minute load average 26.7 is 20 or more
+Traceback (most recent call last):
+  File "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1133-image-swipe-nightly/./scripts/heavy", line 76, in <module>
+    sys.exit(main(sys.argv[1:]))
+  File "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1133-image-swipe-nightly/./scripts/heavy", line 51, in main
+    hl.wait_for_load(args.load_limit, load=hl.load5,
+  File "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1133-image-swipe-nightly/scripts/heavy_lock.py", line 222, in wait_for_load
+    time.sleep(poll)
+KeyboardInterrupt

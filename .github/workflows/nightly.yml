@@ -51,10 +51,13 @@ on:
           - phone4
           - phone5
           - phone6
+          - phone7
+          - phone8
           - pad
           - captures
           - captures2
           - captures3
+          - captures4
 
 concurrency:
   # Never cancel a night for another; a manual run waits its turn.
