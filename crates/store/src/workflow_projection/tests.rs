@@ -221,6 +221,29 @@ fn a_started_ticket_follows_its_run_from_the_column_it_was_in() {
     assert_eq!(seen(&b), ("in_review".into(), Some("reviewing".into())));
 }
 
+#[test]
+fn accepted_load_gated_start_appears_once_in_the_ticket_timeline() {
+    let b = board();
+    enqueue(&b, Definition::ticket());
+    let start = input(&b, "scheduled-start", 1, Grant::Controller, Command::Start {
+        start_load: Some(StartLoad { sample_milli: Some(4100), below_milli: Some(6000) }),
+        item: b.task.key.clone(), policy_pin: "policy-1".into(), resource: "repo".into(),
+        dependencies: BTreeSet::new(), initial_candidate: None, definition: Definition::coding(),
+        models: Default::default(), tree: None, with: vec![],
+    });
+    assert!(b.store.workflow_apply(&start).unwrap().result.is_ok());
+    assert!(b.store.workflow_apply(&start).unwrap().result.is_ok(), "replay is idempotent");
+    let events = b.store.line_events(crate::ticket_lines::LineSubject::Ticket(b.task.id), 0).unwrap();
+    let loads: Vec<_> = events.iter().filter(|e| e.kind == "start_load").collect();
+    assert_eq!(loads.len(), 1);
+    assert_eq!(loads[0].body, "Started at load 4.1, under 6");
+    assert_eq!(loads[0].extra, serde_json::json!({"sample_milli": 4100, "below_milli": 6000}));
+    command(&b, "cancel-load", Command::Cancel { item: b.task.key.clone(), reason: None }).unwrap();
+    command(&b, "archive-load", Command::Advance).unwrap();
+    assert!(b.store.line_events(crate::ticket_lines::LineSubject::Ticket(b.task.id), 0).unwrap()
+        .iter().any(|e| e.body == "Started at load 4.1, under 6"));
+}
+
 /// A tracked ticket keeps its wait: a hold is the card's own note, so tracking every card must not make a
 /// waiting card unmanageable (ov-962). The column stays the engine's, so a held Todo card stays in Todo.
 #[test]

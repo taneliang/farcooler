@@ -157,6 +157,27 @@ pub(crate) fn project(tx: &Transaction<'_>, workspace: &str, state: &State, by: 
 }
 /// What the daemon registers to hear of engine moves.
 pub type BoardListener = std::sync::Arc<dyn Fn(&[BoardMove]) + Send + Sync>;
+
+/// Record the evidence on the ticket timeline even when Start does not change its line stage.
+pub(crate) fn start_load_event(tx: &Transaction<'_>, input: &farcooler_workflow::Input, by: Option<&Actor>) -> Result<()> {
+    let farcooler_workflow::Command::Start { item, start_load: Some(farcooler_workflow::StartLoad {
+        sample_milli: Some(sample), below_milli: Some(below),
+    }), .. } = &input.command else { return Ok(()) };
+    let task: Option<Vec<u8>> = tx.query_row("SELECT task_id FROM workflow_owned_items WHERE workspace=?1 AND item=?2",
+        params![input.workspace, item], |r| r.get(0)).optional()?.flatten();
+    let Some(task) = task else { return Ok(()) };
+    let id = uuid::Uuid::from_slice(&task).map_err(|e| WorkflowError::Board(e.to_string()))?;
+    let decimal = |n: u64| {
+        let fraction = n % 1000;
+        if fraction == 0 { format!("{}", n / 1000) }
+        else { format!("{}.{fraction:03}", n / 1000).trim_end_matches('0').to_owned() }
+    };
+    let body = format!("Started at load {}, under {}", decimal(*sample), decimal(*below));
+    crate::ticket_lines::line_event(tx, LineSubject::Ticket(id), "start_load", by.copied().unwrap_or(Actor::Runner),
+        &body, serde_json::json!({"sample_milli": sample, "below_milli": below}))
+        .map_err(|e| WorkflowError::Board(e.to_string()))?;
+    Ok(())
+}
 /// Called with the workspace after every accepted workflow command (ov-1040).
 pub type CommitListener = std::sync::Arc<dyn Fn(&str) + Send + Sync>;
 /// A card the engine moved: what the board must tell its open clients.

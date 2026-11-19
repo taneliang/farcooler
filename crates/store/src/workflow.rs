@@ -389,6 +389,7 @@ fn apply_in_snapshot(tx: &Transaction<'_>, input: &Input, payload: &str, by: Opt
                 crate::workflow_cleanup::select(tx, &state, &transition.state)?;
                 crate::workflow_notices::select(tx, &admitted, &state, &transition.state)?;
                 moved.extend(crate::workflow_projection::project(tx, &input.workspace, &transition.state, by)?);
+                crate::workflow_projection::start_load_event(tx, &admitted, by)?;
                 crate::workflow_effects::reserve(tx, &transition.state)?;
                 // Never erase operation history. Cancellation/rework makes old intents inert.
                 tx.execute("UPDATE workflow_outbox SET active = 0 WHERE workspace = ?1", [&input.workspace])?;
