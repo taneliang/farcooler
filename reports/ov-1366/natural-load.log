@@ -1,0 +1,164 @@
+RUN 1 START Thu Nov 19 03:59:28 UTC 2026 11:59  up 7 days, 12:08, 1 user, load averages: 19.25 22.22 22.27
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 17.538s
+
+OK
+lane-gate: Node 24 (arm64): /tmp/tmpvcvhqq95/good-node/node
+lane-gate: JDK 17: /tmp/tmpvcvhqq95/j17
+lane-gate: capture JDK 21: /tmp/tmpvcvhqq95/j21
+lane-gate: Android SDK: /tmp/tmpvcvhqq95/sdk
+lane-gate: JDK 17: /tmp/tmpvcvhqq95/j17
+lane-gate: capture JDK 21: /tmp/tmpvcvhqq95/j21
+lane-gate: JDK 17: /tmp/tmpvcvhqq95/j17
+lane-gate: capture JDK 21: /tmp/tmpvcvhqq95/j21
+lane-gate: Android SDK: /tmp/tmpvcvhqq95/sdk
+lane-gate: JDK 17: /tmp/tmpvcvhqq95/j17
+lane-gate: capture JDK 21: /tmp/tmpvcvhqq95/j21
+gate-flaky self-test: ok
+........................
+----------------------------------------------------------------------
+Ran 24 tests in 14.475s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+....................
+----------------------------------------------------------------------
+Ran 20 tests in 4.033s
+
+OK
+.........
+----------------------------------------------------------------------
+Ran 9 tests in 0.909s
+
+OK
+lane-gate self-test: ok
+RUN 1 END status=0 Thu Nov 19 04:00:32 UTC 2026 12:00  up 7 days, 12:09, 1 user, load averages: 14.34 20.26 21.53
+RUN 2 START Thu Nov 19 04:00:32 UTC 2026 12:00  up 7 days, 12:09, 1 user, load averages: 14.34 20.26 21.53
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 16.554s
+
+OK
+lane-gate: Node 24 (arm64): /tmp/tmpkv54qh2n/good-node/node
+lane-gate: JDK 17: /tmp/tmpkv54qh2n/j17
+lane-gate: capture JDK 21: /tmp/tmpkv54qh2n/j21
+lane-gate: Android SDK: /tmp/tmpkv54qh2n/sdk
+lane-gate: JDK 17: /tmp/tmpkv54qh2n/j17
+lane-gate: capture JDK 21: /tmp/tmpkv54qh2n/j21
+lane-gate: JDK 17: /tmp/tmpkv54qh2n/j17
+lane-gate: capture JDK 21: /tmp/tmpkv54qh2n/j21
+lane-gate: Android SDK: /tmp/tmpkv54qh2n/sdk
+lane-gate: JDK 17: /tmp/tmpkv54qh2n/j17
+lane-gate: capture JDK 21: /tmp/tmpkv54qh2n/j21
+gate-flaky self-test: ok
+........................
+----------------------------------------------------------------------
+Ran 24 tests in 16.035s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+....................
+----------------------------------------------------------------------
+Ran 20 tests in 3.486s
+
+OK
+.........
+----------------------------------------------------------------------
+Ran 9 tests in 0.788s
+
+OK
+lane-gate self-test: ok
+RUN 2 END status=0 Thu Nov 19 04:01:36 UTC 2026 12:01  up 7 days, 12:10, 1 user, load averages: 11.56 18.41 20.75
+RUN 3 START Thu Nov 19 04:01:36 UTC 2026 12:01  up 7 days, 12:10, 1 user, load averages: 11.56 18.41 20.75
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 15.538s
+
+OK
+lane-gate: Node 24 (arm64): /tmp/tmpahbtyrby/good-node/node
+lane-gate: JDK 17: /tmp/tmpahbtyrby/j17
+lane-gate: capture JDK 21: /tmp/tmpahbtyrby/j21
+lane-gate: Android SDK: /tmp/tmpahbtyrby/sdk
+lane-gate: JDK 17: /tmp/tmpahbtyrby/j17
+lane-gate: capture JDK 21: /tmp/tmpahbtyrby/j21
+lane-gate: JDK 17: /tmp/tmpahbtyrby/j17
+lane-gate: capture JDK 21: /tmp/tmpahbtyrby/j21
+lane-gate: Android SDK: /tmp/tmpahbtyrby/sdk
+lane-gate: JDK 17: /tmp/tmpahbtyrby/j17
+lane-gate: capture JDK 21: /tmp/tmpahbtyrby/j21
+gate-flaky self-test: ok
+........................
+----------------------------------------------------------------------
+Ran 24 tests in 16.944s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+....................
+----------------------------------------------------------------------
+Ran 20 tests in 6.303s
+
+OK
+.........
+----------------------------------------------------------------------
+Ran 9 tests in 1.078s
+
+OK
+lane-gate self-test: ok
+RUN 3 END status=0 Thu Nov 19 04:02:42 UTC 2026 12:02  up 7 days, 12:11, 1 user, load averages: 12.10 17.19 20.11
+RUN 4 START Thu Nov 19 04:02:42 UTC 2026 12:02  up 7 days, 12:11, 1 user, load averages: 12.10 17.19 20.11
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 19.131s
+
+OK
+Traceback (most recent call last):
+  File "/tmp/lane-gate-source-kwdl91s7/scripts/lane-gate.py", line 2041, in <module>
+    sys.exit(main(sys.argv[1:]))
+  File "/tmp/lane-gate-source-kwdl91s7/scripts/lane-gate.py", line 905, in main
+    return self_test()
+  File "/tmp/lane-gate-source-kwdl91s7/scripts/lane-gate.py", line 1250, in self_test
+    return _self_test()
+  File "/tmp/lane-gate-source-kwdl91s7/scripts/lane-gate.py", line 1469, in _self_test
+    failed = run_jobs(["first", "second"], fixtures, rows, d, d, ctx, d, ns)
+  File "/tmp/lane-gate-source-kwdl91s7/scripts/lane-gate.py", line 1129, in run_jobs
+    failed = run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args) or failed
+  File "/tmp/lane-gate-source-kwdl91s7/scripts/lane-gate.py", line 1175, in run_one_job
+    result, secs, counts, ok, log, output = run_step_safely(s, repo, env, logdir, tmp, getattr(args, "fail_fast", False))
+  File "/tmp/lane-gate-source-kwdl91s7/scripts/lane-gate.py", line 802, in run_step_safely
+    code, secs, output, log = run_step(step, repo, env, logdir, tmp, fail_fast)
+  File "/tmp/lane-gate-source-kwdl91s7/scripts/lane-gate.py", line 712, in run_step
+    code = process_guard.run(["bash", "-e", "-c", step.run], cwd=cwd, env=e,
+  File "/private/tmp/lane-gate-source-kwdl91s7/scripts/process_guard.py", line 33, in run
+    return subprocess.CompletedProcess(argv, supervisor.wait())
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 1189, in wait
+    return self._wait(timeout=timeout)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 1917, in _wait
+    (pid, sts) = self._try_wait(0)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 1875, in _try_wait
+    (pid, sts) = os.waitpid(self.pid, wait_flags)
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1361-lane-gate-selftest/scripts/lane-gate.py", line 2041, in <module>
+    sys.exit(main(sys.argv[1:]))
+  File "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1361-lane-gate-selftest/scripts/lane-gate.py", line 905, in main
+    return self_test()
+  File "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1361-lane-gate-selftest/scripts/lane-gate.py", line 1240, in self_test
+    return fixture.run(ROOT)
+  File "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1361-lane-gate-selftest/scripts/gate-test-fixture.py", line 56, in run
+    return subprocess.call([sys.executable, str(repo / "scripts/lane-gate.py"), "--self-test"], cwd=repo, env=env)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 351, in call
+    return p.wait(timeout=timeout)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 1189, in wait
+    return self._wait(timeout=timeout)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 1917, in _wait
+    (pid, sts) = self._try_wait(0)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 1875, in _try_wait
+    (pid, sts) = os.waitpid(self.pid, wait_flags)
+KeyboardInterrupt
