@@ -76,39 +76,44 @@ class ProcessGuardTests(unittest.TestCase):
                         "m.run([sys.executable, 'nextest.py'], kill=False, grace=0)\n")
             owner_code = (f"import sys, os\nfrom pathlib import Path\nsys.path.insert(0, {str(SCRIPTS)!r})\n"
                           "from process_guard_test import load\n" + body)
-            bystander = subprocess.Popen([sys.executable, '-c', 'import time\nwhile True: time.sleep(60)'])
-            owner = subprocess.Popen([sys.executable, '-c', owner_code], cwd=root,
+            # The parent owns the only pipe writer. EOF also ends the fixture
+            # if this test process dies before it can run its cleanup.
+            bystander = subprocess.Popen([sys.executable, '-c', 'import sys; sys.stdin.buffer.read()'],
+                                         stdin=subprocess.PIPE)
+            try:
+                owner = subprocess.Popen([sys.executable, '-c', owner_code], cwd=root,
                                      env={**os.environ, 'FC_GUARD_FINISH': '1' if killed == 'finished' else '',
                                           'FC_GUARD_OUTER': '1' if entry == 'leak-wrapper' else ''},
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            pids = []
-            try:
-                self.assertTrue(until(lambda: (root / 'leaf').exists() and (root / 'leaf').read_text()),
-                                'test never started')
-                pids = [int((root / name).read_text()) for name in ('runner', 'leaf')]
-                if killed == 'runner':
-                    os.kill(pids[0], signal.SIGKILL)
-                elif killed == 'runner-group':
-                    os.killpg(os.getpgid(pids[0]), signal.SIGKILL)
-                elif killed != 'finished':
-                    os.kill(owner.pid, killed)
-                owner.wait(timeout=8)
-                self.assertTrue(until(lambda: not any(running(pid) for pid in pids)),
-                                f'{entry} left test processes alive after {killed}: {pids}')
-                self.assertIsNone(bystander.poll(), 'another run was signaled')
+                pids = []
+                try:
+                    self.assertTrue(until(lambda: (root / 'leaf').exists() and (root / 'leaf').read_text()),
+                                    'test never started')
+                    pids = [int((root / name).read_text()) for name in ('runner', 'leaf')]
+                    if killed == 'runner':
+                        os.kill(pids[0], signal.SIGKILL)
+                    elif killed == 'runner-group':
+                        os.killpg(os.getpgid(pids[0]), signal.SIGKILL)
+                    elif killed != 'finished':
+                        os.kill(owner.pid, killed)
+                    owner.wait(timeout=8)
+                    self.assertTrue(until(lambda: not any(running(pid) for pid in pids)),
+                                    f'{entry} left test processes alive after {killed}: {pids}')
+                    self.assertIsNone(bystander.poll(), 'another run was signaled')
+                finally:
+                    for pid in pids:
+                        if running(pid):
+                            os.kill(pid, signal.SIGKILL)
+                    if owner.poll() is None:
+                        owner.kill()
+                    owner.wait()
+                    if (root / 'base').exists():
+                        shutil.rmtree((root / 'base').read_text(), ignore_errors=True)
+                    if (root / 'outer-base').exists():
+                        shutil.rmtree((root / 'outer-base').read_text(), ignore_errors=True)
             finally:
-                for pid in pids:
-                    if running(pid):
-                        os.kill(pid, signal.SIGKILL)
-                if owner.poll() is None:
-                    owner.kill()
-                owner.wait()
-                bystander.kill()
+                bystander.stdin.close()
                 bystander.wait()
-                if (root / 'base').exists():
-                    shutil.rmtree((root / 'base').read_text(), ignore_errors=True)
-                if (root / 'outer-base').exists():
-                    shutil.rmtree((root / 'outer-base').read_text(), ignore_errors=True)
 
     def test_killed_gate_reaps_its_tests(self):
         for sig in (signal.SIGTERM, signal.SIGKILL):
