@@ -19,3 +19,14 @@ was deliberately interrupted because the existing 20-run streak already
 satisfied the ruling; its traceback is retained and is not counted as a pass.
 The full self-test includes process guard, landing policy and landing benchmark
 tests. The native system Python was placed first on PATH as in the earlier runs.
+
+Fix round 1: `merged-streak.log` records 20 consecutive successful full
+self-tests on merged code at SHA `62648c979cf83fd4a4fd314f97dd73d8aa025ad2`.
+It includes every run's output, exit status, start and end load, and 30-second
+periodic load samples. The natural one-minute load varied; no synthetic load
+was generated. This evidence supersedes the three-run post-merge check above.
+The subsequent commit only adds this report and log.
+
+The historical JDK rejection and 24-test error remain unverified for the reasons
+above. The reviewer requires an explicit owner revision if their causes cannot
+be established; a revision has been requested and must not be assumed.
