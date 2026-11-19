@@ -163,8 +163,8 @@ async function notePrf(session: Session, answer: Signed): Promise<void> {
 /// PRF has no copy: its storage is asked to persist instead, so the browser
 /// is less likely to clear it.
 ///
-/// After a touch, repair a missing or unreadable copy. On local changes,
-/// merge the relay's authenticated runners before saving (ov-1009).
+/// After a touch, repair a missing, unreadable, or incomplete copy. Merge
+/// the relay's authenticated runners before saving (ov-1009).
 function keepCopy(session: Session, recheck = false): Promise<void> {
   if (session.signingOut) return Promise.resolve()
   const work = (session.copyWork ?? Promise.resolve()).catch(() => {}).then(() => {

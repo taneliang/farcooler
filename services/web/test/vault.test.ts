@@ -302,6 +302,35 @@ describe('browsers sharing one synced passkey (ov-1009)', () => {
     expect(held).toBeDefined()
   })
 
+  it('repairs a readable copy missing a runner from an unchanged device', async () => {
+    const { vaultKey } = await deriveKeys(prfBytes(7))
+    const second = { ...RUNNERS[0], id: 'r2', label: 'den' }
+    const device = enrolled({ runners: [...RUNNERS, second] })
+    expect(await saveCopy(async () => ({ status: 200, body: {} }), vaultKey, device, false)).toBe('saved')
+    // A device saved before ov-1009 can have a digest but no per-runner baseline.
+    device.vaultRunnerHashes = undefined
+    expect(await needsSaving(device)).toBe(false)
+
+    const updated = { ...RUNNERS[0], host_key: 'new-pin', token: 'new-token' }
+    const third = { ...RUNNERS[0], id: 'r3' }
+    const shortCopy = await sealCopy(vaultKey, ACCOUNT, CRED, { ...copyOf(device), runners: [updated, third] })
+    let held: Vault = { credential: b64url(CRED), uv: false, sealed: shortCopy }
+    const writes: string[] = []
+    const call = async (route: string, body: any) => {
+      if (route === 'web/vault') return { status: 200, body: { vaults: [held] } }
+      expect(route).toBe('web/vault/save')
+      writes.push(body.expected)
+      held = { credential: body.credential, uv: body.uv, sealed: body.sealed }
+      return { status: 200, body: {} }
+    }
+
+    expect(await syncCopy(call, vaultKey, device, false)).toBe('saved')
+    expect(await openCopy(vaultKey, ACCOUNT, CRED, held.sealed)).toMatchObject({ runners: [updated, third, second] })
+    expect(device.runners).toEqual([...RUNNERS, second, third])
+    expect(await syncCopy(call, vaultKey, device, false)).toBe('saved')
+    expect(writes).toEqual([shortCopy])
+  })
+
   it('preserves a newer grant when a stale browser adds another runner, without replacing its local host pin', async () => {
     const { vaultKey } = await deriveKeys(prfBytes(7))
     let held: Vault | undefined

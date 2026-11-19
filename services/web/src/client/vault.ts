@@ -186,8 +186,7 @@ export async function saveCopy(call: VaultCall, key: CryptoKey, device: Device, 
   return 'saved'
 }
 
-/// A touch repairs only a missing or unreadable copy. Another browser with
-/// this synced passkey may have added runners since our last save.
+/// Whether the relay holds a readable copy for this device's passkey.
 export async function relayHoldsOurs(vaults: Vault[], device: Device, key: CryptoKey): Promise<boolean> {
   if (!device.passkey) return false
   const ours = vaults.find(v => v.credential === b64url(device.passkey!.id))
@@ -196,7 +195,8 @@ export async function relayHoldsOurs(vaults: Vault[], device: Device, key: Crypt
 
 /// Read before writing, merge only authenticated runners, and retry a raced
 /// write. Edited local entries replace shared grants; stale entries do not.
-/// A touch with unchanged local data never replaces a readable copy.
+/// A touch with unchanged local data only writes to repair a missing,
+/// unreadable, or incomplete copy.
 export async function syncCopy(call: VaultCall, key: CryptoKey, device: Device, uv: boolean): Promise<Saved> {
   if (!device.passkey) return 'refused'
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -213,6 +213,7 @@ export async function syncCopy(call: VaultCall, key: CryptoKey, device: Device, 
     if (copy && (copy.spki !== copyOf(snapshot).spki || JSON.stringify(copy.node) !== JSON.stringify(copyOf(snapshot).node))) return 'refused'
     const merged = copyOf(snapshot)
     const hashes = await runnerHashes(merged.runners)
+    let missingRunner = false
     if (copy) {
       const local = new Map(merged.runners.map(r => [r.id, r]))
       merged.runners = []
@@ -224,11 +225,12 @@ export async function syncCopy(call: VaultCall, key: CryptoKey, device: Device, 
           // Without a baseline, differing grants cannot be ordered safely.
           // Refuse the save rather than roll back another browser's host pin.
           if (changed && differs && !snapshot.vaultRunnerHashes?.[here.id]) return 'refused'
-          const locallyChanged = snapshot.vaultRunnerHashes?.[here.id] !== hashes[here.id]
+          const locallyChanged = changed && snapshot.vaultRunnerHashes?.[here.id] !== hashes[here.id]
           merged.runners.push(locallyChanged ? here : remote)
           local.delete(remote.id)
         }
       }
+      missingRunner = local.size > 0
       merged.runners.push(...local.values())
       merged.registered ||= copy.registered
     }
@@ -246,7 +248,7 @@ export async function syncCopy(call: VaultCall, key: CryptoKey, device: Device, 
       device.vaultRunnerHashes = await runnerHashes(snapshot.runners)
       device.vaultSealed = snapshot.vaultSealed
     }
-    if (copy && !changed) {
+    if (copy && !changed && !missingRunner) {
       await remember()
       return 'saved'
     }
