@@ -4,6 +4,7 @@
 use super::*;
 use super::super::{coding_tests::admitted, tests::enqueue};
 use super::tests::native;
+use std::collections::BTreeMap;
 
 #[test]
 fn a_pane_read_that_fails_is_unknown_until_two_minutes_pass_and_a_closed_pane_is_read_twice() {
@@ -177,4 +178,128 @@ async fn native_gate_scenarios() {
         let outcome = tokio::time::timeout(Duration::from_secs(10), run).await.unwrap().unwrap();
         assert!(matches!(outcome, Outcome::Passed(_)), "{outcome:?}");
     }
+}
+
+/// Cross the actual group gate and push with four already-running native builds.
+#[tokio::test]
+async fn four_native_builders_keep_their_panes_through_a_landing() {
+    use super::super::coding_verbs_tests::{at_join, batched_push, lander, phase_of, remote_head};
+    use super::super::concurrency_tests::enqueue_item;
+
+    let (dir, runtime) = lander("pass").await;
+    let (dir, mut runtime, _fake) = super::tests::native_in(dir, runtime, "pass", "codex-engine").await;
+    if let CodingHarness::Native { process, .. } = &mut runtime.coding.as_mut().unwrap().harness {
+        process.timeout_ms = 60_000;
+    }
+    let definition = batched_push(&runtime, "any", 5000);
+    let old_head = remote_head(&runtime).await;
+    at_join(&mut runtime, "landing", &definition).await;
+    // The native fixture normally replaces the entire login command to avoid
+    // the user's startup files. Bring back the shell that exhibited the loss.
+    if let Some(fish) = farcooler_core::programs::find("fish") {
+        TEST_ARGV.with(|args| {
+            let mut args = args.borrow_mut();
+            let command = args.as_ref().unwrap().iter().map(|arg| crate::service::shell_quote(arg)).collect::<Vec<_>>().join(" ");
+            *args = Some(vec![fish.to_string_lossy().into_owned(), "--no-config".into(), "-ilc".into(), command]);
+        });
+    }
+    let items = ["builder-one", "builder-two", "builder-three", "builder-four"];
+    let script = dir.path().join("interactive.py");
+    let source = std::fs::read_to_string(&script).unwrap();
+    let waiting = r#"
+shared = pathlib.Path(os.environ['STARTED']).parent
+item = os.environ['FARCOOLER_WORKFLOW_ITEM']
+if item.startswith('builder-'):
+    (shared / item).write_text(str(os.getpid()))
+    while not (shared / 'landed').exists():
+        time.sleep(0.01)
+"#;
+    assert!(source.contains("if mode in ('steering', 'active-steering'):\n    ready"));
+    std::fs::write(&script, source.replacen("if mode in ('steering', 'active-steering'):\n    ready",
+        &format!("{waiting}if mode in ('steering', 'active-steering'):\n    ready"), 1)).unwrap();
+
+    let adapter = dir.path().join("adapter.py");
+    let source = std::fs::read_to_string(&adapter).unwrap();
+    let gate = r#"elif stage == 'gate':
+    import time
+    shared = pathlib.Path(os.environ['MARKER']).parent
+    pids = [p.read_text() for p in sorted(shared.glob('builder-*'))]
+    assert len(pids) == 4, pids
+    deadline = time.monotonic() + 5
+    while True:
+        states = [subprocess.check_output(['/bin/ps', '-o', 'stat=', '-p', pid], text=True).strip() for pid in pids]
+        if all(state.startswith('T') for state in states):
+            break
+        assert time.monotonic() < deadline, states
+        time.sleep(.02)
+    print('landing gate held four builders: ' + repr(list(zip(pids, states))), flush=True)
+"#;
+    assert!(source.contains("elif stage == 'gate':\n"));
+    std::fs::write(adapter, source.replacen("elif stage == 'gate':\n", gate, 1)).unwrap();
+
+    runtime.set_effect_cap(4);
+    runtime.continuous = true;
+    for item in items { enqueue_item(&mut runtime, "w", item, definition.clone()); }
+    let controller = runtime.controller();
+    let handle = runtime.command_handle(&controller).unwrap();
+    let root = runtime.root.clone();
+    let check = async {
+        while !items.iter().all(|item| dir.path().join(item).exists()) {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let owners: Vec<NativeOwner> = std::fs::read_dir(root.join("receipts")).unwrap()
+            .map(|entry| entry.unwrap().path()).filter_map(|path| {
+                if !path.to_string_lossy().ends_with(".native-owner.json") { return None; }
+                let owner: NativeOwner = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+                items.contains(&owner.binding.effect.item.as_str()).then_some(owner)
+            }).collect();
+        assert_eq!(owners.len(), items.len());
+        let panes = async || {
+            let mut owners_panes = BTreeMap::new();
+            for owner in &owners {
+                let tmux = server(&root, &owner.binding);
+                let tagged = tmux.list_tagged_panes().await.unwrap();
+                let pane = tagged.iter().find(|pane| pane.terminal_id == owner.terminal
+                    && pane.pane_id == owner.pane && !pane.dead).expect("same live native pane");
+                owners_panes.insert(owner.binding.effect.item.clone(), (owner.terminal, pane.pane_id.clone(), pane.stamp.pid));
+            }
+            owners_panes
+        };
+        let before = panes().await;
+        eprintln!("before the gate {before:?}");
+        let state = handle.state("w").await.unwrap().unwrap();
+        assert!(handle.submit(&controller, Request {
+            id: "queue-landing".into(), workspace: "w".into(), expected_revision: state.revision,
+            sequence: state.source_sequences["controller"] + 1,
+            command: Command::Queue { item: "landing".into() },
+        }, 20).await.unwrap().result.is_ok());
+        loop {
+            let state = handle.state("w").await.unwrap().unwrap();
+            if phase_of(&state, "landing") == Some(Phase::Done) { break; }
+            for item in items {
+                assert_eq!(phase_of(&state, item), Some(Phase::Running), "{item} lost its native build");
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let after = panes().await;
+        assert_eq!(before, after);
+        eprintln!("after the push {after:?}");
+        std::fs::write(dir.path().join("landed"), "go").unwrap();
+    };
+    let (sweep, ()) = tokio::time::timeout(Duration::from_secs(30), async {
+        tokio::join!(runtime.pump(20), check)
+    }).await.expect("the four builders and landing must all settle");
+    sweep.unwrap();
+    let state = runtime.state("w").unwrap().unwrap();
+    let new_head = remote_head(&runtime).await;
+    assert_ne!(new_head, old_head);
+    for item in items {
+        assert_eq!(phase_of(&state, item), Some(Phase::WaitingJoin), "{item} did not finish its original build");
+    }
+    let gate_log = std::fs::read_dir(root.join("receipts")).unwrap().filter_map(|entry| {
+        let path = entry.unwrap().path();
+        path.extension().is_some_and(|ext| ext == "output").then(|| std::fs::read_to_string(path).ok()).flatten()
+    }).find(|output| output.contains("landing gate held four builders")).unwrap();
+    eprint!("{gate_log}");
+    eprintln!("landing pushed {old_head} -> {new_head}; all four original builds passed");
 }

@@ -303,3 +303,69 @@ async fn a_native_gate_leaves_other_panes_and_reused_ttys_alone() {
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert!(std::fs::read(dir.join("first")).unwrap().len() > paused.len(), "the same pane resumes");
 }
+
+/// Fish's interactive command exits successfully if its foreground job is still stopped
+/// when fish handles SIGCHLD. Widen the gap between signals to make the gate's race deterministic.
+#[tokio::test]
+async fn a_fish_builder_survives_a_gate_with_delayed_signals() {
+    use crate::service::shell_quote;
+    use farcooler_tmux::PaneLife;
+
+    let Some(fish) = farcooler_core::programs::find("fish") else {
+        eprintln!("fish is unavailable");
+        return;
+    };
+    let dir = farcooler_core::scratch::dir("gate-fish");
+    let id = uuid::Uuid::now_v7();
+    let tmux = farcooler_tmux::TmuxServer::in_dir(&format!("gate-fish-{id}"), id, &dir);
+    struct Reap<'a>(&'a farcooler_tmux::TmuxServer);
+    impl Drop for Reap<'_> { fn drop(&mut self) { farcooler_tmux::reap_server(self.0.socket()); } }
+    let _reap = Reap(&tmux);
+    let child = "/bin/sh -c 'echo $$ > child; exec /bin/sleep 30'";
+    let login = format!("/usr/bin/nice -n 10 {} --no-config -ilc {}; status=$?; exit \"$status\"",
+        shell_quote(fish.to_str().unwrap()), shell_quote(child));
+    let launch = format!("exec /bin/sh -c {}", shell_quote(&login));
+    let window = tmux.create_terminal_window(id, id, "fish gate", dir.to_str().unwrap(), &launch).await.unwrap();
+    let marker = dir.join("child");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let child: i32 = loop {
+        if let Ok(pid) = std::fs::read_to_string(&marker) {
+            if let Ok(pid) = pid.trim().parse() { break pid; }
+        }
+        assert!(tokio::time::Instant::now() < deadline, "fish never started its foreground job");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    let pane = tmux.list_tagged_panes().await.unwrap().into_iter().find(|p| p.pane_id == window.pane_id).unwrap();
+    let supervisor = pane.stamp.pid as i32;
+    let ppid = Command::new("/bin/ps").args(["-o", "ppid=", "-p", &child.to_string()]).output().unwrap();
+    let shell: i32 = String::from_utf8(ppid.stdout).unwrap().trim().parse().unwrap();
+    assert_ne!(shell, supervisor, "the login shell must be between the PTY supervisor and its job");
+    let raw = crate::proc_table::snapshot().unwrap();
+    let table_in_order = |first: i32, second: i32| {
+        let mut rows: Vec<_> = raw.lines().collect();
+        rows.sort_by_key(|row| match row.split_whitespace().next().and_then(|pid| pid.parse::<i32>().ok()) {
+            Some(pid) if pid == first => 0,
+            Some(pid) if pid == second => 1,
+            _ => 2,
+        });
+        crate::foreground::parse(&rows.join("\n"))
+    };
+    let send = |pid, signal| {
+        unsafe { libc::kill(pid, signal); }
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    // Begin with a quiet pause so the red run isolates the clean exit on gate release.
+    send(shell, libc::SIGSTOP);
+    send(child, libc::SIGSTOP);
+    signal_native(&table_in_order(shell, child), &pane.tty, supervisor, libc::SIGCONT, send);
+    let life = tmux.pane_life_with_exit_evidence(&pane.pane_id, id).await.unwrap();
+    eprintln!("fish pane after delayed resume: {life:?}");
+    assert_eq!(life, PaneLife::Live, "resuming fish before its stopped job loses the pane");
+    // The process table can also list the job first while stopping. The login shell
+    // must be stopped before that job even if this is the order of the snapshot.
+    signal_native(&table_in_order(child, shell), &pane.tty, supervisor, libc::SIGSTOP, send);
+    let life = tmux.pane_life_with_exit_evidence(&pane.pane_id, id).await.unwrap();
+    eprintln!("fish pane after delayed stop: {life:?}");
+    assert_eq!(life, PaneLife::Live, "stopping the job before fish loses the pane");
+    signal_native(&table_in_order(shell, child), &pane.tty, supervisor, libc::SIGCONT, send);
+}

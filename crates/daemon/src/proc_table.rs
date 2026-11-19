@@ -36,6 +36,25 @@ pub fn snapshot() -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
+// A successful signal only requests a stop. Confirm the kernel observed it before acknowledging a
+// pause: otherwise a shell handling its child's exit can still execute after the caller sees Paused.
+#[cfg(target_os = "macos")]
+pub(crate) fn stopped_or_gone(pid: i32) -> bool {
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of_val(&info) as i32;
+    let got = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) };
+    (got == size && matches!(info.pbi_status, libc::SSTOP | libc::SZOMB))
+        || (got <= 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH))
+}
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn stopped_or_gone(pid: i32) -> bool {
+    match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+        Ok(stat) => stat.rsplit_once(')').and_then(|(_, s)| s.trim_start().chars().next())
+            .is_some_and(|state| matches!(state, 'T' | 't' | 'Z' | 'X')),
+        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+    }
+}
+
 /// One `struct kinfo_proc` on 64-bit macOS (`<sys/sysctl.h>`), and the offsets
 /// this reads from it. The `libc` crate has no definition. They were read off
 /// the kernel's own answer against `ps`'s for every process on a live host

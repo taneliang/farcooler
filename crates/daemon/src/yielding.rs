@@ -93,13 +93,32 @@ fn signal(target: &Target, sig: i32) {
         Target::Native { tty, supervisor, started } => {
             if started.is_empty() || !crate::effect_runner::Owner::started_at(*supervisor).is_ok_and(|actual| actual == *started) { return; }
             let Some(raw) = crate::proc_table::snapshot() else { return };
-            let pids = crate::foreground::parse(&raw).under_tty(tty.trim_start_matches("/dev/"));
-            // A recycled tty belongs to another run. Never signal it, even if the old shell still exists elsewhere.
-            if !pids.contains(&(*supervisor as i32)) { return; }
-            for pid in pids {
-                if pid > 1 && pid != *supervisor as i32 && pid != std::process::id() as i32 { unsafe { libc::kill(pid, sig); } }
-            }
+            signal_native(&crate::foreground::parse(&raw), tty, *supervisor as i32, sig, |pid, sig| {
+                unsafe { libc::kill(pid, sig); }
+            });
         }
+    }
+}
+
+fn signal_native(table: &crate::foreground::Foreground, tty: &str, supervisor: i32, sig: i32, mut send: impl FnMut(i32, i32)) {
+    let mut pids = table.under_tty(tty.trim_start_matches("/dev/"));
+    // A recycled tty belongs to another run. Never signal it, even if the old shell still exists elsewhere.
+    if !pids.contains(&supervisor) { return; }
+    pids.retain(|&pid| pid > 1 && pid != supervisor && pid != std::process::id() as i32);
+    let ordered = table.parent_first(&pids);
+    if sig == libc::SIGCONT {
+        // An interactive login shell can see a stopped foreground job and exit
+        // successfully. Resume its children before letting it handle SIGCHLD.
+        for (pid, _) in ordered.into_iter().rev() { send(pid, sig); }
+        return;
+    }
+    // A stop request is asynchronous. If the parent's stop is still pending,
+    // the next gate sweep can visit its children after the parent has stopped.
+    let mut stopped = std::collections::HashSet::new();
+    for (pid, parent) in ordered {
+        if parent.is_some_and(|parent| !stopped.contains(&parent)) { continue; }
+        if !crate::proc_table::stopped_or_gone(pid) { send(pid, sig); }
+        if crate::proc_table::stopped_or_gone(pid) { stopped.insert(pid); }
     }
 }
 

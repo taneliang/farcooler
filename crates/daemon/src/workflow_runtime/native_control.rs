@@ -29,29 +29,10 @@ async fn freeze(tty: &str, supervisor: i32) -> Result<Frozen> {
             }
             if !frozen.0.contains(&pid) { frozen.0.push(pid); }
         }
-        if frozen.0.len() == old && current.iter().all(|&pid| stopped(pid)) { return Ok(frozen); }
+        if frozen.0.len() == old && current.iter().all(|&pid| crate::proc_table::stopped_or_gone(pid)) { return Ok(frozen); }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     Err(Error::Refused("native pause did not settle"))
-}
-
-// A successful signal only requests a stop. Confirm the kernel observed it before acknowledging a
-// pause: otherwise a shell handling its child's exit can still execute after the caller sees Paused.
-#[cfg(target_os = "macos")]
-fn stopped(pid: i32) -> bool {
-    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
-    let size = std::mem::size_of_val(&info) as i32;
-    let got = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) };
-    (got == size && matches!(info.pbi_status, libc::SSTOP | libc::SZOMB))
-        || (got <= 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH))
-}
-#[cfg(not(target_os = "macos"))]
-fn stopped(pid: i32) -> bool {
-    match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
-        Ok(stat) => stat.rsplit_once(')').and_then(|(_, s)| s.trim_start().chars().next())
-            .is_some_and(|state| matches!(state, 'T' | 't' | 'Z' | 'X')),
-        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
-    }
 }
 
 /// Quiet-period accounting excludes time the orchestrator paused the step, and time a landing gate held its builder
