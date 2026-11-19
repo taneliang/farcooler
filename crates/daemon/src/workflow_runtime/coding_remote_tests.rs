@@ -123,6 +123,12 @@ async fn a_push_the_remote_turns_down_at_sign_in_fails_the_run_with_a_sentence()
     let fact = push_fact(&r.runtime);
     assert_eq!(fact["label"], "rejected");
     assert_eq!(fact["detail"]["why"], "The landing remote turned down this runner's sign-in, so nothing was sent. Check its git and ssh credentials.");
+    let state = r.runtime.state("w").unwrap().unwrap();
+    let (group_id, group) = state.items.iter().find(|(_, item)| item.group_of.is_some() && item.phase == Phase::Failed).unwrap();
+    let get = r.runtime.wire_command("w", "owner", farcooler_protocol::workflow_commands::Action::Get).unwrap();
+    let reason = get["state"]["items"][group_id]["reason"].as_str().unwrap();
+    assert!(reason.starts_with(&format!("{}:", group.definition.stages[group.stage].id))
+        && reason.contains("turned down this runner's sign-in") && reason.contains(".verb.json"), "{reason}");
 }
 
 #[tokio::test]

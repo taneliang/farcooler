@@ -22,12 +22,13 @@ pub(super) fn ci(item: &mut Item, id: &str, input: &Input, effects: &mut Vec<Eff
     }
     if !matches!(item.definition.stages[item.stage].kind, StageKind::Ci | StageKind::AwaitCi) { return Ok(false); }
     let evidence = match outcome {
-        Outcome::Passed(e) | Outcome::Rejected(e) | Outcome::Labeled(_, e) | Outcome::CiResult { evidence: e, .. } => e,
+        Outcome::Passed(e) | Outcome::Rejected(e) | Outcome::Labeled(_, e)
+        | Outcome::LabeledWithReason { evidence: e, .. } | Outcome::CiResult { evidence: e, .. } => e,
         _ => return Ok(false),
     };
     if item.pending.as_ref() != Some(effect) || &item.run != run || item.fence != *fence { return Err(Refusal::Stale); }
     if input.grant != (Grant::Operation { effect: effect.clone(), run: run.clone(), fence: *fence }) { return Err(Refusal::Unauthorized); }
-    if let Outcome::Labeled(label, _) = outcome {
+    if let Outcome::Labeled(label, _) | Outcome::LabeledWithReason { label, .. } = outcome {
         let stage = &item.definition.stages[item.stage];
         if item.definition.schema != 2 { return Err(Refusal::Invalid); }
         if !(emits_unrouted(&stage.kind, label) || stage.routes.contains_key(label)) {
@@ -93,11 +94,13 @@ pub(super) fn decide(state: &State, input: &Input) -> Result<Transition, Refusal
                 let mut command = observation.command.clone();
                 if let HookMove::Relabel { label } = choice {
                     let Command::Observe { outcome, .. } = &mut command else { return Err(Refusal::Invalid) };
-                    let green = matches!(outcome, Outcome::Passed(_)) || matches!(outcome, Outcome::Labeled(l, _) if l == "passed") || matches!(outcome, Outcome::CiResult { label, .. } if label == "passed");
+                    let green = matches!(outcome, Outcome::Passed(_)) || matches!(outcome,
+                        Outcome::Labeled(label, _) | Outcome::LabeledWithReason { label, .. } | Outcome::CiResult { label, .. }
+                        if label == "passed");
                     if label == "passed" && !green { return Err(Refusal::Evidence); }
                     let stage = &item.definition.stages[item.stage];
                     if !stage.routes.contains_key(label) { return Err(Refusal::Invalid); };
-                    if let Outcome::CiResult { label: current, .. } = outcome { *current = label.clone(); }
+                    if let Outcome::CiResult { label: current, .. } | Outcome::LabeledWithReason { label: current, .. } = outcome { *current = label.clone(); }
                     else { *outcome = Outcome::Labeled(label.clone(), item.last_evidence.clone().ok_or(Refusal::Evidence)?); }
                 }
                 let mut ci_base = base.clone();

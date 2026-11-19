@@ -417,8 +417,11 @@ pub enum Outcome {
     GateRejected { evidence: Evidence, members: Vec<String>, brief: String, failure: GroupFailure },
     ReviewRejected { evidence: Evidence, summary: String, receipt: String },
     Passed(Evidence), Rejected(Evidence), RejectedWithDetails(Evidence, GroupFailure), RejectedWithBrief(Evidence, String), Labeled(String, Evidence), SafeFailure,
+    LabeledWithReason { label: String, evidence: Evidence, reason: String },
     /// A `SafeFailure` that says why, in a sentence kept on the run as its `failure` (ov-1058).
     SafeFailureBecause(String),
+    /// A safe failure backed by a durable settlement journal.
+    SafeFailureWithReceipt { reason: Option<String>, receipt: String },
     /// A temporary resource refusal; retry without spending an attempt or a back-edge.
     ResourceHold(String),
     Interrupted, Uncertain, Stopped { operation: String, receipt: String } }

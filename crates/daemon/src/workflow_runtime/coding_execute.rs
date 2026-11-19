@@ -984,7 +984,8 @@ impl Exec {
                     let path = self.provider_path(binding);
                     let raw = match self.bytes(&path) {
                         // An agent that ended its turn without a verdict gave none: it never passes, and it runs again (ov-969).
-                        Err(Error::Io(error)) if agent && error.kind() == std::io::ErrorKind::NotFound => return Ok(Outcome::SafeFailure),
+                        Err(Error::Io(error)) if agent && error.kind() == std::io::ErrorKind::NotFound =>
+                            return Ok(Outcome::SafeFailureBecause("The reviewing agent ended without recording a verdict.".into())),
                         raw => raw?,
                     };
                     let config = self.coding.as_ref().ok_or(Error::Refused("missing config"))?;

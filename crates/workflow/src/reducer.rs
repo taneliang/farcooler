@@ -426,7 +426,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                                 if item.phase == Phase::Failed { item.brief = Some(brief.clone()); }
                             }
                         }
-                        Outcome::Labeled(label, evidence) => {
+                        Outcome::Labeled(label, evidence) | Outcome::LabeledWithReason { label, evidence, .. } => {
                             if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
                             let stage = &item.definition.stages[item.stage];
                             if item.definition.schema != 2 { return Err(Refusal::Invalid); }
@@ -462,12 +462,16 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                             }
                             finish(&mut item, id, input, matches!(outcome, Outcome::Passed(_)), evidence, Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
                         }
-                        Outcome::SafeFailure | Outcome::SafeFailureBecause(_) => {
+                        Outcome::SafeFailure | Outcome::SafeFailureBecause(_) | Outcome::SafeFailureWithReceipt { .. } => {
                             if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
                             // An effect's reason that can't go on the ticket is dropped, not the failure: refusing the
                             // answer would leave a plain failure Uncertain, for a person (ov-1061). A person's own
                             // Resolve is still refused, so they can fix the sentence.
-                            if let Outcome::SafeFailureBecause(reason) = outcome {
+                            if let Outcome::SafeFailureWithReceipt { receipt, .. } = outcome {
+                                if !valid_id(receipt) { return Err(Refusal::Evidence); }
+                            }
+                            if let Outcome::SafeFailureBecause(reason)
+                                | Outcome::SafeFailureWithReceipt { reason: Some(reason), .. } = outcome {
                                 if valid_rework_reason(reason) { item.failure = Some(reason.clone()); }
                                 else if resolving { return Err(Refusal::Invalid); }
                             }
@@ -512,17 +516,24 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     }
                     if item.phase == Phase::Failed {
                         match outcome {
-                            Outcome::SafeFailure | Outcome::SafeFailureBecause(_) => {
+                            Outcome::SafeFailure | Outcome::SafeFailureBecause(_) | Outcome::SafeFailureWithReceipt { .. } => {
                                 let cause = item.failure.as_deref().unwrap_or("The operation failed before completing.").to_owned();
                                 let step = &item.definition.stages[item.stage].id;
-                                item.reason = Some(format_reason(step, &format!("{cause} Attempts exhausted."), Some(&input.id)));
+                                let receipt = match outcome {
+                                    Outcome::SafeFailureWithReceipt { receipt, .. } => receipt.as_str(),
+                                    // Pre-launch refusals and old observations have only the store receipt.
+                                    _ => input.id.as_str(),
+                                };
+                                item.reason = Some(format_reason(step, &format!("{cause} Attempts exhausted."), Some(receipt)));
                             }
                             Outcome::GateRejected { evidence, failure, .. }
                             | Outcome::RejectedWithDetails(evidence, failure)
                             | Outcome::CiResult { label: _, evidence, failure: Some(failure), .. } => {
                                 describe_failure(&mut item, &format!("{}: {}", failure.job, failure.first_line), Some(&evidence.receipt));
                             }
-                            Outcome::RejectedWithBrief(evidence, brief) => describe_failure(&mut item, brief, Some(&evidence.receipt)),
+                            Outcome::RejectedWithBrief(evidence, brief)
+                            | Outcome::LabeledWithReason { evidence, reason: brief, .. } =>
+                                describe_failure(&mut item, brief, Some(&evidence.receipt)),
                             Outcome::FoldConflict { evidence, files, .. } => {
                                 describe_failure(&mut item, &conflict_brief(evidence, files)?, Some(&evidence.receipt));
                             }

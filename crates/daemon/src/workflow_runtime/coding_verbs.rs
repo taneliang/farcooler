@@ -220,6 +220,11 @@ impl Exec {
                 members: fact.detail.get("members").cloned().map(serde_json::from_value).transpose()?,
                 files: serde_json::from_value(fact.detail.get("files").cloned().unwrap_or(serde_json::json!([])))? });
         }
+        if fact.label != "passed" {
+            if let Some(reason) = fact.detail["why"].as_str().filter(|text| farcooler_workflow::valid_rework_reason(text)) {
+                return Ok(Outcome::LabeledWithReason { label: fact.label, evidence, reason: reason.into() });
+            }
+        }
         Ok(match fact.label.as_str() {
             "passed" => Outcome::Passed(evidence),
             "rejected" => match serde_json::from_value::<farcooler_workflow::GroupFailure>(fact.detail["failure"].clone()) {

@@ -905,6 +905,19 @@ impl Runtime {
     fn write_result(&self, workspace: &str, effect: &Effect, outcome: Outcome, resolving: bool, now_ms: i64)
         -> Result<std::result::Result<(), Refusal>>
     {
+        let outcome = match &outcome {
+            Outcome::SafeFailure | Outcome::SafeFailureBecause(_) => {
+                let journal = self.journal_path(effect);
+                match journal.file_name().and_then(|name| name.to_str()).filter(|_| journal.is_file()) {
+                    Some(receipt) => Outcome::SafeFailureWithReceipt {
+                        reason: match outcome { Outcome::SafeFailureBecause(reason) => Some(reason), _ => None },
+                        receipt: receipt.into(),
+                    },
+                    None => outcome,
+                }
+            }
+            _ => outcome,
+        };
         let command = if let EffectKind::Decide { input, .. } = &effect.kind {
             let result = match outcome { Outcome::Hook(result) => result, _ => HookResult::Missing };
             Command::Decide { item: effect.item.clone(), call: input.call.clone(), fence: effect.fence,

@@ -114,6 +114,19 @@ async fn an_agent_that_never_gives_a_verdict_fails_the_run_and_one_that_rejects_
         enqueue(&mut runtime, "w", "one", definition);
         let state = settle(&mut runtime, 2).await;
         assert_eq!(at(&state), ("agent-review".into(), Phase::Failed), "{mode}");
+        if mode == "never" {
+            let item = &state.items["one"];
+            let get = runtime.wire_command("w", "owner", farcooler_protocol::workflow_commands::Action::Get).unwrap();
+            let reason = get["state"]["items"]["one"]["reason"].as_str().unwrap();
+            let outbox = runtime.store.workflow_outbox("w").unwrap();
+            let effect = &outbox.iter().find(|stored| stored.effect.run == item.run
+                && stored.effect.kind == EffectKind::Execute(StageKind::Review(Reviewer::Agent))).unwrap().effect;
+            let journal = runtime.journal_path(effect);
+            assert!(journal.is_file(), "{journal:?}");
+            assert!(reason.starts_with("agent-review:") && reason.contains("without recording a verdict")
+                && reason.contains(journal.file_name().unwrap().to_str().unwrap()), "{reason}");
+            assert_eq!(crate::plan_run::run_of(&state, "one").unwrap().reason.as_deref(), Some(reason));
+        }
         assert_eq!(adapters::git(&runtime.repository(), &["rev-parse", runtime.landing_ref()]).await.unwrap(),
             runtime.coding.as_ref().unwrap().base, "{mode}: nothing landed");
     }
@@ -144,7 +157,8 @@ async fn the_verdict_command_writes_the_receipt_the_gate_reads() {
     assert_eq!(binding.effect.kind, EffectKind::Execute(StageKind::Review(Reviewer::Agent)));
     // The agent runs and ends its turn with no verdict: that is no pass.
     let (_hold, cancelled) = tokio::sync::watch::channel(false);
-    assert_eq!(runtime.execute_coding(&workspace, &binding, cancelled).await.unwrap(), Outcome::SafeFailure);
+    assert!(matches!(runtime.execute_coding(&workspace, &binding, cancelled).await.unwrap(),
+        Outcome::SafeFailureBecause(reason) if reason.contains("without recording a verdict")));
     // What the agent's environment held, as the step pinned it.
     let command = runtime.coding_command(&binding).unwrap();
     let env = |key: &str| command.environment.get(key).cloned();
