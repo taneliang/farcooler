@@ -580,12 +580,32 @@ def _self_test():
 
         # Two wrappers at once: the second prints who holds the lock, and they never overlap.
         marks.write_text("")
-        cmd = lambda n: [heavy, "--", "sh", "-c", f'echo {n}-in >> "{marks}"; sleep 0.6; echo {n}-out >> "{marks}"']
+        release = t / "release-wrapper"
+        output = t / "waiting-wrapper-output"
+        holder_cmd = f'echo one-in >> "{marks}"; while [ ! -e "{release}" ]; do sleep 0.05; done; echo one-out >> "{marks}"'
+        waiter_cmd = f'echo two-in >> "{marks}"; echo two-out >> "{marks}"'
         env2 = {**env, "HEAVY_ANNOUNCE": "0.1"}
-        p1 = subprocess.Popen(cmd("one"), env=env2, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        time.sleep(0.3)
-        p2 = subprocess.Popen(cmd("two"), env=env2, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        o1, o2 = p1.communicate()[0], p2.communicate()[0]
+        p1 = subprocess.Popen([heavy, "--", "sh", "-c", holder_cmd], env=env2, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        p2 = None
+        try:
+            deadline = time.monotonic() + 10
+            while not marks.read_text().strip() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            with output.open("w") as waiter_output:
+                p2 = subprocess.Popen([heavy, "--", "sh", "-c", waiter_cmd], env=env2, stdout=waiter_output, stderr=subprocess.STDOUT, text=True)
+                deadline = time.monotonic() + 10
+                while "held by worktree" not in output.read_text() and time.monotonic() < deadline and p2.poll() is None:
+                    time.sleep(0.02)
+                release.touch()
+                p2.wait(timeout=10)
+            o1 = p1.communicate(timeout=10)[0]
+            o2 = output.read_text()
+        finally:
+            release.touch()
+            for proc in (p1, p2):
+                if proc is not None and proc.poll() is None:
+                    proc.kill()
+                    proc.wait()
         expect("two wrappers do not overlap", marks.read_text().split(), ["one-in", "one-out", "two-in", "two-out"])
         expect("the waiting wrapper names the holder", "held by worktree" in o2 and f"PID {p1.pid}" in o2, True)
         expect("the holder says nothing of waiting", "waiting" in o1, False)
