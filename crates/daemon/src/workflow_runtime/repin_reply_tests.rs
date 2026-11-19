@@ -1,6 +1,6 @@
 //! ov-1373: a busy workspace's `workflow.get` stays under the 1 MiB reply cap, and `workspace re-pin` asks only for
 //! the published workflow. Both lists grow without bound; the first fixture is the live machine's (766 cleanups).
-use super::*;
+use super::Runtime;
 use super::wire_commands::bound_recent;
 use farcooler_workflow::cleanup::CleanupEffect;
 use farcooler_protocol::workflow_commands::Action;
