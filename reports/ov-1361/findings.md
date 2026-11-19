@@ -37,3 +37,11 @@ output, 30-second load samples, and exit statuses are in `final-streak.log`.
 Several one-minute load readings were below 15, so this does not meet the later
 review request for load above 15 throughout. No synthetic load was generated,
 in accordance with the manager's ruling.
+
+Fix round 2: a further search of the available `/private/tmp/claude-502` logs
+for the original `Ran 24 tests in 14.664s` summary found only the pre-queue log
+and its task output, both containing the same truncated summary. Neither has
+the failing test or traceback. At 10:51 on November 19 the natural one-minute
+load was 9.36, below the requested threshold. The original causes and the
+above-15 streak remain unverified; the existing evidence must not be treated
+as satisfying those requirements.
