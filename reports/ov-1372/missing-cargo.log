@@ -1,0 +1,106 @@
+
+RUN 1 START Thu Nov 19 06:39:45 UTC 2026
+14:39  up 7 days, 14:48, 1 user, load averages: 4.38 5.88 10.58
+........ss
+----------------------------------------------------------------------
+Ran 10 tests in 13.619s
+
+OK (skipped=2)
+lane-gate: Node 24 (arm64): /tmp/tmpne82ouqa/good-node/node
+lane-gate: JDK 17: /tmp/tmpne82ouqa/j17
+lane-gate: capture JDK 21: /tmp/tmpne82ouqa/j21
+lane-gate: Android SDK: /tmp/tmpne82ouqa/sdk
+lane-gate: JDK 17: /tmp/tmpne82ouqa/j17
+lane-gate: capture JDK 21: /tmp/tmpne82ouqa/j21
+lane-gate: JDK 17: /tmp/tmpne82ouqa/j17
+lane-gate: capture JDK 21: /tmp/tmpne82ouqa/j21
+lane-gate: Android SDK: /tmp/tmpne82ouqa/sdk
+lane-gate: JDK 17: /tmp/tmpne82ouqa/j17
+lane-gate: capture JDK 21: /tmp/tmpne82ouqa/j21
+SAMPLE Thu Nov 19 06:40:15 UTC 2026 14:40  up 7 days, 14:48, 1 user, load averages: 6.04 6.13 10.51
+gate-flaky self-test: ok
+......E........EEE...E..
+======================================================================
+ERROR: test_evidence_names_selected_and_skipped_binaries_and_reads_back (__main__.LandingTests)
+ov-1278: each gate run saves the test binaries it selected and skipped; a red main is traced by reading them.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/lane-gate-source-r0272sv1/scripts/landing-policy-test.py", line 359, in test_evidence_names_selected_and_skipped_binaries_and_reads_back
+    metadata = json.loads(subprocess.run(
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 505, in run
+    with Popen(*popenargs, **kwargs) as process:
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 951, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 1821, in _execute_child
+    raise child_exception_type(errno_num, err_msg, err_filename)
+FileNotFoundError: [Errno 2] No such file or directory: 'cargo'
+
+======================================================================
+ERROR: test_real_affected_failure_and_unaffected_ci_failure (__main__.LandingTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/lane-gate-source-r0272sv1/scripts/landing-policy-test.py", line 555, in test_real_affected_failure_and_unaffected_ci_failure
+    self.real_failure_proof(use_nextest=shutil.which("cargo-nextest") is not None)
+  File "/private/tmp/lane-gate-source-r0272sv1/scripts/landing-policy-test.py", line 572, in real_failure_proof
+    subprocess.run(["cargo", "generate-lockfile", "--offline"], cwd=repo, check=True, capture_output=True)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 505, in run
+    with Popen(*popenargs, **kwargs) as process:
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 951, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 1821, in _execute_child
+    raise child_exception_type(errno_num, err_msg, err_filename)
+FileNotFoundError: [Errno 2] No such file or directory: 'cargo'
+
+======================================================================
+ERROR: test_real_failure_proof_without_optional_nextest (__main__.LandingTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/lane-gate-source-r0272sv1/scripts/landing-policy-test.py", line 558, in test_real_failure_proof_without_optional_nextest
+    self.real_failure_proof(use_nextest=False)
+  File "/private/tmp/lane-gate-source-r0272sv1/scripts/landing-policy-test.py", line 572, in real_failure_proof
+    subprocess.run(["cargo", "generate-lockfile", "--offline"], cwd=repo, check=True, capture_output=True)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 505, in run
+    with Popen(*popenargs, **kwargs) as process:
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 951, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 1821, in _execute_child
+    raise child_exception_type(errno_num, err_msg, err_filename)
+FileNotFoundError: [Errno 2] No such file or directory: 'cargo'
+
+======================================================================
+ERROR: test_real_workspace_leaf_narrows_and_shared_inputs_select_everything (__main__.LandingTests)
+ov-1268: the lane gate skips Rust tests a change cannot affect, using this repo's real crate graph.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/lane-gate-source-r0272sv1/scripts/landing-policy-test.py", line 300, in test_real_workspace_leaf_narrows_and_shared_inputs_select_everything
+    metadata = json.loads(subprocess.run(
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 505, in run
+    with Popen(*popenargs, **kwargs) as process:
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 951, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 1821, in _execute_child
+    raise child_exception_type(errno_num, err_msg, err_filename)
+FileNotFoundError: [Errno 2] No such file or directory: 'cargo'
+
+======================================================================
+ERROR: test_three_file_fold_plan_uses_group_base_and_only_reached_rust_binaries (__main__.LandingTests)
+ov-1305: execute the planner with a stale remote ref and a pinned group base.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/lane-gate-source-r0272sv1/scripts/landing-policy-test.py", line 483, in test_three_file_fold_plan_uses_group_base_and_only_reached_rust_binaries
+    subprocess.run(["cargo", "generate-lockfile", "--offline"], cwd=repo, check=True, capture_output=True)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 505, in run
+    with Popen(*popenargs, **kwargs) as process:
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 951, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 1821, in _execute_child
+    raise child_exception_type(errno_num, err_msg, err_filename)
+FileNotFoundError: [Errno 2] No such file or directory: 'cargo'
+
+----------------------------------------------------------------------
+Ran 24 tests in 5.432s
+
+FAILED (errors=5)
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+RUN 1 EXIT 1 END Thu Nov 19 06:40:26 UTC 2026
+14:40  up 7 days, 14:49, 1 user, load averages: 6.21 6.16 10.47

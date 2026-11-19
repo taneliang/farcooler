@@ -1534,13 +1534,24 @@ def _self_test():
             ns.release_between_jobs = False
             ns.no_lock = True
             marks.write_text("")
+            # Each job remains active until the other has started. A sleep before
+            # starting the second thread does not guarantee overlap under load.
+            rendezvous = {}
+            for job, name, other in (("h1", "g1h1", "g2h"), ("g2h", "g2h", "g1h1")):
+                rendezvous[job] = [Step("x", name,
+                    f'echo "{name} start" >> "{marks}"; touch "{t / name}"; '
+                    f'i=0; while [ ! -f "{t / other}" ]; do '
+                    'i=$((i + 1)); [ "$i" -lt 300 ] || exit 1; sleep 0.1; done; '
+                    f'echo "{name} end" >> "{marks}"\n')]
+            rows1, rows2 = [], []
             with contextlib.redirect_stdout(io.StringIO()):
-                t1 = threading.Thread(target=run_jobs, args=(["h1"], plans2, [], t, t, ctx, t, ns))
+                t1 = threading.Thread(target=run_jobs, args=(["h1"], rendezvous, rows1, t, t, ctx, t, ns))
                 t1.start()
-                time.sleep(0.2)
-                run_jobs(["g2h"], plans2, [], t, t, ctx, t, ns)
-                t1.join(10)
-            expect("--no-lock lets them overlap", marks.read_text().split()[:4], ["g1h1", "start", "g2h", "start"])
+                run_jobs(["g2h"], rendezvous, rows2, t, t, ctx, t, ns)
+                t1.join(40)
+            expect("--no-lock lets both jobs reach the rendezvous", [r[2] for r in rows1 + rows2], ["pass", "pass"])
+            expect("--no-lock starts both jobs before either ends",
+                   {line for line in marks.read_text().splitlines()[:2]}, {"g1h1 start", "g2h start"})
             ns.no_lock = False
             os.environ["CI"] = "true"
             expect("CI turns the lock off by default", hl.lock_wanted(ns.no_lock), False)
@@ -1671,7 +1682,9 @@ def _self_test():
         bin21 = pathlib.Path(jdk21) / "bin"
         for directory, version in ((bin11, "11.0.12"), (bin17, "17.0.9"), (bin21, "21.0.1")):
             directory.mkdir()
-            (directory / "java").write_text(f"#!/bin/sh\necho 'openjdk version \"{version}\"' >&2\n")
+            # If accidentally executed, this exceeds the real probe deadline.
+            # The fixture must supply its result without launching this process.
+            (directory / "java").write_text(f"#!/bin/sh\nsleep 1\necho 'openjdk version \"{version}\"' >&2\n")
             (directory / "java").chmod(0o755)
         badbin, goodbin, sdk = t / "bad-node", t / "good-node", t / "sdk"
         for directory, arch in ((badbin, "x64"), (goodbin, "arm64")):

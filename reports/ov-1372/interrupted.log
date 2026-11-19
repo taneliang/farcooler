@@ -1,0 +1,70 @@
+
+RUN 1 START Thu Nov 19 06:39:13 UTC 2026
+14:39  up 7 days, 14:47, 1 user, load averages: 3.54 5.93 10.80
+......Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/private/tmp/lane-gate-source-6xsnh13j/scripts/process_guard_test.py", line 225, in <module>
+    unittest.main()
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/main.py", line 101, in __init__
+    self.runTests()
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/main.py", line 271, in runTests
+    self.result = testRunner.run(self.test)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/runner.py", line 176, in run
+    test(result)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/suite.py", line 84, in __call__
+    return self.run(*args, **kwds)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/suite.py", line 122, in run
+    test(result)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/suite.py", line 84, in __call__
+    return self.run(*args, **kwds)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/suite.py", line 122, in run
+    test(result)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/case.py", line 653, in __call__
+    return self.run(*args, **kwds)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/case.py", line 593, in run
+    self._callTestMethod(testMethod)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/case.py", line 550, in _callTestMethod
+    method()
+  File "/private/tmp/lane-gate-source-6xsnh13j/scripts/process_guard_test.py", line 129, in test_killed_outer_leak_wrapper_reaps_its_tests
+    self.exercise('leak-wrapper', sig)
+  File "/private/tmp/lane-gate-source-6xsnh13j/scripts/process_guard_test.py", line 100, in exercise
+    self.assertTrue(until(lambda: not any(running(pid) for pid in pids)),
+  File "/private/tmp/lane-gate-source-6xsnh13j/scripts/process_guard_test.py", line 37, in until
+    time.sleep(0.05)
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/tmp/lane-gate-source-6xsnh13j/scripts/lane-gate.py", line 2054, in <module>
+    sys.exit(main(sys.argv[1:]))
+  File "/tmp/lane-gate-source-6xsnh13j/scripts/lane-gate.py", line 905, in main
+    return self_test()
+  File "/tmp/lane-gate-source-6xsnh13j/scripts/lane-gate.py", line 1243, in self_test
+    if subprocess.call([sys.executable, str(ROOT / "scripts/process_guard_test.py")]):
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 351, in call
+    return p.wait(timeout=timeout)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 1189, in wait
+    return self._wait(timeout=timeout)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 1917, in _wait
+    (pid, sts) = self._try_wait(0)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 1875, in _try_wait
+    (pid, sts) = os.waitpid(self.pid, wait_flags)
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1361-lane-gate-selftest/scripts/lane-gate.py", line 2054, in <module>
+    sys.exit(main(sys.argv[1:]))
+  File "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1361-lane-gate-selftest/scripts/lane-gate.py", line 905, in main
+    return self_test()
+  File "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1361-lane-gate-selftest/scripts/lane-gate.py", line 1240, in self_test
+    return fixture.run(ROOT)
+  File "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1361-lane-gate-selftest/scripts/gate-test-fixture.py", line 56, in run
+    return subprocess.call([sys.executable, str(repo / "scripts/lane-gate.py"), "--self-test"], cwd=repo, env=env)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 351, in call
+    return p.wait(timeout=timeout)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 1189, in wait
+    return self._wait(timeout=timeout)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 1917, in _wait
+    (pid, sts) = self._try_wait(0)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 1875, in _try_wait
+    (pid, sts) = os.waitpid(self.pid, wait_flags)
+KeyboardInterrupt
