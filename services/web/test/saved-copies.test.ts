@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import words from '../../../crates/client/src/testdata/recovery-view.json'
-import { relayRaw } from '../src/client/relay-client'
+import { relayCopy } from '../src/client/relay-client'
 import { deleteCopy, SavedCopies } from '../src/client/saved-copies'
 
 // A small DOM surface; real text sinks and event handlers are exercised without
@@ -73,11 +73,27 @@ describe('account-owned saved copies', () => {
     expect(dialog.open).toBe(false)
   })
 
+  it('opens while the presenter loads and stays closed if dismissed during that wait', async () => {
+    vi.stubGlobal('document', { createElement: () => new Element() })
+    const dialog = new Element()
+    const call = vi.fn()
+    let loaded!: (view: typeof words) => void
+    const opening = new SavedCopies(dialog as unknown as HTMLDialogElement, call, () => undefined,
+      () => new Promise(resolve => { loaded = resolve })).open()
+    expect(dialog.open).toBe(true)
+    expect(dialog.children[3].textContent).toBe(words.loading)
+    await dialog.children[2].onclick!()
+    loaded(words)
+    await opening
+    expect(dialog.open).toBe(false)
+    expect(call).not.toHaveBeenCalled()
+  })
+
   it('keeps an expired-session delete on the page so Sign Out can report its failure', async () => {
     const assign = vi.fn()
     vi.stubGlobal('location', { assign })
     vi.stubGlobal('fetch', async () => new Response('{}', { status: 401 }))
-    expect(await deleteCopy((route, body) => relayRaw(route, body, false), 'cred')).toBe(false)
+    expect(await deleteCopy(relayCopy, 'cred')).toBe(false)
     expect(assign).not.toHaveBeenCalled()
   })
 

@@ -26,9 +26,7 @@ export class SavedCopies {
   constructor(private readonly dialog: HTMLDialogElement, private readonly call: VaultCall, private readonly current: () => string | undefined, private readonly present: RecoveryPresenter) {}
 
   async open(): Promise<void> {
-    const presented = await this.present(0, false).catch(() => null)
-    const words = presented ?? bundledView
-    if (!this.dialog.open) this.dialog.showModal()
+    const words = bundledView
     this.dialog.replaceChildren()
     const heading = document.createElement('h2')
     heading.textContent = words.title
@@ -42,6 +40,9 @@ export class SavedCopies {
     message.textContent = words.loading
     const list = document.createElement('ul')
     this.dialog.append(heading, explanation, close, message, list)
+    if (!this.dialog.open) this.dialog.showModal()
+    const presented = await this.present(0, false).catch(() => null)
+    if (!this.dialog.open) return
     if (!presented) {
       message.textContent = words.loadFailed
       return

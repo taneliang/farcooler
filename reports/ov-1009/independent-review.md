@@ -73,3 +73,24 @@ Fresh validation after rebase:
 - `cargo check --manifest-path crates/web/Cargo.toml --locked` passes.
 - `TMPDIR=/private/tmp cargo test -p farcooler-client recovery_view --lib`:
   both count/identity and bundled-view parity tests pass.
+
+## ov-1377 carry review (2026-11-19)
+
+The pinned base already includes the ov-1009 implementation and shared
+recovery view. The independent reviewer verified that alternating touches from
+two browsers keep the same readable copy, that raced enrollments retain every
+runner, and that account-scoped listing and deletion let the owner clear junk
+copies.
+
+The reviewer found that a late connection update could replace the Sign Out
+warning and that an unrelated in-flight relay request could redirect away on
+401. Sign Out now keeps Retry Delete and Sign Out Anyway in its own dialog.
+The relay client checks whether to redirect when the response arrives.
+Saved Copies opens before waiting for its presenter, so its dialog cannot
+appear over the Sign Out warning after a late module load. The independent
+follow-up found no remaining blocker.
+
+The web suites passed 255 worker tests and 56 Rust-backed adapter tests.
+The relay suite passed 841 tests. The Rust web suite and the shared recovery
+model tests passed. Web and relay type checks, web workflow tests, the web
+dependency check, and the shared-core baseline check passed.

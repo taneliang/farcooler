@@ -109,6 +109,14 @@
   </section>
 </main>
 <dialog class="saved-copies" id="saved-copies" aria-label="Saved Copies"></dialog>
+<dialog class="sign-out" id="sign-out" aria-labelledby="sign-out-title" aria-describedby="sign-out-detail">
+  <h2 id="sign-out-title"></h2>
+  <p id="sign-out-detail" role="status"></p>
+  <div class="actions">
+    <button id="sign-out-retry" type="button" hidden></button>
+    <button class="quiet" id="sign-out-anyway" type="button" hidden></button>
+  </div>
+</dialog>
 <dialog class="plan-sheet" id="workflow-runs" aria-label="Workflow Runs"></dialog>
 <dialog class="plan-sheet" id="plan-list" aria-labelledby="plan-list-title">
   <header class="plan-sheet-bar">

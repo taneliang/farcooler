@@ -48,17 +48,20 @@ import { type Budget, MAX_LIVE_PANES, PaneSet } from './panes'
 import { comparisonButtons, type Opened, registerDevice, waitForReply } from './sealed'
 import { type LinkView, Reconnector } from './reconnect'
 import { installSignOut } from './sign-out'
-import { relayCopy, relayRaw } from './relay-client'
+import { relayCopy, relayRaw as requestRelay } from './relay-client'
 import { type RecoveryPresenter, type RecoveryView, SavedCopies } from './saved-copies'
-// Bundled shared view: emergency sign-out must also work if WASM cannot load.
-// crates/client's recovery_view test verifies this snapshot against its model.
-import recoveryWords from '../../../../crates/client/src/testdata/recovery-view.json'
 import { StartWatch } from './start'
 import { PaneView } from './terminal'
 import { loadTailcat, type Tailcat, type TunnelConn } from './tunnel'
 import { b64url, deriveKeys, needsSaving, prfUse, restore, syncCopy, type Saved, type Vault } from './vault'
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
+
+let isSigningOut = () => false
+
+function relayRaw(route: string, body: unknown = {}) {
+  return requestRelay(route, body, () => !isSigningOut())
+}
 
 async function relay(route: string, body: unknown = {}): Promise<any> {
   const answer = await relayRaw(route, body)
@@ -1073,22 +1076,13 @@ async function addAgain(session: Session): Promise<void> {
 /// Sign Out stops queued copies, forgets local runners, and reports an
 /// unconfirmed shared-copy delete before leaving the page.
 function signOutForgets(session: () => Session | null): void {
-  const words = recoveryWords
   const form = document.querySelector<HTMLFormElement>('form[action="/sign-out"]')
   if (!form) return
-  installSignOut(form, {
+  isSigningOut = installSignOut(form, $<HTMLDialogElement>('sign-out'), {
     session,
     call: relayCopy,
     forget: forgetDevice,
     dropSecret,
-    waiting: () => status(words.signingOut),
-    failed: (retry, anyway) => status(
-      words.deleteTitle,
-      words.deleteDetail,
-      { label: words.retry, run: retry },
-      anyway,
-      words.anyway,
-    ),
   })
 }
 
