@@ -46,6 +46,28 @@ async fn an_owner_that_exited_before_quiescence_looked_is_quiescent() {
 }
 
 #[tokio::test]
+async fn a_dead_panes_reassigned_tty_cannot_end_another_native_pane() {
+    let (_owner_dir, runtime, host, mut owner) = owned_pane("/bin/sleep 30").await;
+    let pids = on_tty(&owner);
+    assert!(!pids.is_empty());
+    for pid in pids { unsafe { libc::kill(pid, libc::SIGKILL); } }
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while host.0.pane_life(&owner.pane, owner.terminal).await.unwrap() != farcooler_tmux::PaneLife::Dead {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }).await.unwrap();
+
+    let (_other_dir, _other_runtime, other_host, other) = owned_pane("/bin/sleep 30").await;
+    // Model the tty number being handed out again regardless of which PTY
+    // numbers concurrent tests have open when the kernel allocates ours.
+    owner.tty.clone_from(&other.tty);
+    let result = runtime.quiesce_native(&owner).await;
+    assert_eq!(other_host.0.pane_life(&other.pane, other.terminal).await.unwrap(),
+        farcooler_tmux::PaneLife::Live, "quiescing a dead owner must leave the other pane running");
+    assert!(result.is_err(), "a busy former tty cannot prove quiescence");
+}
+
+#[tokio::test]
 async fn an_owner_that_exits_after_its_pane_was_seen_live_is_quiescent() {
     let (_dir, runtime, host, owner) = owned_pane("/bin/sleep 30").await;
     let pids = on_tty(&owner);

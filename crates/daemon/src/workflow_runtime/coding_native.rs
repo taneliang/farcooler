@@ -302,38 +302,39 @@ impl Exec {
             return Err(Error::Refused("foreign native terminal"));
         }
         let tty = owner.tty.trim_start_matches("/dev/");
-        let mut current = Vec::new();
+        let mut owned_sample = None;
         for round in 0..100 {
             let life = tmux.pane_life(&owner.pane, owner.terminal).await
                 .map_err(|_| Error::Refused("native pane ownership unavailable"))?;
-            if life == farcooler_tmux::PaneLife::Live {
+            let supervisor = if life == farcooler_tmux::PaneLife::Live {
                 let panes = tmux.list_tagged_panes().await.map_err(|_| Error::Refused("native owner inventory unavailable"))?;
-                match panes.iter().find(|p| p.pane_id == owner.pane && p.terminal_id == owner.terminal) {
-                    Some(p) if p.daemon_id != owner.terminal || p.worktree_id != owner.terminal || p.tty != owner.tty =>
-                        return Err(Error::Refused("native tty differs from retained owner")),
-                    Some(_) => {}
+                let Some(pane) = panes.iter().find(|p| !p.dead && p.pane_id == owner.pane && p.terminal_id == owner.terminal) else {
                     // Closed since tmux called it live: read its life again.
-                    None => { tokio::time::sleep(Duration::from_millis(10)).await; continue; }
+                    tokio::time::sleep(Duration::from_millis(10)).await; continue;
+                };
+                if pane.daemon_id != owner.terminal || pane.worktree_id != owner.terminal || pane.tty != owner.tty {
+                    return Err(Error::Refused("native tty differs from retained owner"));
                 }
                 #[cfg(test)]
                 if let Some(hook) = AFTER_LIVE.with(|h| h.borrow_mut().take()) { hook(); }
-            }
+                Some(pane.stamp.pid as i32)
+            } else { None };
             let table = tokio::task::spawn_blocking(snapshot).await
                 .map_err(|_| Error::Refused("native process read failed"))??;
-            current = table.under_tty(tty);
+            let current = table.under_tty(tty);
             match life {
-                // tmux has let the tty go, so nothing on it now is provably the owner's.
+                // A retained dead pane can still name a tty the kernel has handed to another pane.
                 farcooler_tmux::PaneLife::Gone if current.is_empty() => return Ok(()),
                 farcooler_tmux::PaneLife::Gone => return Err(Error::Refused("native vanished pane still has processes")),
                 farcooler_tmux::PaneLife::Dead if current.is_empty() => return close_native(&tmux, owner).await,
-                _ if !current.is_empty() => break,
-                _ => {
-                    if round % 10 == 9 { tmux.nudge_reap().await; }
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                }
+                farcooler_tmux::PaneLife::Dead => return Err(Error::Refused("native dead pane still has processes")),
+                farcooler_tmux::PaneLife::Live => {}
             }
+            if let Some(pid) = supervisor.filter(|pid| current.contains(pid)) { owned_sample = Some((pid, current)); break; }
+            if round % 10 == 9 { tmux.nudge_reap().await; }
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        if current.is_empty() { return Err(Error::Refused("native owner exit never observed")); }
+        let Some((supervisor, mut current)) = owned_sample else { return Err(Error::Refused("native owner exit never observed")) };
         // Stop the tty roots and all descendants before terminating them so an
         // interactive shell's separate job groups cannot escape a leader kill.
         let mut owned = BTreeSet::new();
@@ -350,6 +351,8 @@ impl Exec {
             let table = tokio::task::spawn_blocking(snapshot).await
                 .map_err(|_| Error::Refused("native process read failed"))??;
             current = table.under_tty(tty);
+            // If the supervisor exited, finish only the processes already found with it.
+            if !current.contains(&supervisor) { stable = true; break; }
         }
         if !stable { return Err(Error::Refused("native process tree did not settle")); }
         for &pid in owned.iter().rev() { unsafe { libc::kill(pid, libc::SIGKILL); } }
