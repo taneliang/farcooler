@@ -315,7 +315,7 @@ fn apply_in_snapshot(tx: &Transaction<'_>, input: &Input, payload: &str, by: Opt
             Command::Enqueue {resource,..} | Command::Start {resource,..} | Command::Reopen {resource,..} => Some(resource.as_str()),
             Command::Approve {item,..}|Command::Review {item,..}|Command::Observe {item,..}|Command::Cancel {item,..}|Command::Retry {item}|Command::Queue {item}|Command::Leave {item}|Command::Move {item,..}|Command::Resolve {item,..}
                 |Command::Decide {item,..}|Command::SendBack {item,..}|Command::Close {item,..}|Command::Land {item,..}
-                |Command::RefreshJoin {item,..} => state.items.get(item).map(|i|i.resource.as_str()),
+                |Command::RefreshJoin {item,..}|Command::RepinPending {item,..} => state.items.get(item).map(|i|i.resource.as_str()),
             Command::Advance | Command::RefreshGroups { .. } => None,
         };
         // A Start takes its followers with it (ov-970), so their quarantine holds it back as the lead's does.
@@ -350,6 +350,25 @@ fn apply_in_snapshot(tx: &Transaction<'_>, input: &Input, payload: &str, by: Opt
                 "SELECT dispatch_state FROM workflow_outbox WHERE workspace=?1 AND id=?2",
                 params![input.workspace, effect], |r| r.get(0)).optional()?;
             if status.as_deref() != Some("admitted") { result = Err(Refusal::Phase); }
+        }
+        if result.is_ok() && let Command::RepinPending { effect, policy_pin, definition, .. } = &input.command {
+            // Serialize re-pinning with publication and with the original effect's admission.
+            let selected: Option<String> = tx.query_row(
+                "SELECT b.definition_pin FROM workflow_bundle_selections s JOIN workflow_bundles b ON b.pin=s.pin
+                 WHERE s.workspace=?1 AND s.pin=?2", params![input.workspace, policy_pin], |r| r.get(0),
+            ).optional()?;
+            if selected.is_none_or(|pin| definition.as_ref().is_some_and(|definition| definition.pin() != pin)) {
+                result = Err(Refusal::Stale);
+            } else {
+                let unstarted: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM workflow_outbox WHERE workspace=?1 AND id=?2 AND active=1
+                     AND dispatch_state IN ('pending','claimed') AND json_type(payload, '$.kind.Execute') IS NOT NULL)",
+                    params![input.workspace, effect], |r| r.get(0),
+                )?;
+                if !unstarted || !crate::workflow_effects::executable_payload(tx, &input.workspace, effect)? {
+                    result = Err(Refusal::Phase);
+                }
+            }
         }
         if let Ok(transition) = &result {
             for item in transition.state.items.values().filter(|i| owns_resource(i)) {

@@ -2,6 +2,10 @@ use super::*;
 
 pub(super) fn failed(before: &State, next: &mut State, input: &Input, effects: &mut Vec<Effect>) {
     for (id, item) in &mut next.items {
+        // A run stopped for carry must start no further process under its old pin.
+        if matches!(&input.command, Command::RepinPending { item, definition: None, .. } if item == id) {
+            continue;
+        }
         if item.phase == Phase::Failed && before.items.get(id).is_none_or(|old| old.phase != Phase::Failed) {
             crate::hooks::fire(item, id, input, HookPoint::RunFails, None, effects);
         }

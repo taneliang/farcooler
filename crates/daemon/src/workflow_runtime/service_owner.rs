@@ -131,8 +131,8 @@ impl Runtime {
     }
     pub(super) fn item_configuration(&self, workspace: &str, item_id: &str, item: &Item) -> Result<Option<CodingConfig>> {
         if !self.service_mode { return Ok(self.coding.clone()); }
-        // The admitted item's policy pin is immutable and also present in every
-        // effect/receipt. Never consult the workspace's current selection here.
+        // Every admitted effect and receipt keeps its original binding. Resolve
+        // the item's bundle here, even when the workspace has since published another.
         let bundle = self.store.workflow_bundle(&item.policy_pin)?.ok_or(Error::Refused("missing item bundle"))?;
         // A group item runs the steps of one of the ticket bundle's groups.
         let expected = match &item.group_of {
@@ -155,6 +155,22 @@ impl Runtime {
             (None, _) => self.validate_publication(&bundle.definition, None)?,
         }
         Ok(bundle.adapter.map(|AdapterConfiguration::Coding(config)| config))
+    }
+    pub(super) fn pending_repin(&self, workspace: &str, item: &Item, effect: &Effect) -> Result<Option<Command>> {
+        use crate::workflow_starter::{changes_file_pins, engine_repinned};
+
+        let (true, Some(old), EffectKind::Execute(_)) = (self.service_mode, &self.coding, &effect.kind) else { return Ok(None) };
+        let Some(current) = self.store.workflow_configuration(workspace)? else { return Ok(None) };
+        let Some(AdapterConfiguration::Coding(new)) = &current.adapter else { return Ok(None) };
+        if current.pin == item.policy_pin || !changes_file_pins(old, new) { return Ok(None); }
+        let previous = self.store.workflow_bundle(&item.policy_pin)?.ok_or(Error::Refused("missing item bundle"))?;
+        // Use the same app-owned files as publication admission, but require exact
+        // equality for every other setting, including routes, approvals and notifications.
+        let compatible = self.root.parent().and_then(|root| engine_repinned(root, &previous)).is_some_and(|engine| {
+            engine.adapter == current.adapter && engine.definition == current.definition && engine.notifications == current.notifications
+        });
+        Ok(Some(Command::RepinPending { item: effect.item.clone(), effect: effect.id.clone(),
+            policy_pin: current.pin, definition: compatible.then(|| Box::new(current.definition)) }))
     }
     pub(super) fn validate_item_launch(&mut self, workspace: &str, item: &Item) -> Result<()> {
         if !self.service_mode { return Ok(()); }

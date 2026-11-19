@@ -168,7 +168,7 @@ impl Admission {
                 let same = |previous: Option<&farcooler_store::workflow_publication::Configuration>|
                     farcooler_store::workflow_publication::runs_the_same(previous, definition, adapter.as_deref());
                 if !same(previous.as_ref())
-                    && !previous.as_ref().and_then(|p| crate::workflow_starter::engine_repinned(&self.service, p)).is_some_and(|p| same(Some(&p)))
+                    && !previous.as_ref().and_then(|p| crate::workflow_starter::engine_repinned(self.service.root_dir(), p)).is_some_and(|p| same(Some(&p)))
                 {
                     return Err(DomainError::ScopeDenied { needed: "a person's approval of a draft that changes commands, environment, hooks or the approvals before them" });
                 }

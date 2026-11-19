@@ -61,7 +61,7 @@ pub(crate) fn effect_binds(effect: &farcooler_workflow::Effect, state: &State, w
             && item.run==effect.run && item.resource==effect.resource && item.fence==effect.fence
             && item.pin==effect.definition_pin && item.policy_pin==effect.policy_pin && item.candidate==effect.candidate)
 }
-fn executable_payload(tx: &Transaction<'_>, workspace: &str, id: &str) -> Result<bool> {
+pub(crate) fn executable_payload(tx: &Transaction<'_>, workspace: &str, id: &str) -> Result<bool> {
     let row: Option<(String,String,u64,String)>=tx.query_row(
         "SELECT o.payload,o.payload_hash,o.revision,s.state FROM workflow_outbox o JOIN workflow_states s ON s.workspace=o.workspace WHERE o.workspace=?1 AND o.id=?2",
         params![workspace,id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;

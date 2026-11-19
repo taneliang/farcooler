@@ -76,7 +76,7 @@ printf '%s,"failed_jobs":%s}\n' "${out%?}" "$jobs" > "$FARCOOLER_RECEIPT""#;
 pub(crate) async fn add_to_get(svc: &Service, workspace: Uuid, mut value: serde_json::Value) -> serde_json::Value {
     // Every reply, a published workspace's too: Codex's hooks are what a published adapter pins to add Codex models (ov-1088).
     if value.get("configuration").is_some() {
-        if let (Some(reply), Some(hooks)) = (value.as_object_mut(), engine_codex_hooks(svc, true)) {
+        if let (Some(reply), Some(hooks)) = (value.as_object_mut(), engine_codex_hooks(svc.root_dir(), true)) {
             reply.insert("engine_codex_hooks".into(), serde_json::json!(hooks));
         }
     }
@@ -122,8 +122,8 @@ pub async fn settings(svc: &Service, workspace: Uuid) -> Result<CodingConfig, St
     let landing_repository = github_repository(&push).ok_or("Its origin pushes somewhere other than GitHub, so a draft has nowhere to land. Write the settings yourself and publish them with `workspace set-workflow`.")?;
     let landing = CodingLanding { job: LANDING_JOB.into(), repository: landing_url(&push, &landing_repository).into(),target: landing_ref.clone(), config_digest: String::new() };
     let gh = farcooler_core::programs::find("gh").ok_or("This runner has no gh, which the CI step looks at GitHub with.")?;
-    let settings = engine_hook_settings(svc, true).ok_or("Far Cooler couldn’t write the engine’s Claude hook settings on this runner.")?;
-    let codex_hooks = engine_codex_hooks(svc, true).ok_or("Far Cooler couldn’t write the engine’s Codex hooks on this runner.")?;
+    let settings = engine_hook_settings(svc.root_dir(), true).ok_or("Far Cooler couldn’t write the engine’s Claude hook settings on this runner.")?;
+    let codex_hooks = engine_codex_hooks(svc.root_dir(), true).ok_or("Far Cooler couldn’t write the engine’s Codex hooks on this runner.")?;
     let environment = crate::landing_templates::gate_environment(&[]).map_err(|e| e.to_string())?;
     let mut agent = environment.clone();
     if let Some(home) = environment.get("HOME") { agent.insert("PATH".into(), format!("{GATE_PATH}:{home}/.local/bin:{home}/.cargo/bin")); }
@@ -141,19 +141,19 @@ pub async fn settings(svc: &Service, workspace: Uuid) -> Result<CodingConfig, St
 /// Claude's hook settings for the agents the engine starts: they report to the engine's own socket, which publishing
 /// checks (`native_agent_hooks`), not to the one the runner's terminals use. An app-owned file (`app_owned_file`),
 /// written only when `write`.
-fn engine_hook_settings(svc: &Service, write: bool) -> Option<LaunchFile> {
-    let engine = svc.root_dir().join("workflow").canonicalize().ok()?;
+fn engine_hook_settings(root: &Path, write: bool) -> Option<LaunchFile> {
+    let engine = root.join("workflow").canonicalize().ok()?;
     let text = serde_json::to_string_pretty(&crate::hook_install::claude_settings(&engine.join("h.sock"))).ok()?;
-    app_owned_file(svc, CLAUDE_HOOKS_STEM, &text, write)
+    app_owned_file(root, CLAUDE_HOOKS_STEM, &text, write)
 }
 
 /// Codex's hooks for the agents the engine starts, pinned like Claude's settings and reporting to the same socket. Codex
 /// has no flag for them, so the engine copies this file into each worktree it runs Codex in (`install_codex_hooks`), and
 /// no repository has to commit one (ov-1088). An app-owned file (`app_owned_file`), written only when `write`.
-fn engine_codex_hooks(svc: &Service, write: bool) -> Option<LaunchFile> {
-    let engine = svc.root_dir().join("workflow").canonicalize().ok()?;
+fn engine_codex_hooks(root: &Path, write: bool) -> Option<LaunchFile> {
+    let engine = root.join("workflow").canonicalize().ok()?;
     let text = serde_json::to_string_pretty(&crate::hook_install::native_codex_hooks(&engine.join("h.sock"))).ok()?;
-    app_owned_file(svc, CODEX_HOOKS_STEM, &text, write)
+    app_owned_file(root, CODEX_HOOKS_STEM, &text, write)
 }
 
 /// The names the engine's own hook files start with, under the runtime root.
@@ -167,18 +167,18 @@ const CODEX_HOOKS_STEM: &str = "workflow-codex-hooks";
 /// through a temporary file and a rename so no reader sees half of it. The unnamed `<stem>.json` an older build wrote
 /// is never written again, so a workflow that pins it keeps running too. Without `write` the file is only named, never
 /// written: a permission check asks what this build would pin and must change nothing on disk (ov-1267).
-fn app_owned_file(svc: &Service, stem: &str, text: &str, write: bool) -> Option<LaunchFile> {
+fn app_owned_file(root: &Path, stem: &str, text: &str, write: bool) -> Option<LaunchFile> {
     let digest = farcooler_workflow::digest(&text.as_bytes().to_vec());
     let name: String = digest.trim_start_matches("wf1:").chars().take(16).collect();
-    let path = svc.root_dir().canonicalize().ok()?.join(format!("{stem}-{name}.json"));
+    let path = root.canonicalize().ok()?.join(format!("{stem}-{name}.json"));
     if write && std::fs::read_to_string(&path).ok().as_deref() != Some(text) { crate::skill_install::write_atomically(&path, text).ok()?; }
     Some(LaunchFile { digest, path })
 }
 
 /// Which of the engine's own hook files `path` is, when it is one: a file under the runtime root this build or an
 /// older one wrote (`app_owned_file`), with or without its content in its name.
-fn app_owned_stem(svc: &Service, path: &Path) -> Option<&'static str> {
-    let root = svc.root_dir().canonicalize().ok()?;
+fn app_owned_stem(root: &Path, path: &Path) -> Option<&'static str> {
+    let root = root.canonicalize().ok()?;
     if path.parent() != Some(root.as_path()) { return None; }
     let name = path.file_name()?.to_str()?.strip_suffix(".json")?;
     [CLAUDE_HOOKS_STEM, CODEX_HOOKS_STEM].into_iter().find(|stem| name.strip_prefix(stem)
@@ -200,15 +200,15 @@ pub enum Repin {
 /// (Claude settings, a repository's hooks, a local landing's config) is digested again from where it is. A file that
 /// can't be read keeps its old pin, which publishing then refuses with the file's name. Nothing is published here;
 /// the engine's own hook files this build writes are written, so the draft or publish that follows finds them.
-pub fn repin(svc: &Service, config: &CodingConfig, scope: Repin) -> CodingConfig { repin_with(svc, config, scope, true) }
+pub fn repin(svc: &Service, config: &CodingConfig, scope: Repin) -> CodingConfig { repin_with(svc.root_dir(), config, scope, true) }
 
 /// `repin`, writing the engine's own hook files only when `write`.
-fn repin_with(svc: &Service, config: &CodingConfig, scope: Repin, write: bool) -> CodingConfig {
+fn repin_with(root: &Path, config: &CodingConfig, scope: Repin, write: bool) -> CodingConfig {
     let mut next = config.clone();
     let fresh = |file: &LaunchFile| -> LaunchFile {
-        match app_owned_stem(svc, &file.path) {
-            Some(CLAUDE_HOOKS_STEM) => engine_hook_settings(svc, write),
-            Some(_) => engine_codex_hooks(svc, write),
+        match app_owned_stem(root, &file.path) {
+            Some(CLAUDE_HOOKS_STEM) => engine_hook_settings(root, write),
+            Some(_) => engine_codex_hooks(root, write),
             None if scope == Repin::Everything => std::fs::read(&file.path).ok()
                 .map(|bytes| LaunchFile { path: file.path.clone(), digest: farcooler_workflow::digest(&bytes) }),
             None => None,
@@ -231,11 +231,11 @@ fn repin_with(svc: &Service, config: &CodingConfig, scope: Repin, write: bool) -
 /// Read only: it runs inside the publish permission check, before anything is accepted, so it names the files this
 /// build writes without writing them. Publishing then reads them as pinned (`native_agent_hooks`), and refuses a
 /// missing one, so the orchestrator publishes what `workspace re-pin` or the engine's own re-pin draft wrote.
-pub fn engine_repinned(svc: &Service, published: &farcooler_store::workflow_publication::Configuration)
+pub fn engine_repinned(root: &Path, published: &farcooler_store::workflow_publication::Configuration)
     -> Option<farcooler_store::workflow_publication::Configuration>
 {
     let Some(farcooler_protocol::workflow_config::AdapterConfiguration::Coding(config)) = &published.adapter else { return None };
-    let next = repin_with(svc, config, Repin::AppOwned, false);
+    let next = repin_with(root, config, Repin::AppOwned, false);
     if &next == config { return None; }
     let definition = repin_definition(&published.definition, config, &next)?;
     Some(farcooler_store::workflow_publication::Configuration { pin: published.pin.clone(), definition,
@@ -249,8 +249,7 @@ fn landing_is_local(landing: &CodingLanding) -> bool {
 
 /// Why the engine filed a re-pin draft, in its own words on the card.
 pub const REPIN_REASON: &str = "This Far Cooler update writes new hooks for the agents the engine starts. The published \
-    workflow still pins the previous ones, so its runs carry on with those. Approve this to move new runs to the new hooks; \
-    nothing else changes.";
+    workflow still pins the previous ones. Approve this to move new runs and the next unstarted steps of existing runs to the new hooks.";
 
 /// At start, for every workspace whose published workflow pins one of the engine's own hook files that this build
 /// writes differently, file the re-pin draft itself (ov-1259): the same definition, the hooks moved to this build's.
@@ -282,22 +281,37 @@ pub fn file_repin_drafts(svc: &Service, watcher: &crate::watch::Watcher) -> Vec<
 /// that still names the old one. `None` when the definition names no step by `before`'s pin, as when it was read with
 /// hidden values: then there is nothing sound to re-pin.
 pub fn repin_definition(definition: &farcooler_workflow::Definition, before: &CodingConfig, after: &CodingConfig) -> Option<farcooler_workflow::Definition> {
-    fn walk(value: &mut serde_json::Value, from: &str, to: &str, found: &mut bool) {
-        match value {
-            serde_json::Value::String(s) if s == from => { *s = to.into(); *found = true; }
-            serde_json::Value::Array(items) => for item in items { walk(item, from, to, found); },
-            serde_json::Value::Object(fields) => for field in fields.values_mut() { walk(field, from, to, found); },
-            _ => {}
+    let mut next = definition.clone();
+    let (before, after) = (before.pin(), after.pin());
+    let mut found = false;
+    for stage in next.stages.iter_mut().chain(next.groups.values_mut().flat_map(|g| &mut g.steps)) {
+        if let Some(pin) = stage.operation.arguments.first_mut().filter(|pin| **pin == before) {
+            *pin = after.clone();
+            found = true;
         }
     }
-    let mut value = serde_json::to_value(definition).ok()?;
-    let mut found = false;
-    walk(&mut value, &before.pin(), &after.pin(), &mut found);
-    found.then(|| serde_json::from_value(value).ok()).flatten()
+    found.then_some(next)
 }
-fn pinned_digests(config: &CodingConfig) -> Vec<Option<&str>> {
-    let CodingHarness::Native { settings, project_hooks, codex_hooks, .. } = &config.harness else { return Vec::new() };
-    [settings, project_hooks, codex_hooks].into_iter().map(|f| f.as_ref().map(|f| f.digest.as_str())).collect()
+
+fn native_files(config: &CodingConfig) -> [Option<&LaunchFile>; 3] {
+    match &config.harness {
+        CodingHarness::Native { settings, project_hooks, codex_hooks, .. } =>
+            [settings.as_ref(), project_hooks.as_ref(), codex_hooks.as_ref()],
+        CodingHarness::Command(_) => [None; 3],
+    }
+}
+
+fn pinned_digests(config: &CodingConfig) -> [Option<&str>; 3] {
+    native_files(config).map(|file| file.map(|f| f.digest.as_str()))
+}
+
+/// A publication refreshed pinned launch files. Ordinary definition or command edits keep the existing run pins.
+pub(crate) fn changes_file_pins(before: &CodingConfig, after: &CodingConfig) -> bool {
+    fn local_config(config: &CodingConfig) -> Option<(&Path, &str)> {
+        config.landing.as_ref().filter(|landing| landing_is_local(landing))
+            .map(|landing| (landing.repository.as_path(), landing.config_digest.as_str()))
+    }
+    native_files(before) != native_files(after) || local_config(before) != local_config(after)
 }
 
 /// The checkout a `.git` directory belongs to, when it is a main checkout's own directory.
@@ -377,17 +391,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let svc = crate::service::Service::open_in(dir.path().join("state")).await.unwrap();
         std::fs::create_dir_all(svc.root_dir().join("workflow")).unwrap();
-        let old = app_owned_file(&svc, CODEX_HOOKS_STEM, "{\"hooks\":\"before the update\"}", true).unwrap();
-        let new = app_owned_file(&svc, CODEX_HOOKS_STEM, "{\"hooks\":\"after the update\"}", true).unwrap();
+        let old = app_owned_file(svc.root_dir(), CODEX_HOOKS_STEM, "{\"hooks\":\"before the update\"}", true).unwrap();
+        let new = app_owned_file(svc.root_dir(), CODEX_HOOKS_STEM, "{\"hooks\":\"after the update\"}", true).unwrap();
         assert_ne!(old.path, new.path);
         assert_eq!(farcooler_workflow::digest(&std::fs::read(&old.path).unwrap()), old.digest, "the pinned file is untouched");
-        assert_eq!(app_owned_file(&svc, CODEX_HOOKS_STEM, "{\"hooks\":\"after the update\"}", true).unwrap(), new, "the same content, the same file");
+        assert_eq!(app_owned_file(svc.root_dir(), CODEX_HOOKS_STEM, "{\"hooks\":\"after the update\"}", true).unwrap(), new, "the same content, the same file");
         // Only the engine's own names under its root are its files; an unnamed one is an older build's.
         let root = svc.root_dir().canonicalize().unwrap();
-        assert_eq!(app_owned_stem(&svc, &root.join("workflow-claude-hooks.json")), Some(CLAUDE_HOOKS_STEM));
-        assert_eq!(app_owned_stem(&svc, &old.path), Some(CODEX_HOOKS_STEM));
-        assert_eq!(app_owned_stem(&svc, &root.join("workflow-codex-hooks-xyz.json")), None);
-        assert_eq!(app_owned_stem(&svc, &dir.path().join("workflow-codex-hooks.json")), None);
+        assert_eq!(app_owned_stem(svc.root_dir(), &root.join("workflow-claude-hooks.json")), Some(CLAUDE_HOOKS_STEM));
+        assert_eq!(app_owned_stem(svc.root_dir(), &old.path), Some(CODEX_HOOKS_STEM));
+        assert_eq!(app_owned_stem(svc.root_dir(), &root.join("workflow-codex-hooks-xyz.json")), None);
+        assert_eq!(app_owned_stem(svc.root_dir(), &dir.path().join("workflow-codex-hooks.json")), None);
 
         // A re-pin by the engine moves its own files and nothing else; one a person asks for digests every file again.
         let mine = dir.path().join("settings.json");
@@ -401,7 +415,7 @@ mod tests {
         let crate::workflow_runtime::CodingHarness::Native { settings, codex_hooks, .. } = &engine.harness else { unreachable!() };
         assert_eq!(settings.as_ref().unwrap().digest, farcooler_workflow::digest(&b"settings as published".to_vec()));
         let current = codex_hooks.clone().unwrap();
-        assert!(current != old && app_owned_stem(&svc, &current.path) == Some(CODEX_HOOKS_STEM), "{current:?}");
+        assert!(current != old && app_owned_stem(svc.root_dir(), &current.path) == Some(CODEX_HOOKS_STEM), "{current:?}");
         let person = repin(&svc, &c, Repin::Everything);
         let crate::workflow_runtime::CodingHarness::Native { settings, codex_hooks, .. } = &person.harness else { unreachable!() };
         assert_eq!(settings.as_ref().unwrap().digest, farcooler_workflow::digest(&b"settings edited since".to_vec()));

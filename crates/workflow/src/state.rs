@@ -256,6 +256,9 @@ pub enum Command {
     Advance,
     /// Refresh waiting landing groups from the owner's published definition. Build evidence keeps its original pin.
     RefreshGroups { definition: Definition, policy_pin: String },
+    /// The runtime classified a publication while this effect was still unstarted.
+    /// An engine-only re-pin supplies the new definition. Any other re-pin stops the run for carry.
+    RepinPending { item: String, effect: String, policy_pin: String, definition: Option<Box<Definition>> },
     Enqueue { item: String, definition: Definition, policy_pin: String,
         resource: String, dependencies: BTreeSet<String>, initial_candidate: Option<String> },
     Approve { item: String, run: String, pin: String, candidate: Option<String> },

@@ -96,7 +96,8 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                 | Command::Observe { item, .. } | Command::Cancel { item, .. } | Command::Retry { item }
                 | Command::Queue { item } | Command::Leave { item } | Command::RefreshJoin { item, .. }
                 | Command::Move { item, .. } | Command::Start { item, .. }
-                | Command::Resolve { item, .. } | Command::SendBack { item, .. } | Command::Close { item, .. } | Command::Land { item, .. } => item,
+                | Command::Resolve { item, .. } | Command::SendBack { item, .. } | Command::Close { item, .. }
+                | Command::Land { item, .. } | Command::RepinPending { item, .. } => item,
                 Command::Decide { .. } | Command::Enqueue { .. } | Command::Advance | Command::RefreshGroups { .. } | Command::Reopen { .. } => unreachable!(),
             };
             let mut item = next.items.remove(id).ok_or(Refusal::Missing)?;
@@ -109,6 +110,34 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                 next.items.insert(id.clone(), item);
             } else {
             match command {
+                Command::RepinPending { effect, policy_pin, definition, .. } => {
+                    controller(input)?;
+                    if item.phase != Phase::Running || item.deciding.is_some() || item.stopping.is_some() {
+                        return Err(Refusal::Phase);
+                    }
+                    if item.pending.as_ref() != Some(effect) || item.policy_pin == *policy_pin {
+                        return Err(Refusal::Stale);
+                    }
+                    if !valid_id(policy_pin) { return Err(Refusal::Invalid); }
+                    if let Some(definition) = definition {
+                        definition.validate()?;
+                        item.definition = if let Some(group) = &mut item.group_of {
+                            group.pin = definition.pin();
+                            definition.group_definition(&group.name).ok_or(Refusal::Definition)?
+                        } else { *definition.clone() };
+                        item.pin = item.definition.pin();
+                        item.policy_pin = policy_pin.clone();
+                        item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
+                        let kind = if item.ci_retry.as_ref().is_some_and(|retry| retry.pending) {
+                            StageKind::RerunCi
+                        } else { item.definition.stages.get(item.stage).ok_or(Refusal::Definition)?.kind.clone() };
+                        emit(&mut item, id, input, EffectKind::Execute(kind), &mut effects);
+                    } else {
+                        item.phase = Phase::Failed;
+                        item.pending = None;
+                        item.failure = Some("The published workflow re-pin changed more than the engine's own hooks. Carry this run's work to a new run under the published workflow.".into());
+                    }
+                }
                 Command::Approve { run, pin, candidate, .. } => {
                     if item.phase != Phase::WaitingApproval { return Err(Refusal::Phase); }
                     if run != &item.run || pin != &item.pin || candidate != &item.candidate {
@@ -1154,7 +1183,8 @@ fn valid_state(state: &State) -> bool {
                 && item.rework_history.len() <= usize::from(item.iteration)
                 && item.rework_history.iter().enumerate().all(|(index, r)|
                     valid_id(&r.id) && valid_id(&r.principal) && valid_id(&r.run)
-                    && r.definition_pin == item.pin && r.evidence.policy_pin == item.policy_pin
+                    // History retains the pins the decision actually used, even after an engine re-pin.
+                    && valid_id(&r.definition_pin) && valid_id(&r.evidence.policy_pin)
                     && valid_rework_reason(&r.reason) && r.iteration < item.iteration
                     && (index == 0 || item.rework_history[index-1].iteration < r.iteration))
                 && item.sent_back.len() <= usize::from(item.definition.execution_limits().send_backs)

@@ -805,6 +805,12 @@ impl Runtime {
                     waiting.push(Placed::new(workspace, &effect, pool));
                     continue;
                 }
+                if selected.is_ok() && let Some(command) = self.pending_repin(workspace, item, &effect)? {
+                    // Re-pinning replaces only an unstarted outbox entry. The next scan
+                    // validates and claims the new entry through ordinary admission.
+                    if self.internal(workspace, command, Grant::Controller, clock())?.result.is_ok() { *count += 1; }
+                    continue;
+                }
                 let tree = self.effect_tree(workspace, &effect);
                 let Ok(tree) = self.tree_lock(&tree).try_read_owned() else { continue };
                 let Some(claim) = self.store.workflow_claim_effect(workspace, &effect.id,

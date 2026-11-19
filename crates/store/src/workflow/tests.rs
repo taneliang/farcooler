@@ -59,6 +59,45 @@ fn workflow_atomic_reopen_duplicate_payload_and_replay() {
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
 #[test]
+fn ov1379_repin_and_admission_cannot_both_consume_an_effect() {
+    use crate::workflow_publication::Write;
+
+    for admitted in [false, true] {
+        let store = Store::open_in_memory().unwrap();
+        let definition = Definition::coding();
+        store.workflow_wire_write("workspace", "publish", "publish", Write::Publish {
+            expected_pin: None, definition: &definition, adapter: None, notifications: None, revision: 0,
+        }).unwrap();
+        store.workflow_apply(&enqueue("workspace", "resource")).unwrap();
+        let state = store.workflow_state("workspace").unwrap().unwrap();
+        let item = &state.items["item"];
+        let effect = item.pending.clone().unwrap();
+        let claim = store.workflow_claim_effect("workspace", &effect, "runner", state.revision,
+            state.epoch, 1000, 2000).unwrap().unwrap();
+        if admitted { assert!(store.workflow_admit_effect(&claim, 1001).unwrap()); }
+
+        let receipt = store.workflow_apply(&Input {
+            id: "repin".into(), source: "runtime".into(), source_sequence: 1, expected_revision: state.revision,
+            command: Command::RepinPending { item: "item".into(), effect, policy_pin: definition.pin(),
+                definition: Some(Box::new(definition)) },
+            ..enqueue("workspace", "resource")
+        }).unwrap();
+        let mut replay = State::empty("workspace".into(), 1);
+        for input in store.workflow_events("workspace").unwrap() { replay = step(&replay, &input).unwrap().state; }
+        assert_eq!(Some(&replay), store.workflow_state("workspace").unwrap().as_ref());
+        if admitted {
+            assert_eq!(receipt.result, Err(Refusal::Phase));
+            assert_eq!(replay, state);
+        } else {
+            assert_eq!(receipt.result, Ok(state.revision + 1));
+            assert!(!store.workflow_admit_effect(&claim, 1001).unwrap());
+            let replacement = &replay.items["item"];
+            assert_ne!(replacement.pending, item.pending);
+            assert_eq!(replacement.run, item.run);
+        }
+    }
+}
+#[test]
 fn workflow_sql_failure_rolls_back_every_boundary() {
     // Inject faults at each write after the reducer, including the final receipt.
     for table in ["workflow_events", "workflow_states", "workflow_resources", "workflow_outbox", "workflow_receipts"] {

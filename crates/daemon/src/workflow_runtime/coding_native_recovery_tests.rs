@@ -152,6 +152,92 @@ async fn workflow_service_changed_pinned_file_names_it_on_the_item() {
     assert!(failure.contains(&pinned.path.display().to_string()) && failure.contains("re-pin"), "{failure:?}");
     assert!(!dir.path().join("started").exists(),"nothing ran on a changed pin");
 }
+/// Re-pin after Provision, with the old Build effect already in the outbox.
+#[tokio::test]
+async fn ov1379_only_an_engine_hooks_repin_carries_the_pending_build() {
+    use crate::workflow_starter::{repin, repin_definition, Repin};
+    use farcooler_protocol::{workflow_commands::{Action, Mutation}, workflow_config::AdapterConfiguration};
+    use farcooler_store::workflow_publication::configuration_pin;
+
+    for (app_owned, changed_definition) in [(true, false), (true, true), (false, false)] {
+        let carries = app_owned && !changed_definition;
+        let (dir, configured, _fake) = tests::native("pass").await;
+        let svc = crate::service::Service::open_in(dir.path().join("state")).await.unwrap();
+        let repo_root = svc.store.create_repository_root(svc.host_id, dir.path().to_str().unwrap(), 0).unwrap();
+        let mut config = configured.coding.clone().unwrap();
+        let repo = svc.store.create_repository(svc.host_id, repo_root.id, "private",
+            config.repository.join(".git").to_str().unwrap(), "").unwrap();
+        let workspace = svc.store.ensure_main_workspace(repo.id).unwrap().id.to_string();
+        drop(configured);
+        let mut runtime = Runtime::open_service(&svc.root_dir().join("workflow"), svc.store.clone()).unwrap();
+        let old_file = svc.root_dir().canonicalize().unwrap().join(
+            if app_owned { "workflow-claude-hooks.json" } else { "owner-settings.json" });
+        let text = serde_json::to_vec(&crate::hook_install::claude_settings(&runtime.root.join("h.sock"))).unwrap();
+        std::fs::write(&old_file, &text).unwrap();
+        let CodingHarness::Native { settings, .. } = &mut config.harness else { unreachable!() };
+        *settings = Some(LaunchFile { path: old_file.clone(), digest: digest(&text) });
+        let definition = config.definition().unwrap();
+        let old_adapter = AdapterConfiguration::Coding(config.clone());
+        let old_pin = configuration_pin(&definition, Some(&old_adapter));
+        let mutation = |id: &str, revision, sequence| Mutation { id: id.into(), revision, epoch: 1, sequence };
+        let publish = |runtime: &mut Runtime, id: &str, revision, sequence, expected_pin, definition, adapter| {
+            let reply = runtime.wire_command(&workspace, "owner", Action::Publish { reason: None, notifications: None,
+                mutation: mutation(id, revision, sequence), expected_pin, definition, adapter: Some(Box::new(adapter)) }).unwrap();
+            assert!(reply.pointer("/receipt/result/Ok").is_some(), "{reply}");
+        };
+        publish(&mut runtime, "before", 0, 1, None, definition.clone(), old_adapter);
+        runtime.wire_command(&workspace, "owner", Action::Enqueue { mutation: mutation("enqueue", 0, 1),
+            item: "one".into(), pin: old_pin.clone() }).unwrap();
+        runtime.pump(2).await.unwrap();
+        let state = runtime.state(&workspace).unwrap().unwrap();
+        let original = runtime.store.workflow_outbox(&workspace).unwrap().into_iter().find(|s| s.active).unwrap().effect;
+        assert_eq!(original.kind, EffectKind::Execute(StageKind::Build));
+        assert_eq!(original.policy_pin, old_pin);
+        let tree = runtime.item_tree(&workspace, "one");
+        assert!(tree.exists());
+
+        if !app_owned {
+            let mut edited = text;
+            edited.push(b'\n');
+            std::fs::write(&old_file, edited).unwrap();
+        }
+        let next = repin(&svc, &config, Repin::Everything);
+        let mut next_definition = repin_definition(&definition, &config, &next).unwrap();
+        if changed_definition { next_definition.send_backs = Some(1); }
+        let adapter = AdapterConfiguration::Coding(next);
+        let next_pin = configuration_pin(&next_definition, Some(&adapter));
+        assert_ne!(next_pin, old_pin);
+        publish(&mut runtime, "after", state.revision, 2, Some(old_pin.clone()), next_definition, adapter);
+        if carries { std::fs::write(&old_file, "overwritten by an app update").unwrap(); }
+
+        let root = runtime.root.clone();
+        drop(runtime);
+        let mut runtime = Runtime::open_service(&root, svc.store.clone()).unwrap();
+        let state = finish(&mut runtime, &workspace).await;
+        let item = &state.items["one"];
+        if !carries {
+            assert_eq!(item.phase, Phase::Failed);
+            assert_eq!(item.policy_pin, old_pin);
+            assert!(item.failure.as_deref().is_some_and(|s| s.contains("Carry")), "{item:?}");
+            assert!(!dir.path().join("started").exists());
+        } else {
+            assert_eq!(item.phase, Phase::Done, "{item:?}");
+            assert_eq!(item.policy_pin, next_pin);
+            let effects = runtime.store.workflow_outbox(&workspace).unwrap();
+            let provision = effects.iter().find(|s| s.effect.kind == EffectKind::Execute(StageKind::Provision)).unwrap();
+            assert_eq!(provision.effect.policy_pin, old_pin);
+            assert_eq!(provision.dispatch_state, "settled");
+            let old_build = effects.iter().find(|s| s.effect.id == original.id).unwrap();
+            assert_eq!(old_build.effect, original);
+            assert_eq!(old_build.dispatch_state, "suppressed");
+            let build = effects.iter().find(|s| s.effect.kind == original.kind && s.effect.policy_pin == next_pin).unwrap();
+            assert_eq!(build.effect.run, original.run);
+            assert_eq!(build.dispatch_state, "settled");
+            assert_eq!(std::fs::read_to_string(tree.join("result.txt")).unwrap(), "candidate native PTY");
+        }
+    }
+}
+
 /// ov-1130: an install removed the server after the verdict and output were saved, before settlement.
 #[tokio::test]
 async fn workflow_native_review_vanished_server_keeps_output_and_recorded_verdict() {
