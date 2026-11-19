@@ -124,7 +124,7 @@ pub(crate) async fn owned_yielding(tree: &Path, argv: &[String], environment: &s
 
 /// A process this runtime started and may have outlived: its pid, which is also its process group,
 /// and when it started, so a recycled pid is never taken for it.
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Owner { pub pid: u32, pub started: String }
 impl Owner {
     pub(crate) fn started_at(pid: u32) -> std::io::Result<String> {

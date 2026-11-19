@@ -36,7 +36,7 @@ async fn workflow_coding_native_reopen_stop_owns_original_pty_without_relaunch()
     let window = host.0.create_terminal_window(id, id, "crash fixture", runtime.tree(&binding).to_str().unwrap(), "/bin/sleep 30").await.unwrap();
     let panes = host.0.list_tagged_panes().await.unwrap();
     let pane = panes.iter().find(|p| p.pane_id == window.pane_id).unwrap();
-    let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: pane.pane_id.clone(), tty: pane.tty.clone() };
+    let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: pane.pane_id.clone(), tty: pane.tty.clone(), supervisor: None };
     durable(&runtime.native_path(&binding, "owner"), &serde_json::to_vec(&owner).unwrap()).unwrap();
     // Surviving private PTY plus bound owner, but no launch/process settlement.
     // Drop/reopen only the workflow owner, as after daemon death.
@@ -95,7 +95,7 @@ async fn workflow_service_native_stop_ignores_launch_drift_with_original_owner()
         let host = Host(server(&root,&binding)); let id = terminal(&binding);
         let window = host.0.create_terminal_window(id,id,"crash fixture",runtime.tree(&binding).to_str().unwrap(),"/bin/sleep 30").await.unwrap();
         let panes = host.0.list_tagged_panes().await.unwrap(); let pane = panes.iter().find(|p| p.pane_id==window.pane_id).unwrap();
-        let owner = NativeOwner { binding:binding.clone(),terminal:id,pane:pane.pane_id.clone(),tty:pane.tty.clone() };
+        let owner = NativeOwner { binding:binding.clone(),terminal:id,pane:pane.pane_id.clone(),tty:pane.tty.clone(), supervisor: None };
         durable(&runtime.native_path(&binding,"owner"),&serde_json::to_vec(&owner).unwrap()).unwrap();
         drop(runtime);
         match drift {
@@ -171,7 +171,7 @@ async fn workflow_native_review_vanished_server_keeps_output_and_recorded_verdic
         assert_eq!(unsafe { libc::openpty(&mut master, &mut slave, name.as_mut_ptr(), std::ptr::null_mut(), std::ptr::null_mut()) }, 0);
         let (_master, _slave) = unsafe { (std::fs::File::from_raw_fd(master), std::fs::File::from_raw_fd(slave)) };
         let tty = unsafe { std::ffi::CStr::from_ptr(name.as_ptr()) }.to_str().unwrap().to_owned();
-        let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: pane.pane_id.clone(), tty };
+        let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: pane.pane_id.clone(), tty, supervisor: None };
         durable(&runtime.native_path(&binding, "owner"), &serde_json::to_vec(&owner).unwrap()).unwrap();
         let command = runtime.coding_command(&binding).unwrap();
         super::super::write_agent_verdict(|key| command.environment.get(key).cloned(), passed).unwrap();
@@ -247,7 +247,7 @@ async fn workflow_native_review_vanished_pane_refuses_a_busy_tty() {
     let window = host.0.create_terminal_window(id, id, "busy tty", runtime.tree(&binding).to_str().unwrap(), "/bin/sleep 30").await.unwrap();
     let panes = host.0.list_tagged_panes().await.unwrap();
     let pane = panes.iter().find(|p| p.pane_id == window.pane_id).unwrap();
-    let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: "%999999".into(), tty: pane.tty.clone() };
+    let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: "%999999".into(), tty: pane.tty.clone(), supervisor: None };
     durable(&runtime.native_path(&binding, "owner"), &serde_json::to_vec(&owner).unwrap()).unwrap();
     std::fs::write(runtime.process_log(&binding), b"saved output").unwrap();
     assert!(runtime.cancel_interrupted_native(&binding, Some(true)).await.is_err());
@@ -272,7 +272,7 @@ async fn workflow_native_review_recovers_from_its_recorded_verdict_after_a_crash
     let window = host.0.create_terminal_window(id, id, "crash fixture", runtime.tree(&binding).to_str().unwrap(), "/bin/sleep 30").await.unwrap();
     let panes = host.0.list_tagged_panes().await.unwrap();
     let pane = panes.iter().find(|p| p.pane_id == window.pane_id).unwrap();
-    let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: pane.pane_id.clone(), tty: pane.tty.clone() };
+    let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: pane.pane_id.clone(), tty: pane.tty.clone(), supervisor: None };
     durable(&runtime.native_path(&binding, "owner"), &serde_json::to_vec(&owner).unwrap()).unwrap();
     let command = runtime.coding_command(&binding).unwrap();
     super::super::write_agent_verdict(|key| command.environment.get(key).cloned(), true).unwrap();

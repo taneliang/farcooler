@@ -112,7 +112,17 @@ impl Foreground {
     /// because codex and cursor run each command as a child with no tty, and
     /// that child is the only process that goes where the command goes.
     pub fn under_tty(&self, tty: &str) -> Vec<i32> {
-        let mut found: Vec<i32> = self.on_tty.get(tty).cloned().unwrap_or_default();
+        self.descendants(self.on_tty.get(tty).cloned().unwrap_or_default())
+    }
+
+    /// Start at processes on the tty that still belong to the pane's PTY session.
+    pub(crate) fn under_tty_in_session(&self, tty: &str, session: i32) -> Vec<i32> {
+        let roots = self.on_tty.get(tty).into_iter().flatten().copied()
+            .filter(|&pid| unsafe { libc::getsid(pid) } == session).collect();
+        self.descendants(roots)
+    }
+
+    fn descendants(&self, mut found: Vec<i32>) -> Vec<i32> {
         let mut seen: std::collections::HashSet<i32> = found.iter().copied().collect();
         let mut next = 0;
         while next < found.len() {
