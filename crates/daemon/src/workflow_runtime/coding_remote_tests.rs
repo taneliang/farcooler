@@ -771,7 +771,8 @@ async fn workflow_start_reuses_a_failed_tickets_branch_with_a_new_model() {
     let head = adapters::git(Path::new(&tree.path), &["rev-parse", "HEAD"]).await.unwrap();
     let again = start(&failed, "restart", "claude:sonnet", true);
     let adopted = runtime.prepare_start(&board, "owner", &again).await.unwrap().unwrap();
-    assert_eq!((&adopted.branch, &adopted.path), (&tree.branch, &tree.path));
+    assert_eq!(adopted.branch, tree.branch);
+    assert_eq!(Path::new(&adopted.path).canonicalize().unwrap(), Path::new(&tree.path).canonicalize().unwrap());
     accepted(runtime.wire_command_with(&board, "owner", &[], None, again,
         Prepared { tree: Some(adopted), ..Default::default() }).unwrap());
     runtime.pump(60).await.unwrap();

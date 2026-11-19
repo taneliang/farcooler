@@ -121,20 +121,30 @@ async fn an_agent_that_never_gives_a_verdict_fails_the_run_and_one_that_rejects_
 
 #[tokio::test]
 async fn the_verdict_command_writes_the_receipt_the_gate_reads() {
+    use farcooler_store::models::{Actor, NoteKind};
     let (dir, mut runtime, _fake) = three_gates("never").await;
+    let host = Uuid::now_v7();
+    let path = runtime.repository();
+    let root = runtime.store.create_repository_root(host, path.to_str().unwrap(), 0).unwrap();
+    let repository = runtime.store.create_repository(host, root.id, "Review findings", path.join(".git").to_str().unwrap(), "").unwrap();
+    let board = runtime.store.ensure_main_workspace(repository.id).unwrap();
+    let workspace = board.id.to_string();
+    let task = runtime.store.create_task(board.id, "Fix retry", Actor::User).unwrap();
+    let key = &task.key;
     let definition = definition(&runtime);
-    enqueue(&mut runtime, "w", "one", definition);
+    enqueue(&mut runtime, &workspace, key, definition);
     // Provision and build, then hold the review effect without running it.
     for time in 2..20 {
-        let state = runtime.state("w").unwrap().unwrap();
-        if at(&state).0 == "agent-review" { break; }
+        let state = runtime.state(&workspace).unwrap().unwrap();
+        let item = &state.items[key];
+        if item.definition.stages[item.stage].id == "agent-review" { break; }
         runtime.pump(time).await.unwrap();
     }
-    let binding = super::coding_tests::admitted(&runtime).await;
+    let binding = super::coding_tests::admitted_in(&runtime, &workspace).await;
     assert_eq!(binding.effect.kind, EffectKind::Execute(StageKind::Review(Reviewer::Agent)));
     // The agent runs and ends its turn with no verdict: that is no pass.
     let (_hold, cancelled) = tokio::sync::watch::channel(false);
-    assert_eq!(runtime.execute_coding("w", &binding, cancelled).await.unwrap(), Outcome::SafeFailure);
+    assert_eq!(runtime.execute_coding(&workspace, &binding, cancelled).await.unwrap(), Outcome::SafeFailure);
     // What the agent's environment held, as the step pinned it.
     let command = runtime.coding_command(&binding).unwrap();
     let env = |key: &str| command.environment.get(key).cloned();
@@ -156,14 +166,18 @@ async fn the_verdict_command_writes_the_receipt_the_gate_reads() {
     write_agent_verdict_with_summary(env, false, Some(finding.into())).unwrap();
     let rejected = runtime.reconcile_coding(&binding).await.unwrap();
     assert!(matches!(rejected, Outcome::ReviewRejected { .. }));
-    assert!(runtime.observe("w", &binding.effect, rejected, false, 40).unwrap());
-    let state = runtime.state("w").unwrap().unwrap();
-    assert_eq!(state.items["one"].phase, Phase::Failed);
-    let get = runtime.wire_command("w", "owner", farcooler_protocol::workflow_commands::Action::Get).unwrap();
-    let reason = get["state"]["items"]["one"]["reason"].as_str().unwrap();
+    assert!(runtime.observe(&workspace, &binding.effect, rejected.clone(), false, 40).unwrap());
+    let state = runtime.state(&workspace).unwrap().unwrap();
+    assert_eq!(state.items[key].phase, Phase::Failed);
+    let get = runtime.wire_command(&workspace, "owner", farcooler_protocol::workflow_commands::Action::Get).unwrap();
+    let reason = get["state"]["items"][key]["reason"].as_str().unwrap();
     assert!(reason.starts_with("agent-review:") && reason.contains(finding)
         && reason.contains(receipt.file_name().unwrap().to_str().unwrap()), "{get}");
-    assert_eq!(crate::plan_run::run_of(&state, "one").unwrap().reason.as_deref(), Some(reason));
+    assert_eq!(crate::plan_run::run_of(&state, key).unwrap().reason.as_deref(), Some(reason));
+    runtime.observe(&workspace, &binding.effect, rejected, false, 40).unwrap();
+    let notes = runtime.store.notes_for(task.id, Some(NoteKind::Finding)).unwrap();
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(notes[0].body.contains(finding), "{notes:?}");
     drop(dir);
 }
 
@@ -275,7 +289,8 @@ async fn a_review_runs_with_the_model_its_changed_paths_earn_and_the_workflows_w
     assert_eq!(command.environment.get("FARCOOLER_WORKFLOW_MODEL").map(String::as_str), Some("claude:opus"));
     let prompt = command.environment.get("TEST_LAUNCHED_PROMPT").unwrap();
     assert!(prompt.starts_with("You are reviewing ticket one.") && prompt.ends_with("\n\nRead the lane rules first."), "{prompt}");
-    assert!(prompt.contains(" task note one --kind finding") && !prompt.contains("`farcooler "), "the reviewer is told where its reasons go: {prompt}");
+    assert!(prompt.contains(" workflow verdict --passed false --summary") && !prompt.contains("`farcooler "),
+        "the reviewer is told how to record its finding: {prompt}");
     assert_eq!(runtime.coding_command(&binding).unwrap(), command);
 }
 

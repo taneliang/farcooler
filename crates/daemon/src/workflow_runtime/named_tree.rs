@@ -83,7 +83,7 @@ impl Runtime {
                 // A run that has ended holds its name only while its tree is still there (ov-979).
                 .filter(|i| !matches!(i.phase, Phase::Done | Phase::Failed | Phase::Cancelled) || i.tree.as_ref().is_some_and(|t| Path::new(&t.path).exists()))
                 .filter_map(|i| i.tree.as_ref()).any(f);
-            if held(&|t| t.path == path.to_string_lossy()) { return Err(Error::Domain(DomainError::WorktreeExists)); }
+            if held(&|t| same_path(Path::new(&t.path), &path)) { return Err(Error::Domain(DomainError::WorktreeExists)); }
             if held(&|t| clashes(&t.branch, &named.branch)) { return Err(Error::Domain(DomainError::BranchExists)); }
         }
         // Any branch of that name, here or on a remote, or one that clashes with it by prefix (`foo` beside

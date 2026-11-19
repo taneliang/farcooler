@@ -187,12 +187,16 @@ mod workflow_coding_exit_prose_dirty_checks_and_ci_provenance_are_not_success {
 }
 
 pub(super) async fn admitted(runtime: &Runtime) -> Binding {
-    let state = runtime.state("w").unwrap().unwrap();
-    let stored = runtime.store.workflow_outbox("w").unwrap().into_iter().find(|s| s.active).unwrap();
-    let claim = runtime.store.workflow_claim_effect("w", &stored.effect.id, "crash-test", state.revision, state.epoch, 10, 100).unwrap().unwrap();
-    let base = runtime.pin_base("w", &stored.effect).await.unwrap();
+    admitted_in(runtime, "w").await
+}
+
+pub(super) async fn admitted_in(runtime: &Runtime, workspace: &str) -> Binding {
+    let state = runtime.state(workspace).unwrap().unwrap();
+    let stored = runtime.store.workflow_outbox(workspace).unwrap().into_iter().find(|s| s.active).unwrap();
+    let claim = runtime.store.workflow_claim_effect(workspace, &stored.effect.id, "crash-test", state.revision, state.epoch, 10, 100).unwrap().unwrap();
+    let base = runtime.pin_base(workspace, &stored.effect).await.unwrap();
     assert!(runtime.store.workflow_admit_effect(&claim, 10).unwrap());
-    Binding::new("w", &stored.effect, claim.resource_generation, state.items[&stored.effect.item].iteration, &base)
+    Binding::new(workspace, &stored.effect, claim.resource_generation, state.items[&stored.effect.item].iteration, &base)
 }
 
 /// A crash after stage `index` settled outside, before its journal: the

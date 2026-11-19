@@ -305,10 +305,9 @@ impl Exec {
     pub(super) fn reviewing(item: &str) -> String {
         format!("You are reviewing ticket {item}. The ticket is included below. The work under review is \
             the commits from $FARCOOLER_BASE to $FARCOOLER_CANDIDATE in this worktree. Review it against the ticket. Don't \
-            change, commit or stage anything here.\n\nIf it isn't ready, first write what must change, plainly, with \
-            `farcooler task note {item} --kind finding --body \"…\"`: a fresh agent makes the fix, and that note is how it \
-            knows.\n\nWhen you've decided, record your verdict with \
-            `farcooler workflow verdict --passed true` or `farcooler workflow verdict --passed false --summary \"Brief finding\"`, then end your turn. \
+            change, commit or stage anything here.\n\nWhen you've decided, record your verdict with \
+            `farcooler workflow verdict --passed true` or `farcooler workflow verdict --passed false --summary \"What needs to change\"`, then end your turn. \
+            The rejection summary becomes a finding on the ticket so the next agent knows what to fix. \
             Only that command's verdict counts. If you end your turn without one, the review hasn't happened, and it \
             runs again.")
     }
