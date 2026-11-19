@@ -255,3 +255,27 @@ async fn workflow_get_shows_an_effect_waiting_for_a_place() {
     let view = runtime.places.lock().unwrap().view("w");
     assert!(view["waiting"].as_array().unwrap().is_empty(), "nothing waits once the sweep has ended: {view}");
 }
+
+/// ov-1375: the sweep loop polls its effects only while it waits in `select!`. Its other work (a round of
+/// `lsof +D` over every engine tree in `release_builds` took about 20 seconds on a busy runner) left an
+/// effect's git unpolled past its deadline: git finished in milliseconds, nobody looked, and when the loop
+/// came back the next git of the same call started with no time left and was killed. An effect runs on its
+/// own, so a loop busy elsewhere costs it nothing.
+#[tokio::test]
+async fn workflow_an_effect_s_git_finishes_while_the_loop_is_busy_elsewhere() {
+    let dir = tempfile::tempdir().unwrap();
+    std::process::Command::new("git").args(["init", "-q"]).current_dir(dir.path()).status().unwrap();
+    let timeout = Duration::from_millis(500);
+    crate::git::TIMEOUT.with(|t| t.set(Some(timeout)));
+    let tree = dir.path().to_path_buf();
+    let mut futures = vec![effect_slot(async move {
+        crate::git::git(&tree, &["check-ignore", "--quiet", "--no-index", "target/"]).await
+            .map(|_| Outcome::SafeFailure).map_err(|_| Error::Refused("git failed"))
+    })];
+    // The loop polls once, which starts the git, then goes off to other work for longer than git may take.
+    assert!(tokio::time::timeout(Duration::ZERO, next_finished(&mut futures)).await.is_err());
+    tokio::time::sleep(timeout * 3).await;
+    let (_, outcome) = next_finished(&mut futures).await;
+    crate::git::TIMEOUT.with(|t| t.set(None));
+    assert!(outcome.is_ok(), "the git was killed for time the loop spent elsewhere: {outcome:?}");
+}

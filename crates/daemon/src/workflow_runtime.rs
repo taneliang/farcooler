@@ -822,7 +822,7 @@ impl Runtime {
                 let mut exec = self.exec.clone();
                 exec.launched = Some((clock(), std::time::Instant::now()));
                 let (run_workspace, run_binding) = (workspace.clone(), binding.clone());
-                futures.push(Some(Box::pin(execution::ACTIVITY.scope(activity.clone(), async move {
+                futures.push(effect_slot(execution::ACTIVITY.scope(activity.clone(), async move {
                     // Internal adapters own an async session; native agents and configured commands
                     // publish presence only after the real PTY or child exists.
                     let process = exec.coding.is_some() && matches!(run_binding.effect.kind,
@@ -831,7 +831,7 @@ impl Runtime {
                     if matches!(run_binding.effect.kind, EffectKind::Decide { .. }) { exec.execute_hook(&run_binding, Some(cancelled)).await }
                     else if exec.coding.is_some() { exec.execute_coding(&run_workspace, &run_binding, cancelled).await }
                     else { exec.execute(&run_workspace, &run_binding).await }
-                }))));
+                })));
                 running.push(Running { workspace: workspace.clone(), effect, binding, cancel, pool });
             }
             self.recovery.keep_only(workspace, &uncertain);
@@ -1023,6 +1023,61 @@ enum Event {
     Finished(usize, Result<Outcome>),
     Shutdown,
     Message(Option<Inbox>),
+}
+/// An effect, on its own task once the loop has polled it (ov-1375).
+///
+/// The loop polls its effects only while it waits in `select!`. Its other work (a round of `lsof +D` over
+/// every engine tree, about 20 seconds on a busy runner) left each effect's git unwatched past its
+/// deadline, to be killed though it had finished in milliseconds. So the loop's first poll, which starts
+/// the effect as before (merely admitting one still says Starting), hands it to a task of its own, which
+/// keeps going whatever the loop is doing.
+///
+/// The task only polls the effect; the slot still owns it. Dropping the slot drops the effect there and
+/// then, as before, so a sweep cut off mid-effect (a crash, in the tests) releases its locks and kills its
+/// children before anything opens the runtime again, not whenever an aborted task is next scheduled.
+fn effect_slot(effect: impl std::future::Future<Output = Result<Outcome>> + Send + 'static) -> Slot {
+    Some(Box::pin(EffectTask { effect: std::sync::Arc::new(std::sync::Mutex::new(Some(Box::pin(effect)))), task: None }))
+}
+type Effecting = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Outcome>> + Send>>;
+struct EffectTask {
+    effect: std::sync::Arc<std::sync::Mutex<Option<Effecting>>>,
+    task: Option<tokio::task::JoinHandle<Option<Result<Outcome>>>>,
+}
+/// One poll of `effect`, which is gone once it has finished or its slot was dropped.
+fn poll_effect(effect: &std::sync::Mutex<Option<Effecting>>, cx: &mut std::task::Context<'_>)
+    -> std::task::Poll<Option<Result<Outcome>>>
+{
+    let mut effect = effect.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(running) = effect.as_mut() else { return std::task::Poll::Ready(None) };
+    let polled = running.as_mut().poll(cx);
+    if polled.is_ready() { *effect = None; }
+    polled.map(Some)
+}
+impl std::future::Future for EffectTask {
+    type Output = Result<Outcome>;
+    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+        if self.task.is_none() {
+            if let std::task::Poll::Ready(outcome) = poll_effect(&self.effect, cx) {
+                return std::task::Poll::Ready(outcome.unwrap_or(Err(Error::Refused("effect dropped"))));
+            }
+            let effect = self.effect.clone();
+            self.task = Some(tokio::spawn(std::future::poll_fn(move |cx| poll_effect(&effect, cx))));
+        }
+        let task = self.task.as_mut().expect("spawned above");
+        std::pin::Pin::new(task).poll(cx).map(|joined| match joined {
+            Ok(Some(outcome)) => outcome,
+            // A panic in an effect ends the loop, as it did when the loop polled it.
+            Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
+            Ok(None) | Err(_) => Err(Error::Refused("effect dropped")),
+        })
+    }
+}
+impl Drop for EffectTask {
+    fn drop(&mut self) {
+        let effect = self.effect.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+        drop(effect);
+        if let Some(task) = &self.task { task.abort(); }
+    }
 }
 /// Resolves with the first finished future and its position, without the `futures` crate.
 async fn next_finished(futures: &mut [Slot])
