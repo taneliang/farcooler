@@ -330,6 +330,16 @@ pub async fn get(link:&mut crate::Link, workspace:Uuid) -> Result<serde_json::Va
     let result::Value::WorkflowReply(reply) = expect_value(reply.value)? else { return Err("unexpected workflow reply".into()) };
     Ok(serde_json::from_str(&reply.json)?)
 }
+/// `get` for `workspace re-pin`: the published workflow only. A busy workspace's state and history can outgrow
+/// the daemon's 1 MiB reply cap, and re-pinning reads none of it (ov-1373).
+pub async fn get_published(link:&mut crate::Link, workspace:Uuid) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    if !link.daemon_capabilities().iter().any(|c| c == capability::WORKFLOW_COMMANDS) { return Err("runner lacks workflow commands".into()); }
+    let mut req = full_request(workspace)?;
+    req.accepts.push("workflow_repin_v1".into());
+    let reply = read_deadline(link.call(req)).await??;
+    let result::Value::WorkflowReply(reply) = expect_value(reply.value)? else { return Err("unexpected workflow reply".into()) };
+    Ok(serde_json::from_str(&reply.json)?)
+}
 /// The `workflow.watch` request: the item, and nothing a viewer could type or size.
 pub fn watch_request(workspace:Uuid, item:&str) -> pb::Request {
     let json = serde_json::json!({ "item": item }).to_string();

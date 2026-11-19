@@ -62,6 +62,19 @@ fn summarize(mut value:serde_json::Value) -> serde_json::Value {
     value
 }
 
+/// The newest this many `build_cleanup` records and process logs ride in a `workflow.get` reply (ov-1373). Both lists
+/// grow for as long as a workspace runs (766 records was 509 KB), and the daemon refuses any reply over 1 MiB. 50 keeps
+/// each list to roughly 35 KB at that record size, and a person reading a plan wants the latest, not the history.
+const RECENT_LIST: usize = 50;
+
+/// Keep the newest `RECENT_LIST` of `list`, and say how many older entries were left out as `<name>_omitted`.
+pub(super) fn bound_recent<T>(reply: &mut serde_json::Map<String, serde_json::Value>, name: &str, mut list: Vec<T>) where T: serde::Serialize {
+    let omitted = list.len().saturating_sub(RECENT_LIST);
+    list.drain(..omitted);
+    reply.insert(name.into(), serde_json::json!(list));
+    reply.insert(format!("{name}_omitted"), omitted.into());
+}
+
 impl Exec {
     /// Reads committed records and local stop receipts only; never executes git or drives effects.
     fn read_get(&self, workspace:&str) -> Result<serde_json::Value> {
@@ -80,10 +93,14 @@ impl Exec {
         }
         let budgets: std::collections::BTreeMap<_, _> = state.iter().flat_map(|s| &s.items)
             .map(|(id, item)| (id.clone(), farcooler_workflow::back_edge_budgets(item))).collect();
-        Ok(serde_json::json!({"schema":1,"configuration": self.store.workflow_configuration(workspace)?,
+        let mut reply = serde_json::json!({"schema":1,"configuration": self.store.workflow_configuration(workspace)?,
             "publication_history":self.store.workflow_publication_history(workspace)?,
             "orchestrator_publishes_workflow":self.store.orchestrator_publishes_workflow(workspace)?,
-            "build_cleanup":self.store.workflow_cleanups(workspace)?, "back_edge_budgets":budgets, "process_logs":self.failed_process_logs(workspace)?, "places":self.places().view(workspace), "state":state, "notices":notices,"notice_deliveries":deliveries, "stops":stops}))
+            "back_edge_budgets":budgets, "places":self.places().view(workspace), "state":state, "notices":notices,"notice_deliveries":deliveries, "stops":stops});
+        let fields = reply.as_object_mut().expect("a JSON object");
+        bound_recent(fields, "build_cleanup", self.store.workflow_cleanups(workspace)?);
+        bound_recent(fields, "process_logs", self.failed_process_logs(workspace)?);
+        Ok(reply)
     }
 }
 impl CommandHandle {

@@ -57,6 +57,8 @@ pub use places::{DEFAULT_EFFECT_CAP, DEFAULT_LANDING_PLACES, DEFAULT_WORK_PLACES
 use places::{Placed, Places, Pool};
 mod build_cleanup;
 #[cfg(test)]
+mod repin_reply_tests;
+#[cfg(test)]
 mod build_cleanup_tests;
 mod recovery_backoff;
 #[cfg(test)]

@@ -819,10 +819,17 @@ impl Rpc {
                         .map_err(|e| match e { crate::workflow_runtime::Error::Domain(said) => said, _ => DomainError::NotFound })?;
                     return Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema:1, json:value.to_string() }));
                 }
-                let value = if matches!(action, Action::Get) {
+                let action_is_get = matches!(action, Action::Get);
+                let value = if action_is_get {
                     handle.read_get(admission, full || !summary).await
                 } else { handle.wire_command(admission, action).await }
                     .map_err(|e| match e { crate::workflow_runtime::Error::Domain(said) => said, _ => DomainError::NotFound })?;
+                let mut value = value;
+                // `workspace re-pin` reads the published workflow and nothing else (ov-1373): the state, notices and
+                // lists beside it grow without bound, and the reply may not pass the 1 MiB frame cap.
+                if action_is_get && req.accepts.iter().any(|v| v == "workflow_repin_v1") {
+                    if let Some(o) = value.as_object_mut() { o.retain(|k, _| matches!(k.as_str(), "schema" | "configuration" | "context")); }
+                }
                 self.announce_workflow_publication(&value);
                 if summary && !full {
                     return Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema:1, json:value.to_string() }));

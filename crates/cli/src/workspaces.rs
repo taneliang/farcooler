@@ -699,7 +699,7 @@ async fn workspace_via(
 
         WorkspaceCmd::RePin { workspace, propose, reason, output, repo } => {
             let (ws, _) = named(&mut link, repo.as_deref(), &workspace, env).await?;
-            let get = crate::workflow::get(&mut link, uuid_of(&ws.id)).await?;
+            let get = crate::workflow::get_published(&mut link, uuid_of(&ws.id)).await?;
             let Some(bundle) = crate::landing_templates::repinned(&get)? else {
                 eprintln!("Every file the published workflow pins still matches. Nothing to re-pin.");
                 return Ok(());
