@@ -291,7 +291,9 @@ async fn workflow_native_review_vanished_server_keeps_output_and_recorded_verdic
         let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: pane.pane_id.clone(), tty, supervisor: None };
         durable(&runtime.native_path(&binding, "owner"), &serde_json::to_vec(&owner).unwrap()).unwrap();
         let command = runtime.coding_command(&binding).unwrap();
-        super::super::write_agent_verdict(|key| command.environment.get(key).cloned(), passed).unwrap();
+        let finding = "The candidate still drops the caller's deadline.";
+        super::super::write_agent_verdict_with_summary(|key| command.environment.get(key).cloned(),
+            passed, (!passed).then(|| finding.into())).unwrap();
         std::fs::write(runtime.process_log(&binding), b"saved reviewer output").unwrap();
         assert!(host.0.run(&["kill-server"]).await.unwrap().ok());
         let root = runtime.root.clone(); drop(runtime);
@@ -299,7 +301,11 @@ async fn workflow_native_review_vanished_server_keeps_output_and_recorded_verdic
         runtime.pump(200).await.unwrap();
         let expected = if passed { ("orchestrator-review".into(), Phase::WaitingReview) }
             else { ("agent-review".into(), Phase::Failed) };
-        assert_eq!(at(&runtime.state("w").unwrap().unwrap()), expected);
+        let state = runtime.state("w").unwrap().unwrap();
+        assert_eq!(at(&state), expected);
+        if !passed {
+            assert!(state.items["one"].failed_reason().unwrap().contains(finding));
+        }
         assert_eq!(std::fs::read(runtime.process_log(&binding)).unwrap(), b"saved reviewer output");
         assert!(runtime.root.join("receipts").join(format!("{}.process.json", digest(&binding.effect))).exists());
         assert!(runtime.native_path(&binding, "settled").exists());

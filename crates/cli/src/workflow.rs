@@ -155,7 +155,7 @@ pub enum WorkflowCmd {
     Verdict {
         #[arg(long, action = clap::ArgAction::Set, required = true)]
         passed: bool,
-        /// A brief finding to keep with the verdict.
+        /// A brief finding to keep with the verdict. Required when --passed is false.
         #[arg(long)]
         summary: Option<String>,
     },

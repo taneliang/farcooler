@@ -191,7 +191,9 @@ async fn the_verdict_command_writes_the_receipt_the_gate_reads() {
     runtime.observe(&workspace, &binding.effect, rejected, false, 40).unwrap();
     let notes = runtime.store.notes_for(task.id, Some(NoteKind::Finding)).unwrap();
     assert_eq!(notes.len(), 1, "{notes:?}");
-    assert!(notes[0].body.contains(finding), "{notes:?}");
+    assert_eq!(notes[0].body, finding);
+    assert_eq!(notes[0].extra["run"], binding.effect.run);
+    assert_eq!(notes[0].extra["receipt"], receipt.file_name().unwrap().to_str().unwrap());
     drop(dir);
 }
 

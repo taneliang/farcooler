@@ -78,6 +78,10 @@ pub fn write_agent_verdict(env: impl Fn(&str) -> Option<String>, passed: bool) -
 }
 
 pub fn write_agent_verdict_with_summary(env: impl Fn(&str) -> Option<String>, passed: bool, summary: Option<String>) -> Result<PathBuf> {
+    if !passed && summary.is_none() {
+        return Err(Error::Domain(farcooler_core::error::DomainError::refused(
+            "A rejected verdict requires a nonempty --summary describing the finding.".into())));
+    }
     if summary.as_deref().is_some_and(|text| !farcooler_workflow::valid_rework_reason(text)) {
         return Err(Error::Domain(farcooler_core::error::DomainError::refused(
             "A verdict summary must contain text and fit within 4096 bytes.".into())));

@@ -16,20 +16,34 @@ fn the_verdict_is_written_where_the_step_reads_it() {
     let candidate = "a".repeat(40);
     let env = [("FARCOOLER_RECEIPT", receipt.to_str().unwrap()), ("FARCOOLER_OPERATION_BINDING", "wf1:binding"),
         ("FARCOOLER_CANDIDATE", candidate.as_str())];
-    for (word, passed) in [("true", true), ("false", false)] {
-        let out = verdict(&env, &["--passed", word]);
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-        let read: CodingReviewReceipt = serde_json::from_slice(&std::fs::read(&receipt).unwrap()).unwrap();
-        assert_eq!((read.binding.as_str(), read.identity.as_str(), read.candidate.as_str(), read.passed),
-            ("wf1:binding", AGENT_REVIEWER, candidate.as_str(), passed));
-    }
+    let out = verdict(&env, &["--passed", "true"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let read: CodingReviewReceipt = serde_json::from_slice(&std::fs::read(&receipt).unwrap()).unwrap();
+    assert_eq!((read.binding.as_str(), read.identity.as_str(), read.candidate.as_str(), read.passed),
+        ("wf1:binding", AGENT_REVIEWER, candidate.as_str(), true));
     let finding = "Retry discards the caller's deadline.";
     let out = verdict(&env, &["--passed", "false", "--summary", finding]);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let read: CodingReviewReceipt = serde_json::from_slice(&std::fs::read(&receipt).unwrap()).unwrap();
+    assert!(!read.passed);
     assert_eq!(read.summary.as_deref(), Some(finding));
     // Only the receipt is left: no draft beside it.
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn a_rejection_requires_a_finding() {
+    let dir = tempfile::tempdir().unwrap();
+    let receipt = dir.path().join("effect.provider.json");
+    let candidate = "a".repeat(40);
+    let env = [("FARCOOLER_RECEIPT", receipt.to_str().unwrap()), ("FARCOOLER_OPERATION_BINDING", "wf1:binding"),
+        ("FARCOOLER_CANDIDATE", candidate.as_str())];
+    for args in [&["--passed", "false"][..], &["--passed", "false", "--summary", "   "][..]] {
+        let out = verdict(&env, args);
+        assert!(!out.status.success());
+        assert!(String::from_utf8_lossy(&out.stderr).contains("summary"));
+        assert!(!receipt.exists());
+    }
 }
 
 #[test]
