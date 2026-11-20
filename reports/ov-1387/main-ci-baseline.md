@@ -760,4 +760,4 @@ Elapsed paths use workflow creation to the later Swift job's completion, and wor
 
 | Run (commit) | Swift tests | Swift bundle | Swift path | Web tests | Web bundles and browser | Web path | Notes |
 |---|---:|---:|---:|---:|---:|---:|---|
-| [44731090334](https://github.com/taneliang/farcooler/actions/runs/44731090334) (`f70b08547`) | 20.4 | 16.8 | 25.3 | 12.5 | 9.1 | 12.9 | All Swift and Web jobs passed. Swift test compilation was cold and saved the new key. The bundle job queued for 8.2 minutes. Wire failed on the old landing-gate fixture, which was corrected before the next push. |
+| [44731090334](https://github.com/taneliang/farcooler/actions/runs/44731090334) (`f70b08547`) | 20.4 | 16.8 | 25.3 | 12.5 | 9.1 | 12.9 | All Swift and Web jobs passed. Both Swift jobs compiled cold and saved the new keys. The bundle job queued for 8.2 minutes. Wire failed on the old landing-gate fixture, which was corrected before the next push superseded this run. |
