@@ -138,9 +138,10 @@ def experiment(args):
                    str(ROOT / "scripts/tmux-leak-check.py"), "--",
                    sys.executable, str(Path(__file__).resolve()), "--run-shard", str(shard_file),
                    "--runtime", str(runtime), *selection]
-        # Match scripts/heavy's documented five-minute load criterion. Keep
-        # the one- and fifteen-minute observations in the report as well.
-        while os.getloadavg()[1] >= 20:
+        # Like scripts/heavy, wait for a quiet machine for local measurements.
+        # CI runs the full suite immediately and still records whether its load
+        # was low enough to use the partition timings as a benchmark.
+        while not os.environ.get("CI") and os.getloadavg()[1] >= 20:
             print("waiting for 5-minute load below 20", flush=True)
             time.sleep(5)
         start, load = time.monotonic(), os.getloadavg()
@@ -220,23 +221,26 @@ def self_test():
         floor.write_text("3\n")
         env = {**os.environ, "PATH": str(base) + os.pathsep + os.environ["PATH"],
                "HEAVY_LOCK_HELD": "1"}
-        for omit in (False, True):
-            out = base / ("missing" if omit else "green")
-            # Each shard starts below the threshold, then observes a loaded run.
+        for name, ci, omit in (("local", False, False), ("ci", True, False), ("missing", True, True)):
+            out = base / name
+            # Each shard sees high load on arrival and during the run.
             samples = threading.local()
             def loaded_run():
                 samples.count = getattr(samples, "count", 0) + 1
-                return (0., 0., 0.) if samples.count <= 2 else (25., 25., 25.)
-            with mock.patch.dict(os.environ, {**env, "OMIT_TEST": "1" if omit else ""}), \
+                return (0., 0., 0.) if samples.count in (2, 3) else (25., 25., 25.)
+            with mock.patch.dict(os.environ, {**env, "CI": "true" if ci else "", "OMIT_TEST": "1" if omit else ""}), \
                     mock.patch(__name__ + ".FLOOR", floor), \
                     mock.patch("os.getloadavg", side_effect=loaded_run), \
+                    mock.patch("time.sleep", return_value=None), \
                     mock.patch(__name__ + ".discover_runtime", return_value=runtime), \
                     (base / "run.log").open("w") as log, contextlib.redirect_stdout(log):
                 rc = experiment(argparse.Namespace(out=out, suite=None, processes=2))
-            assert (rc != 0) == omit, (base / "run.log").read_text()
+            log = (base / "run.log").read_text()
+            assert (rc != 0) == omit, log
             report = json.loads((out / "timing.json").read_text())
             assert all(s["load_peak"][1] == 25 and not s["valid_measurement"] for s in report["shards"])
-            assert (base / "run.log").read_text().count("Timing is not a valid measurement") == 1
+            assert log.count("waiting for 5-minute load below 20") == (0 if ci else 2), log
+            assert log.count("Timing is not a valid measurement") == 1
             if omit:
                 assert "below the floor" in (out / "1.log").read_text()
         floor.write_text("4\n")
