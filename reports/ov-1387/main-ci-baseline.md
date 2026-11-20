@@ -712,3 +712,9 @@ Measured 2026-11-20 using GitHub Actions job and step APIs for the latest 20 `ci
 | 44221066329 | 2 | 0.3 |
 
 No post-change five-run Swift sample or five consecutive push-to-last-job measurements are available here. GitHub-hosted runner/cache availability is external, but this sample does not establish it as the single limiting factor. The acceptance targets therefore remain unverified.
+
+## Capacity constraint on proposed parallelism
+
+The checked-in capacity model (`python3 scripts/ci-macos-capacity.py`) reports a conservative peak of 14 landing jobs, including four Macs, and 20 total jobs with the shared background reservation, recorder and Nightly yield gate. It reserves five Macs in all. The native test shards deliberately wait for both Swift jobs as well as their archive; removing either Swift dependency fails the model's regression checks. The Android build and UI matrices each use `max-parallel: 1`; those waits are workflow-imposed serialization, not evidence of a GitHub runner queue. More simultaneous shards or an additional Swift job require a revised capacity plan, not just changing those settings. This model is an upper bound for overlapping workflows, not proof that external runner capacity is the single limit on these observed runs.
+
+The cold Swift job's named steps add 26.3 minutes (9.2 native build, 4.8 AgentKit, 12.3 Mac tests), versus 8.6 minutes for the corresponding warm steps in 44484977088. The cache misses and differences are observed together; they do not isolate the effect of each cache. A safe split must preserve the required checks and test guards, fit the capacity reservation, and then be measured on five executions. No such split or post-change measurements have been validated in this branch.
