@@ -248,7 +248,23 @@ pub fn preset_command_with_hooks(
     session_id: Option<&str>,
     extras: &LaunchExtras,
 ) -> String {
+    render_preset_command(preset, session_id, extras, false)
+}
+
+/// Under a native hold the agent must replace its launch shells. An interactive fish waiting for
+/// its foreground child can exit if it sees the child stopped during a group stop or continue.
+pub(crate) fn native_preset_command(preset: &str, session_id: &str, extras: &LaunchExtras) -> String {
+    render_preset_command(preset, Some(session_id), extras, true)
+}
+
+pub(crate) fn agent_in_login_shell(shell: &str, payload: &str, replace_shell: bool) -> String {
+    let exec = if replace_shell { "exec " } else { "" };
+    format!("{exec}{shell} -ilc {}", shell_quote(&format!("{exec}{payload}")))
+}
+
+fn render_preset_command(preset: &str, session_id: Option<&str>, extras: &LaunchExtras, replace_shell: bool) -> String {
     let shell = farcooler_core::shell::login_shell();
+    let login = |payload: String| agent_in_login_shell(&shell, &payload, replace_shell);
     let (agent, model) = match preset.split_once(':') {
         Some((a, m)) if is_safe_model(m) => (a, Some(m)),
         // A model that is not a plain identifier is dropped, not escaped and
@@ -296,12 +312,7 @@ pub fn preset_command_with_hooks(
         // both. With no settings file the payload holds no quote at all, so
         // `shell_quote` produces exactly the `'claude…'` this arm has always
         // produced, byte for byte.
-        "claude" => {
-            format!(
-                "{shell} -ilc {}",
-                shell_quote(&format!("{}{flag}{session}{settings}{prompt}", claude_program(extras)))
-            )
-        }
+        "claude" => login(format!("{}{flag}{session}{settings}{prompt}", claude_program(extras))),
         // `shell_quote` around the payload now, for claude's reason: the
         // prompt is quoted in turn. With no prompt the payload holds no quote.
         //
@@ -315,13 +326,10 @@ pub fn preset_command_with_hooks(
         "codex" => {
             let orchestrator = orchestrator_flags(crate::orchestrator::Harness::Codex, extras);
             let hooks = extras.codex_hooks.as_ref().map(|hooks| format!(" --config \"$(cat {})\"", shell_quote(&hooks.display().to_string()))).unwrap_or_default();
-            format!(
-                "{shell} -ilc {}",
-                shell_quote(&format!(
-                    "{}{flag} {CODEX_NO_UPDATE_CHECK}{hooks}{}{orchestrator}{prompt}",
-                    agent_program("codex"), crate::shared_logins::codex_flags(extras)
-                ))
-            )
+            login(format!(
+                "{}{flag} {CODEX_NO_UPDATE_CHECK}{hooks}{}{orchestrator}{prompt}",
+                agent_program("codex"), crate::shared_logins::codex_flags(extras)
+            ))
         }
         // `shell_quote` around the payload for claude's reason: the plugin
         // path is quoted in turn. With no plugin directory, no trust and no
@@ -335,13 +343,7 @@ pub fn preset_command_with_hooks(
                 .unwrap_or_default();
             let trust = if extras.trust_workspace { " --trust" } else { "" };
             let orchestrator = orchestrator_flags(crate::orchestrator::Harness::Cursor, extras);
-            format!(
-                "{shell} -ilc {}",
-                shell_quote(&format!(
-                    "{}{flag}{trust}{plugin}{orchestrator}{prompt}",
-                    agent_program("cursor-agent")
-                ))
-            )
+            login(format!("{}{flag}{trust}{plugin}{orchestrator}{prompt}", agent_program("cursor-agent")))
         }
         other if is_safe_model(other) => format!("{shell} -ilc '{}{flag}'", agent_program(other)),
         // An unrecognized preset that is not a plain identifier is not run at

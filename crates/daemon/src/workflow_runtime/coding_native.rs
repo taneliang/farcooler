@@ -958,6 +958,7 @@ else:
         std::fs::write(&stand_in, r#"#!/usr/bin/python3
 import json, os, pathlib, sys
 assert sys.argv[1] == 'codex', sys.argv
+assert os.getpid() == os.getpgrp(), 'the agent replaced its launch shells'
 assert 'TEST_LAUNCHED_PROMPT' not in os.environ
 assert 'TEST_LAUNCHED_PROMPT_FILE' not in os.environ
 pathlib.Path(__file__).with_name('received.json').write_text(json.dumps(sys.argv[2:]))

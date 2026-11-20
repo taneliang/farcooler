@@ -183,6 +183,7 @@ async fn native_gate_scenarios() {
 /// Cross the actual group gate and push with four already-running native builds.
 #[tokio::test]
 async fn four_native_builders_keep_their_panes_through_a_landing() {
+    let _ = tracing_subscriber::fmt().with_max_level(tracing::Level::WARN).try_init();
     use super::super::coding_verbs_tests::{at_join, batched_push, lander, phase_of, remote_head};
     use super::super::concurrency_tests::enqueue_item;
 
@@ -194,20 +195,16 @@ async fn four_native_builders_keep_their_panes_through_a_landing() {
     let definition = batched_push(&runtime, "any", 5000);
     let old_head = remote_head(&runtime).await;
     at_join(&mut runtime, "landing", &definition).await;
-    // Keep a shell between the pane supervisor and the agent on both platforms.
-    // Use the login shell that exhibited the loss when it is available.
+    // Exercise the native login launch with fish, the shell that exhibited the loss.
     TEST_ARGV.with(|args| {
         let mut args = args.borrow_mut();
         let agent = args.take().unwrap();
-        let launch = if let Some(fish) = farcooler_core::programs::find("fish") {
-            let command = agent.iter().map(|arg| farcooler_core::shell::shell_quote(arg)).collect::<Vec<_>>().join(" ");
-            vec![fish.to_string_lossy().into_owned(), "--no-config".into(), "-ilc".into(), command]
-        } else {
-            let mut launch = vec!["/bin/sh".into(), "-c".into(), "\"$@\"; status=$?; exit \"$status\"".into(), "builder".into()];
-            launch.extend(agent);
-            launch
-        };
-        *args = Some(launch);
+        let quote = farcooler_core::shell::shell_quote;
+        let shell = farcooler_core::programs::find("fish")
+            .map_or_else(|| "/bin/sh".to_owned(), |fish| format!("{} --no-config", quote(&fish.to_string_lossy())));
+        let payload = agent.iter().map(|arg| quote(arg)).collect::<Vec<_>>().join(" ");
+        *args = Some(vec!["/bin/sh".into(), "-c".into(),
+            crate::service::agent_in_login_shell(&shell, &payload, true)]);
     });
     let items = ["builder-one", "builder-two", "builder-three", "builder-four"];
     let script = dir.path().join("interactive.py");

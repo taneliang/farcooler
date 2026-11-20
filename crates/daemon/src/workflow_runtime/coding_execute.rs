@@ -259,6 +259,11 @@ impl Exec {
                         launch_command = crate::service::preset_command_with_hooks(preset, Some(&Self::native_session(binding)), &extras);
                     }
                     let mut command = process.clone();
+                    // The hold's exec wrappers are launch mechanics. Keep the original
+                    // command identity when reconstructing a retained process fact.
+                    if launch {
+                        launch_command = crate::service::native_preset_command(preset, &Self::native_session(binding), &extras);
+                    }
                     command.argv = vec!["/bin/sh".into(), "-c".into(), launch_command];
                     #[cfg(test)]
                     if let Some(argv) = super::coding_native::TEST_ARGV.with(|p| p.borrow().clone()) {
@@ -478,6 +483,7 @@ impl Exec {
         };
         if let Some(ledger) = &ledger { named_tree::end_gate(ledger)?; }
         let exit = exit?;
+        if self.is_native_agent(binding) { return self.write_native_fact(binding, exit.map(|code| code == 0)); }
         let fact = ProcessFact { binding: binding.clone(), argv: command.argv,
             environment: pinned_environment, managed_build: true, exit, log_path: Some(log.clone()), log_digest: digest(&self.bytes(&log)?) };
         durable(&self.fact_path(binding), &serde_json::to_vec(&fact)?)
