@@ -383,7 +383,8 @@ jobs:
   # bills at ten times the minutes for the same answer.
   tunnel:
     name: Tunnel (Go)
-    needs: changes
+    # Yield the initial Linux slot to the two parallel Web jobs.
+    needs: [changes, wire]
     if: ${{ !cancelled() && needs.changes.outputs.non_docs != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -1200,16 +1201,22 @@ jobs:
             apps/macos/.build/repositories
           key: swiftpm-${{ runner.os }}-${{ hashFiles('apps/macos/Package.resolved') }}
 
-      # Cache compilation, not just downloads (ov-1183). Each source's hash
-      # gates timestamp restoration; final links always use this tree's Rust.
+      # Key compilation on the tracked package and header trees. Landing and
+      # docs commits with identical Swift inputs can share one cache entry.
+      # The timestamp manifest still validates every file before restoring it,
+      # and final links always use this tree's Rust.
+      - name: Fingerprint Swift compilation inputs
+        id: swift-inputs
+        run: echo "tree=$(git ls-tree HEAD -- apps/macos apps/shared/AgentKit crates/vt/include crates/client/include | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v4
         with:
           path: |
             apps/macos/.build
             apps/shared/AgentKit/.build
             target/swift-build-cache.json
-          key: swift-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-${{ github.sha }}
+          key: swift-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-${{ steps.swift-inputs.outputs.tree }}
           restore-keys: |
+            swift-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-
             swift-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-
       - name: Restore unchanged Swift input timestamps and force fresh links
         run: |
@@ -1372,16 +1379,22 @@ jobs:
             apps/macos/.build/repositories
           key: swiftpm-${{ runner.os }}-${{ hashFiles('apps/macos/Package.resolved') }}
 
-      # Cache compilation, not just downloads (ov-1183). Each source's hash
-      # gates timestamp restoration; final links always use this tree's Rust.
+      # Key compilation on the tracked package and header trees. Landing and
+      # docs commits with identical Swift inputs can share one cache entry.
+      # The timestamp manifest still validates every file before restoring it,
+      # and final links always use this tree's Rust.
+      - name: Fingerprint Swift compilation inputs
+        id: swift-inputs
+        run: echo "tree=$(git ls-tree HEAD -- apps/macos apps/shared/AgentKit crates/vt/include crates/client/include | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v4
         with:
           path: |
             apps/macos/.build
             apps/shared/AgentKit/.build
             target/swift-build-cache.json
-          key: swift-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-${{ github.sha }}
+          key: swift-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-${{ steps.swift-inputs.outputs.tree }}
           restore-keys: |
+            swift-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-
             swift-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-
       - name: Restore unchanged Swift input timestamps and force fresh links
         run: |
@@ -1807,12 +1820,58 @@ jobs:
       - run: npx wrangler deploy --dry-run --env canary --outdir /tmp/site-build-canary
       - run: npx wrangler deploy --dry-run --env preview --outdir /tmp/site-build-preview
 
-  # The web client (services/web and the wasm it serves, ov-764): its tests,
-  # both channels' real bundles with the size gate on each, and the shell in
-  # headless Chromium under its production CSP, on every push. Deploying is
-  # web.yml's.
-  web:
-    name: Web
+  # Native tests and producing/serving both bundles can start together.
+  web-tests:
+    name: Web tests
+    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.web != 'false' }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: services/web
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # build.sh asks scripts/version.sh which channel the tree stamps,
+          # and that reads tags and the commit count.
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # The repo's own workspace too, for the client core's wasm32 check
+          # below: one crate tree, built for one target.
+          workspaces: |
+            crates/web
+            .
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: crates/tailcat/go/go.mod
+          cache-dependency-path: crates/tailcat/go/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: services/web/package-lock.json
+      - run: cargo check --locked -p farcooler-client --no-default-features --features web --target wasm32-unknown-unknown
+        working-directory: .
+      - run: ./scripts/web-client-tree-check.py --self-test
+        working-directory: .
+      - run: ./scripts/web-client-tree-check.py
+        working-directory: .
+      - run: npm ci
+      - run: npx tsc --noEmit -p tsconfig.json
+      - run: npm test
+      - run: npm run test:workflow
+      - run: cargo test --locked --manifest-path ../../crates/web/Cargo.toml
+      - run: GOOS=js GOARCH=wasm go test -exec "$(go env GOROOT)/lib/wasm/go_js_wasm_exec" .
+        working-directory: crates/tailcat/go
+      - run: npx tsc --noEmit -p tsconfig.client.json
+
+  web-bundles:
+    name: Web bundles and browser checks
     runs-on: ubuntu-latest
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.web != 'false' }}
@@ -1836,11 +1895,7 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
         with:
-          # The repo's own workspace too, for the client core's wasm32 check
-          # below: one crate tree, built for one target.
-          workspaces: |
-            crates/web
-            .
+          workspaces: crates/web
       - uses: actions/setup-go@v5
         with:
           go-version-file: crates/tailcat/go/go.mod
@@ -1876,16 +1931,7 @@ jobs:
         run: |
           echo "WASM_BINDGEN=$RUNNER_TEMP/wasm-tools/wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl/wasm-bindgen" >> "$GITHUB_ENV"
           echo "WASM_OPT=$RUNNER_TEMP/wasm-tools/binaryen-$BINARYEN_VERSION/bin/wasm-opt" >> "$GITHUB_ENV"
-      - run: cargo check --locked -p farcooler-client --no-default-features --features web --target wasm32-unknown-unknown
-        working-directory: .
-      - run: ./scripts/web-client-tree-check.py --self-test
-        working-directory: .
-      - run: ./scripts/web-client-tree-check.py
-        working-directory: .
       - run: npm ci
-      - run: npx tsc --noEmit -p tsconfig.json
-      - run: npm test
-      - run: npm run test:workflow
       - name: Make sure there is an sshd for the passkey login
         env:
           DEBIAN_FRONTEND: noninteractive
@@ -1896,12 +1942,8 @@ jobs:
             sudo apt-get -o Acquire::Retries=3 install -y openssh-server
           fi
           /usr/sbin/sshd -V 2>&1 | head -1
-      - run: cargo test --locked --manifest-path ../../crates/web/Cargo.toml
-      - run: GOOS=js GOARCH=wasm go test -exec "$(go env GOROOT)/lib/wasm/go_js_wasm_exec" .
-        working-directory: crates/tailcat/go
       - run: node scripts/size-gate.mjs --self-test
       - run: ../../crates/web/build.sh --channel stable --out "$RUNNER_TEMP/wasm-stable"
-      - run: npx tsc --noEmit -p tsconfig.client.json
       - run: WEB_WASM_DIR="$RUNNER_TEMP/wasm-stable" ./build.sh --channel stable --build "$GITHUB_SHA"
       - run: node scripts/size-gate.mjs dist
       - run: npx wrangler deploy --dry-run --outdir /tmp/web-build
@@ -1914,3 +1956,23 @@ jobs:
       - run: node test/browser/plan-render-check.mjs
       - run: node test/browser/csp-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon --tunnel-delay 100
       - run: node test/browser/sleep-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon --engines chromium
+
+  # Keep the existing Web check green only when both jobs pass, or when
+  # Changes explicitly skipped Web, as it did for the original job.
+  web:
+    name: Web
+    needs: [changes, web-tests, web-bundles]
+    if: ${{ !cancelled() && needs.changes.outputs.web != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check Web jobs
+        env:
+          TEST_RESULT: ${{ needs.web-tests.result }}
+          BUNDLE_RESULT: ${{ needs.web-bundles.result }}
+        run: |
+          if [[ "$TEST_RESULT" == success && "$BUNDLE_RESULT" == success ]]; then
+            exit 0
+          fi
+          echo "Web tests: $TEST_RESULT, Web bundles: $BUNDLE_RESULT"
+          exit 1
