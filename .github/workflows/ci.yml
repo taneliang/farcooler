@@ -1171,9 +1171,18 @@ jobs:
             echo "Skipping $dir: its xcrun finds no Apple platform"
           done
           [[ -n "${picked:-}" ]] || { echo "No usable Xcode 27 on this runner; set DEVELOPER_DIR."; env | grep -iE 'sdk|developer|xcode'; xcrun -v --show-sdk-platform-path; exit 1; }
-          xcodebuild -version
-          key="$( { xcodebuild -version; swift --version; xcrun --show-sdk-version; } | shasum -a 256 | cut -d ' ' -f 1)"
-          echo "cache-key=$key" >> "$GITHUB_OUTPUT"
+          xcode="$(xcodebuild -version)"
+          swift_version="$(swift --version)"
+          sdk_version="$(xcrun --show-sdk-version)"
+          sdk_build="$(xcrun --sdk macosx --show-sdk-build-version)"
+          # SwiftPM takes the deployment target from the package manifest.
+          # The default Target line in --version is independent of that build.
+          # Keep the compiler, architecture, Xcode and actual Mac SDK scoped.
+          compiler="$(printf '%s\n' "$swift_version" | sed '/^Target: /d')"
+          key="$(printf '%s\n' "$xcode" "$compiler" "$sdk_build" | shasum -a 256 | cut -d ' ' -f 1)"
+          legacy_key="$(printf '%s\n' "$xcode" "$swift_version" "$sdk_version" | shasum -a 256 | cut -d ' ' -f 1)"
+          printf '%s\n' "$xcode" "$swift_version" "macOS SDK build $sdk_build"
+          printf 'cache-key=%s\nlegacy-cache-key=%s\n' "$key" "$legacy_key" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
           # The build number is `git rev-list --count HEAD`, and the default
@@ -1214,10 +1223,11 @@ jobs:
             apps/macos/.build
             apps/shared/AgentKit/.build
             target/swift-build-cache.json
-          key: swift-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-${{ steps.swift-inputs.outputs.tree }}
+          key: swift-build-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-${{ steps.swift-inputs.outputs.tree }}
           restore-keys: |
-            swift-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-
-            swift-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-
+            swift-build-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-
+            swift-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.legacy-cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-
+            swift-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.legacy-cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-
       - name: Restore unchanged Swift input timestamps and force fresh links
         run: |
           python3 scripts/swift-build-cache.py self-test
@@ -1346,9 +1356,18 @@ jobs:
             echo "Skipping $dir: its xcrun finds no Apple platform"
           done
           [[ -n "${picked:-}" ]] || { echo "No usable Xcode 27 on this runner; set DEVELOPER_DIR."; env | grep -iE 'sdk|developer|xcode'; xcrun -v --show-sdk-platform-path; exit 1; }
-          xcodebuild -version
-          key="$( { xcodebuild -version; swift --version; xcrun --show-sdk-version; } | shasum -a 256 | cut -d ' ' -f 1)"
-          echo "cache-key=$key" >> "$GITHUB_OUTPUT"
+          xcode="$(xcodebuild -version)"
+          swift_version="$(swift --version)"
+          sdk_version="$(xcrun --show-sdk-version)"
+          sdk_build="$(xcrun --sdk macosx --show-sdk-build-version)"
+          # SwiftPM takes the deployment target from the package manifest.
+          # The default Target line in --version is independent of that build.
+          # Keep the compiler, architecture, Xcode and actual Mac SDK scoped.
+          compiler="$(printf '%s\n' "$swift_version" | sed '/^Target: /d')"
+          key="$(printf '%s\n' "$xcode" "$compiler" "$sdk_build" | shasum -a 256 | cut -d ' ' -f 1)"
+          legacy_key="$(printf '%s\n' "$xcode" "$swift_version" "$sdk_version" | shasum -a 256 | cut -d ' ' -f 1)"
+          printf '%s\n' "$xcode" "$swift_version" "macOS SDK build $sdk_build"
+          printf 'cache-key=%s\nlegacy-cache-key=%s\n' "$key" "$legacy_key" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
           # Whole history, as `swift` has it. Nothing in this job asks
@@ -1392,10 +1411,11 @@ jobs:
             apps/macos/.build
             apps/shared/AgentKit/.build
             target/swift-build-cache.json
-          key: swift-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-${{ steps.swift-inputs.outputs.tree }}
+          key: swift-build-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-${{ steps.swift-inputs.outputs.tree }}
           restore-keys: |
-            swift-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-
-            swift-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-
+            swift-build-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-
+            swift-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.legacy-cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-
+            swift-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.legacy-cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-
       - name: Restore unchanged Swift input timestamps and force fresh links
         run: |
           python3 scripts/swift-build-cache.py self-test
