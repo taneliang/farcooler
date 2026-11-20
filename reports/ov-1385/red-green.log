@@ -1,0 +1,58 @@
+=== old fixture (red): delay second job by 1 second ===
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 15.515s
+
+OK
+lane-gate: Node 24 (arm64): /tmp/tmp02lc119l/good-node/node
+lane-gate: JDK 17: /tmp/tmp02lc119l/j17
+lane-gate: capture JDK 21: /tmp/tmp02lc119l/j21
+lane-gate: Android SDK: /tmp/tmp02lc119l/sdk
+lane-gate: JDK 17: /tmp/tmp02lc119l/j17
+lane-gate: capture JDK 21: /tmp/tmp02lc119l/j21
+lane-gate: JDK 17: /tmp/tmp02lc119l/j17
+lane-gate: capture JDK 21: /tmp/tmp02lc119l/j21
+lane-gate: Android SDK: /tmp/tmp02lc119l/sdk
+lane-gate: JDK 17: /tmp/tmp02lc119l/j17
+lane-gate: capture JDK 21: /tmp/tmp02lc119l/j21
+gate-flaky self-test: ok
+lane-gate self-test: --no-lock lets them overlap: got ['g1h1', 'start', 'g1h1', 'end'], want ['g1h1', 'start', 'g2h', 'start']
+exit status: 1
+=== synchronized fixture (green): delay second job by 1 second ===
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 15.602s
+
+OK
+lane-gate: Node 24 (arm64): /tmp/tmpwbjty4i0/good-node/node
+lane-gate: JDK 17: /tmp/tmpwbjty4i0/j17
+lane-gate: capture JDK 21: /tmp/tmpwbjty4i0/j21
+lane-gate: Android SDK: /tmp/tmpwbjty4i0/sdk
+lane-gate: JDK 17: /tmp/tmpwbjty4i0/j17
+lane-gate: capture JDK 21: /tmp/tmpwbjty4i0/j21
+lane-gate: JDK 17: /tmp/tmpwbjty4i0/j17
+lane-gate: capture JDK 21: /tmp/tmpwbjty4i0/j21
+lane-gate: Android SDK: /tmp/tmpwbjty4i0/sdk
+lane-gate: JDK 17: /tmp/tmpwbjty4i0/j17
+lane-gate: capture JDK 21: /tmp/tmpwbjty4i0/j21
+gate-flaky self-test: ok
+........................
+----------------------------------------------------------------------
+Ran 24 tests in 12.530s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+....................
+----------------------------------------------------------------------
+Ran 20 tests in 3.400s
+
+OK
+.........
+----------------------------------------------------------------------
+Ran 9 tests in 0.771s
+
+OK
+lane-gate self-test: ok
+exit status: 0

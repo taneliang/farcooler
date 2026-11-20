@@ -1,0 +1,410 @@
+
+=== run 1/10; start 2026-11-20T09:41:07Z ===
+17:41  up 8 days, 17:49, 1 user, load averages: 6.41 6.51 5.80
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 15.567s
+
+OK
+lane-gate: Node 24 (arm64): /tmp/tmppf4_mi2o/good-node/node
+lane-gate: JDK 17: /tmp/tmppf4_mi2o/j17
+lane-gate: capture JDK 21: /tmp/tmppf4_mi2o/j21
+lane-gate: Android SDK: /tmp/tmppf4_mi2o/sdk
+lane-gate: JDK 17: /tmp/tmppf4_mi2o/j17
+lane-gate: capture JDK 21: /tmp/tmppf4_mi2o/j21
+lane-gate: JDK 17: /tmp/tmppf4_mi2o/j17
+lane-gate: capture JDK 21: /tmp/tmppf4_mi2o/j21
+lane-gate: Android SDK: /tmp/tmppf4_mi2o/sdk
+lane-gate: JDK 17: /tmp/tmppf4_mi2o/j17
+lane-gate: capture JDK 21: /tmp/tmppf4_mi2o/j21
+gate-flaky self-test: ok
+........................
+----------------------------------------------------------------------
+Ran 24 tests in 12.268s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+....................
+----------------------------------------------------------------------
+Ran 20 tests in 3.360s
+
+OK
+.........
+----------------------------------------------------------------------
+Ran 9 tests in 0.764s
+
+OK
+lane-gate self-test: ok
+run 1 exit status: 0; end 2026-11-20T09:41:59Z
+17:41  up 8 days, 17:50, 1 user, load averages: 7.29 6.74 5.93
+
+=== run 2/10; start 2026-11-20T09:41:59Z ===
+17:41  up 8 days, 17:50, 1 user, load averages: 7.29 6.74 5.93
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 15.569s
+
+OK
+lane-gate: Node 24 (arm64): /tmp/tmp48nru884/good-node/node
+lane-gate: JDK 17: /tmp/tmp48nru884/j17
+lane-gate: capture JDK 21: /tmp/tmp48nru884/j21
+lane-gate: Android SDK: /tmp/tmp48nru884/sdk
+lane-gate: JDK 17: /tmp/tmp48nru884/j17
+lane-gate: capture JDK 21: /tmp/tmp48nru884/j21
+lane-gate: JDK 17: /tmp/tmp48nru884/j17
+lane-gate: capture JDK 21: /tmp/tmp48nru884/j21
+lane-gate: Android SDK: /tmp/tmp48nru884/sdk
+lane-gate: JDK 17: /tmp/tmp48nru884/j17
+lane-gate: capture JDK 21: /tmp/tmp48nru884/j21
+gate-flaky self-test: ok
+........................
+----------------------------------------------------------------------
+Ran 24 tests in 12.274s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+....................
+----------------------------------------------------------------------
+Ran 20 tests in 3.502s
+
+OK
+.........
+----------------------------------------------------------------------
+Ran 9 tests in 0.749s
+
+OK
+lane-gate self-test: ok
+run 2 exit status: 0; end 2026-11-20T09:42:52Z
+17:42  up 8 days, 17:51, 1 user, load averages: 7.32 6.83 6.00
+
+=== run 3/10; start 2026-11-20T09:42:52Z ===
+17:42  up 8 days, 17:51, 1 user, load averages: 7.32 6.83 6.00
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 15.643s
+
+OK
+lane-gate: Node 24 (arm64): /tmp/tmpm56uha9f/good-node/node
+lane-gate: JDK 17: /tmp/tmpm56uha9f/j17
+lane-gate: capture JDK 21: /tmp/tmpm56uha9f/j21
+lane-gate: Android SDK: /tmp/tmpm56uha9f/sdk
+lane-gate: JDK 17: /tmp/tmpm56uha9f/j17
+lane-gate: capture JDK 21: /tmp/tmpm56uha9f/j21
+lane-gate: JDK 17: /tmp/tmpm56uha9f/j17
+lane-gate: capture JDK 21: /tmp/tmpm56uha9f/j21
+lane-gate: Android SDK: /tmp/tmpm56uha9f/sdk
+lane-gate: JDK 17: /tmp/tmpm56uha9f/j17
+lane-gate: capture JDK 21: /tmp/tmpm56uha9f/j21
+gate-flaky self-test: ok
+........................
+----------------------------------------------------------------------
+Ran 24 tests in 21.799s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+....................
+----------------------------------------------------------------------
+Ran 20 tests in 3.770s
+
+OK
+.........
+----------------------------------------------------------------------
+Ran 9 tests in 0.812s
+
+OK
+lane-gate self-test: ok
+run 3 exit status: 0; end 2026-11-20T09:43:54Z
+17:43  up 8 days, 17:52, 1 user, load averages: 17.30 9.38 6.99
+
+=== run 4/10; start 2026-11-20T09:43:55Z ===
+17:43  up 8 days, 17:52, 1 user, load averages: 17.30 9.38 6.99
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 15.828s
+
+OK
+lane-gate: Node 24 (arm64): /tmp/tmpb08mjyzb/good-node/node
+lane-gate: JDK 17: /tmp/tmpb08mjyzb/j17
+lane-gate: capture JDK 21: /tmp/tmpb08mjyzb/j21
+lane-gate: Android SDK: /tmp/tmpb08mjyzb/sdk
+lane-gate: JDK 17: /tmp/tmpb08mjyzb/j17
+lane-gate: capture JDK 21: /tmp/tmpb08mjyzb/j21
+lane-gate: JDK 17: /tmp/tmpb08mjyzb/j17
+lane-gate: capture JDK 21: /tmp/tmpb08mjyzb/j21
+lane-gate: Android SDK: /tmp/tmpb08mjyzb/sdk
+lane-gate: JDK 17: /tmp/tmpb08mjyzb/j17
+lane-gate: capture JDK 21: /tmp/tmpb08mjyzb/j21
+gate-flaky self-test: ok
+........................
+----------------------------------------------------------------------
+Ran 24 tests in 14.939s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+....................
+----------------------------------------------------------------------
+Ran 20 tests in 3.408s
+
+OK
+.........
+----------------------------------------------------------------------
+Ran 9 tests in 0.809s
+
+OK
+lane-gate self-test: ok
+run 4 exit status: 0; end 2026-11-20T09:44:53Z
+17:44  up 8 days, 17:53, 1 user, load averages: 12.60 9.35 7.13
+
+=== run 5/10; start 2026-11-20T09:44:53Z ===
+17:44  up 8 days, 17:53, 1 user, load averages: 12.60 9.35 7.13
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 15.395s
+
+OK
+lane-gate: Node 24 (arm64): /tmp/tmp_8pqabvw/good-node/node
+lane-gate: JDK 17: /tmp/tmp_8pqabvw/j17
+lane-gate: capture JDK 21: /tmp/tmp_8pqabvw/j21
+lane-gate: Android SDK: /tmp/tmp_8pqabvw/sdk
+lane-gate: JDK 17: /tmp/tmp_8pqabvw/j17
+lane-gate: capture JDK 21: /tmp/tmp_8pqabvw/j21
+lane-gate: JDK 17: /tmp/tmp_8pqabvw/j17
+lane-gate: capture JDK 21: /tmp/tmp_8pqabvw/j21
+lane-gate: Android SDK: /tmp/tmp_8pqabvw/sdk
+lane-gate: JDK 17: /tmp/tmp_8pqabvw/j17
+lane-gate: capture JDK 21: /tmp/tmp_8pqabvw/j21
+gate-flaky self-test: ok
+........................
+----------------------------------------------------------------------
+Ran 24 tests in 19.206s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+....................
+----------------------------------------------------------------------
+Ran 20 tests in 8.359s
+
+OK
+.........
+----------------------------------------------------------------------
+Ran 9 tests in 1.248s
+
+OK
+lane-gate self-test: ok
+run 5 exit status: 0; end 2026-11-20T09:45:58Z
+17:45  up 8 days, 17:54, 1 user, load averages: 16.80 10.65 7.74
+
+=== run 6/10; start 2026-11-20T09:45:58Z ===
+17:45  up 8 days, 17:54, 1 user, load averages: 16.80 10.65 7.74
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 18.707s
+
+OK
+lane-gate: Node 24 (arm64): /tmp/tmpc3u496ai/good-node/node
+lane-gate: JDK 17: /tmp/tmpc3u496ai/j17
+lane-gate: capture JDK 21: /tmp/tmpc3u496ai/j21
+lane-gate: Android SDK: /tmp/tmpc3u496ai/sdk
+lane-gate: JDK 17: /tmp/tmpc3u496ai/j17
+lane-gate: capture JDK 21: /tmp/tmpc3u496ai/j21
+lane-gate: JDK 17: /tmp/tmpc3u496ai/j17
+lane-gate: capture JDK 21: /tmp/tmpc3u496ai/j21
+lane-gate: Android SDK: /tmp/tmpc3u496ai/sdk
+lane-gate: JDK 17: /tmp/tmpc3u496ai/j17
+lane-gate: capture JDK 21: /tmp/tmpc3u496ai/j21
+gate-flaky self-test: ok
+........................
+----------------------------------------------------------------------
+Ran 24 tests in 22.227s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+....................
+----------------------------------------------------------------------
+Ran 20 tests in 9.232s
+
+OK
+.........
+----------------------------------------------------------------------
+Ran 9 tests in 1.765s
+
+OK
+lane-gate self-test: ok
+run 6 exit status: 0; end 2026-11-20T09:47:25Z
+17:47  up 8 days, 17:56, 1 user, load averages: 37.22 20.01 11.70
+
+=== run 7/10; start 2026-11-20T09:47:25Z ===
+17:47  up 8 days, 17:56, 1 user, load averages: 37.22 20.01 11.70
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 23.919s
+
+OK
+lane-gate: Node 24 (arm64): /tmp/tmpmhbh5hhq/good-node/node
+lane-gate: JDK 17: /tmp/tmpmhbh5hhq/j17
+lane-gate: capture JDK 21: /tmp/tmpmhbh5hhq/j21
+lane-gate: Android SDK: /tmp/tmpmhbh5hhq/sdk
+lane-gate: JDK 17: /tmp/tmpmhbh5hhq/j17
+lane-gate: capture JDK 21: /tmp/tmpmhbh5hhq/j21
+lane-gate: JDK 17: /tmp/tmpmhbh5hhq/j17
+lane-gate: capture JDK 21: /tmp/tmpmhbh5hhq/j21
+lane-gate: Android SDK: /tmp/tmpmhbh5hhq/sdk
+lane-gate: JDK 17: /tmp/tmpmhbh5hhq/j17
+lane-gate: capture JDK 21: /tmp/tmpmhbh5hhq/j21
+gate-flaky self-test: ok
+........................
+----------------------------------------------------------------------
+Ran 24 tests in 34.329s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+....................
+----------------------------------------------------------------------
+Ran 20 tests in 8.623s
+
+OK
+.........
+----------------------------------------------------------------------
+Ran 9 tests in 1.458s
+
+OK
+lane-gate self-test: ok
+run 7 exit status: 0; end 2026-11-20T09:49:12Z
+17:49  up 8 days, 17:57, 1 user, load averages: 69.15 34.85 18.36
+
+=== run 8/10; start 2026-11-20T09:49:12Z ===
+17:49  up 8 days, 17:57, 1 user, load averages: 69.15 34.85 18.36
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 19.550s
+
+OK
+lane-gate: Node 24 (arm64): /tmp/tmphlj1qvmc/good-node/node
+lane-gate: JDK 17: /tmp/tmphlj1qvmc/j17
+lane-gate: capture JDK 21: /tmp/tmphlj1qvmc/j21
+lane-gate: Android SDK: /tmp/tmphlj1qvmc/sdk
+lane-gate: JDK 17: /tmp/tmphlj1qvmc/j17
+lane-gate: capture JDK 21: /tmp/tmphlj1qvmc/j21
+lane-gate: JDK 17: /tmp/tmphlj1qvmc/j17
+lane-gate: capture JDK 21: /tmp/tmphlj1qvmc/j21
+lane-gate: Android SDK: /tmp/tmphlj1qvmc/sdk
+lane-gate: JDK 17: /tmp/tmphlj1qvmc/j17
+lane-gate: capture JDK 21: /tmp/tmphlj1qvmc/j21
+gate-flaky self-test: ok
+........................
+----------------------------------------------------------------------
+Ran 24 tests in 32.671s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+....................
+----------------------------------------------------------------------
+Ran 20 tests in 12.011s
+
+OK
+.........
+----------------------------------------------------------------------
+Ran 9 tests in 1.595s
+
+OK
+lane-gate self-test: ok
+run 8 exit status: 0; end 2026-11-20T09:51:07Z
+17:51  up 8 days, 17:59, 1 user, load averages: 61.22 42.37 23.38
+
+=== run 9/10; start 2026-11-20T09:51:07Z ===
+17:51  up 8 days, 17:59, 1 user, load averages: 61.22 42.37 23.38
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 37.759s
+
+OK
+lane-gate: Node 24 (arm64): /tmp/tmpc42k9m_8/good-node/node
+lane-gate: JDK 17: /tmp/tmpc42k9m_8/j17
+lane-gate: capture JDK 21: /tmp/tmpc42k9m_8/j21
+lane-gate: Android SDK: /tmp/tmpc42k9m_8/sdk
+lane-gate: JDK 17: /tmp/tmpc42k9m_8/j17
+lane-gate: capture JDK 21: /tmp/tmpc42k9m_8/j21
+lane-gate: JDK 17: /tmp/tmpc42k9m_8/j17
+lane-gate: capture JDK 21: /tmp/tmpc42k9m_8/j21
+lane-gate: Android SDK: /tmp/tmpc42k9m_8/sdk
+lane-gate: JDK 17: /tmp/tmpc42k9m_8/j17
+lane-gate: capture JDK 21: /tmp/tmpc42k9m_8/j21
+gate-flaky self-test: ok
+........................
+----------------------------------------------------------------------
+Ran 24 tests in 43.608s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+....................
+----------------------------------------------------------------------
+Ran 20 tests in 27.495s
+
+OK
+.........
+----------------------------------------------------------------------
+Ran 9 tests in 5.420s
+
+OK
+lane-gate self-test: ok
+run 9 exit status: 0; end 2026-11-20T09:54:17Z
+17:54  up 8 days, 18:02, 1 user, load averages: 70.26 57.19 33.58
+
+=== run 10/10; start 2026-11-20T09:54:17Z ===
+17:54  up 8 days, 18:02, 1 user, load averages: 70.26 57.19 33.58
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 27.243s
+
+OK
+lane-gate: Node 24 (arm64): /tmp/tmp1q1m1ptz/good-node/node
+lane-gate: JDK 17: /tmp/tmp1q1m1ptz/j17
+lane-gate: capture JDK 21: /tmp/tmp1q1m1ptz/j21
+lane-gate: Android SDK: /tmp/tmp1q1m1ptz/sdk
+lane-gate: JDK 17: /tmp/tmp1q1m1ptz/j17
+lane-gate: capture JDK 21: /tmp/tmp1q1m1ptz/j21
+lane-gate: JDK 17: /tmp/tmp1q1m1ptz/j17
+lane-gate: capture JDK 21: /tmp/tmp1q1m1ptz/j21
+lane-gate: Android SDK: /tmp/tmp1q1m1ptz/sdk
+lane-gate: JDK 17: /tmp/tmp1q1m1ptz/j17
+lane-gate: capture JDK 21: /tmp/tmp1q1m1ptz/j21
+gate-flaky self-test: ok
+........................
+----------------------------------------------------------------------
+Ran 24 tests in 31.615s
+
+OK
+lane-gate: fold base unavailable (missing fold context); falling back to given base HEAD
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+....................
+----------------------------------------------------------------------
+Ran 20 tests in 11.082s
+
+OK
+.........
+----------------------------------------------------------------------
+Ran 9 tests in 1.736s
+
+OK
+lane-gate self-test: ok
+run 10 exit status: 0; end 2026-11-20T09:56:19Z
+17:56  up 8 days, 18:05, 1 user, load averages: 75.79 62.23 38.59
