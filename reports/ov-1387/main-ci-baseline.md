@@ -718,3 +718,42 @@ No post-change five-run Swift sample or five consecutive push-to-last-job measur
 The checked-in capacity model (`python3 scripts/ci-macos-capacity.py`) reports a conservative peak of 14 landing jobs, including four Macs, and 20 total jobs with the shared background reservation, recorder and Nightly yield gate. It reserves five Macs in all. The native test shards deliberately wait for both Swift jobs as well as their archive; removing either Swift dependency fails the model's regression checks. The Android build and UI matrices each use `max-parallel: 1`; those waits are workflow-imposed serialization, not evidence of a GitHub runner queue. More simultaneous shards or an additional Swift job require a revised capacity plan, not just changing those settings. This model is an upper bound for overlapping workflows, not proof that external runner capacity is the single limit on these observed runs.
 
 The cold Swift job's named steps add 26.3 minutes (9.2 native build, 4.8 AgentKit, 12.3 Mac tests), versus 8.6 minutes for the corresponding warm steps in 44484977088. The cache misses and differences are observed together; they do not isolate the effect of each cache. A safe split must preserve the required checks and test guards, fit the capacity reservation, and then be measured on five executions. No such split or post-change measurements have been validated in this branch.
+
+## ov-1390 branch validation
+
+### What changed
+
+- **Swift.** The 30.0-minute run missed its native Rust, SwiftPM, Swift compilation and tmux caches. Its Swift test and app jobs keyed their Swift compilation archives on the CI commit SHA. Each new SHA could save an archive even when it had exactly the same Swift inputs. The cold Swift test archive alone was 669 MB, and the repository reported 11.6 GB of active Actions caches on November 20. The compilation keys now fingerprint the tracked Mac and AgentKit trees and the two FFI header directories. They retain the runner architecture, Xcode/Swift/SDK fingerprint, job and package manifest scope. The previous keys remain available as a restore fallback. The timestamp manifest still checks file contents, Cargo still prepares the current native targets, and executables still relink against them.
+- **Web.** In [44684599999](https://github.com/taneliang/farcooler/actions/runs/44684599999), the sequential Web job spent 379 seconds on `npm test`, 143 on the wasm client check, 325 on the two channels' wasm and bundle builds, and 242 on the CSP and sleep browser checks. In [44484977088](https://github.com/taneliang/farcooler/actions/runs/44484977088), Chromium provisioning alone took another 277 seconds. The native/Rust/Go/Node checks and the bundle/browser pipeline now run concurrently on Linux. The `Web` check requires both to pass when the existing Web change filter selects them. The local landing gate continues to derive its Web test plan from both sets of CI steps.
+- **Capacity.** `Tunnel (Go)` yields one Linux slot to `Wire compatibility` before starting, including when Wire fails. The capacity model still bounds this workflow at 14 jobs and four Macs and the total reservation at 20 jobs and five Macs. The Android matrices and native Mac archive/shard schedule retain their existing capacity limits.
+
+### CI job list
+
+Matrix rows list the executed variants of each job. This is the job inventory for `ci.yml`; the existing path filters still decide which jobs execute for a particular change.
+
+| Before | After |
+|---|---|
+| Changes | Changes |
+| Wire compatibility | Wire compatibility |
+| Tunnel (Go) | Tunnel (Go) |
+| Tunnel helper (Go) | Tunnel helper (Go) |
+| Rust (ubuntu-24.04), Rust (macos-latest) | Rust (ubuntu-24.04), Rust (macos-latest) |
+| Rust test archive | Rust test archive |
+| Rust tests (1/4), (2/4), (3/4), (4/4) | Rust tests (1/4), (2/4), (3/4), (4/4) |
+| Rust native test archive (macOS) | Rust native test archive (macOS) |
+| Rust native tests (macOS 1/2), (macOS 2/2) | Rust native tests (macOS 1/2), (macOS 2/2) |
+| Swift (app build + bundle checks) | Swift (app build + bundle checks) |
+| Swift (AgentKit + Mac tests) | Swift (AgentKit + Mac tests) |
+| iOS | iOS |
+| iOS UI plan | iOS UI plan |
+| iOS UI (smoke) | iOS UI (smoke) |
+| Android unit tests, Android release build | Android unit tests, Android release build |
+| Android UI tests (first), (rest) | Android UI tests (first), (rest) |
+| Android | Android |
+| Relay | Relay |
+| Site | Site |
+| Web | Web tests, Web bundles and browser checks, Web |
+
+### Post-change runs on ov-1387-ci-end-to-end
+
+Elapsed paths use workflow creation to the later Swift job's completion, and workflow creation to the Web aggregate's completion. They include the Changes job, runner queues, builds, tests and post steps. Runtime columns use each job's start and completion and are shown in minutes.
