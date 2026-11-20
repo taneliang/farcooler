@@ -102,11 +102,12 @@ APP_JOBS = {"rust", "swift-tests", "swift", "ios", "android", "tunnel"}
 CI_JOB_ALIASES = {
     "wire": "wire", "tunnel": "tunnel", "tunnel-helper": "tunnel", "rust": "rust", "swift": "swift", "swift-tests": "swift-tests",
     "rust-build": "rust", "rust-tests": "rust", "rust-macos-tests": "rust", "rust-macos-build": "rust",
-    "ios": "ios", "ios-ui-plan": "ios", "android": "android", "android-build": "android", "android-ui": "android", "relay": "relay", "site": "site", "web": "web",
+    "ios": "ios", "ios-ui-plan": "ios", "android": "android", "android-build": "android", "android-ui": "android", "relay": "relay", "site": "site", "web-tests": "web", "web-bundles": "web",
 }
 CI_JOBS_NOT_RUN = {
     "changes": "decides which jobs CI runs; this script does that from the diff",
     "ios-ui": "a simulator run: scripts/ios-ui-tests.sh",
+    "web": "joins the two Web jobs, which are run locally under one name",
 }
 
 # Steps that set up a CI runner rather than check anything.
@@ -310,6 +311,8 @@ def steps_for(job, workflows, ctx):
         ids = ["android-build", "android-ui:first", "android-ui:rest", "android"]
     if job == "tunnel":
         ids = ["tunnel", "tunnel-helper"]
+    if job == "web":
+        ids = ["web-tests", "web-bundles"]
     steps = []
     for ci_spec in ids:
         ci_id, _, shard = ci_spec.partition(":")
@@ -332,6 +335,8 @@ def steps_for(job, workflows, ctx):
                 skip = "installs a toolchain on a CI runner"
             elif job == "rust" and name == "macOS native Rust tests":
                 skip = "local gate runs the full Rust suite; the filtered Mac CI replay would duplicate it"
+            elif ci_id == "web-bundles" and run.strip() == "npm ci":
+                skip = "the local Web jobs share the dependencies installed by web-tests"
             elif job == "web" and WEB_LINUX_ONLY.search(hay):
                 skip = "needs the Linux x86 wasm toolchain CI downloads; left to CI"
             elif job == "ios" and not IOS_KEEP.search(run):
