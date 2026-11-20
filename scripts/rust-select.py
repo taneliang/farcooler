@@ -56,7 +56,7 @@ def graph(metadata):
 # Jobs of ci.yml that never run the Rust suite: an edit confined to them selects nothing (ov-1293).
 # Anything else in the file (a Rust job, a shared job, the triggers, env, an unknown job) is everything.
 NON_RUST_JOBS = {"swift", "swift-tests", "ios", "ios-ui-plan", "ios-ui", "android-build", "android-ui",
-                 "android", "relay", "site", "web"}
+                 "android", "relay", "site", "web", "web-tests", "web-bundles"}
 CI_WORKFLOW = ".github/workflows/ci.yml"
 
 
