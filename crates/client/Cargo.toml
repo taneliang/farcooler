@@ -84,8 +84,11 @@ uuid.workspace = true
 # that must round-trip byte-for-byte between three platforms is a second place
 # for the field names to be wrong.
 serde.workspace = true
-serde_json.workspace = true
+# Board dates cross the presenter as fractional timestamps and must round-trip.
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 typeshare.workspace = true
+unicode-normalization = "0.1"
+unicode-segmentation = "1.12"
 tracing.workspace = true
 thiserror.workspace = true
 # The crypto backend is the feature's: aws-lc natively, ring in a browser.
@@ -120,6 +123,10 @@ farcooler-fence = { workspace = true, optional = true }
 getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }
 # The page's clock, for `session::now_millis`.
 js-sys = "0.3"
+
+# Preserve Foundation's case- and diacritic-insensitive board search on Apple.
+[target.'cfg(target_vendor = "apple")'.dependencies]
+core-foundation = "0.9"
 
 # `pipe.rs` closes what a spawned `runner pipe` would inherit; macOS only.
 [target.'cfg(target_os = "macos")'.dependencies]

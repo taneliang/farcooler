@@ -26,54 +26,48 @@ public enum BoardHistory {
     /// The page's title: "Done", "Canceled".
     public static func title(_ status: TaskStatus) -> String { status.title }
 
+    private static func boundaries(_ now: Date, _ calendar: Calendar) -> [String: Double] {
+        let today = calendar.startOfDay(for: now)
+        let day = calendar.dateInterval(of: .day, for: now)
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: now).map { calendar.startOfDay(for: $0) }
+        let week = calendar.dateInterval(of: .weekOfYear, for: now)
+        return [
+            "today": today, "tomorrow": day?.end, "yesterday": yesterday,
+            "week_start": week?.start, "week_end": week?.end,
+        ].compactMapValues { $0?.timeIntervalSinceReferenceDate }
+    }
+
     public static func period(of date: Date, now: Date, calendar: Calendar = .current) -> Period {
-        if calendar.isDate(date, inSameDayAs: now) { return .today }
-        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
-            calendar.isDate(date, inSameDayAs: yesterday)
-        {
-            return .yesterday
-        }
-        if let week = calendar.dateInterval(of: .weekOfYear, for: now), week.contains(date) { return .thisWeek }
-        return .earlier
+        let index: Int = TaskBoardPresenter.ask("history_period", [
+            "at": date.timeIntervalSinceReferenceDate, "calendar": boundaries(now, calendar),
+        ]) ?? Period.allCases.count - 1
+        return Period.allCases[index]
     }
 
-    /// `rows`, newest landed first, in their periods, the empty ones left
-    /// out.
     public static func groups(_ rows: [TaskRow], now: Date, calendar: Calendar = .current) -> [Group] {
-        let sorted = BoardDone.newestFirst(rows)
-        return Period.allCases.compactMap { period in
-            let inIt = sorted.filter { self.period(of: $0.statusSince, now: now, calendar: calendar) == period }
-            return inIt.isEmpty ? nil : Group(period: period, rows: inIt)
+        let groups: [[Int]] = TaskBoardPresenter.ask("history_groups", [
+            "stamps": rows.map { $0.statusSince.timeIntervalSinceReferenceDate },
+            "calendar": boundaries(now, calendar),
+        ]) ?? []
+        return zip(Period.allCases, groups).compactMap { period, indices in
+            indices.isEmpty ? nil : Group(period: period, rows: indices.map { rows[$0] })
         }
     }
 
-    /// The area a title names, `<Area>: <outcome>` (the manager's
-    /// convention): "Mac" of "Mac: diff viewer…". Nil for a title without
-    /// one, or with a prefix too long to be an area.
     public static func area(of title: String) -> String? {
-        guard let colon = title.range(of: ": ") else { return nil }
-        let area = title[..<colon.lowerBound].trimmingCharacters(in: .whitespaces)
-        guard !area.isEmpty, area.count <= 16, !area.contains(where: { ".,;!?()".contains($0) }) else { return nil }
-        return area
+        TaskBoardPresenter.ask("history_area", ["title": title])
     }
 
-    /// The areas `rows` name, most used first, then by name: the chips.
     public static func areas(_ rows: [TaskRow]) -> [String] {
-        var counts: [String: Int] = [:]
-        for row in rows { if let area = area(of: row.title) { counts[area, default: 0] += 1 } }
-        return counts.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }.map(\.key)
+        TaskBoardPresenter.ask("history_areas", ["titles": rows.map(\.title)]) ?? []
     }
 
-    /// `rows` in `area` (nil for any) whose key or title carries every word
-    /// of `query`, or whose notes do (`noteHits`, task ids the runner's note
-    /// search answered).
     public static func filter(
         _ rows: [TaskRow], query: String, area: String? = nil, noteHits: Set<String> = []
     ) -> [TaskRow] {
-        rows.filter { row in
-            (area == nil || self.area(of: row.title) == area)
-                && (BoardFilter.matches(row, query) || (!BoardFilter.isEmpty(query) && noteHits.contains(row.id)))
-        }
+        let indices = BoardFilter.indices(rows.map { ["id": $0.id, "key": $0.key, "title": $0.title] },
+            query: query, area: area, noteHits: noteHits)
+        return indices.map { rows[$0] }
     }
 
     /// When a row landed, under its period's heading: the time today and
@@ -99,10 +93,16 @@ public enum BoardHistory {
 /// The navigator's filter (⌘F, ov-103): a task matches when its key or title
 /// carries every word typed, ignoring case and accents.
 public enum BoardFilter {
-    public static func isEmpty(_ query: String) -> Bool { words(query).isEmpty }
+    public static func isEmpty(_ query: String) -> Bool {
+        TaskBoardPresenter.ask("search_empty", ["query": query]) ?? query.isEmpty
+    }
 
-    static func words(_ query: String) -> [String] {
-        query.split(whereSeparator: \.isWhitespace).map(String.init)
+    fileprivate static func indices(
+        _ rows: [[String: String]], query: String, area: String? = nil, noteHits: Set<String> = []
+    ) -> [Int] {
+        var fields: [String: Any] = ["rows": rows, "query": query, "note_hits": Array(noteHits)]
+        fields["area"] = area
+        return TaskBoardPresenter.ask("search", fields) ?? []
     }
 
     public static func matches(_ row: TaskRow, _ query: String) -> Bool {
@@ -110,19 +110,15 @@ public enum BoardFilter {
     }
 
     public static func matches(key: String, title: String, _ query: String) -> Bool {
-        let haystack = key + " " + title
-        return words(query).allSatisfy {
-            haystack.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil
-        }
+        !indices([["key": key, "title": title]], query: query).isEmpty
     }
 
-    /// `board` with only the tasks that match: every section narrowed, the
-    /// empty ones kept as headers reading 0.
     public static func narrowed(_ board: TaskBoardModel, _ query: String) -> TaskBoardModel {
         guard !isEmpty(query) else { return board }
         return TaskBoardModel(
-            columns: board.columns.map { TaskBoardColumn(status: $0.status, rows: $0.rows.filter { matches($0, query) }) },
-            unreadable: board.unreadable.filter { matches(key: $0.key, title: $0.title, query) })
+            columns: board.columns.map { TaskBoardColumn(status: $0.status, rows: BoardHistory.filter($0.rows, query: query)) },
+            unreadable: indices(board.unreadable.map { ["key": $0.key, "title": $0.title] }, query: query)
+                .map { board.unreadable[$0] })
     }
 }
 

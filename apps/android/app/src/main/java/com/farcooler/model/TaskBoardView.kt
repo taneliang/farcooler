@@ -1,6 +1,7 @@
 package com.farcooler.model
 
 import com.farcooler.core.NativeClient
+import com.farcooler.core.coreIsAvailable
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -18,6 +19,11 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.temporal.WeekFields
+import java.util.Locale
 import kotlin.math.roundToLong
 
 /** Calls the shared task board view through the client-core presenter bridge. */
@@ -76,6 +82,7 @@ internal object TaskBoardPresenter {
                 fields.forEach { (key, value) -> put(key, value) }
             })
         }
+        check(coreIsAvailable)
         val answer = json.parseToJsonElement(checkNotNull(NativeClient.nativePlanView(request.toString()))).jsonObject
         check(answer["error"]?.jsonPrimitive?.contentOrNull == null)
         return requireNotNull(answer["task_board"])
@@ -188,7 +195,7 @@ data class TaskRow(
 
     /** The panes working this task, in the order handed in. */
     fun livePanes(panes: List<Terminal>): List<Terminal> =
-        panes.filter { TaskAgentLink.isWorking(it, id) }
+        TaskAgentLink.livePanes(panes, id)
 
     /**
      * What the card says about its agent. `runnerRecordsTasks` false is "can't
@@ -267,7 +274,10 @@ data class TaskBoard(
         }
 
     /** Tasks (not panes) at least one live agent is on. */
-    fun tasksWithLiveAgents(panes: List<Terminal>): Int = rows.count { it.livePanes(panes).isNotEmpty() }
+    fun tasksWithLiveAgents(panes: List<Terminal>): Int = TaskBoardPresenter.ask("live_task_count", mapOf(
+        "tasks" to JsonArray(rows.map { JsonPrimitive(it.id) }),
+        "panes" to JsonArray(panes.map(TaskAgentLink::paneInput)),
+    ))
 
     fun row(id: String): TaskRow? = rows.firstOrNull { it.id == id }
 
@@ -396,10 +406,20 @@ object TaskAgentLink {
     fun runsAgent(terminal: Terminal): Boolean = runsAgent(terminal.preset, terminal.isClientDrawn)
 
     /** Whether [pane] is working the task with id [taskId], whatever that task's status. */
-    fun isWorking(pane: Terminal, taskId: String): Boolean {
-        val id = pane.taskId
-        if (id.isNullOrEmpty() || id != taskId) return false
-        return runsAgent(pane) && pane.state in LIVE_STATES
+    fun isWorking(pane: Terminal, taskId: String): Boolean = livePanes(listOf(pane), taskId).isNotEmpty()
+
+    internal fun livePanes(panes: List<Terminal>, taskId: String): List<Terminal> {
+        val indices: List<Int> = TaskBoardPresenter.ask("live_panes", mapOf(
+            "task" to JsonPrimitive(taskId), "panes" to JsonArray(panes.map(::paneInput)),
+        ))
+        return indices.map(panes::get)
+    }
+
+    internal fun paneInput(pane: Terminal): JsonObject = buildJsonObject {
+        put("task", pane.taskId)
+        put("state", pane.state)
+        put("preset", pane.preset)
+        put("changes", pane.isClientDrawn)
     }
 
     /**
@@ -410,7 +430,10 @@ object TaskAgentLink {
      * Anything else is "can't say", which is different from "none".
      */
     fun speaksOfAgents(link: RunnerLink, build: DaemonBuild?): Boolean =
-        link == RunnerLink.ANSWERING && build?.can(Capability.TERMINAL_TASK) == true
+        TaskBoardPresenter.ask("show_agents", buildJsonObject {
+            put("connected", link == RunnerLink.ANSWERING)
+            put("recorded", build?.can(Capability.TERMINAL_TASK) == true)
+        })
 
     /** Menu items for several panes, told apart by short id where the titles collide. */
     fun menuTitles(titles: List<String>, shorts: List<String>): List<String> {
@@ -823,46 +846,50 @@ object BoardHistory {
 
     data class Group(val period: Period, val rows: List<TaskRow>)
 
+    private fun boundaries(nowMs: Long, zone: ZoneId, week: WeekFields): JsonObject {
+        val today = Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
+        val start = today.with(week.dayOfWeek(), 1)
+        fun epoch(day: LocalDate) = day.atStartOfDay(zone).toInstant().toEpochMilli()
+        return buildJsonObject {
+            put("today", epoch(today))
+            put("tomorrow", epoch(today.plusDays(1)))
+            put("yesterday", epoch(today.minusDays(1)))
+            put("week_start", epoch(start))
+            put("week_end", epoch(start.plusWeeks(1)))
+        }
+    }
+
     fun period(
         atMs: Long,
         nowMs: Long,
-        zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
-        week: java.time.temporal.WeekFields = java.time.temporal.WeekFields.of(java.util.Locale.getDefault()),
+        zone: ZoneId = ZoneId.systemDefault(),
+        week: WeekFields = WeekFields.of(Locale.getDefault()),
     ): Period {
-        val day = java.time.Instant.ofEpochMilli(atMs).atZone(zone).toLocalDate()
-        val today = java.time.Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
-        if (day == today) return Period.TODAY
-        if (day == today.minusDays(1)) return Period.YESTERDAY
-        val start = today.with(week.dayOfWeek(), 1)
-        return if (!day.isBefore(start) && day.isBefore(start.plusWeeks(1))) Period.THIS_WEEK else Period.EARLIER
+        val index: Int = TaskBoardPresenter.ask("history_period", mapOf(
+            "at" to JsonPrimitive(atMs), "calendar" to boundaries(nowMs, zone, week),
+        ))
+        return Period.entries[index]
     }
 
     fun groups(
         rows: List<TaskRow>,
         nowMs: Long,
-        zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
-        week: java.time.temporal.WeekFields = java.time.temporal.WeekFields.of(java.util.Locale.getDefault()),
+        zone: ZoneId = ZoneId.systemDefault(),
+        week: WeekFields = WeekFields.of(Locale.getDefault()),
     ): List<Group> {
-        val sorted = BoardDone.newestFirst(rows)
-        return Period.entries.mapNotNull { period ->
-            sorted.filter { period(it.statusSince, nowMs, zone, week) == period }
-                .takeIf { it.isNotEmpty() }?.let { Group(period, it) }
+        val groups: List<List<Int>> = TaskBoardPresenter.ask("history_groups", mapOf(
+            "stamps" to JsonArray(rows.map { JsonPrimitive(it.statusSince) }),
+            "calendar" to boundaries(nowMs, zone, week),
+        ))
+        return Period.entries.zip(groups).mapNotNull { (period, indices) ->
+            indices.takeIf { it.isNotEmpty() }?.let { Group(period, it.map(rows::get)) }
         }
     }
 
-    /** "Mac" of "Mac: diff viewer…"; null for a title with no area. */
-    fun area(title: String): String? {
-        val colon = title.indexOf(": ")
-        if (colon <= 0) return null
-        val area = title.substring(0, colon).trim()
-        return area.takeIf { it.isNotEmpty() && it.length <= 16 && it.none { c -> c in ".,;!?()" } }
-    }
+    fun area(title: String): String? = TaskBoardPresenter.ask("history_area", mapOf("title" to JsonPrimitive(title)))
 
-    /** The areas, most used first, then by name: the chips. */
     fun areas(rows: List<TaskRow>): List<String> =
-        rows.mapNotNull { area(it.title) }.groupingBy { it }.eachCount().entries
-            .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
-            .map { it.key }
+        TaskBoardPresenter.ask("history_areas", mapOf("titles" to JsonArray(rows.map { JsonPrimitive(it.title) })))
 
     /** When [row] landed, under its period: the time today and yesterday, weekday and time this week, else the date. */
     fun landed(
@@ -886,12 +913,19 @@ object BoardHistory {
         }
     }
 
-    /** Rows in [area] (null for any) whose key or title carries every word of [query]. */
     fun filter(rows: List<TaskRow>, query: String, area: String? = null): List<TaskRow> {
-        val words = query.split(Regex("\\s+")).filter { it.isNotEmpty() }
-        return rows.filter { row ->
-            (area == null || area(row.title) == area) &&
-                words.all { w -> "${row.key} ${row.title}".contains(w, ignoreCase = true) }
-        }
+        val indices: List<Int> = TaskBoardPresenter.ask("search", buildJsonObject {
+            put("query", query)
+            put("area", area)
+            put("rows", buildJsonArray {
+                rows.forEach { row ->
+                    add(buildJsonObject {
+                        put("key", row.key)
+                        put("title", row.title)
+                    })
+                }
+            })
+        })
+        return indices.map(rows::get)
     }
 }

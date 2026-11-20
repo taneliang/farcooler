@@ -54,8 +54,19 @@ public enum TaskAgentLink {
     /// its task to `needs_decision` and is still sitting in its pane, which
     /// is the one case where going to it matters most.
     public static func isWorking(_ pane: some TaskBoardPane, on taskID: String) -> Bool {
-        guard let id = pane.boardTaskID, !id.isEmpty, id == taskID else { return false }
-        return pane.runsAgent && liveStates.contains(pane.boardState)
+        !livePanes([pane], on: taskID).isEmpty
+    }
+
+    fileprivate static func livePanes<P: TaskBoardPane>(_ panes: [P], on task: String) -> [P] {
+        let indices: [Int] = TaskBoardPresenter.ask("live_panes", [
+            "task": task, "panes": panes.map { paneInput($0) },
+        ]) ?? []
+        return indices.map { panes[$0] }
+    }
+
+    fileprivate static func paneInput(_ pane: any TaskBoardPane) -> [String: Any] {
+        let task = pane.boardTaskID ?? ""
+        return ["task": task, "state": pane.boardState, "agent": !task.isEmpty && pane.runsAgent]
     }
 }
 
@@ -85,7 +96,7 @@ extension TaskAgentLink {
     /// runner that is not connected gets no pills, no "No Agent", and no count
     /// — "can't say", which is different from "none".
     public static func speaksOfAgents(connected: Bool, build: DaemonBuild?) -> Bool {
-        connected && build?.can(.terminalTask) == true
+        TaskBoardPresenter.ask("show_agents", ["connected": connected, "recorded": build?.can(.terminalTask) == true]) ?? false
     }
 
     /// What a board says when its Agent button has nowhere to land: the pane
@@ -164,7 +175,7 @@ extension TaskRow {
     /// agent on a task, in the same lane or a new one, and the first stays
     /// findable only through its own task id.
     public func livePanes<P: TaskBoardPane>(in panes: [P]) -> [P] {
-        panes.filter { TaskAgentLink.isWorking($0, on: id) }
+        TaskAgentLink.livePanes(panes, on: id)
     }
 
     /// What the card says about its agent.
@@ -222,7 +233,9 @@ extension TaskBoardModel {
     /// Tasks, not panes: the sidebar row answers "how much of this board is
     /// moving", and two agents on one task are still one task moving.
     public func tasksWithLiveAgents<P: TaskBoardPane>(in panes: [P]) -> Int {
-        rows.filter { !$0.livePanes(in: panes).isEmpty }.count
+        TaskBoardPresenter.ask("live_task_count", [
+            "tasks": rows.map(\.id), "panes": panes.map { TaskAgentLink.paneInput($0) },
+        ]) ?? 0
     }
 
     /// The tooltip on the sidebar's amber count, or nil at zero.

@@ -1,6 +1,9 @@
 //! The task board's projection of a runner's task list and its card labels.
 //! The adapters supply the current clock and render the resulting columns and cards.
 
+use std::collections::{HashMap, HashSet};
+use unicode_normalization::UnicodeNormalization;
+use unicode_segmentation::UnicodeSegmentation;
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -191,6 +194,152 @@ fn cut(rows: &[CutRow], finished: bool, all: bool, filtering: bool, keeping: Opt
     Cut { indices, hidden, history: None }
 }
 
+// The renderers supply boundaries from their local calendar and time zone.
+#[derive(serde::Deserialize)]
+struct HistoryCalendar {
+    today: f64,
+    tomorrow: Option<f64>,
+    yesterday: Option<f64>,
+    week_start: Option<f64>,
+    week_end: Option<f64>,
+}
+
+impl HistoryCalendar {
+    fn period(&self, at: f64, android: bool) -> usize {
+        if self.tomorrow.is_some_and(|end| (self.today..end).contains(&at)) {
+            0
+        } else if self.yesterday.is_some_and(|start| (start..self.today).contains(&at)) {
+            1
+        } else if self.week_start.zip(self.week_end)
+            .is_some_and(|(start, end)| at >= start && (at < end || (!android && at == end))) {
+            2
+        } else {
+            3
+        }
+    }
+
+    fn groups(&self, stamps: &[f64], android: bool) -> [Vec<usize>; 4] {
+        let mut indices: Vec<_> = (0..stamps.len()).collect();
+        indices.sort_by(|&a, &b| stamps[b].total_cmp(&stamps[a]));
+        let mut groups: [Vec<usize>; 4] = Default::default();
+        for index in indices {
+            groups[self.period(stamps[index], android)].push(index);
+        }
+        groups
+    }
+}
+
+fn area(title: &str, android: bool) -> Option<&str> {
+    let (prefix, _) = title.split_once(": ")?;
+    // Foundation's whitespaces set excludes line breaks. Kotlin trims those too.
+    let area = if android {
+        prefix.trim()
+    } else {
+        prefix.trim_matches(|c: char| c == '\t' || (c.is_whitespace() && !matches!(c, '\n'..='\r' | '\u{85}' | '\u{2028}' | '\u{2029}')))
+    };
+    let length = if android { area.encode_utf16().count() } else { area.graphemes(true).count() };
+    (length > 0 && length <= 16 && !area.contains(['.', ',', ';', '!', '?', '(', ')'])).then_some(area)
+}
+
+fn areas(titles: &[&str], android: bool) -> Vec<String> {
+    let mut counts = HashMap::new();
+    for title in titles {
+        if let Some(area) = area(title, android) {
+            let (count, _) = counts.entry(area_key(area, android)).or_insert((0, area));
+            *count += 1;
+        }
+    }
+    let mut counts: Vec<_> = counts.into_iter().collect();
+    counts.sort_by(|(a, (n, _)), (b, (m, _))| m.cmp(n).then_with(|| {
+        if android { a.encode_utf16().cmp(b.encode_utf16()) } else { a.cmp(b) }
+    }));
+    counts.into_iter().map(|(_, (_, area))| area.to_owned()).collect()
+}
+
+fn area_key(area: &str, android: bool) -> String {
+    if android { area.to_owned() } else { area.nfc().collect() }
+}
+
+#[derive(serde::Deserialize)]
+struct SearchRow<'a> {
+    #[serde(default)]
+    id: &'a str,
+    key: &'a str,
+    title: &'a str,
+}
+
+fn search_terms(query: &str, android: bool) -> Vec<&str> {
+    // Kotlin's Regex("\\s+") uses the ASCII whitespace class.
+    query.split(|c: char| if android { matches!(c, ' ' | '\t'..='\r') } else { c.is_whitespace() })
+        .filter(|part| !part.is_empty()).collect()
+}
+
+fn android_search_text(text: &str) -> String {
+    // Java's case-insensitive substring comparison uses simple upper then lower case.
+    text.chars().map(|c| {
+        let mut upper = c.to_uppercase();
+        let first = upper.next().unwrap_or(c);
+        let simple = if upper.next().is_some() { c } else { first };
+        simple.to_lowercase().next().unwrap_or(simple)
+    }).collect()
+}
+
+#[cfg(target_vendor = "apple")]
+fn apple_matches(text: &str, terms: &[&str]) -> bool {
+    use core_foundation::base::TCFType;
+    use core_foundation::string::{CFString, CFStringFind, kCFCompareCaseInsensitive, kCFCompareDiacriticInsensitive};
+
+    // Use the same comparison as Foundation's range(of:options:) on Apple.
+    let text = CFString::new(text);
+    terms.iter().all(|term| {
+        let term = CFString::new(term);
+        // Both CFStrings are retained for the duration of the call.
+        let range = unsafe {
+            CFStringFind(text.as_concrete_TypeRef(), term.as_concrete_TypeRef(),
+                kCFCompareCaseInsensitive | kCFCompareDiacriticInsensitive)
+        };
+        range.location >= 0
+    })
+}
+
+#[cfg(not(target_vendor = "apple"))]
+fn apple_matches(text: &str, terms: &[&str]) -> bool {
+    // The Apple presenter runs on Darwin. Keep the projection usable in host tests elsewhere.
+    fn fold(text: &str) -> String {
+        text.nfd().filter(|c| !unicode_normalization::char::is_combining_mark(*c))
+            .flat_map(char::to_lowercase).collect()
+    }
+    let text = fold(text);
+    terms.iter().all(|term| text.contains(&fold(term)))
+}
+
+fn search(
+    rows: &[SearchRow<'_>], query: &str, selected: Option<&str>, note_hits: &[Value], android: bool,
+) -> Vec<usize> {
+    let terms = search_terms(query, android);
+    let android_terms: Vec<_> = if android { terms.iter().map(|word| android_search_text(word)).collect() } else { Vec::new() };
+    let note_hits: HashSet<_> = note_hits.iter().filter_map(Value::as_str).collect();
+    let selected = selected.map(|area| area_key(area, android));
+    rows.iter().enumerate().filter_map(|(index, row)| {
+        if let Some(selected) = &selected
+            && area(row.title, android).is_none_or(|area| area_key(area, android) != *selected)
+        {
+            return None;
+        }
+        if terms.is_empty() || note_hits.contains(row.id) {
+            return Some(index);
+        }
+        let text = format!("{} {}", row.key, row.title);
+        let matches = if android {
+            let text = android_search_text(&text);
+            android_terms.iter().all(|term| text.contains(term))
+        } else {
+            apple_matches(&text, &terms)
+        };
+        matches.then_some(index)
+    }).collect()
+}
+
 fn runs_agent(preset: &str, changes: bool) -> bool {
     if changes {
         return false;
@@ -214,6 +363,18 @@ fn agent_presence(asked: &Value) -> Option<Value> {
     }
     let kind = if asked["status"] == "in_progress" && asked["ranked"] != true { "no_agent" } else { "unsaid" };
     Some(json!({"kind": kind}))
+}
+
+fn live_task(pane: &Value) -> Option<&str> {
+    let task = pane["task"].as_str()?;
+    let state = pane["state"].as_str()?;
+    if task.is_empty() || !LIVE_STATES.contains(&state) {
+        return None;
+    }
+    let agent = pane["agent"].as_bool().or_else(|| {
+        Some(runs_agent(pane["preset"].as_str()?, pane["changes"] == true))
+    })?;
+    agent.then_some(task)
 }
 
 fn counted_words(count: i64, one: &str, many: impl FnOnce(i64) -> String) -> Option<String> {
@@ -288,7 +449,10 @@ pub(crate) fn project(request: &Value) -> Option<Value> {
     if request["schema"].as_u64() != Some(1) {
         return None;
     }
-    let asked = request.get("task_board")?;
+    present(request.get("task_board")?)
+}
+
+fn present(asked: &Value) -> Option<Value> {
     let result = match asked["op"].as_str()? {
         "settings" => json!({
             "day": DAY, "done_floor": DONE_FLOOR, "section_limit": SECTION_LIMIT, "live_states": LIVE_STATES,
@@ -342,6 +506,27 @@ pub(crate) fn project(request: &Value) -> Option<Value> {
             let status = STATUSES.iter().find(|status| asked["status"] == status.wire)?;
             json!(format!("All {}", status.view(asked["android"] == true).title))
         }
+        "history_period" | "history_groups" => {
+            let calendar: HistoryCalendar = serde_json::from_value(asked["calendar"].clone()).ok()?;
+            let android = asked["android"] == true;
+            if let Some(at) = asked["at"].as_f64() {
+                json!(calendar.period(at, android))
+            } else {
+                let stamps: Vec<f64> = serde_json::from_value(asked["stamps"].clone()).ok()?;
+                json!(calendar.groups(&stamps, android))
+            }
+        }
+        "history_area" => json!(area(asked["title"].as_str()?, asked["android"] == true)),
+        "history_areas" => {
+            let titles: Vec<&str> = serde::Deserialize::deserialize(&asked["titles"]).ok()?;
+            json!(areas(&titles, asked["android"] == true))
+        }
+        "search_empty" => json!(search_terms(asked["query"].as_str()?, asked["android"] == true).is_empty()),
+        "search" => {
+            let rows: Vec<SearchRow<'_>> = serde::Deserialize::deserialize(&asked["rows"]).ok()?;
+            json!(search(&rows, asked["query"].as_str()?, asked["area"].as_str(),
+                asked["note_hits"].as_array().map_or(&[], Vec::as_slice), asked["android"] == true))
+        }
         "period_titles" => if asked["android"] == true {
             json!(["Today", "Yesterday", "This week", "Earlier"])
         } else {
@@ -365,6 +550,18 @@ pub(crate) fn project(request: &Value) -> Option<Value> {
             json!(rendered?)
         }
         "runs_agent" => json!(runs_agent(asked["preset"].as_str()?, asked["changes"] == true)),
+        "live_panes" => {
+            let task = asked["task"].as_str()?;
+            let panes = asked["panes"].as_array()?;
+            json!(panes.iter().enumerate().filter_map(|(index, pane)| {
+                (live_task(pane) == Some(task)).then_some(index)
+            }).collect::<Vec<_>>())
+        }
+        "live_task_count" => {
+            let live: HashSet<_> = asked["panes"].as_array()?.iter().filter_map(live_task).collect();
+            json!(asked["tasks"].as_array()?.iter().filter_map(Value::as_str).filter(|task| live.contains(task)).count())
+        }
+        "show_agents" => json!(asked["connected"] == true && asked["recorded"] == true),
         "agent_presence" => agent_presence(asked)?,
         "agent_title" => json!(agent_title(asked["kind"].as_str()?, asked["count"].as_i64()?, asked["android"] == true)),
         "closed_pane" => json!("That agent’s pane has closed."),
@@ -380,6 +577,72 @@ mod tests {
     use super::*;
 
     #[test]
+    fn history_groups_sort_newest_first_and_keep_input_order_for_ties() {
+        // A 23-hour day across a local clock change, and a week ending tomorrow.
+        let calendar = json!({"today": 100, "tomorrow": 123, "yesterday": 76, "week_start": -45, "week_end": 123});
+        let request = json!({"op": "history_groups", "calendar": calendar,
+            "stamps": [-46, 101, -45, 76, 122, 101, 123, 100, 75]});
+        assert_eq!(present(&request), Some(json!([[4, 1, 5, 7], [3], [6, 8, 2], [0]])));
+        let mut android = request;
+        android["android"] = json!(true);
+        assert_eq!(present(&android), Some(json!([[4, 1, 5, 7], [3], [8, 2], [6, 0]])));
+    }
+
+    #[test]
+    fn history_areas_order_by_frequency_and_ignore_invalid_prefixes() {
+        let request = json!({"op": "history_areas", "titles": [
+            "Mac: Title", "Rust: Parser", "Mac: History", "Android: UI",
+            "Which area?: Unknown", "Longer than sixteen: Words", " : Empty", "No prefix",
+        ]});
+        assert_eq!(present(&request), Some(json!(["Mac", "Android", "Rust"])));
+        assert_eq!(area("  Café: Fix", false), Some("Café"));
+        assert_eq!(area("👋👋👋👋👋👋👋👋👋: Fix", false), Some("👋👋👋👋👋👋👋👋👋"));
+        assert_eq!(area("👋👋👋👋👋👋👋👋👋: Fix", true), None);
+    }
+
+    #[test]
+    fn history_search_combines_area_words_and_note_hits() {
+        let rows = json!([
+            {"id": "a", "key": "ov-1", "title": "Mac: Café board"},
+            {"id": "b", "key": "ov-2", "title": "Mac: Menu"},
+            {"id": "c", "key": "ov-3", "title": "Linux: Café board"},
+        ]);
+        let request = json!({"op": "search", "query": "CAFE board", "area": "Mac", "rows": rows, "note_hits": ["b", "c"]});
+        assert_eq!(present(&request), Some(json!([0, 1])));
+        let mut android = request;
+        android["android"] = json!(true);
+        assert_eq!(present(&android), Some(json!([1])));
+        android["query"] = json!("CAFÉ ov-1");
+        assert_eq!(present(&android), Some(json!([0, 1])));
+        android["query"] = json!("  ");
+        assert_eq!(present(&android), Some(json!([0, 1])));
+    }
+
+    #[cfg(target_vendor = "apple")]
+    #[test]
+    fn apple_search_matches_folded_words_at_character_boundaries() {
+        let rows = json!([{"key": "ov-1", "title": "Straße Σ"}, {"key": "ov-2", "title": "ß"}]);
+        let mut request = json!({"op": "search", "query": "STRASSE ς", "rows": rows});
+        assert_eq!(present(&request), Some(json!([0])));
+        request["query"] = json!("s");
+        assert_eq!(present(&request), Some(json!([0])));
+    }
+
+    #[test]
+    fn live_panes_and_task_counts_exclude_idle_shells_and_unlinked_panes() {
+        let panes = json!([
+            {"task": "a", "state": "unknown", "agent": true},
+            {"task": "a", "state": "exited", "agent": true},
+            {"task": "a", "state": "running", "agent": false},
+            {"task": "", "state": "running", "agent": true},
+            {"task": "a", "state": "starting", "agent": true},
+            {"task": "b", "state": "running", "agent": true},
+        ]);
+        assert_eq!(present(&json!({"op": "live_panes", "task": "a", "panes": panes})), Some(json!([0, 4])));
+        assert_eq!(present(&json!({"op": "live_task_count", "tasks": ["a", "b", "", "c"], "panes": panes})), Some(json!(2)));
+    }
+
+    #[test]
     fn columns_keep_empty_columns_duplicates_and_unreadable_rows() {
         let view = board(&[json!("done"), json!("new"), Value::Null, json!("done"), json!("needs_decision")]);
         assert_eq!(view.columns.iter().map(|c| c.status).collect::<Vec<_>>(),
@@ -388,6 +651,20 @@ mod tests {
         assert!(view.columns[1].indices.is_empty());
         assert_eq!(view.columns[5].indices, [0, 3]);
         assert_eq!(view.unreadable, [1]);
+    }
+
+    #[test]
+    fn clock_preserves_the_exact_status_date_across_the_json_bridge() {
+        let request: Value = serde_json::from_str(r#"{
+            "schema": 1,
+            "task_board": {
+                "op": "clock", "status": "in_review", "now": 816863112.913055,
+                "since": 816859512.913055, "updated": 816600000
+            }
+        }"#).unwrap();
+        let view = project(&request).unwrap();
+        assert_eq!(view["last_moved"].as_f64(), Some(816859512.913055));
+        assert_eq!(view["stopped_for"].as_f64(), Some(3600.0));
     }
 
     #[test]
