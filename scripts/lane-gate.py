@@ -1302,7 +1302,7 @@ def _self_test():
         ("rust", "./scripts/rust-archive.sh target/rust-tests.tar.zst"),
         ("rust", "cargo clippy --workspace --all-targets -- -D warnings"),
         ("rust", "cargo test --workspace --doc"),
-        ("swift-tests", "./scripts/swift-test-guard.sh apps/shared/AgentKit/test-floor.txt -- ./scripts/test-leak-check.py -- swift test --package-path apps/shared/AgentKit"),
+        ("swift-tests", "./scripts/macos-test-wrapper-test.sh"),
         ("swift-tests", "./apps/macos/test.sh"),
         ("swift", "apps/macos/build-app.sh"),
         ("swift", "python3 scripts/macos-bundle-native-test.py"),
@@ -1372,8 +1372,8 @@ def _self_test():
     expect("the unfiltered Mac test is not skipped", any(s.run.strip() == "./apps/macos/test.sh" and not s.skip for s in plans["swift-tests"]), True)
     mac_test = next(s for s in plans["swift-tests"] if s.run.strip() == "./apps/macos/test.sh")
     expect("Mac tests use the complete two-process inventory", mac_test.env.get("FARCOOLER_MAC_TEST_PROCESSES"), "2")
-    expect("Mac tests revalidate the unified native graph", mac_test.env.get("FARCOOLER_MAC_TEST_UNIFIED_RUST"), "1")
-    expect("AgentKit's native preparation uses that same graph", has("swift-tests", "./apps/macos/build-test-native.sh"), True)
+    expect("both Swift suites use the unified native graph", mac_test.env.get("FARCOOLER_MAC_TEST_UNIFIED_RUST"), "1")
+    expect("the Mac wrapper also runs the guarded AgentKit suite", mac_test.env.get("FARCOOLER_MAC_TEST_AGENTKIT"), "1")
     bundle = next(s for s in plans["swift"] if "build-app.sh" in s.run)
     expect("bundle uses the shipping Swift release configuration", bundle.run.strip(), "apps/macos/build-app.sh")
     # The PR path builds the bundle's Rust fast (ov-1270); shipping optimization
@@ -1388,7 +1388,8 @@ def _self_test():
             expect(f"{name}.yml keeps shipping optimization (no {key})", key in shipping_yml, False)
     for job in ("swift", "swift-tests"):
         refresh = next(i for i, step in enumerate(plans[job]) if "swift-build-cache.py restore" in step.run)
-        native = next(i for i, step in enumerate(plans[job]) if "build-test-native.sh" in step.run or "build-app.sh" in step.run)
+        native = next(i for i, step in enumerate(plans[job]) if step.run.strip() in
+                      {"./apps/macos/test.sh", "apps/macos/build-app.sh"})
         expect(f"{job} refreshes the watched git index before Cargo", refresh < native and
                "git status --porcelain --untracked-files=no" in plans[job][refresh].run, True)
     for cgo in (0, 1):
