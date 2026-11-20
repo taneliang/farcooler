@@ -1433,38 +1433,9 @@ jobs:
       - run: ./scripts/mac-capture-stop-test.sh
       - run: ./scripts/capture-duplicates-test.sh
 
-      # Build both FFI libraries and the real CLI/daemon in one profile and
-      # feature graph. test.sh revalidates the same complete target selection.
-      - name: Build the shared native test targets
-        run: ./apps/macos/build-test-native.sh
-      - name: Test AgentKit
-        # Under the same early-exit guard as the Mac's tests (ov-324); a change
-        # that adds tests raises the floor in apps/shared/AgentKit/test-floor.txt.
-        run: ./scripts/swift-test-guard.sh apps/shared/AgentKit/test-floor.txt -- ./scripts/test-leak-check.py -- swift test --package-path apps/shared/AgentKit
-
-      # The Mac app's own four test targets, which had never run here.
-      #
-      # `swift test --package-path apps/shared/AgentKit` above is the only Swift
-      # test line this workflow has ever had, so `CeremonyTests`, `GlanceTests`,
-      # `TilingTests` and `RenderBenchTests` — 196 tests across 33 suites —
-      # executed nowhere but the machine that wrote them. That covers the
-      # `~/.ssh/config` writer, whose failure modes its own Package.swift
-      # comment names as "a runner taking over `github.com` for every push on
-      # this Mac", and the glance vocabulary, which rasterises a mark and reads
-      # the ink back out because "a view asked what it is will happily answer
-      # correctly while rendering something else". Both are things that CANNOT
-      # be caught by looking, which is the reason those targets exist at all.
-      #
-      # Last in the job, and it has to stay last. `swift test` can rewrite
-      # `Package.resolved`, and a dirty tree makes `scripts/version.sh channel`
-      # answer `local` — every step above that asks it must have asked already.
-      #
-      # build-test-native.sh stages the dev-profile static libraries under
-      # target/release for Swift's linker and leaves the CLI/daemon/filter in
-      # target/debug. test.sh revalidates those same targets before building
-      # and partitioning the Swift tests, reusing the prepared native artifacts.
-      # RenderBenchTests asserts nothing and stays silent unless
-      # `FARCOOLER_RENDER_BENCH` is set, so this is not the slow benchmark.
+      # Prepare tmux before the shared native build. The Swift suites need
+      # the same FFI libraries and the Mac tests need a real CLI and daemon.
+      # test.sh builds those targets once, then runs both guarded suites.
       #
       # tmux, so `RealCLIConfirmationTests` runs here rather than reporting a
       # skip: it starts the bundle's real daemon, which needs tmux, and feeds
@@ -1480,8 +1451,9 @@ jobs:
       - name: Install tmux
         timeout-minutes: 10
         run: ./scripts/ci-install-tmux.sh
-      - name: Test the Mac app
+      - name: Test AgentKit and the Mac app
         env:
+          FARCOOLER_MAC_TEST_AGENTKIT: "1"
           FARCOOLER_MAC_TEST_PROCESSES: "2"
           FARCOOLER_MAC_TEST_UNIFIED_RUST: "1"
         run: ./apps/macos/test.sh

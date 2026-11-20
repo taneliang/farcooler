@@ -41,6 +41,11 @@ case "${FARCOOLER_MAC_TEST_UNIFIED_RUST:-0}" in
   *) echo "FARCOOLER_MAC_TEST_UNIFIED_RUST must be 0 or 1" >&2; exit 2 ;;
 esac
 
+# CI runs both Swift suites against the native artifacts prepared above.
+if [ "${FARCOOLER_MAC_TEST_AGENTKIT:-0}" = 1 ]; then
+  (cd ../.. && ./scripts/swift-test-guard.sh apps/shared/AgentKit/test-floor.txt -- ./scripts/test-leak-check.py -- swift test --package-path apps/shared/AgentKit)
+fi
+
 # Under the tmux leak check (ov-207): the real-CLI tests start scratch
 # daemons, each with a tmux server that `daemon stop` leaves running, and a
 # test that forgets to end one fails the run here rather than leaving a

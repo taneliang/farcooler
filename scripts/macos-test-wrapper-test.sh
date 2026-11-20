@@ -17,11 +17,12 @@ native_real="$PWD/apps/macos/build-test-native.sh"
 
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
-mkdir -p "$scratch/apps/macos" "$scratch/bin" "$scratch/scripts"
+mkdir -p "$scratch/apps/macos" "$scratch/apps/shared/AgentKit" "$scratch/bin" "$scratch/scripts"
 mkdir -p "$scratch/home/.cargo/bin"
 cp "$real" "$scratch/apps/macos/test.sh"
 cp scripts/tmux-leak-check.py scripts/test-leak-check.py scripts/process_guard.py scripts/swift-test-guard.sh "$scratch/scripts/"
 echo 1 >"$scratch/apps/macos/test-floor.txt"
+echo 1 >"$scratch/apps/shared/AgentKit/test-floor.txt"
 
 cat >"$scratch/apps/macos/build-vt.sh" <<'STUB'
 #!/bin/bash
@@ -41,6 +42,7 @@ cat >"$scratch/bin/swift" <<'STUB'
 [ "${SWIFT_BUILD_FAIL:-}" = 1 ] && [ "$*" = 'build --build-tests' ] && exit 1
 case "${TMPDIR:-}" in /tmp/fcl-*/) tmp="(private tmp)" ;; *) tmp="" ;; esac
 echo "swift $* ${TMUX_TMPDIR:+(private tmux)} $tmp" >>"$LOG"
+[ "${AGENTKIT_FAILS:-}" = 1 ] && [ "$*" = 'test --package-path apps/shared/AgentKit' ] && exit 1
 echo "Test run with 2 tests in 1 suite passed after 1 second."
 STUB
 chmod +x "$scratch/apps/macos/build-vt.sh" "$scratch/bin/swift" "$scratch/home/.cargo/bin/cargo" "$scratch/apps/macos/test.sh"
@@ -115,6 +117,21 @@ if FARCOOLER_MAC_TEST_UNIFIED_RUST=1 NATIVE_FAILS=1 "$scratch/apps/macos/test.sh
 fi
 [ "$(cat "$LOG")" = build-test-native ] || fail "tests ran after unified native build failed"
 echo "ok: unified native mode revalidates its targets and propagates failures"
+
+: >"$LOG"
+env -u TMUX_TMPDIR FARCOOLER_MAC_TEST_UNIFIED_RUST=1 FARCOOLER_MAC_TEST_AGENTKIT=1 \
+  FARCOOLER_MAC_TEST_PROCESSES=2 "$scratch/apps/macos/test.sh" >/dev/null
+head -3 "$LOG" | diff -u <(printf '%s\n' build-test-native \
+  'swift test --package-path apps/shared/AgentKit  (private tmp)' 'swift build --build-tests  ') - \
+  || fail "AgentKit and the Mac suite did not share one native build"
+grep -q '^partitions --repeat 1 --out ' "$LOG" || fail "the complete Mac inventory did not run after AgentKit"
+: >"$LOG"
+if AGENTKIT_FAILS=1 FARCOOLER_MAC_TEST_UNIFIED_RUST=1 FARCOOLER_MAC_TEST_AGENTKIT=1 \
+    FARCOOLER_MAC_TEST_PROCESSES=2 "$scratch/apps/macos/test.sh" >/dev/null 2>&1; then
+  fail "the combined runner swallowed an AgentKit failure"
+fi
+if grep -q 'swift build\|partitions' "$LOG"; then fail "Mac tests ran after AgentKit failed"; fi
+echo "ok: the guarded Swift suites share one native build and propagate failures"
 
 # Exercise the real native helper after the wrapper's stand-in cases.
 cp "$native_real" "$scratch/apps/macos/build-test-native.sh"
