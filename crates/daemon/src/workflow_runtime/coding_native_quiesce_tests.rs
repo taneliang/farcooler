@@ -64,7 +64,9 @@ async fn an_owner_that_exited_before_quiescence_looked_is_quiescent() {
 #[tokio::test]
 async fn an_owner_that_exits_while_the_runner_ends_it_is_quiescent() {
     for delay in [0, 50, 150] {
-        let (_dir, runtime, host, owner) = owned_pane("exec /bin/sleep 0.1", true).await;
+        let (dir, runtime, host, owner) = owned_pane(
+            "while [ ! -f go ]; do sleep 0.01; done; exec /bin/sleep 0.1", true).await;
+        std::fs::write(dir.path().join("go"), "").unwrap();
         tokio::time::sleep(Duration::from_millis(delay)).await;
         runtime.quiesce_native(&owner).await.unwrap();
         assert!(closed(&host, &owner).await, "after {delay} ms");

@@ -1,4 +1,10 @@
-use super::*;
+use super::{Answer, BLIND, FLAG, Held, Leader, Lineage, ask_blocking, signal_group};
+#[cfg(target_os = "macos")]
+use super::responsibility;
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// A hold run as `farcoolerd` runs it in a pane, here without a terminal.
 struct Hold { child: std::process::Child, socket: PathBuf, dir: tempfile::TempDir }
@@ -85,6 +91,32 @@ fn a_stop_asked_first_is_done_first_even_when_its_words_arrive_last() {
     std::thread::sleep(Duration::from_millis(300));
     assert!(ticks(h.dir.path()) > at, "the later continue was done last, so the group runs");
     assert_eq!(ask_blocking(&h.socket, "end", Duration::from_secs(30)), Answer::Said("ended".into()));
+    h.child.wait().unwrap();
+}
+
+/// Disconnect after the stop reply but before confirming it, both with and without an earlier gate.
+#[test]
+fn an_unconfirmed_pause_rolls_back_only_its_own_stop() {
+    let mut h = hold("while :; do sleep 0.02; done");
+    let wait = Duration::from_secs(5);
+    for gate in [false, true] {
+        if gate {
+            assert_eq!(ask_blocking(&h.socket, "stop", wait), Answer::Said("stopped".into()));
+        }
+        let mut manual = UnixStream::connect(&h.socket).unwrap();
+        manual.write_all(b"pause\n").unwrap();
+        assert_eq!(reply(&manual), "stopped");
+        drop(manual);
+        let expected = Answer::Said(if gate { "stopped" } else { "unsettled" }.into());
+        let mut state = ask_blocking(&h.socket, "stopped", wait);
+        for _ in 0..20 {
+            if state == expected { break; }
+            std::thread::sleep(Duration::from_millis(10));
+            state = ask_blocking(&h.socket, "stopped", wait);
+        }
+        assert_eq!(state, expected);
+    }
+    assert_eq!(ask_blocking(&h.socket, "end", wait), Answer::Said("ended".into()));
     h.child.wait().unwrap();
 }
 
@@ -177,7 +209,7 @@ fn an_agent_that_ends_its_own_stray_ends() {
 fn a_reaped_leader_is_never_signalled() {
     let mut other = std::process::Command::new("/bin/sleep").arg("30").spawn().unwrap();
     let pid = other.id() as i32;
-    let held = Held { leader: Leader(pid), reaped: Some(0), lineage: Lineage::new().unwrap() };
+    let held = Held { leader: Leader(pid), reaped: Some(0), lineage: Lineage::new().unwrap(), gate_stop: false };
     assert!(!signal_group(&held, libc::SIGKILL));
     std::thread::sleep(Duration::from_millis(50));
     assert!(alive(pid));
@@ -186,8 +218,9 @@ fn a_reaped_leader_is_never_signalled() {
 }
 
 /// Where a native agent is signalled, and what each file may do.
-const NATIVE: [(&str, Rule); 4] = [
+const NATIVE: [(&str, Rule); 5] = [
     ("src/workflow_runtime/coding_native.rs", Rule::NoSignals),
+    ("src/workflow_runtime/coding_native_quiesce.rs", Rule::NoSignals),
     ("src/workflow_runtime/native_control.rs", Rule::NoSignals),
     ("src/native_hold.rs", Rule::OnlySignalGroup),
     ("src/yielding.rs", Rule::NoProcessListing),

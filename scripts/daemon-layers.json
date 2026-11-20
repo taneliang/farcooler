@@ -130,6 +130,7 @@
    "engine_steering",
    "engine_stuck",
    "landing_templates",
+   "native_hold",
    "path_routes",
    "ticket_moves",
    "workflow_deciders",

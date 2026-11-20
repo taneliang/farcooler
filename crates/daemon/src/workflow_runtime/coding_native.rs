@@ -607,11 +607,7 @@ impl Exec {
             let life = tmux.pane_life(&owner.pane, owner.terminal).await
                 .map_err(|_| Error::Refused("native pane ownership unavailable"))?;
             if life == farcooler_tmux::PaneLife::Gone {
-                let table = tokio::task::spawn_blocking(snapshot).await
-                    .map_err(|_| Error::Refused("native process read failed"))??;
-                if !owner.processes(&table)?.is_empty() {
-                    return Err(Error::Refused("native vanished pane still has processes"));
-                }
+                self.quiesce_native(&owner).await?;
                 // The pane cannot be captured or closed again. Its saved output and verdict survive the install. A
                 // log that is gone (a daemon that died before its first write) is no doubt about the process: nothing
                 // is on its tty, so an empty log stands for it, and a cancel ends instead of staying Uncertain (ov-1301).
@@ -726,6 +722,9 @@ impl Exec {
         let life = server(&self.root, binding).pane_life(&owner.pane, owner.terminal).await
             .map_err(|_| Error::Refused("native pane ownership unavailable"))?;
         if life == farcooler_tmux::PaneLife::Live { return Ok(Some("its agent is still running")); }
+        if owner.hold {
+            return Ok(self.native_hold_socket(binding).try_exists()?.then_some("its agent's hold has not confirmed exit"));
+        }
         let table = tokio::task::spawn_blocking(snapshot).await.map_err(|_| Error::Refused("native process read failed"))??;
         Ok((!owner.processes(&table)?.is_empty()).then_some("processes are still running on its agent's terminal"))
     }

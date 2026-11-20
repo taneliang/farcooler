@@ -13,15 +13,18 @@ impl Drop for Frozen {
     fn drop(&mut self) { if let Some(hold) = self.0.take() { crate::native_hold::tell(&hold, "cont"); } }
 }
 /// Ask the hold to stop the agent's group. It answers once the kernel has stopped every member.
-async fn freeze(hold: &Path) -> Result<Frozen> {
-    match crate::native_hold::ask(hold, "stop", Duration::from_secs(5)).await {
+async fn freeze(hold: &Path, wait: Duration) -> Result<Frozen> {
+    match crate::native_hold::pause(hold, wait).await {
         crate::native_hold::Answer::Said(word) if word == "stopped" => Ok(Frozen(Some(hold.to_path_buf()))),
-        crate::native_hold::Answer::Said(word) if word == "unsettled" => {
-            // Not left half-stopped: whatever did stop is continued.
-            drop(Frozen(Some(hold.to_path_buf())));
-            Err(Error::Refused("native pause did not settle"))
-        }
-        _ => Err(Error::Refused("native pause has no hold to ask")),
+        crate::native_hold::Answer::Gone => Err(Error::Refused("native pause has no hold to ask")),
+        _ => Err(Error::Refused("native hold did not confirm pause")),
+    }
+}
+
+fn resume(stopped: Frozen, builder: Option<&crate::yielding::BuilderGuard>) {
+    if let Some(builder) = builder {
+        stopped.quiescent();
+        builder.manual(false);
     }
 }
 
@@ -80,7 +83,7 @@ pub(super) async fn controlled<T>(turn: impl std::future::Future<Output = Result
                 deadline.as_mut().reset(active_since + remaining);
             }
             _ = async { while !*cancel.borrow_and_update() { if cancel.changed().await.is_err() { break; } } } => return Ok(None),
-            Some((op, reply)) = orders.recv() => {
+            Some((op, mut reply)) = orders.recv() => {
                 let result = match op {
                     Control::Pause if frozen.is_none() => {
                         // Validate the tagged pane again; never signal a tty from a stale capability.
@@ -88,27 +91,38 @@ pub(super) async fn controlled<T>(turn: impl std::future::Future<Output = Result
                             Ok(farcooler_tmux::PaneLife::Live) => {
                                 // Recorded first, so a gate that ends meanwhile cannot continue what is about to stop.
                                 if let Some(y) = yielded { y.manual(true); }
-                                match freeze(hold).await {
-                                Ok(stopped) => {
-                                    remaining = remaining.saturating_sub(active_since.elapsed());
-                                    *frozen = Some(stopped); clock.pause(); engine_steering::paused(id, true); Ok(())
-                                },
-                                Err(error) => {
-                                    tracing::warn!(%error, "native pause refused");
-                                    if let Some(y) = yielded { y.manual(false); }
-                                    Err(farcooler_core::DomainError::OperationFailed)
-                                },
+                                let attempt = tokio::select! {
+                                    biased;
+                                    _ = reply.closed() => None,
+                                    _ = cancel.wait_for(|&cancelled| cancelled) => None,
+                                    result = freeze(hold, Duration::from_secs(5)) => Some(result),
+                                };
+                                match attempt {
+                                    Some(Ok(stopped)) => {
+                                        clock.pause();
+                                        engine_steering::paused(id, true);
+                                        if reply.send(Ok(())).is_ok() {
+                                            remaining = remaining.saturating_sub(active_since.elapsed());
+                                            *frozen = Some(stopped);
+                                        } else {
+                                            resume(stopped, yielded);
+                                            clock.resume();
+                                            engine_steering::paused(id, false);
+                                        }
+                                        continue;
+                                    }
+                                    Some(Err(error)) => tracing::warn!(%error, "native pause refused"),
+                                    None => {}
                                 }
+                                if let Some(y) = yielded { y.manual(false); }
+                                Err(farcooler_core::DomainError::OperationFailed)
                             },
                             _ => Err(farcooler_core::DomainError::NotFound),
                         }
                     },
                     Control::Resume if frozen.is_some() => {
                         // A builder a landing gate also holds stays stopped until the gate ends.
-                        match (frozen.take(), yielded) {
-                            (Some(stopped), Some(y)) => { stopped.quiescent(); y.manual(false); }
-                            (stopped, _) => drop(stopped),
-                        }
+                        if let Some(stopped) = frozen.take() { resume(stopped, yielded); }
                         clock.resume();
                         active_since = tokio::time::Instant::now();
                         deadline.as_mut().reset(active_since + remaining);
@@ -167,6 +181,35 @@ mod tests {
         let (outcome, ()) = tokio::join!(turn, steer);
         farcooler_tmux::reap_server(tmux.socket());
         assert!(outcome.unwrap().is_none(), "only active time expires the step");
+    }
+
+    #[tokio::test]
+    async fn a_reviewer_keeps_running_after_its_queued_pause_times_out() {
+        use std::io::Write;
+        use std::os::unix::net::UnixStream;
+
+        let dir = farcooler_core::scratch::dir("native-pause-timeout");
+        let hold = dir.join("review.sock");
+        let mut reviewer = std::process::Command::new(crate::runtime::fanout_binary().unwrap())
+            .args([crate::native_hold::FLAG, hold.to_str().unwrap(), "--", "/bin/sh", "-c",
+                "while [ ! -f proceed ]; do sleep 0.02; done; echo running > result"])
+            .current_dir(&dir).spawn().unwrap();
+        assert!(crate::workflow_runtime::wait_until(tokio::time::Instant::now() + Duration::from_secs(5),
+            Duration::from_millis(10), || hold.exists()).await);
+        let mut first = UnixStream::connect(&hold).unwrap();
+        let mut second = UnixStream::connect(&hold).unwrap();
+        // Both earlier connections keep their requests incomplete until the reviewer's pause is refused.
+        assert!(freeze(&hold, Duration::from_millis(250)).await.is_err());
+        first.write_all(b"ready\n").unwrap();
+        second.write_all(b"ready\n").unwrap();
+        let state = crate::native_hold::ask(&hold, "stopped", Duration::from_secs(5)).await;
+        std::fs::write(dir.join("proceed"), "").unwrap();
+        let ran = crate::workflow_runtime::wait_until(tokio::time::Instant::now() + Duration::from_secs(2),
+            Duration::from_millis(10), || dir.join("result").exists()).await;
+        if !ran { crate::native_hold::ask(&hold, "end", Duration::from_secs(5)).await; }
+        reviewer.wait().unwrap();
+        assert_eq!(state, crate::native_hold::Answer::Said("unsettled".into()));
+        assert!(ran, "the reviewer must run after the queue has drained");
     }
 
     /// A builder a landing gate holds stopped is not timed out for it, and its quiet periods don't run (ov-1301): the

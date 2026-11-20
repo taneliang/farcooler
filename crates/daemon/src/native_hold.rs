@@ -10,7 +10,7 @@
 //! group id, on Linux or macOS, so from `fork` until the hold reaps the child, `killpg(leader, _)` reaches this group
 //! and no other. Every signal the engine sends a native agent is that call, made here, in [`signal_group`].
 //!
-//! The daemon never signals the agent. It asks the hold over `<socket>` to `stop`, `cont` or `end`. The hold reads
+//! The daemon never signals the agent. It asks the hold over `<socket>` to `pause`, `stop`, `cont` or `end`. The hold reads
 //! the process table only to wait (is anything left in the group, is all of it stopped); while the leader is
 //! unreaped a row with its group id is one of ours, so a stale read can only make it wait longer.
 //!
@@ -47,6 +47,7 @@ const GRACE: Duration = Duration::from_secs(1);
 const STRAY_WAIT: Duration = Duration::from_secs(5);
 /// How often the hold learns its lineage while the agent runs. Only macOS learns: see [`Lineage`].
 const LEARN_EVERY: Duration = Duration::from_millis(100);
+const PAUSE_ACK: [u8; 1] = *b"1";
 
 /// `farcoolerd --native-hold <socket> -- <program> [args…]`, if that is how this process was started: run the hold
 /// and return the exit status for `main`.
@@ -71,7 +72,12 @@ pub fn pane_command(hold: &Path, socket: &Path, script: &str) -> String {
 /// the same lock as every signal, so while a `Leader` is reachable through an unreaped [`Held`] its pid and group id
 /// are this agent's.
 struct Leader(i32);
-struct Held { leader: Leader, reaped: Option<i32>, lineage: Lineage }
+struct Held {
+    leader: Leader,
+    reaped: Option<i32>,
+    lineage: Lineage,
+    gate_stop: bool,
+}
 
 /// The only signal call in the native engine (ov-1330, enforced by `the_native_engine_signals_only_its_own_group`).
 /// Nothing once the leader is reaped: its number may belong to someone else from then on.
@@ -134,7 +140,7 @@ pub fn serve(socket: &Path, argv: &[String]) -> i32 {
         }
     };
     lineage.look(leader);
-    let held = Arc::new(Mutex::new(Held { leader: Leader(leader), reaped: None, lineage }));
+    let held = Arc::new(Mutex::new(Held { leader: Leader(leader), reaped: None, lineage, gate_stop: false }));
     let socket: PathBuf = socket.to_path_buf();
     {
         let (held, socket) = (held.clone(), socket.clone());
@@ -262,18 +268,27 @@ fn finish(socket: &Path, code: i32) -> ! {
     std::process::exit(code)
 }
 
-/// One request: a line naming the operation, answered with one line.
+/// One request and reply per connection. A manual pause also takes an acknowledgement.
 fn answer(stream: UnixStream, held: &Mutex<Held>, socket: &Path) {
     if !same_user(&stream) { return; }
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let mut line = String::new();
-    if BufReader::new(&stream).read_line(&mut line).is_err() { return; }
+    let mut reader = BufReader::new(&stream);
+    if reader.read_line(&mut line).is_err() { return; }
     let mut held = lock(held);
     let reply = match line.trim() {
         "ready" if held.reaped.is_none() => "ready",
         "stopped" if held.reaped.is_none() => if group_stopped(&held) { "stopped" } else { "unsettled" },
-        "stop" if held.reaped.is_none() => if stop(&held) { "stopped" } else { "unsettled" },
-        "cont" if held.reaped.is_none() => { signal_group(&held, libc::SIGCONT); "continued" }
+        "pause" if held.reaped.is_none() => return answer_pause(&stream, &mut reader, &held),
+        "stop" if held.reaped.is_none() => {
+            held.gate_stop = true;
+            if stop(&held) { "stopped" } else { "unsettled" }
+        }
+        "cont" if held.reaped.is_none() => {
+            held.gate_stop = false;
+            signal_group(&held, libc::SIGCONT);
+            "continued"
+        }
         "end" => match end(&mut held, STRAY_WAIT) {
             Ended::Settled(code) => {
                 // Gone before the answer, so whoever reads `ended` also finds the socket gone.
@@ -283,10 +298,31 @@ fn answer(stream: UnixStream, held: &Mutex<Held>, socket: &Path) {
             }
             Ended::Unsettled => "unsettled",
         },
-        "ready" | "stop" | "stopped" | "cont" => "ended",
+        "ready" | "pause" | "stop" | "stopped" | "cont" => "ended",
         _ => "unknown",
     };
     let _ = (&stream).write_all(format!("{reply}\n").as_bytes());
+}
+
+/// A hand pause is provisional until the caller confirms it on the same socket. Finish any rollback before
+/// processing the next connection, and leave an earlier landing gate's stop in effect.
+fn answer_pause(mut stream: &UnixStream, reader: &mut BufReader<&UnixStream>, held: &Held) {
+    use std::io::Read;
+    use std::os::fd::AsRawFd;
+
+    let mut ack = [0u8];
+    // EOF means this caller left while queued. Peeking keeps the normal acknowledgement read intact.
+    // SAFETY: ack is writable for one byte; the stream keeps its descriptor open.
+    if unsafe { libc::recv(stream.as_raw_fd(), ack.as_mut_ptr().cast(), 1, libc::MSG_PEEK | libc::MSG_DONTWAIT) } == 0 {
+        return;
+    }
+    let stopped = stop(held);
+    let reply = if stopped { b"stopped\n".as_slice() } else { b"unsettled\n" };
+    let committed = stream.write_all(reply).is_ok() && stopped
+        && reader.read_exact(&mut ack).is_ok() && ack == PAUSE_ACK;
+    if !committed && !held.gate_stop {
+        signal_group(held, libc::SIGCONT);
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -342,25 +378,9 @@ fn exited(leader: i32) -> bool {
     got == 0 && info.si_signo == libc::SIGCHLD && matches!(info.si_code, libc::CLD_EXITED | libc::CLD_KILLED | libc::CLD_DUMPED)
 }
 
-/// Every process in the leader's group but the leader, or `None` when the table can't be read whole.
-fn members(leader: i32) -> Option<Vec<i32>> {
-    let table = crate::proc_table::snapshot()?;
-    let me = std::process::id() as i32;
-    let mut found = Vec::new();
-    let mut complete = false;
-    for row in table.lines() {
-        let mut columns = row.split_whitespace().map(str::parse::<i32>);
-        let (Some(Ok(pid)), Some(Ok(_)), Some(Ok(pgid))) = (columns.next(), columns.next(), columns.next()) else { continue };
-        complete |= pid == me;
-        if pgid == leader && pid != leader { found.push(pid); }
-    }
-    complete.then_some(found)
-}
-
 fn group_stopped(held: &Held) -> bool {
     let leader = held.leader.0;
-    crate::proc_table::stopped_or_gone(leader)
-        && members(leader).is_some_and(|rest| rest.iter().all(|&pid| crate::proc_table::stopped_or_gone(pid)))
+    rows().is_some_and(|rows| rows.iter().filter(|row| row.pgid == leader).all(|row| row.stopped))
 }
 
 /// Stop the group and wait until the kernel has stopped every member: a stop only requests it.
@@ -434,7 +454,7 @@ struct Lineage { me: u64, known: HashSet<u64>, blind: bool }
 
 /// A live process: its pid, group, identity and its parent's identity (unique ids on macOS, pids on Linux), and
 /// whether it names the hold as responsible for it (macOS; always false on Linux).
-struct Row { pid: i32, pgid: i32, id: u64, parent: u64, responsible: bool }
+struct Row { pid: i32, pgid: i32, id: u64, parent: u64, responsible: bool, stopped: bool }
 
 /// What one look found alive: members of the agent's group (the leader among them), and descendants outside it.
 struct Look { group: usize, strays: usize }
@@ -514,7 +534,8 @@ fn rows() -> Option<Vec<Row>> {
         let Some(ids) = unique_ids(pid) else { continue };
         complete |= pid == me;
         let responsible = pid != me && responsibility::of(pid) == Some(me);
-        rows.push(Row { pid, pgid: info.pbi_pgid as i32, id: ids.id, parent: ids.parent, responsible });
+        rows.push(Row { pid, pgid: info.pbi_pgid as i32, id: ids.id, parent: ids.parent, responsible,
+            stopped: info.pbi_status == libc::SSTOP });
     }
     complete.then_some(rows)
 }
@@ -532,28 +553,9 @@ fn rows() -> Option<Vec<Row>> {
             (fields.next(), fields.next().map(str::parse::<u32>), fields.next().map(str::parse::<i32>)) else { continue };
         if matches!(state, "Z" | "X" | "x") { continue; }
         complete |= pid == me;
-        rows.push(Row { pid, pgid, id: u64::from(pid as u32), parent: u64::from(ppid), responsible: false });
+        rows.push(Row { pid, pgid, id: u64::from(pid as u32), parent: u64::from(ppid), responsible: false, stopped: matches!(state, "T" | "t") });
     }
     complete.then_some(rows)
-}
-
-// A successful signal only requests a stop. Confirm the kernel observed it. Observation only: what this reads is
-// never signalled.
-#[cfg(target_os = "macos")]
-pub(crate) fn stopped(pid: i32) -> bool {
-    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
-    let size = std::mem::size_of_val(&info) as i32;
-    let got = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) };
-    (got == size && matches!(info.pbi_status, libc::SSTOP | libc::SZOMB))
-        || (got <= 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH))
-}
-#[cfg(not(target_os = "macos"))]
-pub(crate) fn stopped(pid: i32) -> bool {
-    match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
-        Ok(stat) => stat.rsplit_once(')').and_then(|(_, s)| s.trim_start().chars().next())
-            .is_some_and(|state| matches!(state, 'T' | 't' | 'Z' | 'X')),
-        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
-    }
 }
 
 /// What a hold said.
@@ -563,7 +565,7 @@ pub(crate) enum Answer {
     Said(String),
     /// Its socket is gone: the hold ended its group and exited (or never started, which the caller rules out).
     Gone,
-    /// Its socket is there and nobody answers: the hold was killed before it could end its group.
+    /// Its socket exists, but no complete answer arrived before the caller stopped waiting.
     Silent,
 }
 
@@ -579,6 +581,27 @@ pub(crate) fn ask_blocking(socket: &Path, op: &str, wait: Duration) -> Answer {
         Ok(n) if n > 0 => Answer::Said(line.trim().to_owned()),
         // Ended between our connect and its reply: the socket is removed before it exits.
         _ => gone(),
+    }
+}
+
+/// Request a manual pause. Timing out or dropping this future closes the socket, so the hold discards or
+/// rolls back the unconfirmed stop before taking another request.
+pub(crate) async fn pause(socket: &Path, wait: Duration) -> Answer {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    let request = async {
+        let mut stream = BufReader::new(tokio::net::UnixStream::connect(socket).await?);
+        stream.write_all(b"pause\n").await?;
+        let mut line = String::new();
+        if stream.read_line(&mut line).await? == 0 { return Ok(None); }
+        let word = line.trim();
+        if word == "stopped" { stream.write_all(&PAUSE_ACK).await?; }
+        Ok::<_, std::io::Error>(Some(Answer::Said(word.to_owned())))
+    };
+    match tokio::time::timeout(wait, request).await {
+        Ok(Ok(Some(answer))) => answer,
+        _ if !socket.exists() => Answer::Gone,
+        _ => Answer::Silent,
     }
 }
 

@@ -378,10 +378,9 @@ async fn a_builder_counts_the_time_a_gate_held_it_and_not_its_hand_pause() {
     end(child);
 }
 
-/// A tty number alone can be reused by another run. Both the shell's start identity and its presence on that tty
-/// must agree before a gate signals anything, and an unrelated pane keeps working throughout a valid pause.
+/// Confirm that gate admission waits for the hold and that its signals only affect the builder.
 #[tokio::test]
-async fn a_native_gate_leaves_other_panes_and_reused_ttys_alone() {
+async fn a_native_gate_pauses_only_the_builder_and_preserves_a_manual_pause() {
     let dir = farcooler_core::scratch::dir("native-gate-identity");
     let id = uuid::Uuid::now_v7();
     let tmux = farcooler_tmux::TmuxServer::in_dir(&format!("gate-identity-{id}"), id, &dir);
@@ -389,113 +388,51 @@ async fn a_native_gate_leaves_other_panes_and_reused_ttys_alone() {
     impl Drop for Reap<'_> { fn drop(&mut self) { farcooler_tmux::reap_server(self.0.socket()); } }
     let _reap = Reap(&tmux);
     let mut panes = Vec::new();
+    let binary = crate::runtime::fanout_binary().unwrap();
+    let socket = dir.join("first.sock");
     for file in ["first", "other"] {
         let terminal = uuid::Uuid::now_v7();
-        let command = format!("exec /bin/sh -c 'sh -c \"while :; do echo tick >> {file}; sleep 0.02; done\"; status=$?; exit \"$status\"'");
+        let command = crate::native_hold::pane_command(&binary, &dir.join(format!("{file}.sock")),
+            &format!("while :; do echo tick >> {file}; sleep 0.02; done"));
         let window = tmux.create_terminal_window(terminal, terminal, "gate identity", dir.to_str().unwrap(), &command).await.unwrap();
-        panes.push(tmux.list_tagged_panes().await.unwrap().into_iter().find(|p| p.pane_id == window.pane_id).unwrap());
+        panes.push((window.pane_id, terminal));
     }
-    for _ in 0..500 {
-        if dir.join("first").exists() && dir.join("other").exists() { break; }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    let first = &panes[0];
-    let target = Target::Native { tty: first.tty.clone(), supervisor: first.stamp.pid,
-        started: crate::effect_runner::Owner::started_at(first.stamp.pid).unwrap() };
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !dir.join("first").exists() || !dir.join("other").exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }).await.unwrap();
     let y = Yielding::at(&dir);
-    let mut wrong_tty = target.clone();
-    if let Target::Native { tty, .. } = &mut wrong_tty { *tty = panes[1].tty.clone(); }
-    let mut recycled = target.clone();
-    if let Target::Native { started, .. } = &mut recycled { *started = "old shell".into(); }
-    let invalid = (y.builder(wrong_tty), y.builder(recycled));
-    let gate = y.gate();
-    let before = (std::fs::read(dir.join("first")).unwrap().len(), std::fs::read(dir.join("other")).unwrap().len());
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    assert!(std::fs::read(dir.join("first")).unwrap().len() > before.0);
-    assert!(std::fs::read(dir.join("other")).unwrap().len() > before.1);
-    drop((gate, invalid));
+    let blocker = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+    let target = Target::Hold(socket);
     let builder = y.builder(target.clone());
-    let gate = y.gate();
+    let admission = y.admit_gate();
+    tokio::pin!(admission);
+    tokio::select! {
+        biased;
+        result = &mut admission => panic!("gate decided before the hold could answer: {}", result.is_ok()),
+        _ = tokio::time::sleep(Duration::from_millis(100)) => {}
+    }
+    drop(blocker);
+    let gate = admission.await.unwrap();
     let recorded: Vec<Target> = serde_json::from_slice(&std::fs::read(dir.join("yielding.json")).unwrap()).unwrap();
-    assert_eq!(recorded, vec![target], "the restart record retains the supervisor identity");
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(recorded, vec![target]);
     let paused = std::fs::read(dir.join("first")).unwrap();
     let other = std::fs::read(dir.join("other")).unwrap();
     tokio::time::sleep(Duration::from_millis(700)).await; // also covers the gate's periodic sweep
     assert_eq!(std::fs::read(dir.join("first")).unwrap(), paused);
     assert!(std::fs::read(dir.join("other")).unwrap().len() > other.len());
-    for pane in &panes { assert_eq!(tmux.pane_life(&pane.pane_id, pane.terminal_id).await.unwrap(), farcooler_tmux::PaneLife::Live); }
+    for (pane, terminal) in &panes {
+        assert_eq!(tmux.pane_life(pane, *terminal).await.unwrap(), farcooler_tmux::PaneLife::Live);
+    }
     builder.manual(true);
     drop(gate);
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(std::fs::read(dir.join("first")).unwrap(), paused, "a hand pause survives the gate");
     builder.manual(false);
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    assert!(std::fs::read(dir.join("first")).unwrap().len() > paused.len(), "the same pane resumes");
-}
-
-/// Fish's interactive command exits successfully if its foreground job is still stopped
-/// when fish handles SIGCHLD. Widen the gap between signals to make the gate's race deterministic.
-#[tokio::test]
-async fn a_fish_builder_survives_a_gate_with_delayed_signals() {
-    use farcooler_core::shell::shell_quote;
-    use farcooler_tmux::PaneLife;
-
-    let Some(fish) = farcooler_core::programs::find("fish") else {
-        eprintln!("fish is unavailable");
-        return;
-    };
-    let dir = farcooler_core::scratch::dir("gate-fish");
-    let id = uuid::Uuid::now_v7();
-    let tmux = farcooler_tmux::TmuxServer::in_dir(&format!("gate-fish-{id}"), id, &dir);
-    struct Reap<'a>(&'a farcooler_tmux::TmuxServer);
-    impl Drop for Reap<'_> { fn drop(&mut self) { farcooler_tmux::reap_server(self.0.socket()); } }
-    let _reap = Reap(&tmux);
-    let child = "/bin/sh -c 'echo $$ > child; exec /bin/sleep 30'";
-    let login = format!("/usr/bin/nice -n 10 {} --no-config -ilc {}; status=$?; exit \"$status\"",
-        shell_quote(fish.to_str().unwrap()), shell_quote(child));
-    let launch = format!("exec /bin/sh -c {}", shell_quote(&login));
-    let window = tmux.create_terminal_window(id, id, "fish gate", dir.to_str().unwrap(), &launch).await.unwrap();
-    let marker = dir.join("child");
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    let child: i32 = loop {
-        if let Ok(pid) = std::fs::read_to_string(&marker) {
-            if let Ok(pid) = pid.trim().parse() { break pid; }
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while std::fs::read(dir.join("first")).unwrap() == paused {
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        assert!(tokio::time::Instant::now() < deadline, "fish never started its foreground job");
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    };
-    let pane = tmux.list_tagged_panes().await.unwrap().into_iter().find(|p| p.pane_id == window.pane_id).unwrap();
-    let supervisor = pane.stamp.pid as i32;
-    let ppid = Command::new("/bin/ps").args(["-o", "ppid=", "-p", &child.to_string()]).output().unwrap();
-    let shell: i32 = String::from_utf8(ppid.stdout).unwrap().trim().parse().unwrap();
-    assert_ne!(shell, supervisor, "the login shell must be between the PTY supervisor and its job");
-    let raw = crate::proc_table::snapshot().unwrap();
-    let table_in_order = |first: i32, second: i32| {
-        let mut rows: Vec<_> = raw.lines().collect();
-        rows.sort_by_key(|row| match row.split_whitespace().next().and_then(|pid| pid.parse::<i32>().ok()) {
-            Some(pid) if pid == first => 0,
-            Some(pid) if pid == second => 1,
-            _ => 2,
-        });
-        crate::foreground::parse(&rows.join("\n"))
-    };
-    let send = |pid, signal| {
-        unsafe { libc::kill(pid, signal); }
-        std::thread::sleep(Duration::from_millis(200));
-    };
-    // Begin with a quiet pause so the red run isolates the clean exit on gate release.
-    send(shell, libc::SIGSTOP);
-    send(child, libc::SIGSTOP);
-    signal_native(&table_in_order(shell, child), &pane.tty, supervisor, libc::SIGCONT, send);
-    let life = tmux.pane_life_with_exit_evidence(&pane.pane_id, id).await.unwrap();
-    eprintln!("fish pane after delayed resume: {life:?}");
-    assert_eq!(life, PaneLife::Live, "resuming fish before its stopped job loses the pane");
-    // The process table can also list the job first while stopping. The login shell
-    // must be stopped before that job even if this is the order of the snapshot.
-    signal_native(&table_in_order(child, shell), &pane.tty, supervisor, libc::SIGSTOP, send);
-    let life = tmux.pane_life_with_exit_evidence(&pane.pane_id, id).await.unwrap();
-    eprintln!("fish pane after delayed stop: {life:?}");
-    assert_eq!(life, PaneLife::Live, "stopping the job before fish loses the pane");
-    signal_native(&table_in_order(shell, child), &pane.tty, supervisor, libc::SIGCONT, send);
+    }).await.unwrap();
 }

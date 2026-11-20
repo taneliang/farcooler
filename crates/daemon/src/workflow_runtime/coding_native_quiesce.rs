@@ -10,10 +10,11 @@ impl NativeOwner {
         let processes = table.under_tty_in_session(tty, session);
         // A session keeps its ID while any member survives. If the PID was
         // recycled as a new session leader, its start identity has changed.
-        if !processes.is_empty() && !crate::effect_runner::Owner::gone(supervisor.pid)? {
+        let owns_session = || unsafe { libc::getsid(session) } == session;
+        if !processes.is_empty() && owns_session() {
             match crate::effect_runner::Owner::started_at(supervisor.pid) {
                 Ok(started) if started != supervisor.started => return Ok(Vec::new()),
-                Err(error) if !crate::effect_runner::Owner::gone(supervisor.pid)? => return Err(Error::Io(error)),
+                Err(error) if owns_session() => return Err(Error::Io(error)),
                 _ => {}
             }
         }
