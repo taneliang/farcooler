@@ -56,14 +56,26 @@ public struct RunnerBoardRow: Equatable, Sendable, Identifiable {
     /// What VoiceOver reads after the row's name: the two counts in words,
     /// or nil when neither says anything. The Mac's tooltips, joined.
     public var spoken: String? {
-        let parts = [
-            TaskBoardModel.decisionsHelp(decisions), TaskBoardModel.agentsHelp(agents),
-        ].compactMap { $0 }
-        return parts.isEmpty ? nil : parts.joined(separator: ", ")
+        TaskBoardPresenter.ask("overview_spoken", ["decisions": decisions, "agents": agents])
     }
 }
 
 public enum RunnerBoards {
+    private struct OverviewRow: Decodable {
+        let name: String
+        let decisions: Int
+        let agents: Int
+    }
+
+    private static func decisionInput(_ items: [NeedsYouItem]) -> [[String: Any]] {
+        items.map { item in
+            var data: [String: Any] = ["decision": item.kind.isDecision || item.also.contains(where: \.isDecision)]
+            data["workspace"] = item.workspaceID
+            data["repository"] = item.repositoryID
+            return data
+        }
+    }
+
     public static func boards(
         repositories: [String], workspaces: [WorkspaceSummary]?
     ) -> [WorkspaceSummary] {
@@ -142,20 +154,28 @@ public enum RunnerBoards {
         needsYou: [NeedsYouItem]? = nil,
         connected: Bool
     ) -> [RunnerBoardRow] {
-        guard (build ?? lastKnownBuild)?.can(.tasks) == true else { return [] }
-        let served = (build ?? lastKnownBuild)?.can(.needsYou) == true
-        let speaks = TaskAgentLink.speaksOfAgents(connected: connected, build: build)
-        return boards.map { workspace in
-            let board = models[workspace.id]
-            let repository = workspace.repository ?? workspace.id
-            return RunnerBoardRow(
-                workspace: workspace,
-                name: workspace.isImplicit ? (names[repository] ?? workspace.name) : workspace.name,
-                decisions: waiting(
-                    columnCount: board?.waitingOnYou ?? 0,
-                    decisions: decisions(for: workspace, in: needsYou ?? []),
-                    listRead: needsYou != nil, listServed: served),
-                agents: speaks ? (board?.tasksWithLiveAgents(in: panes) ?? 0) : 0)
+        let known = build ?? lastKnownBuild
+        var fields: [String: Any] = [
+            "tasks_served": known?.can(.tasks) == true,
+            "decisions_served": known?.can(.needsYou) == true,
+            "connected": connected,
+            "recorded": build?.can(.terminalTask) == true,
+            "panes": panes.map { TaskAgentLink.paneInput($0) },
+            "names": names,
+            "boards": boards.map { workspace -> [String: Any] in
+                let board = models[workspace.id]
+                var fields: [String: Any] = [
+                    "id": workspace.id, "name": workspace.name, "implicit": workspace.isImplicit,
+                    "column": board?.waitingOnYou ?? 0, "tasks": board?.rows.map(\.id) ?? [],
+                ]
+                fields["repository"] = workspace.repository
+                return fields
+            },
+        ]
+        fields["needs_you"] = needsYou.map(decisionInput)
+        let view: [OverviewRow] = TaskBoardPresenter.ask("overview", fields) ?? []
+        return zip(boards, view).map { workspace, row in
+            RunnerBoardRow(workspace: workspace, name: row.name, decisions: row.decisions, agents: row.agents)
         }
     }
 
@@ -170,12 +190,7 @@ public enum RunnerBoards {
     public static func decisions(for workspace: WorkspaceSummary, in items: [NeedsYouItem]) -> Int {
         TaskBoardPresenter.ask("decision_count", [
             "workspace": workspace.id, "implicit": workspace.isImplicit,
-            "items": items.map { item -> [String: Any] in
-                var data: [String: Any] = ["decision": item.kind.isDecision || item.also.contains(where: \.isDecision)]
-                data["workspace"] = item.workspaceID
-                data["repository"] = item.repositoryID
-                return data
-            },
+            "items": decisionInput(items),
         ]) ?? 0
     }
 
@@ -229,51 +244,35 @@ public enum RunnerBoards {
     }
 }
 
-/// Whether a link still owes its boards a read, and which link a sweep is for.
-///
-/// A new link clears it; a sweep that read the repositories sets it. When the
-/// runner's build lands on a link whose sweep was refused for want of it,
-/// the boards are read then: a sweep started before the build was known
-/// refused every board (it cannot know the runner keeps one), and without
-/// this the overview's rows would go on showing what the previous link read
-/// until some board happened to move. The first `host` read on a new link
-/// failing is exactly when that happens — a reconnect over a link still
-/// coming up.
-///
-/// Only a refused sweep is owed. Every link-up reads the build and then
-/// sweeps, so a build landing with no sweep refused yet has one on its way;
-/// sweeping for it too read every board twice on every connect.
-///
-/// And a sweep belongs to its link: `link` is bumped by each new one, and a
-/// sweep that finds itself no longer `isCurrent` stops, rather than reading
-/// on over the new link beside that link's own sweep.
+/// The current link's board sweep state, projected by the shared board model.
 public struct BoardSweep: Equatable, Sendable {
-    public private(set) var sweptOnThisLink = false
-    public private(set) var refusedOnThisLink = false
-    public private(set) var link = 0
+    private struct State: Decodable, Equatable, Sendable {
+        var link = 0
+        var swept = false
+        var refused = false
+        var owed = false
+    }
+
+    private var state = State()
+    public var link: Int { state.link }
+    public var sweptOnThisLink: Bool { state.swept }
+    public var refusedOnThisLink: Bool { state.refused }
+    public var owedWhenBuildLands: Bool { state.owed }
 
     public init() {}
 
-    /// A new link: its boards have not been read on it, and a sweep still
-    /// going from the last one is no longer current.
-    public mutating func linkCameUp() {
-        sweptOnThisLink = false
-        refusedOnThisLink = false
-        link += 1
-    }
-
-    /// This link's boards were read.
-    public mutating func swept() { sweptOnThisLink = true }
-
-    /// A sweep on this link found no build to say whether the runner keeps a
-    /// board, and read nothing.
-    public mutating func refused() { refusedOnThisLink = true }
-
-    /// Whether the build landing now should start a sweep.
-    public var owedWhenBuildLands: Bool { refusedOnThisLink && !sweptOnThisLink }
-
-    /// Whether a sweep started on `link` is still this link's.
+    public mutating func linkCameUp() { advance("link") }
+    public mutating func swept() { advance("swept") }
+    public mutating func refused() { advance("refused") }
     public func isCurrent(_ link: Int) -> Bool { link == self.link }
+
+    private mutating func advance(_ event: String) {
+        let next: State? = TaskBoardPresenter.ask("sweep", [
+            "event": event,
+            "sweep": ["link": state.link, "swept": state.swept, "refused": state.refused, "owed": state.owed],
+        ])
+        if let next { state = next }
+    }
 }
 
 extension TaskBoardModel {

@@ -95,9 +95,8 @@ private func fixture() throws -> Fixture {
 }
 
 private func row(_ task: AnyJSON) throws -> TaskRow {
-    let wire = try JSONDecoder().decode(WireTask.self, from: task.data)
-    let status = try #require(TaskStatus(rawValue: wire.status))
-    return wire.row(status: status)
+    let list = Data(("{\"tasks\":[" + String(decoding: task.data, as: UTF8.self) + "]}").utf8)
+    return try #require(try TaskBoardModel.decode(list).rows.first)
 }
 
 @Test func theFixtureHasCasesToCheck() throws {

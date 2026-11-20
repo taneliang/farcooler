@@ -26,9 +26,7 @@ public enum BoardDone {
     public static func shown(
         _ rows: [TaskRow], reads: BoardReads, keeping: String? = nil, now: Date, calendar: Calendar = .current
     ) -> [TaskRow] {
-        BoardSectionCut.project(rows, finished: true, keeping: keeping) {
-            reads.finishedUnread($0) || calendar.isDate($0.statusSince, inSameDayAs: now)
-        }.rows
+        BoardSectionCut.project(rows, finished: true, keeping: keeping, reads: reads, now: now, calendar: calendar).rows
     }
 }
 
@@ -45,7 +43,7 @@ public enum BoardSectionCut {
 
     static func project(
         _ rows: [TaskRow], finished: Bool, keeping: String? = nil, showingAll: Bool = false,
-        filtering: Bool = false, recent: (TaskRow) -> Bool = { _ in false }
+        filtering: Bool = false, reads: BoardReads? = nil, now: Date? = nil, calendar: Calendar = .current
     ) -> TaskBoardColumn.Cut {
         struct View: Decodable {
             let indices: [Int]
@@ -54,11 +52,13 @@ public enum BoardSectionCut {
         }
         var fields: [String: Any] = [
             "rows": rows.map { row -> [String: Any] in
-                ["id": row.id, "since": row.statusSince.timeIntervalSinceReferenceDate, "recent": recent(row)]
+                let today = finished && !filtering && now.map { calendar.isDate(row.statusSince, inSameDayAs: $0) } == true
+                return ["id": row.id, "since": row.statusSince.timeIntervalSinceReferenceDate, "status": row.status.rawValue, "today": today]
             },
             "finished": finished, "all": showingAll, "filtering": filtering,
         ]
         fields["keeping"] = keeping
+        fields["reads"] = reads?.viewInput
         guard let view: View = TaskBoardPresenter.ask("cut", fields) else {
             return TaskBoardColumn.Cut(rows: rows, hidden: 0, history: nil)
         }
@@ -89,8 +89,8 @@ extension TaskBoardColumn {
         reads: BoardReads, keeping: String? = nil, showingAll: Bool = false, filtering: Bool = false, now: Date,
         calendar: Calendar = .current
     ) -> Cut {
-        BoardSectionCut.project(rows, finished: status.isFinished, keeping: keeping, showingAll: showingAll, filtering: filtering) {
-            status.isFinished && (reads.finishedUnread($0) || calendar.isDate($0.statusSince, inSameDayAs: now))
-        }
+        BoardSectionCut.project(
+            rows, finished: status.isFinished, keeping: keeping, showingAll: showingAll, filtering: filtering,
+            reads: reads, now: now, calendar: calendar)
     }
 }

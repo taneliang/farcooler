@@ -43,7 +43,7 @@ func collapsedSectionsAreKeptPerBoard() throws {
 /// A board with no task anywhere is an empty state, not seven zero headers.
 @Test("A board with no task in any status is blank")
 func aBoardWithNothingOnItIsBlank() {
-    #expect(BoardForm.isBlank(TaskBoardModel.board(from: [])))
+    #expect(BoardForm.isBlank(TaskBoardModel.empty))
 }
 
 @Test("A board with one task, or one unplaceable row, is not blank")

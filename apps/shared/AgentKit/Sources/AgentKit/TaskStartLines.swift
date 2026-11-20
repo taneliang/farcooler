@@ -14,7 +14,7 @@ import Foundation
 // The two clock times are the exception, and are the user's locale's.
 
 /// Which of the board's two lines a waiting task is standing in.
-public enum TaskLine: String, Sendable, Hashable {
+public enum TaskLine: String, Decodable, Sendable, Hashable {
     /// Not started: the order tasks get a free agent in.
     case agent
     /// Started: the order tasks get the one build slot in.
@@ -22,7 +22,7 @@ public enum TaskLine: String, Sendable, Hashable {
 }
 
 /// What a task held for an event is waiting for.
-public enum TaskWaitEvent: String, Sendable, Hashable {
+public enum TaskWaitEvent: String, Decodable, Sendable, Hashable {
     case release
     case recurrence
     case clearBoard = "clear_board"
@@ -39,7 +39,7 @@ public enum TaskWait: Equatable, Sendable, Hashable {
 }
 
 /// What the runner knows of one subagent working a task.
-public enum TaskWorkerState: String, Sendable, Hashable {
+public enum TaskWorkerState: String, Decodable, Sendable, Hashable {
     case running
     /// Open, and the runner can't see it: only what was recorded.
     case unobserved
@@ -80,35 +80,34 @@ public struct TaskWorker: Equatable, Sendable, Hashable {
 
 /// How the subagent control reads: some are still at it, or the last one is
 /// done and the card hasn't moved.
-public enum SubagentState: Equatable, Sendable, Hashable {
+public enum SubagentState: String, Decodable, Equatable, Sendable, Hashable {
     case working
     case finished
     case stopped
 }
 
 extension TaskRow {
-    /// The subagents that are still open.
-    public var openWorkers: [TaskWorker] { workers.filter { $0.state.isOpen } }
-
-    /// The pane the subagents live in, for the control to open: the first
-    /// open worker's orchestrator, else the last one's.
-    public var orchestratorTerminalID: String? {
-        (openWorkers + workers.reversed()).compactMap(\.orchestratorTerminalID).first
+    var workerFields: [String: Any] {
+        ["workers": workers.map { worker -> [String: Any] in
+            var fields: [String: Any] = ["state": worker.state.rawValue]
+            fields["ended"] = worker.endedAt?.timeIntervalSinceReferenceDate
+            fields["orchestrator"] = worker.orchestratorTerminalID
+            return fields
+        }, "missing_stamp": Date.distantPast.timeIntervalSinceReferenceDate]
     }
 
-    /// What the Agent control says about subagents, or nil: only a started
-    /// card has them, and only when the runner recorded some.
-    ///
-    /// Open ones count; with none open the one most recently closed stands
-    /// for the work, because a card still In Progress after its subagent
-    /// finished is the orchestrator reviewing or landing it.
-    var subagentPresence: TaskAgentPresence? {
-        guard status == .inProgress, !workers.isEmpty else { return nil }
-        let open = openWorkers
-        if !open.isEmpty { return .subagents(open.count, .working) }
-        let last = workers.max { ($0.endedAt ?? .distantPast) < ($1.endedAt ?? .distantPast) }
-        return .subagents(1, last?.state == .stopped ? .stopped : .finished)
+    private struct WorkerView: Decodable {
+        let open: [Int]
+        let last: Int?
+        let orchestrator: String?
     }
+
+    private var workerView: WorkerView? {
+        TaskBoardPresenter.ask("workers", workerFields)
+    }
+
+    public var openWorkers: [TaskWorker] { workerView?.open.map { workers[$0] } ?? [] }
+    public var orchestratorTerminalID: String? { workerView?.orchestrator }
 
     /// The card's quiet second line about when it starts and who's on it, or
     /// nil. Sentence case; body text, never a control.
@@ -170,7 +169,8 @@ extension TaskRow {
     }
 
     private func workerSentence(at now: Date) -> String? {
-        let open = openWorkers
+        guard let view = workerView else { return nil }
+        let open = view.open.map { workers[$0] }
         if open.count > 1 { return "\(open.count) subagents working" }
         if let worker = open.first {
             let who = TaskRow.harnessWord(worker.harness)
@@ -185,8 +185,8 @@ extension TaskRow {
             if !worker.doing.isEmpty { line += " · \(worker.doing)" }
             return line
         }
-        guard let last = workers.max(by: { ($0.endedAt ?? .distantPast) < ($1.endedAt ?? .distantPast) })
-        else { return nil }
+        guard let index = view.last else { return nil }
+        let last = workers[index]
         let verb = last.state == .stopped ? "stopped" : "finished"
         guard let ended = last.endedAt else { return "Subagent \(verb)" }
         return "Subagent \(verb) \(TaskRow.ago(from: ended, to: now))"
@@ -263,65 +263,48 @@ extension TaskRow {
     }
 }
 
-// ---------------------------------------------------------------------------
-// The wire
-//
-// `"wait"`, `"waiting_on"` and `"workers"` on a row, as `task_starts_json`
-// writes them. Decoded leniently, by `WireTask`'s rule: a row from an older
-// runner has none of them, and one a newer runner words differently loses the
-// piece it can't read, never the board.
-// ---------------------------------------------------------------------------
-
-/// A row's `"wait"` object.
+/// The shared board projection’s wait value.
 struct WireWait: Decodable {
     var kind: String
-    var line: String?
+    var line: TaskLine?
     var position: Int?
     var until: Int64?
-    var event: String?
+    var event: TaskWaitEvent?
 
     var wait: TaskWait? {
         switch kind {
         case "in_line":
-            guard let line = TaskLine(rawValue: line ?? "") else { return nil }
+            guard let line else { return nil }
             return .inLine(line, position: position ?? 0)
         case "until":
-            guard let until, until > 0 else { return nil }
+            guard let until else { return nil }
             return .until(Date(timeIntervalSince1970: Double(until) / 1000))
         case "after":
-            return TaskWaitEvent(rawValue: event ?? "").map(TaskWait.after)
+            return event.map(TaskWait.after)
         case "parked": return .parked
         default: return nil
         }
     }
 }
 
-/// One entry of a row's `"workers"`.
+/// A worker in the shared board projection.
 struct WireWorker: Decodable {
     var harness: String
-    var state: String
+    var state: TaskWorkerState
     var startedAt: Int64?
     var endedAt: Int64?
-    var doing: String?
+    var doing: String
     var orchestratorTerminal: String?
-    var model: String?
-
-    enum CodingKeys: String, CodingKey {
-        case harness, state, doing, model
-        case startedAt = "started_at"
-        case endedAt = "ended_at"
-        case orchestratorTerminal = "orchestrator_terminal"
-    }
+    var model: String
 
     private static func date(_ ms: Int64?) -> Date? {
-        ms.flatMap { $0 > 0 ? Date(timeIntervalSince1970: Double($0) / 1000) : nil }
+        ms.map { Date(timeIntervalSince1970: Double($0) / 1000) }
     }
 
-    /// An unknown state is `unobserved`: open, and nothing more is claimed.
     var worker: TaskWorker {
         TaskWorker(
-            harness: harness, state: TaskWorkerState(rawValue: state) ?? .unobserved,
-            startedAt: Self.date(startedAt), endedAt: Self.date(endedAt), doing: doing ?? "",
-            orchestratorTerminalID: orchestratorTerminal, model: model ?? "")
+            harness: harness, state: state,
+            startedAt: Self.date(startedAt), endedAt: Self.date(endedAt), doing: doing,
+            orchestratorTerminalID: orchestratorTerminal, model: model)
     }
 }

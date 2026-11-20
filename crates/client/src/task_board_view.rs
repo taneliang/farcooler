@@ -101,34 +101,226 @@ fn clock(status: Status, now: f64, since: f64, created: Option<f64>, updated: Op
 }
 
 #[derive(Serialize)]
-struct Column {
+struct Column<T> {
     status: &'static str,
-    indices: Vec<usize>,
+    rows: Vec<T>,
 }
 
 #[derive(Serialize)]
-struct Board {
-    columns: Vec<Column>,
-    unreadable: Vec<usize>,
+struct Board<T, U> {
+    columns: Vec<Column<T>>,
+    unreadable: Vec<U>,
 }
 
-/// Project by index so the adapters retain the original task payload and decode
-/// only native data types (dates, worker handles and wait types). Repeated IDs
-/// are separate rows, and order within a column is the runner's order.
-fn board(statuses: &[Value]) -> Board {
-    let mut columns: Vec<_> = STATUSES.iter().map(|status| Column {
-        status: status.wire, indices: Vec::new(),
-    }).collect();
-    let mut unreadable = Vec::new();
-    for (index, status) in statuses.iter().enumerate() {
-        let Some(status) = status.as_str() else { continue };
-        if let Some(column) = columns.iter_mut().find(|column| column.status == status) {
-            column.indices.push(index);
+fn columns<T>() -> Vec<Column<T>> {
+    STATUSES.iter().map(|status| Column { status: status.wire, rows: Vec::new() }).collect()
+}
+
+#[derive(serde::Deserialize, Serialize)]
+struct RowIdentity {
+    id: String,
+    key: String,
+    title: String,
+    status: String,
+}
+
+#[derive(serde::Deserialize, Serialize)]
+struct AcceptanceLine {
+    id: String,
+    text: String,
+    met: bool,
+}
+
+#[derive(serde::Deserialize, Serialize)]
+struct Wait {
+    kind: String,
+    line: Option<String>,
+    position: Option<i64>,
+    until: Option<i64>,
+    event: Option<String>,
+}
+
+impl Wait {
+    fn readable(self) -> Option<Self> {
+        let mut view = Self { kind: self.kind, line: None, position: None, until: None, event: None };
+        match view.kind.as_str() {
+            "in_line" if matches!(self.line.as_deref(), Some("agent" | "build")) => {
+                view.line = self.line;
+                view.position = Some(self.position.unwrap_or_default());
+            }
+            "until" if self.until.is_some_and(|at| at > 0) => view.until = self.until,
+            "after" if matches!(self.event.as_deref(), Some("release" | "recurrence" | "clear_board")) => {
+                view.event = self.event;
+            }
+            "parked" => {}
+            _ => return None,
+        }
+        Some(view)
+    }
+}
+
+#[derive(serde::Deserialize, Serialize)]
+struct Worker {
+    harness: String,
+    state: String,
+    started_at: Option<i64>,
+    ended_at: Option<i64>,
+    doing: Option<String>,
+    orchestrator_terminal: Option<String>,
+    model: Option<String>,
+}
+
+impl Worker {
+    fn view(mut self) -> Self {
+        if !matches!(self.state.as_str(), "running" | "unobserved" | "finished" | "stopped") {
+            self.state = "unobserved".into();
+        }
+        self.started_at = self.started_at.filter(|at| *at > 0);
+        self.ended_at = self.ended_at.filter(|at| *at > 0);
+        self.doing.get_or_insert_with(String::new);
+        self.model.get_or_insert_with(String::new);
+        self
+    }
+}
+
+#[derive(Serialize)]
+struct BoardRow {
+    #[serde(flatten)]
+    identity: RowIdentity,
+    status_since: i64,
+    intent: String,
+    labels: Vec<String>,
+    constraints: Vec<String>,
+    acceptance: Vec<AcceptanceLine>,
+    worktree_id: Option<String>,
+    created_at: Option<i64>,
+    updated_at: Option<i64>,
+    workspace: Option<String>,
+    wait: Option<Wait>,
+    workers: Vec<Worker>,
+    waiting_on: Vec<String>,
+}
+
+// Android historically reads JSON primitives as text and skips incomplete
+// rows. Apple requires strings and rejects a malformed required field.
+fn android_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Number(_) | Value::Bool(_) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn integer(value: &Value, android: bool) -> Option<i64> {
+    value.as_i64().or_else(|| {
+        if android {
+            value.as_str()?.parse().ok()
         } else {
-            unreadable.push(index);
+            let n = value.as_f64()?;
+            (n.fract() == 0.0 && n >= i64::MIN as f64 && n < -(i64::MIN as f64)).then_some(n as i64)
+        }
+    })
+}
+
+fn array<T>(value: &Value, parse: impl Fn(&Value) -> Option<T>) -> Option<Vec<T>> {
+    if value.is_null() { Some(Vec::new()) } else { value.as_array()?.iter().map(parse).collect() }
+}
+
+fn parse<T: serde::de::DeserializeOwned>(value: &Value) -> Option<T> {
+    serde_json::from_value(value.clone()).ok()
+}
+
+impl BoardRow {
+    fn read(row: &Value, identity: RowIdentity, android: bool) -> Option<Self> {
+        let text = |key: &str| if android { android_text(&row[key]) } else { row[key].as_str().map(str::to_owned) };
+        let millis = |key: &str| integer(&row[key], android).filter(|at| *at > 0);
+        let text_list = |key: &str| {
+            if android {
+                Some(row[key].as_array().into_iter().flatten().filter_map(android_text).collect())
+            } else {
+                array(&row[key], |item| item.as_str().map(str::to_owned))
+            }
+        };
+        let status_since = integer(&row["status_since"], android);
+        let intent = text("intent");
+        let worktree_id = text("worktree_id");
+        if !android && ((status_since.is_none() && !row["status_since"].is_null())
+            || (intent.is_none() && !row["intent"].is_null())
+            || (worktree_id.is_none() && !row["worktree_id"].is_null()))
+        {
+            return None;
+        }
+        let acceptance = if android {
+            row["acceptance"].as_array().into_iter().flatten().filter_map(|item| Some(AcceptanceLine {
+                id: android_text(&item["id"])?,
+                text: android_text(&item["text"]).unwrap_or_default(),
+                met: item["met"].as_bool().or_else(|| item["met"].as_str()?.parse().ok()).unwrap_or(false),
+            })).collect()
+        } else {
+            array(&row["acceptance"], parse)?
+        };
+        let wait = if android {
+            let wait = &row["wait"];
+            android_text(&wait["kind"]).map(|kind| Wait {
+                kind, line: android_text(&wait["line"]), event: android_text(&wait["event"]),
+                position: integer(&wait["position"], true).filter(|n| i32::try_from(*n).is_ok()),
+                until: integer(&wait["until"], true),
+            })
+        } else {
+            parse(&row["wait"])
+        };
+        let workers = if android {
+            row["workers"].as_array().into_iter().flatten().filter(|worker| worker.is_object()).map(|worker| Worker {
+                harness: android_text(&worker["harness"]).unwrap_or_default(),
+                state: android_text(&worker["state"]).unwrap_or_default(),
+                started_at: integer(&worker["started_at"], true),
+                ended_at: integer(&worker["ended_at"], true),
+                doing: android_text(&worker["doing"]),
+                orchestrator_terminal: android_text(&worker["orchestrator_terminal"]),
+                model: android_text(&worker["model"]),
+            }).collect()
+        } else {
+            array(&row["workers"], parse).unwrap_or_default()
+        };
+        let waiting_on = if STATUSES.iter().any(|status| status.wire == identity.status && status.holds_blocks) {
+            text_list("waiting_on").unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        Some(Self {
+            identity, status_since: status_since.unwrap_or_default(), intent: intent.unwrap_or_default(),
+            labels: text_list("labels")?, constraints: if android { Vec::new() } else { text_list("constraints")? },
+            acceptance, worktree_id, created_at: millis("created_at"), updated_at: millis("updated_at"),
+            workspace: text("workspace"), wait: wait.and_then(Wait::readable),
+            workers: workers.into_iter().map(Worker::view).collect(), waiting_on,
+        })
+    }
+}
+
+/// Keep repeated IDs and the runner's order within a column.
+fn board(tasks: &[Value], android: bool) -> Option<Board<BoardRow, RowIdentity>> {
+    let mut columns = columns();
+    let mut unreadable = Vec::new();
+    for task in tasks {
+        let identity = if android {
+            let text = |key: &str| android_text(&task[key]);
+            (|| Some(RowIdentity { id: text("id")?, key: text("key")?, title: text("title")?, status: text("status")? }))()
+        } else {
+            parse(task)
+        };
+        let Some(identity) = identity else {
+            if android { continue; }
+            return None;
+        };
+        if let Some(column) = columns.iter_mut().find(|column| column.status == identity.status) {
+            column.rows.push(BoardRow::read(task, identity, android)?);
+        } else if android {
+            unreadable.push(identity);
+        } else {
+            unreadable.push(BoardRow::read(task, identity, false)?.identity);
         }
     }
-    Board { columns, unreadable }
+    Some(Board { columns, unreadable })
 }
 
 #[derive(Serialize)]
@@ -157,9 +349,10 @@ fn acceptance_words(met: i64, total: i64) -> String {
 #[derive(serde::Deserialize)]
 struct CutRow {
     id: String,
-    since: f64,
+    since: Value,
     #[serde(default)]
-    recent: bool,
+    today: bool,
+    status: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -169,14 +362,17 @@ struct Cut {
     history: Option<usize>,
 }
 
-fn cut(rows: &[CutRow], finished: bool, all: bool, filtering: bool, keeping: Option<&str>) -> Cut {
+fn cut(rows: &[CutRow], finished: bool, all: bool, filtering: bool, keeping: Option<&str>, reads: &Value) -> Cut {
     let total = rows.len();
     let mut indices: Vec<_> = (0..total).collect();
     if finished {
-        indices.sort_by(|&a, &b| rows[b].since.total_cmp(&rows[a].since));
+        indices.sort_by(|&a, &b| compare_stamps(&rows[b].since, &rows[a].since));
         if !filtering {
             indices = indices.into_iter().enumerate().filter_map(|(rank, index)| {
-                (rank < DONE_FLOOR || rows[index].recent || keeping == Some(&rows[index].id)).then_some(index)
+                let row = &rows[index];
+                let shown = rank < DONE_FLOOR || row.today || keeping == Some(&row.id)
+                    || finished_unread(row.status.as_deref(), &row.since, reads, &row.id);
+                shown.then_some(index)
             }).collect();
         }
         let history = (indices.len() < total).then_some(total);
@@ -348,20 +544,50 @@ fn runs_agent(preset: &str, changes: bool) -> bool {
     name != "shell" && !matches!(name.to_lowercase().as_str(), "sh" | "zsh" | "bash" | "fish" | "dash" | "ksh" | "-zsh")
 }
 
+#[derive(Serialize)]
+struct WorkerView<'a> {
+    open: Vec<usize>,
+    last: Option<usize>,
+    orchestrator: Option<&'a str>,
+}
+
+fn worker_view<'a>(workers: &'a [Value], missing_stamp: &Value) -> WorkerView<'a> {
+    let open: Vec<_> = workers.iter().enumerate().filter_map(|(index, worker)| {
+        matches!(worker["state"].as_str(), Some("running" | "unobserved")).then_some(index)
+    }).collect();
+    let orchestrator = open.iter().map(|&index| &workers[index]).chain(workers.iter().rev())
+        .find_map(|worker| worker["orchestrator"].as_str());
+    fn stamp<'a>(worker: &'a Value, missing_stamp: &'a Value) -> &'a Value {
+        worker.get("ended").filter(|at| at.is_number()).unwrap_or(missing_stamp)
+    }
+    // Reverse before max: both native implementations keep the first on ties.
+    let last = workers.iter().enumerate().rev()
+        .max_by(|(_, a), (_, b)| compare_stamps(stamp(a, missing_stamp), stamp(b, missing_stamp)))
+        .map(|(index, _)| index);
+    WorkerView { open, last, orchestrator }
+}
+
 fn agent_presence(asked: &Value) -> Option<Value> {
     let live = asked["live"].as_i64()?;
     if asked["recorded"] != true {
         return Some(json!({"kind": "unsaid"}));
     }
-    let subagents = asked["subagents"].as_i64().unwrap_or(0);
-    let state = &asked["state"];
+    let workers = asked["workers"].as_array().map_or(&[][..], Vec::as_slice);
+    let in_progress = asked["status"] == "in_progress";
+    let view = worker_view(workers, &asked["missing_stamp"]);
+    let open = if in_progress { view.open.len() } else { 0 };
     if live > 0 {
-        return Some(json!({"kind": "agents", "count": live + if state == "working" { subagents } else { 0 }}));
+        return Some(json!({"kind": "agents", "count": live + open as i64}));
     }
-    if subagents > 0 {
-        return Some(json!({"kind": "subagents", "count": subagents}));
+    if open > 0 {
+        return Some(json!({"kind": "subagents", "count": open, "state": "working"}));
     }
-    let kind = if asked["status"] == "in_progress" && asked["ranked"] != true { "no_agent" } else { "unsaid" };
+    if let Some(last) = view.last.filter(|_| in_progress) {
+        let state = if workers[last]["state"] == "stopped" { "stopped" } else { "finished" };
+        return Some(json!({"kind": "subagents", "count": 1, "state": state}));
+    }
+    let ranked = asked["line"] == "build" && asked["position"].as_i64().is_some_and(|position| position > 0);
+    let kind = if in_progress && !ranked { "no_agent" } else { "unsaid" };
     Some(json!({"kind": kind}))
 }
 
@@ -385,6 +611,14 @@ fn counted_words(count: i64, one: &str, many: impl FnOnce(i64) -> String) -> Opt
     }
 }
 
+fn decision_words(count: i64) -> Option<String> {
+    counted_words(count, "1 task needs a decision", |n| format!("{n} tasks need a decision"))
+}
+
+fn agents_words(count: i64) -> Option<String> {
+    counted_words(count, "An agent is on 1 task", |n| format!("Agents are on {n} tasks"))
+}
+
 fn agent_title(kind: &str, count: i64, android: bool) -> Option<String> {
     match (kind, count) {
         ("no_agent", _) => Some(if android { "No agent" } else { "No Agent" }.into()),
@@ -404,6 +638,55 @@ fn decision_count(items: &[Value], workspace: &str, implicit: bool) -> usize {
             item["workspace"] == workspace
         }
     }).count()
+}
+
+fn show_agents(asked: &Value) -> bool {
+    asked["connected"] == true && asked["recorded"] == true
+}
+
+#[derive(serde::Deserialize)]
+struct OverviewBoard<'a> {
+    id: &'a str,
+    repository: Option<&'a str>,
+    name: &'a str,
+    implicit: bool,
+    column: usize,
+    tasks: Vec<&'a str>,
+}
+
+#[derive(Serialize)]
+struct OverviewRow<'a> {
+    name: &'a str,
+    repository: &'a str,
+    repository_name: Option<&'a str>,
+    decisions: usize,
+    agents: usize,
+}
+
+fn overview(asked: &Value) -> Option<Vec<OverviewRow<'_>>> {
+    if asked["tasks_served"] != true {
+        return Some(Vec::new());
+    }
+    let boards: Vec<OverviewBoard<'_>> = serde::Deserialize::deserialize(&asked["boards"]).ok()?;
+    let names = asked["names"].as_object()?;
+    let decisions = asked["needs_you"].as_array().filter(|_| asked["decisions_served"] == true);
+    let panes = asked["panes"].as_array()?;
+    let live: HashSet<_> = if show_agents(asked) {
+        panes.iter().filter_map(live_task).collect()
+    } else {
+        HashSet::new()
+    };
+    Some(boards.into_iter().map(|board| {
+        let repository = board.repository.unwrap_or(board.id);
+        let repository_name = names.get(repository).and_then(Value::as_str);
+        OverviewRow {
+            repository,
+            repository_name: repository_name.filter(|_| !board.implicit),
+            name: if board.implicit { repository_name.unwrap_or(board.name) } else { board.name },
+            decisions: decisions.map_or(board.column, |items| decision_count(items, board.id, board.implicit)),
+            agents: board.tasks.iter().filter(|task| live.contains(*task)).count(),
+        }
+    }).collect())
 }
 
 fn repository_groups(repositories: &[Value], workspace_repositories: &[Value]) -> Vec<Value> {
@@ -445,6 +728,36 @@ fn newest_stamp(stamps: &[Value]) -> Option<Value> {
     stamps.iter().filter(|stamp| stamp.is_number()).max_by(|a, b| compare_stamps(a, b)).cloned()
 }
 
+fn finished_unread(status: Option<&str>, at: &Value, reads: &Value, id: &str) -> bool {
+    STATUSES.iter().any(|s| s.finished && Some(s.wire) == status)
+        && compare_stamps(at, &reads["floor"]).is_gt()
+        && compare_stamps(at, reads["opened"].get(id).unwrap_or(&reads["missing"])).is_gt()
+}
+
+#[derive(serde::Deserialize, Serialize)]
+struct BoardSweep {
+    link: i64,
+    swept: bool,
+    refused: bool,
+    owed: bool,
+}
+
+fn sweep(asked: &Value) -> Option<BoardSweep> {
+    let mut state: BoardSweep = parse(&asked["sweep"])?;
+    match asked["event"].as_str()? {
+        "link" => {
+            state.link = state.link.wrapping_add(1);
+            state.swept = false;
+            state.refused = false;
+        }
+        "swept" => state.swept = true,
+        "refused" => state.refused = true,
+        _ => return None,
+    }
+    state.owed = state.refused && !state.swept;
+    Some(state)
+}
+
 pub(crate) fn project(request: &Value) -> Option<Value> {
     if request["schema"].as_u64() != Some(1) {
         return None;
@@ -458,7 +771,7 @@ fn present(asked: &Value) -> Option<Value> {
             "day": DAY, "done_floor": DONE_FLOOR, "section_limit": SECTION_LIMIT, "live_states": LIVE_STATES,
         }),
         "statuses" => json!(STATUSES.map(|status| status.view(asked["android"] == true))),
-        "columns" => json!(board(asked["statuses"].as_array()?)),
+        "board" => json!(board(asked["tasks"].as_array()?, asked["android"] == true)?),
         "clock" => {
             let status = STATUSES.iter().find(|status| asked["status"] == status.wire)?;
             json!(clock(*status, asked["now"].as_f64()?, asked["since"].as_f64()?,
@@ -480,6 +793,9 @@ fn present(asked: &Value) -> Option<Value> {
             json!(opened)
         }
         "unread" => json!(compare_stamps(&asked["at"], &asked["mark"]).is_gt()),
+        "finished_unread" => json!(finished_unread(
+            asked["status"].as_str(), &asked["at"], &asked["reads"], asked["id"].as_str()?,
+        )),
         "waiting" => json!(waiting(asked["count"].as_i64()?)),
         "waiting_count" => {
             let key = if asked["read"] == true && asked["served"] == true { "decisions" } else { "column" };
@@ -488,6 +804,8 @@ fn present(asked: &Value) -> Option<Value> {
         "decision_count" => json!(decision_count(
             asked["items"].as_array()?, asked["workspace"].as_str()?, asked["implicit"] == true,
         )),
+        "overview" => json!(overview(asked)?),
+        "sweep" => json!(sweep(asked)?),
         "repository_groups" => json!(repository_groups(
             asked["repositories"].as_array()?, asked["workspace_repositories"].as_array()?,
         )),
@@ -496,7 +814,8 @@ fn present(asked: &Value) -> Option<Value> {
         "acceptance_words" => json!(acceptance_words(asked["met"].as_i64()?, asked["total"].as_i64()?)),
         "cut" => {
             let rows: Vec<CutRow> = serde_json::from_value(asked["rows"].clone()).ok()?;
-            json!(cut(&rows, asked["finished"] == true, asked["all"] == true, asked["filtering"] == true, asked["keeping"].as_str()))
+            json!(cut(&rows, asked["finished"] == true, asked["all"] == true,
+                asked["filtering"] == true, asked["keeping"].as_str(), &asked["reads"]))
         }
         "show_more" => {
             let word = if asked["android"] == true { "more" } else { "More" };
@@ -561,12 +880,21 @@ fn present(asked: &Value) -> Option<Value> {
             let live: HashSet<_> = asked["panes"].as_array()?.iter().filter_map(live_task).collect();
             json!(asked["tasks"].as_array()?.iter().filter_map(Value::as_str).filter(|task| live.contains(task)).count())
         }
-        "show_agents" => json!(asked["connected"] == true && asked["recorded"] == true),
+        "show_agents" => json!(show_agents(asked)),
+        "workers" => json!(worker_view(asked["workers"].as_array()?, &asked["missing_stamp"])),
         "agent_presence" => agent_presence(asked)?,
         "agent_title" => json!(agent_title(asked["kind"].as_str()?, asked["count"].as_i64()?, asked["android"] == true)),
         "closed_pane" => json!("That agent’s pane has closed."),
-        "decisions" => json!(counted_words(asked["count"].as_i64()?, "1 task needs a decision", |n| format!("{n} tasks need a decision"))),
-        "agents" => json!(counted_words(asked["count"].as_i64()?, "An agent is on 1 task", |n| format!("Agents are on {n} tasks"))),
+        "overview_spoken" => {
+            let parts = [
+                decision_words(asked["decisions"].as_i64()?),
+                agents_words(asked["agents"].as_i64()?),
+            ];
+            let sentence = parts.into_iter().flatten().collect::<Vec<_>>().join(", ");
+            json!((!sentence.is_empty()).then_some(sentence))
+        }
+        "decisions" => json!(decision_words(asked["count"].as_i64()?)),
+        "agents" => json!(agents_words(asked["count"].as_i64()?)),
         _ => return None,
     };
     Some(result)
@@ -644,13 +972,43 @@ mod tests {
 
     #[test]
     fn columns_keep_empty_columns_duplicates_and_unreadable_rows() {
-        let view = board(&[json!("done"), json!("new"), Value::Null, json!("done"), json!("needs_decision")]);
+        let row = |status, title| json!({"id": "same", "key": "ov-1", "title": title, "status": status});
+        let view = board(&[
+            row("done", "First"), row("new", "Unknown"), Value::Null,
+            row("done", "Second"), row("needs_decision", "Decision"),
+        ], true).unwrap();
         assert_eq!(view.columns.iter().map(|c| c.status).collect::<Vec<_>>(),
             ["needs_decision", "backlog", "todo", "in_progress", "in_review", "done", "cancelled"]);
-        assert_eq!(view.columns[0].indices, [4]);
-        assert!(view.columns[1].indices.is_empty());
-        assert_eq!(view.columns[5].indices, [0, 3]);
-        assert_eq!(view.unreadable, [1]);
+        assert_eq!(view.columns[0].rows[0].identity.title, "Decision");
+        assert!(view.columns[1].rows.is_empty());
+        assert_eq!(view.columns[5].rows.iter().map(|r| r.identity.title.as_str()).collect::<Vec<_>>(), ["First", "Second"]);
+        assert_eq!(view.unreadable[0].status, "new");
+    }
+
+    #[test]
+    fn wire_rows_preserve_platform_tolerance_and_hide_inapplicable_blockers() {
+        let mut row = json!({
+            "id": "a", "key": "ov-1", "title": "Check compatibility", "status": "todo",
+            "created_at": 0, "updated_at": "1000", "waiting_on": ["ov-2"],
+            "wait": {"kind": "unknown"}, "workers": [{"harness": "codex", "state": "new_state"}],
+        });
+        let apple = board(&[row.clone()], false).unwrap();
+        let card = &apple.columns[2].rows[0];
+        assert_eq!(card.created_at, None);
+        assert_eq!(card.updated_at, None);
+        assert_eq!(card.waiting_on, ["ov-2"]);
+        assert!(card.wait.is_none());
+        assert_eq!(card.workers[0].state, "unobserved");
+
+        row["status"] = json!("done");
+        row["workers"] = json!([{"ended_at": 500}]);
+        let android = board(&[row.clone(), json!({"id": "incomplete"})], true).unwrap();
+        let card = &android.columns[5].rows[0];
+        assert_eq!(card.updated_at, Some(1000));
+        assert!(card.waiting_on.is_empty());
+        assert_eq!(card.workers[0].harness, "");
+        assert_eq!(card.workers[0].ended_at, Some(500));
+        assert!(board(&[row, json!({"id": "incomplete"})], false).is_none());
     }
 
     #[test]
@@ -683,26 +1041,29 @@ mod tests {
     #[test]
     fn cuts_keep_unread_today_and_selection_in_stable_history_order() {
         let mut rows: Vec<_> = (0..12).map(|index| CutRow {
-            id: index.to_string(), since: (index / 2) as f64, recent: index == 1,
+            id: index.to_string(), since: json!(index / 2), today: index == 1, status: None,
         }).collect();
-        assert_eq!(cut(&rows, true, false, false, Some("0")).indices, [10, 11, 8, 0, 1]);
-        assert_eq!(cut(&rows, true, false, false, None).history, Some(12));
-        let in_progress = cut(&rows, false, false, false, Some("11"));
+        assert_eq!(cut(&rows, true, false, false, Some("0"), &Value::Null).indices, [10, 11, 8, 0, 1]);
+        rows[4].status = Some("done".into());
+        rows[5].status = Some("cancelled".into());
+        let reads = json!({"floor": 1, "opened": {"4": 2}});
+        assert_eq!(cut(&rows, true, false, false, None, &reads).indices, [10, 11, 8, 5, 1]);
+        assert_eq!(cut(&rows, true, false, false, None, &Value::Null).history, Some(12));
+        let in_progress = cut(&rows, false, false, false, Some("11"), &Value::Null);
         assert_eq!(in_progress.indices.last(), Some(&11));
         assert_eq!(in_progress.hidden, 1);
-        assert_eq!(cut(&rows, false, true, false, None).hidden, 0);
+        assert_eq!(cut(&rows, false, true, false, None, &Value::Null).hidden, 0);
         rows.truncate(2);
-        assert_eq!(cut(&rows, true, false, false, None).history, None);
+        assert_eq!(cut(&rows, true, false, false, None, &Value::Null).history, None);
     }
 
     #[test]
     fn agent_presence_preserves_waits_older_runners_and_working_subagents() {
-        let mut facts = json!({"live": 0, "recorded": true, "status": "in_progress", "ranked": true});
+        let mut facts = json!({"live": 0, "recorded": true, "status": "in_progress", "line": "build", "position": 1});
         assert_eq!(agent_presence(&facts).unwrap()["kind"], "unsaid");
-        facts["ranked"] = json!(false);
+        facts["position"] = json!(0);
         assert_eq!(agent_presence(&facts).unwrap()["kind"], "no_agent");
-        facts["subagents"] = json!(2);
-        facts["state"] = json!("working");
+        facts["workers"] = json!([{"state": "running"}, {"state": "unobserved"}]);
         facts["live"] = json!(1);
         assert_eq!(agent_presence(&facts).unwrap()["count"], 3);
         facts["recorded"] = json!(false);
@@ -710,6 +1071,25 @@ mod tests {
         assert!(runs_agent(":codex:default", false));
         assert!(!runs_agent("ZSH:login", false));
         assert!(!runs_agent("codex", true));
+    }
+
+    #[test]
+    fn subagent_projection_picks_the_first_latest_close_and_the_open_orchestrator() {
+        let workers = json!([
+            {"state": "stopped", "ended": 20, "orchestrator": "closed"},
+            {"state": "finished", "ended": 20},
+            {"state": "unobserved", "orchestrator": "open"},
+        ]);
+        let view = worker_view(workers.as_array().unwrap(), &json!(i64::MIN));
+        assert_eq!(view.open, [2]);
+        assert_eq!(view.last, Some(0));
+        assert_eq!(view.orchestrator, Some("open"));
+
+        let presence = agent_presence(&json!({
+            "live": 0, "recorded": true, "status": "in_progress", "workers": &workers.as_array().unwrap()[..2],
+        })).unwrap();
+        assert_eq!(presence["state"], "stopped");
+        assert_eq!(presence["count"], 1);
     }
 
     #[test]
@@ -731,6 +1111,42 @@ mod tests {
         ];
         assert_eq!(decision_count(&items, "main", false), 1);
         assert_eq!(decision_count(&items, "repo", true), 1);
+    }
+
+    #[test]
+    fn overview_keeps_board_rows_during_reconnect_but_hides_agent_counts() {
+        let mut request = json!({
+            "tasks_served": true, "decisions_served": true, "connected": false, "recorded": true,
+            "boards": [{
+                "id": "repo", "name": "Main", "implicit": true, "column": 2, "tasks": ["a"],
+            }],
+            "names": {"repo": "Billing"},
+            "panes": [{"task": "a", "state": "running", "agent": true}],
+        });
+        let rows = overview(&request).unwrap();
+        assert_eq!((rows[0].name, rows[0].decisions, rows[0].agents), ("Billing", 2, 0));
+        request["connected"] = json!(true);
+        request["needs_you"] = json!([]);
+        let rows = overview(&request).unwrap();
+        assert_eq!((rows[0].decisions, rows[0].agents), (0, 1));
+        request["tasks_served"] = json!(false);
+        assert!(overview(&request).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_board_sweep_is_owed_only_after_a_refusal_on_the_current_link() {
+        let mut request = json!({
+            "event": "refused", "sweep": {"link": 1, "swept": false, "refused": false, "owed": false},
+        });
+        let state = sweep(&request).unwrap();
+        assert!(state.owed);
+        request["sweep"] = json!(state);
+        request["event"] = json!("swept");
+        assert!(!sweep(&request).unwrap().owed);
+        request["event"] = json!("link");
+        let state = sweep(&request).unwrap();
+        assert_eq!(state.link, 2);
+        assert!(!state.refused && !state.swept && !state.owed);
     }
 
     #[test]

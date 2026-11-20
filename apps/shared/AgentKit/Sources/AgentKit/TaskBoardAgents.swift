@@ -64,7 +64,7 @@ public enum TaskAgentLink {
         return indices.map { panes[$0] }
     }
 
-    fileprivate static func paneInput(_ pane: any TaskBoardPane) -> [String: Any] {
+    static func paneInput(_ pane: any TaskBoardPane) -> [String: Any] {
         let task = pane.boardTaskID ?? ""
         return ["task": task, "state": pane.boardState, "agent": !task.isEmpty && pane.runsAgent]
     }
@@ -193,20 +193,22 @@ extension TaskRow {
         struct Presence: Decodable {
             let kind: String
             let count: Int?
+            let state: SubagentState?
         }
-        var fields: [String: Any] = [
-            "live": livePanes, "recorded": runnerRecordsTasks, "status": status.rawValue,
-        ]
-        if case .inLine(.build, let position)? = wait { fields["ranked"] = position > 0 }
-        let subagents = subagentPresence
-        if case .subagents(let count, let state)? = subagents {
-            fields["subagents"] = count
-            fields["state"] = state == .working ? "working" : "settled"
+        var fields = workerFields
+        fields["live"] = livePanes
+        fields["recorded"] = runnerRecordsTasks
+        fields["status"] = status.rawValue
+        if case .inLine(let line, let position)? = wait {
+            fields["line"] = line.rawValue
+            fields["position"] = position
         }
         let view: Presence? = TaskBoardPresenter.ask("agent_presence", fields)
         switch view?.kind {
         case "agents": return .agents(view?.count ?? livePanes)
-        case "subagents": return subagents ?? .unsaid
+        case "subagents":
+            guard let count = view?.count, let state = view?.state else { return .unsaid }
+            return .subagents(count, state)
         case "no_agent": return .noAgent
         default: return .unsaid
         }

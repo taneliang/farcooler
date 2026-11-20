@@ -10,15 +10,13 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.longOrNull
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -28,7 +26,7 @@ import kotlin.math.roundToLong
 
 /** Calls the shared task board view through the client-core presenter bridge. */
 internal object TaskBoardPresenter {
-    val json = Json { ignoreUnknownKeys = true }
+    val json = Json { ignoreUnknownKeys = true; classDiscriminator = "kind" }
 
     @Serializable
     data class Settings(
@@ -56,16 +54,19 @@ internal object TaskBoardPresenter {
     )
 
     @Serializable
-    data class Board(val columns: List<Column>, val unreadable: List<Int>) {
+    data class Board(val columns: List<Column>, val unreadable: List<UnreadableTaskRow>) {
         @Serializable
-        data class Column(val status: String, val indices: List<Int>)
+        data class Column(val status: TaskStatus, val rows: List<TaskRow>)
     }
 
     @Serializable
     data class Acceptance(val met: Int, val total: Int)
 
     @Serializable
-    data class Presence(val kind: String, val count: Int = 0)
+    data class Presence(val kind: String, val count: Int = 0, val state: SubagentState? = null)
+
+    @Serializable
+    data class Workers(val open: List<Int>, val last: Int?, val orchestrator: String?)
 
     @Serializable
     data class Cut(val indices: List<Int>, val hidden: Int, val history: Int?)
@@ -93,14 +94,15 @@ internal object TaskBoardPresenter {
     val byWire: Map<String, Status> by lazy { statuses.associateBy { it.wire } }
 }
 
+@Serializable
 enum class TaskStatus(val wire: String) {
-    NEEDS_DECISION("needs_decision"),
-    BACKLOG("backlog"),
-    TODO("todo"),
-    IN_PROGRESS("in_progress"),
-    IN_REVIEW("in_review"),
-    DONE("done"),
-    CANCELLED("cancelled");
+    @SerialName("needs_decision") NEEDS_DECISION("needs_decision"),
+    @SerialName("backlog") BACKLOG("backlog"),
+    @SerialName("todo") TODO("todo"),
+    @SerialName("in_progress") IN_PROGRESS("in_progress"),
+    @SerialName("in_review") IN_REVIEW("in_review"),
+    @SerialName("done") DONE("done"),
+    @SerialName("cancelled") CANCELLED("cancelled");
 
     val title: String get() = TaskBoardPresenter.byWire.getValue(wire).title
     val isFinished: Boolean get() = TaskBoardPresenter.byWire.getValue(wire).finished
@@ -113,6 +115,7 @@ enum class TaskStatus(val wire: String) {
 }
 
 /** One checkable thing, and whether it holds. */
+@Serializable
 data class TaskAcceptanceLine(val id: String, val text: String, val met: Boolean)
 
 /** How much of a card's acceptance holds. */
@@ -125,30 +128,31 @@ data class TaskAcceptanceProgress(val met: Int, val total: Int) {
 }
 
 /** One task, as a board draws it. */
+@Serializable
 data class TaskRow(
     val id: String,
     val key: String,
     val title: String,
     val status: TaskStatus,
     /** Unix milliseconds the task entered [status]. */
-    val statusSince: Long,
+    @SerialName("status_since") val statusSince: Long,
     val intent: String = "",
     val labels: List<String> = emptyList(),
     val acceptance: List<TaskAcceptanceLine> = emptyList(),
-    val worktreeId: String? = null,
+    @SerialName("worktree_id") val worktreeId: String? = null,
     /** Unix milliseconds the task was filed, or null from a runner too old to say. */
-    val createdAt: Long? = null,
+    @SerialName("created_at") val createdAt: Long? = null,
     /**
      * Unix milliseconds anything on the card last changed — a move, a note, an
      * edit — or null from a runner too old to say. Equal to [createdAt] on a
      * card nothing has happened to.
      */
-    val updatedAt: Long? = null,
+    @SerialName("updated_at") val updatedAt: Long? = null,
     /**
      * The board this task is on: its workspace's id, sent as `workspace`, or
      * null from a runner without `workstreams`.
      */
-    val workspaceId: String? = null,
+    @SerialName("workspace") val workspaceId: String? = null,
     /**
      * What it is waiting for before it starts (ov-212), or null: nothing said,
      * a runner without `task_waits`, or a word this build cannot read. Read
@@ -166,7 +170,7 @@ data class TaskRow(
      * Backlog, To Do and In Progress, the statuses a block holds back
      * ([holdsBlocks]).
      */
-    val blockedBy: List<String> = emptyList(),
+    @SerialName("waiting_on") val blockedBy: List<String> = emptyList(),
 ) {
     private fun clock(nowMs: Long): TaskBoardPresenter.Clock =
         TaskBoardPresenter.ask("clock", buildJsonObject {
@@ -202,21 +206,17 @@ data class TaskRow(
      * say": no control and no remark, never a guess.
      */
     fun agentPresence(livePanes: Int, runnerRecordsTasks: Boolean): TaskAgentPresence {
-        val subagents = subagentPresence() as? TaskAgentPresence.Subagents
         val ranked = wait as? TaskWait.InLine
-        val view: TaskBoardPresenter.Presence = TaskBoardPresenter.ask("agent_presence", buildJsonObject {
+        val view: TaskBoardPresenter.Presence = TaskBoardPresenter.ask("agent_presence", workerFields() + buildJsonObject {
             put("live", livePanes)
             put("recorded", runnerRecordsTasks)
             put("status", status.wire)
-            put("ranked", ranked?.line == TaskLine.BUILD && ranked.position > 0)
-            subagents?.let {
-                put("subagents", it.count)
-                put("state", it.state.name.lowercase())
-            }
+            put("line", ranked?.line?.wire)
+            ranked?.let { put("position", it.position) }
         })
         return when (view.kind) {
             "agents" -> TaskAgentPresence.Agents(view.count)
-            "subagents" -> checkNotNull(subagents)
+            "subagents" -> TaskAgentPresence.Subagents(view.count, requireNotNull(view.state))
             "no_agent" -> TaskAgentPresence.NoAgent
             else -> TaskAgentPresence.Unsaid
         }
@@ -239,6 +239,7 @@ data class TaskRow(
 }
 
 /** A row whose status word this build has no column for. Shown, never dropped. */
+@Serializable
 data class UnreadableTaskRow(val id: String, val key: String, val title: String, val status: String)
 
 /** One status's worth of rows, in the order the runner listed them. */
@@ -292,64 +293,10 @@ data class TaskBoard(
         /** Decode `task.list`'s answer. Throws only when it is not that shape at all. */
         fun decode(text: String): TaskBoard = decode(json.parseToJsonElement(text).jsonObject)
 
-        /**
-         * Decode `{"tasks": [...]}`. A row missing a field it cannot be drawn
-         * without is skipped, not fatal: one unreadable row must not cost the
-         * other forty.
-         */
         fun decode(body: JsonObject): TaskBoard {
             val tasks = body["tasks"] as? JsonArray ?: throw IllegalArgumentException("task.list.tasks")
-            val payloads = tasks.map { element ->
-                (element as? JsonObject)?.takeIf {
-                    listOf("id", "key", "title", "status").all { field -> it[field]?.jsonPrimitive?.contentOrNull != null }
-                }
-            }
-            val statuses = JsonArray(payloads.map { row ->
-                row?.get("status")?.jsonPrimitive?.contentOrNull?.let(::JsonPrimitive) ?: JsonNull
-            })
-            val view: TaskBoardPresenter.Board = TaskBoardPresenter.ask("columns", mapOf("statuses" to statuses))
-            val columns = view.columns.map { column ->
-                val status = requireNotNull(TaskStatus.parse(column.status))
-                TaskBoardColumn(status, column.indices.map { decodeRow(requireNotNull(payloads[it]), status) })
-            }
-            val unreadable = view.unreadable.map { index ->
-                val row = requireNotNull(payloads[index])
-                UnreadableTaskRow(row.getValue("id").jsonPrimitive.content, row.getValue("key").jsonPrimitive.content,
-                    row.getValue("title").jsonPrimitive.content, row.getValue("status").jsonPrimitive.content)
-            }
-            return TaskBoard(columns, unreadable)
-        }
-
-        private fun decodeRow(t: JsonObject, status: TaskStatus): TaskRow {
-            fun text(name: String) = t[name]?.jsonPrimitive?.contentOrNull
-            val acceptance = (t["acceptance"] as? JsonArray).orEmpty().mapNotNull { line ->
-                val o = line as? JsonObject ?: return@mapNotNull null
-                TaskAcceptanceLine(
-                    id = o["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null,
-                    text = o["text"]?.jsonPrimitive?.contentOrNull ?: "",
-                    met = o["met"]?.jsonPrimitive?.booleanOrNull ?: false,
-                )
-            }
-            return TaskRow(
-                id = requireNotNull(text("id")),
-                key = requireNotNull(text("key")),
-                title = requireNotNull(text("title")),
-                status = status,
-                statusSince = t["status_since"]?.jsonPrimitive?.longOrNull ?: 0L,
-                intent = text("intent") ?: "",
-                labels = (t["labels"] as? JsonArray).orEmpty()
-                    .mapNotNull { it.jsonPrimitive.contentOrNull },
-                acceptance = acceptance,
-                worktreeId = text("worktree_id"),
-                // Absent, `null`, or an older runner's zero: not said.
-                // No time line rather than "Added 56y ago".
-                createdAt = t["created_at"]?.jsonPrimitive?.longOrNull?.takeIf { it > 0 },
-                updatedAt = t["updated_at"]?.jsonPrimitive?.longOrNull?.takeIf { it > 0 },
-                workspaceId = text("workspace"),
-                wait = StartWire.wait(t["wait"]),
-                workers = StartWire.workers(t["workers"]),
-                blockedBy = if (holdsBlocks(status)) StartWire.waitingOn(t["waiting_on"]) else emptyList(),
-            )
+            val view: TaskBoardPresenter.Board = TaskBoardPresenter.ask("board", mapOf("tasks" to tasks))
+            return TaskBoard(view.columns.map { TaskBoardColumn(it.status, it.rows) }, view.unreadable)
         }
     }
 }
@@ -476,11 +423,10 @@ data class BoardRow(
      * What a screen reader says after the row's name: the counts in words, or
      * null. Joined with ", " as the iPhone joins them (`RunnerBoardRow.spoken`).
      */
-    val spoken: String?
-        get() {
-            val parts = listOfNotNull(decisionsSentence(decisions), agentsSentence(agents))
-            return if (parts.isEmpty()) null else parts.joinToString(", ")
-        }
+    val spoken: String? get() = TaskBoardPresenter.ask("overview_spoken", buildJsonObject {
+        put("decisions", decisions)
+        put("agents", agents)
+    })
 
     companion object {
         fun decisionsSentence(count: Int): String? =
@@ -521,26 +467,16 @@ object RunnerBoards {
         return found + missing.map { WorkspaceSummary(id = it, repository = notice.repository) }
     }
 
-    /**
-     * One runner's Board rows, in the order [boards] lists them.
-     *
-     * - A runner that does not advertise `tasks` has no board, and gets no rows;
-     *   nor does one no link has asked yet ([build] null).
-     * - A workspace gets a row whenever it exists, its board read or not and
-     *   empty or not (ov-56): the row is the way onto the board, and a
-     *   workspace made a moment ago has nothing on it yet. The board screen
-     *   draws the empty and unread states.
-     * - An implicit board — a repository's, on a runner without workspaces —
-     *   gets a row the same way, empty or unread (ov-55, spec §5 and §8). It
-     *   used to need something on it; but the workspace view treats it as a
-     *   workspace, and an empty one with no row could never be opened.
-     * - [BoardRow.agents] is counted only where [TaskAgentLink.speaksOfAgents]
-     *   holds; anywhere else it is 0, which draws nothing — "can't say".
-     * - A workspace's row is called by its name; an implicit one's by its
-     *   repository's, from [repositories], as the row always was.
-     *
-     * [models] are the last good reads, by workspace id.
-     */
+    @Serializable
+    private data class OverviewRow(
+        val name: String,
+        val repository: String,
+        @SerialName("repository_name") val repositoryName: String?,
+        val decisions: Int,
+        val agents: Int,
+    )
+
+    /** One runner's Board rows, in the order the runner lists the boards. */
     fun rows(
         hostId: String,
         boards: List<WorkspaceSummary>,
@@ -550,22 +486,28 @@ object RunnerBoards {
         build: DaemonBuild?,
         link: RunnerLink,
     ): List<BoardRow> {
-        if (build?.can(Capability.TASKS) != true) return emptyList()
-        val speaks = TaskAgentLink.speaksOfAgents(link, build)
-        val names = repositories.associate { it.id to it.displayName.ifEmpty { it.short } }
-        return boards.map { workspace ->
-            val board = models[workspace.id]
-            val repository = workspace.repository ?: workspace.id
-            val repositoryName = names[repository]
-            BoardRow(
-                hostId = hostId,
-                repository = repository,
-                name = if (workspace.isImplicit) repositoryName ?: workspace.name else workspace.name,
-                decisions = board?.waitingOnYou ?: 0,
-                agents = if (speaks && board != null) board.tasksWithLiveAgents(panes) else 0,
-                workspace = workspace,
-                repositoryName = if (workspace.isImplicit) null else repositoryName,
-            )
+        val view: List<OverviewRow> = TaskBoardPresenter.ask("overview", buildJsonObject {
+            put("tasks_served", build?.can(Capability.TASKS) == true)
+            put("connected", link == RunnerLink.ANSWERING)
+            put("recorded", build?.can(Capability.TERMINAL_TASK) == true)
+            put("panes", JsonArray(panes.map(TaskAgentLink::paneInput)))
+            put("names", JsonObject(repositories.associate { it.id to JsonPrimitive(it.displayName.ifEmpty { it.short }) }))
+            put("boards", buildJsonArray {
+                boards.forEach { workspace ->
+                    val board = models[workspace.id]
+                    add(buildJsonObject {
+                        put("id", workspace.id)
+                        put("repository", workspace.repository)
+                        put("name", workspace.name)
+                        put("implicit", workspace.isImplicit)
+                        put("column", board?.waitingOnYou ?: 0)
+                        put("tasks", JsonArray(board?.rows.orEmpty().map { JsonPrimitive(it.id) }))
+                    })
+                }
+            })
+        })
+        return view.mapIndexed { index, row ->
+            BoardRow(hostId, row.repository, row.name, row.decisions, row.agents, boards[index], row.repositoryName)
         }
     }
 
@@ -614,47 +556,29 @@ object RunnerBoards {
     )
 }
 
-/**
- * Whether a link still owes its boards a read, and which link a sweep is for.
- * The iPhone's `BoardSweep`, and the same rules.
- *
- * A new link clears it; a sweep that read the repositories sets it. When the
- * runner's build lands on a link whose sweep was refused for want of it —
- * its first `host` read failed and a later poll installed it — the boards are
- * read then, rather than never on that link. Only a refused sweep is owed:
- * every link-up reads the build and then sweeps, so sweeping when the build
- * lands as well read every board twice on every connect.
- *
- * And a sweep belongs to its link: [link] moves with each new one, and a
- * sweep no longer [isCurrent] stops rather than read on over the new link.
- */
+/** The current link's board sweep state, projected by the shared board model. */
 class BoardSweep {
-    var sweptOnThisLink: Boolean = false
-        private set
-    var refusedOnThisLink: Boolean = false
-        private set
-    var link: Int = 0
-        private set
+    @Serializable
+    private data class State(val link: Int = 0, val swept: Boolean = false, val refused: Boolean = false, val owed: Boolean = false)
 
-    fun linkCameUp() {
-        sweptOnThisLink = false
-        refusedOnThisLink = false
-        link += 1
-    }
+    private val json = Json { encodeDefaults = true }
+    private var state = State()
+    val link: Int get() = state.link
+    val sweptOnThisLink: Boolean get() = state.swept
+    val refusedOnThisLink: Boolean get() = state.refused
+    val owedWhenBuildLands: Boolean get() = state.owed
 
-    fun swept() {
-        sweptOnThisLink = true
-    }
-
-    /** A sweep on this link could not read, and read nothing. */
-    fun refused() {
-        refusedOnThisLink = true
-    }
-
-    val owedWhenBuildLands: Boolean get() = refusedOnThisLink && !sweptOnThisLink
-
-    /** Whether a sweep started on [link] is still this link's. */
+    fun linkCameUp() = advance("link")
+    fun swept() = advance("swept")
+    fun refused() = advance("refused")
     fun isCurrent(link: Int): Boolean = link == this.link
+
+    private fun advance(event: String) {
+        state = TaskBoardPresenter.ask("sweep", buildJsonObject {
+            put("sweep", json.encodeToJsonElement(state))
+            put("event", event)
+        })
+    }
 }
 
 /**
@@ -671,14 +595,22 @@ data class BoardReads(val floorMs: Long, val opened: Map<String, Long> = emptyMa
     fun isUnread(taskId: String, atMs: Long): Boolean =
         TaskBoardPresenter.ask("unread", mapOf("at" to JsonPrimitive(atMs), "mark" to JsonPrimitive(mark(taskId))))
 
-    fun finishedUnread(row: TaskRow): Boolean = row.status.isFinished && isUnread(row.id, row.statusSince)
+    internal fun viewInput() = buildJsonObject {
+        put("floor", floorMs)
+        put("opened", JsonObject(opened.mapValues { JsonPrimitive(it.value) }))
+    }
+
+    fun finishedUnread(row: TaskRow): Boolean = TaskBoardPresenter.ask("finished_unread", buildJsonObject {
+        put("status", row.status.wire)
+        put("at", row.statusSince)
+        put("id", row.id)
+        put("reads", viewInput())
+    })
 
     fun open(row: TaskRow, nowMs: Long, latestMs: Long? = null): BoardReads =
         copy(opened = opened + (row.id to readMark(nowMs, row.lastMovedMs, latestMs)))
 
-    fun pruned(): BoardReads = copy(opened = TaskBoardPresenter.ask("prune_marks", mapOf(
-        "floor" to JsonPrimitive(floorMs), "opened" to JsonObject(opened.mapValues { JsonPrimitive(it.value) }),
-    )))
+    fun pruned(): BoardReads = copy(opened = TaskBoardPresenter.ask("prune_marks", viewInput()))
 
     companion object {
         fun firstLook(nowMs: Long): BoardReads =
@@ -772,13 +704,8 @@ object BoardDone {
     fun newestFirst(rows: List<TaskRow>): List<TaskRow> =
         BoardSectionCut.project(rows, finished = true, filtering = true).rows
 
-    fun shown(rows: List<TaskRow>, reads: BoardReads, nowMs: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): List<TaskRow> {
-        val today = java.time.Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
-        return BoardSectionCut.project(rows, finished = true) { row ->
-            reads.finishedUnread(row) ||
-                java.time.Instant.ofEpochMilli(row.statusSince).atZone(zone).toLocalDate() == today
-        }.rows
-    }
+    fun shown(rows: List<TaskRow>, reads: BoardReads, nowMs: Long, zone: ZoneId = ZoneId.systemDefault()): List<TaskRow> =
+        BoardSectionCut.project(rows, finished = true, reads = reads, nowMs = nowMs, zone = zone).rows
 }
 
 /** How a section is cut for display. */
@@ -795,18 +722,23 @@ object BoardSectionCut {
         finished: Boolean,
         showingAll: Boolean = false,
         filtering: Boolean = false,
-        recent: (TaskRow) -> Boolean = { false },
+        reads: BoardReads? = null,
+        nowMs: Long = 0,
+        zone: ZoneId = ZoneId.systemDefault(),
     ): Cut {
+        val today = if (finished && !filtering) Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate() else null
         val view: TaskBoardPresenter.Cut = TaskBoardPresenter.ask("cut", buildJsonObject {
             put("finished", finished)
             put("all", showingAll)
             put("filtering", filtering)
+            reads?.let { put("reads", it.viewInput()) }
             put("rows", buildJsonArray {
                 rows.forEach { row ->
                     add(buildJsonObject {
                         put("id", row.id)
                         put("since", row.statusSince)
-                        put("recent", recent(row))
+                        put("status", row.status.wire)
+                        put("today", today != null && Instant.ofEpochMilli(row.statusSince).atZone(zone).toLocalDate() == today)
                     })
                 }
             })
@@ -819,15 +751,8 @@ object BoardSectionCut {
         reads: BoardReads,
         nowMs: Long,
         showingAll: Boolean = false,
-        zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
-    ): Cut {
-        if (!column.status.isFinished) return project(column.rows, finished = false, showingAll = showingAll)
-        val today = java.time.Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
-        return project(column.rows, finished = true) { row ->
-            reads.finishedUnread(row) ||
-                java.time.Instant.ofEpochMilli(row.statusSince).atZone(zone).toLocalDate() == today
-        }
-    }
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): Cut = project(column.rows, column.status.isFinished, showingAll, reads = reads, nowMs = nowMs, zone = zone)
 }
 
 /**

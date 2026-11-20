@@ -24,13 +24,13 @@ enum TaskBoardPresenter {
         let timeNote: String?
     }
 
-    struct Board: Decodable {
+    fileprivate struct Board: Decodable {
         struct Column: Decodable {
             let status: String
-            let indices: [Int]
+            let rows: [BoardCard]
         }
         let columns: [Column]
-        let unreadable: [Int]
+        let unreadable: [UnreadableTaskRow]
     }
 
     struct Answer<View: Decodable>: Decodable {
@@ -266,7 +266,7 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
 /// defaulting it to `backlog` reads a finished task as unstarted. So it is
 /// carried, with the word the runner used, and the board shows it under a
 /// heading that says this app is the one that is behind.
-public struct UnreadableTaskRow: Equatable, Sendable, Hashable, Identifiable {
+public struct UnreadableTaskRow: Decodable, Equatable, Sendable, Hashable, Identifiable {
     public var id: String
     public var key: String
     public var title: String
@@ -378,157 +378,56 @@ public struct RawTaskBlock: Equatable, Sendable, Decodable {
 // ---------------------------------------------------------------------------
 // Decoding
 //
-// Hand-written rather than synthesized, for the reason every model in this
-// tree that meets a runner is: Swift's synthesized `Decodable` throws on a
-// missing key, so one field added to the CLI's JSON after an app shipped would
-// fail the decode of the ENTIRE board and show "no tasks" for a repository
-// full of them. Everything past the four fields a board cannot draw without is
-// read with `decodeIfPresent`.
-// ---------------------------------------------------------------------------
-
 extension TaskBoardModel {
-    /// The board as `farcooler task list --json` sends it.
-    ///
-    /// Throws only when the payload is not that shape at all. A single row
-    /// missing a field it needs is skipped rather than fatal — see
-    /// `WireTask.row` — because one unreadable row must not cost the other
-    /// forty.
+    /// Projects the runner's task list into board columns and cards.
     public static func decode(_ data: Data) throws -> TaskBoardModel {
-        let list = try JSONDecoder().decode(WireTaskList.self, from: data)
-        return board(from: list.tasks)
-    }
-
-    /// Sort wire rows into columns, keeping the ones this build cannot place.
-    public static func board(from wire: [WireTask]) -> TaskBoardModel {
-        guard let view: TaskBoardPresenter.Board = TaskBoardPresenter.ask("columns", ["statuses": wire.map(\.status)])
-        else { return .empty }
-        let columns = view.columns.compactMap { column -> TaskBoardColumn? in
+        guard let body = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let tasks = body["tasks"] as? [Any],
+            let view: TaskBoardPresenter.Board = TaskBoardPresenter.ask("board", ["tasks": tasks])
+        else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        return TaskBoardModel(columns: view.columns.compactMap { column in
             guard let status = TaskStatus(rawValue: column.status) else { return nil }
-            return TaskBoardColumn(status: status, rows: column.indices.map { wire[$0].row(status: status) })
-        }
-        let unreadable = view.unreadable.map { index in
-            let row = wire[index]
-            return UnreadableTaskRow(id: row.id, key: row.key, title: row.title, status: row.status)
-        }
-        return TaskBoardModel(columns: columns, unreadable: unreadable)
+            return TaskBoardColumn(status: status, rows: column.rows.map { $0.render(status: status) })
+        }, unreadable: view.unreadable)
     }
 }
 
-/// `{"tasks": [...]}`, which is what `task list --json` prints.
-public struct WireTaskList: Decodable, Sendable {
-    public var tasks: [WireTask]
-}
+private struct BoardCard: Decodable {
+    let id: String
+    let key: String
+    let title: String
+    let statusSince: Int64
+    let intent: String
+    let labels: [String]
+    let constraints: [String]
+    let acceptance: [AcceptanceLine]
+    let worktreeId: String?
+    let createdAt: Int64?
+    let updatedAt: Int64?
+    let workspace: String?
+    let wait: WireWait?
+    let waitingOn: [String]
+    let workers: [WireWorker]
 
-/// One task exactly as the CLI spells it, before this app has an opinion.
-///
-/// A separate type from `TaskRow` on purpose: `status` here is the runner's
-/// word and may be one this build has never heard of, which `TaskRow.status`
-/// cannot represent and must not have to.
-public struct WireTask: Decodable, Sendable {
-    public var id: String
-    public var key: String
-    public var title: String
-    public var status: String
-    /// Unix milliseconds, from the wire.
-    public var statusSince: Int64
-    public var intent: String
-    public var labels: [String]
-    public var constraints: [String]
-    public var acceptance: [WireAcceptance]
-    public var worktreeID: String?
-    /// Unix milliseconds, or nil from a runner that did not say. Both absent
-    /// and `null` (what `tasks_json` sends for an older runner's zero) land
-    /// here as nil; so does a zero, for a producer that passed one through.
-    public var createdAt: Int64?
-    public var updatedAt: Int64?
-    /// The board, as `workspace`: the key `tasks_json` writes for both
-    /// producers. Nil from a runner without `workstreams`.
-    public var workspaceID: String?
-    /// What it waits for before it starts; nil from a runner without
-    /// `task_waits`, or for a word this build can't read.
-    var wait: TaskWait?
-    /// The keys of the blockers still open.
-    var waitingOn: [String]
-    var workers: [TaskWorker]
-
-    enum CodingKeys: String, CodingKey {
-        case id, key, title, status, intent, labels, constraints, acceptance, wait, workers
-        case statusSince = "status_since"
-        case worktreeID = "worktree_id"
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
-        case workspaceID = "workspace"
-        case waitingOn = "waiting_on"
+    struct AcceptanceLine: Decodable {
+        let id: String
+        let text: String
+        let met: Bool
     }
 
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        // The four a card cannot be drawn without. A row missing one of these
-        // is a row from a producer this app does not understand at all.
-        id = try c.decode(String.self, forKey: .id)
-        key = try c.decode(String.self, forKey: .key)
-        title = try c.decode(String.self, forKey: .title)
-        status = try c.decode(String.self, forKey: .status)
-        // Everything else defaults. A zero `status_since` is the epoch, which
-        // reads as very stale — correct for a runner that would not say, and
-        // loud rather than quiet, which is the right direction to fail in for
-        // a value whose whole job is to make a stopped task visible.
-        statusSince = try c.decodeIfPresent(Int64.self, forKey: .statusSince) ?? 0
-        intent = try c.decodeIfPresent(String.self, forKey: .intent) ?? ""
-        labels = try c.decodeIfPresent([String].self, forKey: .labels) ?? []
-        constraints = try c.decodeIfPresent([String].self, forKey: .constraints) ?? []
-        acceptance = try c.decodeIfPresent([WireAcceptance].self, forKey: .acceptance) ?? []
-        worktreeID = try c.decodeIfPresent(String.self, forKey: .worktreeID)
-        // Unlike `status_since`, a missing clock here is quiet rather than
-        // loud: the worst a card without it does is carry no time line, and
-        // 1970 would be "Added 56y ago" on every card of an older runner.
-        //
-        // And a malformed one — a string, a fraction — costs only the time,
-        // never the board: `try?` rather than `try`, which Android's
-        // `longOrNull` already does. A synthesized throw here would fail
-        // `WireTaskList` and show "no tasks" over a line nobody needed.
-        createdAt = ((try? c.decodeIfPresent(Int64.self, forKey: .createdAt)) ?? nil)
-            .flatMap { $0 > 0 ? $0 : nil }
-        updatedAt = ((try? c.decodeIfPresent(Int64.self, forKey: .updatedAt)) ?? nil)
-            .flatMap { $0 > 0 ? $0 : nil }
-        // `try?` for the reason the clocks use it: a malformed board id costs
-        // the row its board, never the board its rows.
-        workspaceID = (try? c.decodeIfPresent(String.self, forKey: .workspaceID)) ?? nil
-        // Each of the three `try?`, for the same reason: a runner that words
-        // one differently costs the row that piece, never the board.
-        wait = ((try? c.decodeIfPresent(WireWait.self, forKey: .wait)) ?? nil)?.wait
-        waitingOn = (try? c.decodeIfPresent([String].self, forKey: .waitingOn)) ?? []
-        workers =
-            ((try? c.decodeIfPresent([WireWorker].self, forKey: .workers)) ?? nil)?
-            .map(\.worker) ?? []
+    func render(status: TaskStatus) -> TaskRow {
+        func date(_ ms: Int64) -> Date { Date(timeIntervalSince1970: Double(ms) / 1000) }
+        return TaskRow(
+            id: id, key: key, title: title, status: status, statusSince: date(statusSince),
+            intent: intent, labels: labels,
+            acceptance: acceptance.map { TaskAcceptanceLine(id: $0.id, text: $0.text, met: $0.met) },
+            constraints: constraints, worktreeID: worktreeId,
+            blockedBy: waitingOn.map { TaskBlockRef(key: $0, reason: "") },
+            createdAt: createdAt.map(date), updatedAt: updatedAt.map(date),
+            workspaceID: workspace, wait: wait?.wait, workers: workers.map(\.worker))
     }
-
-    /// This wire row as a card, given the status it was placed under.
-    func row(status: TaskStatus) -> TaskRow {
-        TaskRow(
-            id: id,
-            key: key,
-            title: title,
-            status: status,
-            statusSince: Date(timeIntervalSince1970: Double(statusSince) / 1000),
-            intent: intent,
-            labels: labels,
-            acceptance: acceptance.map {
-                TaskAcceptanceLine(id: $0.id, text: $0.text, met: $0.met)
-            },
-            constraints: constraints,
-            worktreeID: worktreeID,
-            blockedBy: TaskRow.holdsBlocks(status) ? waitingOn.map { TaskBlockRef(key: $0, reason: "") } : [],
-            createdAt: createdAt.map { Date(timeIntervalSince1970: Double($0) / 1000) },
-            updatedAt: updatedAt.map { Date(timeIntervalSince1970: Double($0) / 1000) },
-            workspaceID: workspaceID, wait: wait, workers: workers)
-    }
-}
-
-public struct WireAcceptance: Decodable, Sendable {
-    public var id: String
-    public var text: String
-    public var met: Bool
 }
 
 // ---------------------------------------------------------------------------

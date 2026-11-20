@@ -109,7 +109,7 @@ public struct WorkspaceSummary: Identifiable, Equatable, Hashable, Sendable, Dec
         case lead
     }
 
-    /// Hand-written for `WireTask`'s reason: a key added or dropped by a
+    /// Hand-written so a key added or dropped by a
     /// later runner must cost a field, never the whole fleet. Only `id` is
     /// required; a workspace with no id cannot be grouped under anything.
     public init(from decoder: Decoder) throws {

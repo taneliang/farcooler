@@ -130,7 +130,7 @@ private func row(
 
 /// Tasks moving, not panes: two agents on one card are one card moving.
 @Test func theSidebarCountsTasksWithAnAgentNotAgents() {
-    let board = TaskBoardModel.board(from: [])
+    let board = TaskBoardModel.empty
     #expect(board.tasksWithLiveAgents(in: [Pane(boardTaskID: task)]) == 0)
 
     let a = row(id: task, status: .inProgress)

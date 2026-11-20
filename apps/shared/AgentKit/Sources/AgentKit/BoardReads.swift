@@ -26,7 +26,10 @@ public struct BoardReads: Equatable, Sendable {
     }
 
     public func finishedUnread(_ row: TaskRow) -> Bool {
-        row.status.isFinished && isUnread(row.id, at: row.statusSince)
+        TaskBoardPresenter.ask("finished_unread", [
+            "status": row.status.rawValue, "at": row.statusSince.timeIntervalSinceReferenceDate,
+            "id": row.id, "reads": viewInput,
+        ]) ?? false
     }
 
     public mutating func open(_ row: TaskRow, latest: Date? = nil, now: Date) {
@@ -38,10 +41,16 @@ public struct BoardReads: Equatable, Sendable {
         opened = [:]
     }
 
+    var viewInput: [String: Any] {
+        [
+            "floor": floor.timeIntervalSinceReferenceDate,
+            "opened": opened.mapValues(\.timeIntervalSinceReferenceDate),
+            "missing": Date.distantPast.timeIntervalSinceReferenceDate,
+        ]
+    }
+
     public func pruned() -> BoardReads {
-        let marks: [String: Double] = TaskBoardPresenter.ask("prune_marks", [
-            "floor": floor.timeIntervalSinceReferenceDate, "opened": opened.mapValues(\.timeIntervalSinceReferenceDate),
-        ]) ?? [:]
+        let marks: [String: Double] = TaskBoardPresenter.ask("prune_marks", viewInput) ?? [:]
         return BoardReads(floor: floor, opened: marks.mapValues(Date.init(timeIntervalSinceReferenceDate:)))
     }
 

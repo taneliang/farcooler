@@ -1,18 +1,16 @@
 package com.farcooler.model
 
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.time.temporal.ChronoUnit
 import java.util.Locale
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.longOrNull
 
 // When a card starts, who is working it, and the sentences that say so
 // (ov-212, ov-213).
@@ -29,84 +27,101 @@ import kotlinx.serialization.json.longOrNull
 // the user's locale's.
 
 /** Which of the board's two lines a waiting task is standing in. */
-enum class TaskLine(val wire: String) { AGENT("agent"), BUILD("build") }
+@Serializable
+enum class TaskLine(val wire: String) {
+    @SerialName("agent") AGENT("agent"),
+    @SerialName("build") BUILD("build"),
+}
 
 /** What a task held for an event is waiting for. */
+@Serializable
 enum class TaskWaitEvent(val wire: String) {
-    RELEASE("release"), RECURRENCE("recurrence"), CLEAR_BOARD("clear_board")
+    @SerialName("release") RELEASE("release"),
+    @SerialName("recurrence") RECURRENCE("recurrence"),
+    @SerialName("clear_board") CLEAR_BOARD("clear_board"),
 }
 
 /**
  * What a task is waiting for before it starts. A word this build does not
  * know is no wait at all (null on the row), never a guess.
  */
+@Serializable
 sealed interface TaskWait {
     /** [position] 1 is next; 0 is on the line with no rank yet. */
+    @Serializable
+    @SerialName("in_line")
     data class InLine(val line: TaskLine, val position: Int) : TaskWait
 
-    data class Until(val atMs: Long) : TaskWait
+    @Serializable
+    @SerialName("until")
+    data class Until(@SerialName("until") val atMs: Long) : TaskWait
 
+    @Serializable
+    @SerialName("after")
     data class After(val event: TaskWaitEvent) : TaskWait
 
+    @Serializable
+    @SerialName("parked")
     data object Parked : TaskWait
 }
 
 /** What the runner knows of one subagent working a task. */
+@Serializable
 enum class TaskWorkerState(val wire: String) {
-    RUNNING("running"),
+    @SerialName("running") RUNNING("running"),
 
     /** Open, and the runner can't see it: only what was recorded. */
-    UNOBSERVED("unobserved"),
-    FINISHED("finished"),
+    @SerialName("unobserved") UNOBSERVED("unobserved"),
+    @SerialName("finished") FINISHED("finished"),
 
     /** Failed, killed or stopped. */
-    STOPPED("stopped");
+    @SerialName("stopped") STOPPED("stopped");
 
     /** Still open: the orchestrator has not closed it out. */
     val isOpen: Boolean get() = this == RUNNING || this == UNOBSERVED
 }
 
 /** One subagent working a task from inside another agent's session. */
+@Serializable
 data class TaskWorker(
     val harness: String,
     val state: TaskWorkerState,
-    val startedAtMs: Long? = null,
-    val endedAtMs: Long? = null,
+    @SerialName("started_at") val startedAtMs: Long? = null,
+    @SerialName("ended_at") val endedAtMs: Long? = null,
     /** What it is doing right now, in the runner's words, or empty. */
     val doing: String = "",
     /** The pane its orchestrator runs in: where the subagent lives. */
-    val orchestratorTerminalId: String? = null,
+    @SerialName("orchestrator_terminal") val orchestratorTerminalId: String? = null,
     /** Its model, as the runner recorded it (`claude-opus-5-5`), or empty. */
     val model: String = "",
 )
 
 /** How the subagent control reads: some still at it, or the last one done. */
-enum class SubagentState { WORKING, FINISHED, STOPPED }
-
-/** The still-open subagents. */
-val TaskRow.openWorkers: List<TaskWorker> get() = workers.filter { it.state.isOpen }
-
-/** The pane the subagents live in, for the control to open. */
-val TaskRow.orchestratorTerminalId: String?
-    get() = (openWorkers + workers.reversed()).firstNotNullOfOrNull { it.orchestratorTerminalId }
-
-private fun TaskRow.lastClosed(): TaskWorker? = workers.maxByOrNull { it.endedAtMs ?: Long.MIN_VALUE }
-
-/**
- * What the Agent control says about subagents, or null: only a started card
- * has them, and only when the runner recorded some. Open ones count; with none
- * open the one most recently closed stands for the work, because a card still
- * In Progress after its subagent finished is the orchestrator reviewing it.
- */
-internal fun TaskRow.subagentPresence(): TaskAgentPresence? {
-    if (status != TaskStatus.IN_PROGRESS || workers.isEmpty()) return null
-    val open = openWorkers
-    if (open.isNotEmpty()) return TaskAgentPresence.Subagents(open.size, SubagentState.WORKING)
-    return TaskAgentPresence.Subagents(
-        1,
-        if (lastClosed()?.state == TaskWorkerState.STOPPED) SubagentState.STOPPED else SubagentState.FINISHED,
-    )
+@Serializable
+enum class SubagentState {
+    @SerialName("working") WORKING,
+    @SerialName("finished") FINISHED,
+    @SerialName("stopped") STOPPED,
 }
+
+internal fun TaskRow.workerFields() = buildJsonObject {
+    put("workers", buildJsonArray {
+        workers.forEach { worker ->
+            add(buildJsonObject {
+                put("state", worker.state.wire)
+                worker.endedAtMs?.let { put("ended", it) }
+                put("orchestrator", worker.orchestratorTerminalId)
+            })
+        }
+    })
+    put("missing_stamp", Long.MIN_VALUE)
+}
+
+private fun TaskRow.workerView(): TaskBoardPresenter.Workers =
+    TaskBoardPresenter.ask("workers", workerFields())
+
+val TaskRow.openWorkers: List<TaskWorker> get() = workerView().open.map(workers::get)
+val TaskRow.orchestratorTerminalId: String? get() = workerView().orchestrator
 
 /**
  * Whether a block holds a task in this status back. A task that is done,
@@ -192,7 +207,8 @@ private fun harnessWord(harness: String): String = when (harness) {
 }
 
 private fun TaskRow.workerSentence(nowMs: Long): String? {
-    val open = openWorkers
+    val view = workerView()
+    val open = view.open.map(workers::get)
     if (open.size > 1) return "${open.size} subagents working"
     val worker = open.firstOrNull()
     if (worker != null) {
@@ -206,7 +222,7 @@ private fun TaskRow.workerSentence(nowMs: Long): String? {
         if (worker.doing.isNotEmpty()) line += " · ${worker.doing}"
         return line
     }
-    val last = lastClosed() ?: return null
+    val last = view.last?.let(workers::get) ?: return null
     val verb = if (last.state == TaskWorkerState.STOPPED) "stopped" else "finished"
     val ended = last.endedAtMs ?: return "Subagent $verb"
     return "Subagent $verb ${agoWords(ended, nowMs)}"
@@ -260,47 +276,4 @@ internal fun whenWords(atMs: Long, nowMs: Long, zone: ZoneId, locale: Locale): S
         days == 1L -> "tomorrow at $clock"
         else -> DateTimeFormatter.ofPattern("EEE, MMM d", locale).format(at) + " at $clock"
     }
-}
-
-/** A row's `"wait"`, `"waiting_on"` and `"workers"`, as `task_starts_json` writes them. */
-internal object StartWire {
-    private fun JsonObject.text(name: String): String? =
-        (this[name] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull
-
-    private fun JsonObject.millis(name: String): Long? =
-        (this[name] as? kotlinx.serialization.json.JsonPrimitive)?.longOrNull?.takeIf { it > 0 }
-
-    /** Null for no wait, an older runner, or a word this build cannot read. */
-    fun wait(element: kotlinx.serialization.json.JsonElement?): TaskWait? {
-        val o = element as? JsonObject ?: return null
-        return when (o.text("kind")) {
-            "in_line" -> {
-                val line = TaskLine.entries.firstOrNull { it.wire == o.text("line") } ?: return null
-                TaskWait.InLine(line, (o["position"] as? kotlinx.serialization.json.JsonPrimitive)?.intOrNull ?: 0)
-            }
-            "until" -> o.millis("until")?.let(TaskWait::Until)
-            "after" -> TaskWaitEvent.entries.firstOrNull { it.wire == o.text("event") }?.let(TaskWait::After)
-            "parked" -> TaskWait.Parked
-            else -> null
-        }
-    }
-
-    fun waitingOn(element: kotlinx.serialization.json.JsonElement?): List<String> =
-        (element as? JsonArray).orEmpty().mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull }
-
-    /** An unknown state is `unobserved`: open, and nothing more is claimed. */
-    fun workers(element: kotlinx.serialization.json.JsonElement?): List<TaskWorker> =
-        (element as? JsonArray).orEmpty().mapNotNull {
-            val o = it as? JsonObject ?: return@mapNotNull null
-            TaskWorker(
-                harness = o.text("harness") ?: "",
-                state = TaskWorkerState.entries.firstOrNull { s -> s.wire == o.text("state") }
-                    ?: TaskWorkerState.UNOBSERVED,
-                startedAtMs = o.millis("started_at"),
-                endedAtMs = o.millis("ended_at"),
-                doing = o.text("doing") ?: "",
-                orchestratorTerminalId = o.text("orchestrator_terminal"),
-                model = o.text("model") ?: "",
-            )
-        }
 }

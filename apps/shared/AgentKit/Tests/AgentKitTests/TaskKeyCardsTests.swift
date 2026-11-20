@@ -9,7 +9,7 @@ import Testing
 @MainActor
 struct TaskKeyCardsTests {
     static func board(_ rows: [TaskRow]) -> TaskBoardModel {
-        TaskBoardModel.board(from: []).withRows(rows)
+        TaskBoardModel.empty.withRows(rows)
     }
 
     static func row(_ id: String, _ key: String, _ title: String, _ status: TaskStatus = .inProgress, intent: String = "")
