@@ -1312,6 +1312,15 @@ jobs:
       - run: ./scripts/gh-download-test.sh
 
       - run: ./scripts/macos-entitlements-test.sh "apps/macos/build/$APP_NAME.app"
+
+      # Exercise the test infrastructure on the bundle runner while the
+      # other Mac runs the guarded suites.
+      - run: ./scripts/wait-for-unlock-test.sh
+      - run: ./scripts/swift-test-guard-test.sh
+      - run: ./scripts/macos-test-partitions.py --self-test
+      - run: ./scripts/test-leak-check.py --self-test
+      - run: ./scripts/mac-capture-stop-test.sh
+      - run: ./scripts/capture-duplicates-test.sh
       - name: Record Swift input timestamps for the compilation cache
         run: python3 scripts/swift-build-cache.py save
 
@@ -1427,12 +1436,6 @@ jobs:
 
       # `apps/macos/test.sh` builds the Rust cores before the Mac tests (ov-134).
       - run: ./scripts/macos-test-wrapper-test.sh
-      - run: ./scripts/wait-for-unlock-test.sh
-      - run: ./scripts/swift-test-guard-test.sh
-      - run: ./scripts/macos-test-partitions.py --self-test
-      - run: ./scripts/test-leak-check.py --self-test
-      - run: ./scripts/mac-capture-stop-test.sh
-      - run: ./scripts/capture-duplicates-test.sh
 
       # Prepare tmux before the shared native build. The Swift suites need
       # the same FFI libraries and the Mac tests need a real CLI and daemon.
@@ -1942,8 +1945,20 @@ jobs:
           fi
           /usr/sbin/sshd -V 2>&1 | head -1
       - run: node scripts/size-gate.mjs --self-test
-      - run: ../../crates/web/build.sh --channel stable --out "$RUNNER_TEMP/wasm-stable"
-      - run: WEB_WASM_DIR="$RUNNER_TEMP/wasm-stable" ./build.sh --channel stable --build "$GITHUB_SHA"
+      - name: Build the stable bundle and provision Chromium in parallel
+        shell: bash
+        run: |
+          npx playwright-core install --with-deps --only-shell chromium &
+          chromium=$!
+          (
+            ../../crates/web/build.sh --channel stable --out "$RUNNER_TEMP/wasm-stable"
+            WEB_WASM_DIR="$RUNNER_TEMP/wasm-stable" ./build.sh --channel stable --build "$GITHUB_SHA"
+          ) &
+          bundle=$!
+          result=0
+          wait "$bundle" || result=1
+          wait "$chromium" || result=1
+          exit "$result"
       - run: node scripts/size-gate.mjs dist
       - run: npx wrangler deploy --dry-run --outdir /tmp/web-build
       - run: ../../crates/web/build.sh --channel canary --out "$RUNNER_TEMP/wasm-canary"
@@ -1951,7 +1966,6 @@ jobs:
       - run: node scripts/size-gate.mjs dist
       - run: npx wrangler deploy --dry-run --env canary --outdir /tmp/web-build-canary
       - run: cargo build --locked --manifest-path ../../crates/web/Cargo.toml --example fake_daemon
-      - run: npx playwright-core install --with-deps --only-shell chromium
       - run: node test/browser/plan-render-check.mjs
       - run: node test/browser/csp-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon --tunnel-delay 100
       - run: node test/browser/sleep-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon --engines chromium
