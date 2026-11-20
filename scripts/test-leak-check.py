@@ -296,8 +296,8 @@ def lint_rust(root):
 
 WIRING = (
     (".github/workflows/ci.yml", re.compile(r"test-leak-check\.py -- .*cargo (test|nextest run( --profile \S+)?) (?:--workspace|--no-fail-fast --archive-file)"), "the Rust workspace test"),
-    (".github/workflows/ci.yml", re.compile(r"test-leak-check\.py -- swift test --package-path apps/shared/AgentKit"), "the AgentKit test"),
-    ("apps/macos/test.sh", re.compile(r"test-leak-check\.py -- .*swift test"), "the Mac tests"),
+    ("apps/macos/test.sh", re.compile(r"test-leak-check\.py -- swift test --package-path apps/shared/AgentKit"), "the AgentKit test"),
+    ("apps/macos/test.sh", re.compile(r'test-leak-check\.py -- .*swift test "\$@"'), "the Mac tests"),
     # The nightly perf runs are `swift test` too (ov-724), each its own run.
     (".github/workflows/nightly.yml", re.compile(r"test-leak-check\.py -- swift test --package-path apps/shared/AgentKit --filter AgentRowBudgetTests"), "the nightly AgentKit row budgets"),
     (".github/workflows/nightly.yml", re.compile(r"test-leak-check\.py -- swift test --filter 'ConversationScrollTests"), "the nightly Mac scrolling test"),
@@ -536,7 +536,8 @@ def self_test():
     os.makedirs(os.path.join(wired, ".github", "workflows"))
     os.makedirs(os.path.join(wired, "apps", "macos"))
     with open(os.path.join(wired, "apps", "macos", "test.sh"), "w") as f:
-        f.write("./scripts/test-leak-check.py -- swift test\n")
+        f.write("./scripts/test-leak-check.py -- swift test --package-path apps/shared/AgentKit\n"
+                './scripts/test-leak-check.py -- swift test "$@"\n')
     with open(os.path.join(wired, ".github", "workflows", "nightly.yml"), "w") as f:
         f.write("test-leak-check.py -- swift test --package-path apps/shared/AgentKit --filter AgentRowBudgetTests\n"
                 "test-leak-check.py -- swift test --filter 'ConversationScrollTests/(a|b)'\n"
@@ -547,7 +548,7 @@ def self_test():
         ("      - run: ./scripts/test-leak-check.py -- cargo nextest run --profile ci --workspace\n", False),
     ):
         with open(os.path.join(wired, ".github", "workflows", "ci.yml"), "w") as f:
-            f.write(body + "      - run: ./scripts/test-leak-check.py -- swift test --package-path apps/shared/AgentKit\n")
+            f.write(body)
         if bool(wiring(wired)) != red:
             failures.append(f"the wiring check read {body.strip()!r} wrong")
 
