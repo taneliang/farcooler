@@ -36,9 +36,11 @@ struct StreamingReplyPerfTests {
 
     /// A reply hosted in an offscreen window, drawn the way a transcript
     /// row is: laid out at the row's width and displayed.
+    @MainActor
     final class Host {
         let window: NSWindow
         let host: NSHostingView<AnyView>
+        let tally = DrawTally()
 
         init(width: CGFloat = 760) {
             host = NSHostingView(rootView: AnyView(EmptyView()))
@@ -58,7 +60,8 @@ struct StreamingReplyPerfTests {
             let start = ContinuousClock.now
             host.rootView = AnyView(
                 AgentReplyText(text: text, trailingClearance: 32, streaming: streaming)
-                    .frame(width: 740))
+                    .frame(width: 740)
+                    .drawTally(tally))
             host.layoutSubtreeIfNeeded()
             window.displayIfNeeded()
             let d = ContinuousClock.now - start
@@ -96,9 +99,9 @@ struct StreamingReplyPerfTests {
         text += "streaming "
         _ = host.show(text, streaming: true)
         text += "words "
-        let before = MarkdownPiece.drawnBytes
+        let before = host.tally.bytes
         _ = host.show(text, streaming: true)
-        return MarkdownPiece.drawnBytes - before
+        return host.tally.bytes - before
     }
 
     @Test(arguments: [true, false])
@@ -159,9 +162,9 @@ struct StreamingReplyPerfTests {
         let text = Self.prose(25_600, seed: 5)
         _ = host.show(text, streaming: true)
         _ = host.show(text, streaming: true)
-        let before = MarkdownPiece.drawnBytes
+        let before = host.tally.bytes
         _ = host.show(text, streaming: false)
-        let redrawn = MarkdownPiece.drawnBytes - before
+        let redrawn = host.tally.bytes - before
         guard case let .prose(last)? = MarkdownText.pieces(text).last?.run else {
             Issue.record("the reply should end in prose")
             return
