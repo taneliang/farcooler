@@ -1,48 +1,58 @@
 import Foundation
 
-// The board, as everything except the drawing of it.
-//
-// Here rather than beside the view, and the reason is reach rather than the
-// Mac package being untested — it declares five test targets and CI runs them
-// all. What it does not have is a caller for a rule that lives in a body:
-// SwiftUI will evaluate a `View.body` that composes the wrong sentence and
-// report nothing, and no suite in that package is chartered to look. Its five
-// exist for claims only a rendered view can answer — what a mark paints, which
-// cache a view reaches, how big a pane is — and a staleness rule is not one of
-// those. Pulled out here it is an ordinary function that `swift test
-// --package-path apps/shared/AgentKit` calls on every push, and every sentence
-// below is one somebody acts on: "this task stopped moving three days ago" is
-// the board's entire reason to exist.
-//
-// The producer is `farcooler task list --json` and `farcooler task show
-// --json` (crates/cli/src/tasks.rs). Field names here are that JSON's, and the
-// status words are `status_word`'s, which are the proto's `TaskStatus` names
-// lowercased. Nothing here derives state the runner already derived; what it
-// derives is how the board should READ, which is a client's own business.
-//
-// ## The split this file must not collapse
-//
-// A `Task` is what is understood NOW and every field of it may be revised. A
-// `TaskNote` is the record of how that understanding was reached and no field
-// of any note may ever change. Correcting the record is a NEW note carrying
-// `supersedes`; both stay readable forever.
-//
-// The store enforces it — `task_notes` has a `BEFORE UPDATE` trigger that
-// refuses unconditionally — and no app offers a write that could reach it: the
-// orchestrator owns the task list (ov-184), and the one task write an app
-// makes is an answer, which appends a note.
+// Native types for the shared Rust task board view.
+enum TaskBoardPresenter {
+    struct Settings: Decodable, Sendable {
+        let day: Double
+        let doneFloor: Int
+        let sectionLimit: Int
+        let liveStates: Set<String>
+    }
 
-/// Where a task sits, in the vocabulary the wire uses.
-///
-/// Raw values are the CLI's words verbatim, which are the proto's
-/// `TASK_STATUS_*` names lowercased — so a row on screen reads as the row it
-/// came from and there is one spelling of each state in this app.
-///
-/// Deliberately closed over the seven this build knows, with no `unknown`
-/// case. A runner newer than this app can send an eighth, and the honest answer
-/// to that is not to invent a column for it or to file it under the backlog —
-/// see `TaskBoardModel.unreadable`, which surfaces such a row instead of
-/// deciding on its behalf.
+    struct Status: Decodable, Sendable {
+        let wire: String
+        let title: String
+        let finished: Bool
+        let holdsBlocks: Bool
+        let action: String?
+    }
+
+    struct Clock: Decodable {
+        let lastMoved: Double
+        let stoppedFor: Double
+        let staleNote: String?
+        let timeNote: String?
+    }
+
+    struct Board: Decodable {
+        struct Column: Decodable {
+            let status: String
+            let indices: [Int]
+        }
+        let columns: [Column]
+        let unreadable: [Int]
+    }
+
+    struct Answer<View: Decodable>: Decodable {
+        let taskBoard: View?
+    }
+
+    static func ask<View: Decodable>(_ operation: String, _ fields: [String: Any] = [:]) -> View? {
+        var request = fields
+        request["op"] = operation
+        guard let data = try? JSONSerialization.data(withJSONObject: ["schema": 1, "task_board": request]),
+            let answer = PlanViewPresenter.ask(String(decoding: data, as: UTF8.self))
+        else { return nil }
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        return (try? decoder.decode(Answer<View>.self, from: Data(answer.utf8)))?.taskBoard
+    }
+
+    static let settings: Settings? = ask("settings")
+    static let statuses: [Status] = ask("statuses") ?? []
+    static let statusByWire = Dictionary(uniqueKeysWithValues: statuses.map { ($0.wire, $0) })
+}
+
 public enum TaskStatus: String, CaseIterable, Sendable, Hashable {
     case backlog
     case todo
@@ -52,31 +62,8 @@ public enum TaskStatus: String, CaseIterable, Sendable, Hashable {
     case done
     case cancelled
 
-    /// The column heading, in this app's voice rather than the wire's.
-    ///
-    /// Title case, because these head a column and label a menu item. US
-    /// English throughout — "Canceled" with one L on screen, while the raw
-    /// value stays `cancelled` because that is what the wire says and this
-    /// side does not get to rename it.
-    public var title: String {
-        switch self {
-        case .backlog: return "Backlog"
-        case .todo: return "To Do"
-        case .needsDecision: return "Needs Decision"
-        case .inProgress: return "In Progress"
-        case .inReview: return "In Review"
-        case .done: return "Done"
-        case .cancelled: return "Canceled"
-        }
-    }
-
-    /// Whether work on this task has stopped for good, either way.
-    ///
-    /// `done` is finished, not forgotten, and a board that flagged a task
-    /// shipped in March would be training people to ignore the flag by
-    /// summer. Staleness does not apply to either — nor to the three waiting
-    /// states; see `TaskRow.staleness(at:)` for the whole rule.
-    public var isFinished: Bool { self == .done || self == .cancelled }
+    public var title: String { TaskBoardPresenter.statusByWire[rawValue]?.title ?? rawValue }
+    public var isFinished: Bool { TaskBoardPresenter.statusByWire[rawValue]?.finished == true }
 }
 
 /// Whether a task has stopped moving.
@@ -128,7 +115,7 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
     /// news rather than noise: an agent working a task moves it through
     /// `in_progress` and `in_review` within a session, so one that has sat
     /// in either overnight is one whose agent stopped.
-    public static let staleAfter: TimeInterval = 24 * 60 * 60
+    public static var staleAfter: TimeInterval { TaskBoardPresenter.settings?.day ?? 86_400 }
 
     /// The task's UUID, as the wire spells it. `Identifiable` uses it so a
     /// column's `ForEach` is stable across a re-read that reordered rows.
@@ -212,125 +199,29 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
         self.workers = workers
     }
 
-    /// When anything last moved on this card: `updatedAt` — a move, a note or
-    /// an edit — or `statusSince` from a runner too old to send it.
-    ///
-    /// A note or an edit is movement (the coordinator's ruling on ov-28): a
-    /// card three days in progress whose agent wrote ten minutes ago has not
-    /// stopped. The later of the two, so a producer whose `updated_at` lagged
-    /// a move could never make a card look older than its status says.
-    public var lastMoved: Date { max(statusSince, updatedAt ?? statusSince) }
-
-    /// How long since anything moved on this task, as of `now`. What
-    /// "Hasn’t moved in N days" counts, and what `staleness(at:)` compares.
-    ///
-    /// Never negative. A runner whose clock is ahead of this Mac's hands back a
-    /// time in the future, and a negative age would read as fresh by luck
-    /// rather than by decision — clamping says "just now", which is the honest
-    /// answer when the two clocks disagree about which just happened.
-    public func stoppedFor(at now: Date) -> TimeInterval {
-        max(0, now.timeIntervalSince(lastMoved))
+    private func clock(at now: Date) -> TaskBoardPresenter.Clock? {
+        var fields: [String: Any] = [
+            "status": status.rawValue,
+            "since": statusSince.timeIntervalSinceReferenceDate,
+            "now": now.timeIntervalSinceReferenceDate,
+        ]
+        fields["created"] = createdAt?.timeIntervalSinceReferenceDate
+        fields["updated"] = updatedAt?.timeIntervalSinceReferenceDate
+        return TaskBoardPresenter.ask("clock", fields)
     }
 
-    /// Whether this task has stopped moving when it should be moving.
-    ///
-    /// The board's whole job beyond showing state. The failure mode of the
-    /// factory is not an agent doing the wrong thing; it is a task you
-    /// assumed was in flight that stopped, and a board that renders it
-    /// identically to one that moved a minute ago is what lets that happen.
-    ///
-    /// Only `in_progress` and `in_review` can go stale, because only there is
-    /// an agent meant to be working. `backlog` and `todo` are waiting their
-    /// turn and are not expected to move; `needs_decision` is waiting on the
-    /// person reading the board, who already has its call to action and asked
-    /// not to be nagged twice; `done` and `cancelled` have stopped for good.
-    /// A card that is not expected to move and says "Hasn’t moved" is a flag
-    /// people learn to read past — including on the card where it matters.
-    ///
-    /// The one place this rule lives on Apple platforms: the Mac board, the
-    /// phone board and the card details all read this. Exhaustive rather than
-    /// a `default`, so a status added later has to be decided, not inherited.
-    /// Android's twin is `TaskRow.isStale` in model/TaskBoard.kt.
-    public func staleness(at now: Date) -> TaskStaleness {
-        switch status {
-        case .inProgress, .inReview:
-            return stoppedFor(at: now) >= TaskRow.staleAfter ? .stale : .fresh
-        case .backlog, .todo, .needsDecision, .done, .cancelled:
-            return .fresh
-        }
+    public var lastMoved: Date {
+        guard let clock = clock(at: statusSince) else { return statusSince }
+        return Date(timeIntervalSinceReferenceDate: clock.lastMoved)
     }
 
-    /// The sentence under a stale row, or nil for one that is still moving.
-    ///
-    /// A sentence and not a timestamp: "3 days" is what makes somebody act,
-    /// and a date makes them subtract. Only ever hours or days, because
-    /// nothing below `staleAfter` gets one at all.
-    public func stalenessNote(at now: Date) -> String? {
-        guard staleness(at: now) == .stale else { return nil }
-        let days = Int(stoppedFor(at: now) / (24 * 60 * 60))
-        // A typographic apostrophe, like every other sentence this board draws
-        // — "couldn’t" and "can’t" in `TaskBoardStore.trouble`, and every
-        // string in `Shortcuts.swift`. One screen with two conventions on it
-        // is the kind of thing nobody can name and everybody sees.
-        if days <= 1 { return "Hasn’t moved in a day" }
-        return "Hasn’t moved in \(days) days"
-    }
+    public func stoppedFor(at now: Date) -> TimeInterval { clock(at: now)?.stoppedFor ?? 0 }
+    public func staleness(at now: Date) -> TaskStaleness { stalenessNote(at: now) == nil ? .fresh : .stale }
+    public func stalenessNote(at now: Date) -> String? { clock(at: now)?.staleNote }
+    public func timeNote(at now: Date) -> String? { clock(at: now)?.timeNote }
 
-    /// The quiet line every card carries: "Updated 2h ago" when anything on
-    /// it changed after it was filed, else "Added 3d ago".
-    ///
-    /// Nil in two cases, and both are decisions. A stale card already says
-    /// how long in `stalenessNote(at:)`, and two lines telling one card's
-    /// time in two ways is one too many — the stale sentence is the one that
-    /// asks for something, so it wins. And a runner too old to send
-    /// `created_at` gets no line rather than a guess.
-    ///
-    /// "Updated" is `updatedAt` strictly after `createdAt`. The runner sends
-    /// the two equal for a card nothing has happened to, so equality is
-    /// "Added" and not an update made in the same instant.
-    ///
-    /// A finished card says the fact that matters about it instead: "Done 2h
-    /// ago" or "Canceled 2h ago", from when its status last changed
-    /// (`statusSince`), which a runner of any age sends.
-    public func timeNote(at now: Date) -> String? {
-        if status.isFinished {
-            return status.title + " " + TaskRow.ago(now.timeIntervalSince(statusSince))
-        }
-        guard stalenessNote(at: now) == nil, let createdAt else { return nil }
-        if let updatedAt, updatedAt > createdAt {
-            return "Updated " + TaskRow.ago(now.timeIntervalSince(updatedAt))
-        }
-        return "Added " + TaskRow.ago(now.timeIntervalSince(createdAt))
-    }
-
-    /// `just now`, `5m ago`, `2h ago`, `3d ago`, `2mo ago`, `1y ago`.
-    ///
-    /// Written out rather than taken from `RelativeDateTimeFormatter`, for
-    /// three reasons. Its abbreviated style is "2 hr. ago", longer than a
-    /// card's quiet line wants; it localizes, and this suite's assertions are
-    /// English (`listed`'s reason); and Android has no formatter that says the
-    /// same words, while the three boards must. `TaskRow.ago` in
-    /// model/TaskBoard.kt is this, transcribed, and each has its own test.
-    ///
-    /// Floors rather than rounds — "1h ago" until two full hours have passed
-    /// — so a card never claims to be older than it is. Negative (a runner
-    /// clock ahead of this one) is "just now", the answer `stoppedFor` gives.
-    /// Months are 30 days and stop at 11: days 360 to 364 would otherwise
-    /// read "12mo ago", a unit that should have rolled over, and rolling it
-    /// early to "1y ago" would call the card older than it is.
     public static func ago(_ interval: TimeInterval) -> String {
-        let seconds = max(0, interval)
-        let minute: TimeInterval = 60
-        let hour = 60 * minute
-        let day = 24 * hour
-        switch seconds {
-        case ..<minute: return "just now"
-        case ..<hour: return "\(Int(seconds / minute))m ago"
-        case ..<day: return "\(Int(seconds / hour))h ago"
-        case ..<(30 * day): return "\(Int(seconds / day))d ago"
-        case ..<(365 * day): return "\(min(11, Int(seconds / (30 * day))))mo ago"
-        default: return "\(Int(seconds / (365 * day)))y ago"
-        }
+        TaskBoardPresenter.ask("age", ["seconds": interval]) ?? ""
     }
 
     /// What this task is waiting on, in one line, or nil if it is waiting on
@@ -344,23 +235,11 @@ public struct TaskRow: Equatable, Sendable, Hashable, Identifiable {
         return "Waiting on " + TaskRow.listed(blockedBy.map(\.key))
     }
 
-    /// Whether a block holds a task in this status back. A task that is
-    /// done, canceled, in review or waiting on a decision isn't held by one.
     public static func holdsBlocks(_ status: TaskStatus) -> Bool {
-        status == .backlog || status == .todo || status == .inProgress
+        TaskBoardPresenter.statusByWire[status.rawValue]?.holdsBlocks == true
     }
 
-    /// The one thing the board asks the person looking at it to do, or nil.
-    ///
-    /// Only `needs decision` has one, and that is the point rather than an
-    /// omission: it is the single status that is waiting on the PERSON. A
-    /// board that put a call to action on every column would have none.
-    public var callToAction: String? {
-        switch status {
-        case .needsDecision: return "Answer to unblock this"
-        case .backlog, .todo, .inProgress, .inReview, .done, .cancelled: return nil
-        }
-    }
+    public var callToAction: String? { TaskBoardPresenter.statusByWire[status.rawValue]?.action }
 
     /// `a`, `a and b`, `a, b and c`.
     ///
@@ -419,17 +298,7 @@ public struct TaskBoardColumn: Equatable, Sendable, Identifiable {
 
 /// A repository's board.
 public struct TaskBoardModel: Equatable, Sendable {
-    /// The order the columns are drawn in.
-    ///
-    /// `needs decision` leads, and every other column is in the order work
-    /// moves. It is out of lifecycle order on purpose: it is the only state
-    /// waiting on the person looking at the board, and a column you have to
-    /// scan for is a question that goes unanswered for a day. The lifecycle is
-    /// still legible — the remaining six are in it, and each card says its own
-    /// status anyway.
-    public static let order: [TaskStatus] = [
-        .needsDecision, .backlog, .todo, .inProgress, .inReview, .done, .cancelled,
-    ]
+    public static let order = TaskBoardPresenter.statuses.compactMap { TaskStatus(rawValue: $0.wire) }
 
     public var columns: [TaskBoardColumn]
     /// Rows this build has no column for. Usually empty; never dropped. See
@@ -455,38 +324,10 @@ public struct TaskBoardModel: Equatable, Sendable {
         columns.first { $0.status == .needsDecision }?.rows.count ?? 0
     }
 
-    /// What the board says in its title bar, or nil when nothing is waiting.
-    ///
-    /// Here rather than in the view, like every other sentence this board
-    /// draws. It was the one exception, composed inside `TaskBoardSheet`'s
-    /// body under a comment in that same file saying not to — a copy rule a
-    /// file states and then breaks is worse than one it never claimed, because
-    /// the next reader trusts the comment.
-    ///
-    /// Nil at zero, and that is the copy decision rather than a missing case.
-    /// A badge reading "0 tasks are waiting on you" is a badge people learn to
-    /// stop seeing, and the fact worth showing is the presence of a question,
-    /// not the arithmetic.
     public var waitingSentence: String? { TaskBoardModel.waitingSentence(waitingOnYou) }
 
-    /// The same sentence for a count that did not come off a board.
-    ///
-    /// Static so the plural boundary can be asserted at 0, 1 and 2 without
-    /// building three boards to carry three counts — the boundary is the whole
-    /// reason this is a function and not a literal.
-    ///
-    /// Written out rather than taken from a formatter, for the reason
-    /// `TaskRow.listed` gives: this suite's assertions are English, and copy
-    /// that changed under another locale would be copy the tests say nothing
-    /// about.
     public static func waitingSentence(_ count: Int) -> String? {
-        guard count > 0 else { return nil }
-        // The verb agrees as well as the noun. "1 tasks are waiting" and
-        // "2 task is waiting" are both one careless edit away, and both read as
-        // broken English in a title bar rather than as a bug anybody files.
-        return count == 1
-            ? "1 task is waiting on you"
-            : "\(count) tasks are waiting on you"
+        TaskBoardPresenter.ask("waiting", ["count": count])
     }
 
     /// The key for a task id, when this board holds that task.
@@ -559,21 +400,16 @@ extension TaskBoardModel {
 
     /// Sort wire rows into columns, keeping the ones this build cannot place.
     public static func board(from wire: [WireTask]) -> TaskBoardModel {
-        var rows: [TaskStatus: [TaskRow]] = [:]
-        var unreadable: [UnreadableTaskRow] = []
-        for task in wire {
-            guard let status = TaskStatus(rawValue: task.status) else {
-                unreadable.append(
-                    UnreadableTaskRow(
-                        id: task.id, key: task.key, title: task.title, status: task.status))
-                continue
-            }
-            rows[status, default: []].append(task.row(status: status))
+        guard let view: TaskBoardPresenter.Board = TaskBoardPresenter.ask("columns", ["statuses": wire.map(\.status)])
+        else { return .empty }
+        let columns = view.columns.compactMap { column -> TaskBoardColumn? in
+            guard let status = TaskStatus(rawValue: column.status) else { return nil }
+            return TaskBoardColumn(status: status, rows: column.indices.map { wire[$0].row(status: status) })
         }
-        // Every column, including the empty ones. A board that hid its empty
-        // columns would move sideways under you every time a task was filed,
-        // and "nothing is in review" is worth seeing.
-        let columns = order.map { TaskBoardColumn(status: $0, rows: rows[$0] ?? []) }
+        let unreadable = view.unreadable.map { index in
+            let row = wire[index]
+            return UnreadableTaskRow(id: row.id, key: row.key, title: row.title, status: row.status)
+        }
         return TaskBoardModel(columns: columns, unreadable: unreadable)
     }
 }

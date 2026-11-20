@@ -1,21 +1,8 @@
 import Foundation
 
-/// What this person has read on one board (ov-104): the Unread section's
-/// rule, and the Done rule's (ov-103).
-///
-/// Kept per ticket as a moment, not per item: opening a ticket reads every
-/// item on it, its finish, its filing and all its notes, so the one thing
-/// worth keeping is when it was last opened. An item is unread while it's
-/// newer than that, and newer than the board's `floor`, before which
-/// everything counts read (a first look shows the last day, not the whole
-/// board's history; Mark All as Read moves it to now).
-///
-/// Per device for now, through `BoardReadStore`, so a runner-synced store
-/// can stand in later without touching the rule.
+/// Local read marks. The Rust board view compares and projects these values.
 public struct BoardReads: Equatable, Sendable {
-    /// Everything at or before this counts read.
     public var floor: Date
-    /// Each ticket's read mark, by task id: when it was last opened.
     public var opened: [String: Date]
 
     public init(floor: Date, opened: [String: Date] = [:]) {
@@ -23,42 +10,44 @@ public struct BoardReads: Equatable, Sendable {
         self.opened = opened
     }
 
-    /// Before anything was read: the last day counts unread.
     public static func firstLook(now: Date) -> BoardReads {
-        BoardReads(floor: now.addingTimeInterval(-24 * 60 * 60))
+        let floor: Double? = TaskBoardPresenter.ask("first_look", ["now": now.timeIntervalSinceReferenceDate])
+        return BoardReads(floor: floor.map(Date.init(timeIntervalSinceReferenceDate:)) ?? now)
     }
 
-    /// Everything on `taskID` at or before this counts read.
     public func mark(for taskID: String) -> Date {
-        max(floor, opened[taskID] ?? .distantPast)
+        Self.mark([floor, opened[taskID] ?? .distantPast], default: floor)
     }
 
-    /// Whether something that happened on `taskID` at `at` is unread.
-    public func isUnread(_ taskID: String, at: Date) -> Bool { at > mark(for: taskID) }
+    public func isUnread(_ taskID: String, at: Date) -> Bool {
+        TaskBoardPresenter.ask("unread", [
+            "at": at.timeIntervalSinceReferenceDate, "mark": mark(for: taskID).timeIntervalSinceReferenceDate,
+        ]) ?? false
+    }
 
-    /// Whether `row` finished and nobody has opened it since.
     public func finishedUnread(_ row: TaskRow) -> Bool {
         row.status.isFinished && isUnread(row.id, at: row.statusSince)
     }
 
-    /// `row` was opened: everything on it so far is read. The later of
-    /// this device's clock and the runner's own last word on it (`lastMoved`,
-    /// `latest`), so a runner whose clock runs ahead can't leave an item
-    /// unread under a ticket just opened.
     public mutating func open(_ row: TaskRow, latest: Date? = nil, now: Date) {
-        opened[row.id] = [now, row.lastMoved, latest ?? .distantPast].max()!
+        opened[row.id] = Self.mark([now, row.lastMoved, latest ?? .distantPast], default: now)
     }
 
-    /// Mark All as Read: everything on `rows` so far, with the runner's
-    /// clock allowed for as `open` does.
     public mutating func markAllRead(rows: [TaskRow], now: Date) {
-        floor = ([now] + rows.map(\.lastMoved)).max()!
+        floor = Self.mark([now] + rows.map(\.lastMoved), default: now)
         opened = [:]
     }
 
-    /// Without the marks the floor has passed, which say nothing more.
     public func pruned() -> BoardReads {
-        BoardReads(floor: floor, opened: opened.filter { $0.value > floor })
+        let marks: [String: Double] = TaskBoardPresenter.ask("prune_marks", [
+            "floor": floor.timeIntervalSinceReferenceDate, "opened": opened.mapValues(\.timeIntervalSinceReferenceDate),
+        ]) ?? [:]
+        return BoardReads(floor: floor, opened: marks.mapValues(Date.init(timeIntervalSinceReferenceDate:)))
+    }
+
+    private static func mark(_ stamps: [Date], default fallback: Date) -> Date {
+        let stamp: Double? = TaskBoardPresenter.ask("read_mark", ["stamps": stamps.map(\.timeIntervalSinceReferenceDate)])
+        return stamp.map(Date.init(timeIntervalSinceReferenceDate:)) ?? fallback
     }
 }
 

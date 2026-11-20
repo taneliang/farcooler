@@ -46,7 +46,7 @@ public enum TaskAgentLink {
     /// in. `unknown` is in it on purpose: it is the runner being unable to
     /// read the pane for a moment, and that usually resolves with the agent
     /// still there — dropping the link for it would make the pill flicker.
-    public static let liveStates: Set<String> = ["running", "starting", "unknown"]
+    public static var liveStates: Set<String> { TaskBoardPresenter.settings?.liveStates ?? [] }
 
     /// Whether `pane` is working the task with id `taskID`.
     ///
@@ -72,14 +72,8 @@ extension TaskAgentLink {
     /// daemon never dispatches one for a task, and a pill that could lead to a
     /// diff would be a rule that works by luck.
     public static func runsAgent(preset: String, isChangesPane: Bool) -> Bool {
-        guard !isChangesPane else { return false }
-        let name = preset.split(separator: ":").first.map(String.init) ?? ""
-        guard !name.isEmpty else { return false }
-        return name != "shell" && !shells.contains(name.lowercased())
+        TaskBoardPresenter.ask("runs_agent", ["preset": preset, "changes": isChangesPane]) ?? false
     }
-
-    /// The names a plain shell reports itself by.
-    static let shells: Set<String> = ["sh", "zsh", "bash", "fish", "dash", "ksh", "-zsh"]
 
     /// Whether a board may say anything about agents on one runner.
     ///
@@ -97,7 +91,7 @@ extension TaskAgentLink {
     /// What a board says when its Agent button has nowhere to land: the pane
     /// closed after the card was drawn. Said on the board, briefly, instead of
     /// closing it onto nothing. See `ShellFleet.landing`.
-    public static let paneHasClosed = "That agent’s pane has closed."
+    public static let paneHasClosed: String = TaskBoardPresenter.ask("closed_pane") ?? ""
 
     /// Menu items for several panes on one card, told apart even where their
     /// names are not: titles that collide get the pane's short id after them.
@@ -105,13 +99,7 @@ extension TaskAgentLink {
     /// `titles[i]` and `shorts[i]` are one pane's. The Mac's `BoardPane.titles`
     /// makes the same choice.
     public static func menuTitles(_ titles: [String], shorts: [String]) -> [String] {
-        let counts = Dictionary(titles.map { ($0, 1) }, uniquingKeysWith: +)
-        return titles.enumerated().map { index, title in
-            guard counts[title, default: 0] > 1, shorts.indices.contains(index) else {
-                return title
-            }
-            return "\(title) (\(shorts[index]))"  // not a count: a twin pane told apart by its id
-        }
+        TaskBoardPresenter.ask("menu_titles", ["titles": titles, "shorts": shorts]) ?? titles
     }
 }
 
@@ -138,12 +126,15 @@ public enum TaskAgentPresence: Equatable, Sendable {
     /// Agent": the pill is a button that goes somewhere, and a count on a
     /// button with one destination is arithmetic nobody asked for.
     public var title: String? {
+        let kind: String
+        let count: Int
         switch self {
         case .unsaid: return nil
-        case .noAgent: return "No Agent"
-        case .agents(let n): return n == 1 ? "Agent" : "\(n) Agents"
-        case .subagents(let n, _): return n == 1 ? "Subagent" : "\(n) Subagents"
+        case .noAgent: (kind, count) = ("no_agent", 0)
+        case .agents(let n): (kind, count) = ("agents", n)
+        case .subagents(let n, _): (kind, count) = ("subagents", n)
         }
+        return TaskBoardPresenter.ask("agent_title", ["kind": kind, "count": count])
     }
 }
 
@@ -161,16 +152,8 @@ public struct TaskAcceptanceProgress: Equatable, Sendable {
     /// the one state of this line that says "ready to look at".
     public var isComplete: Bool { total > 0 && met == total }
 
-    /// `2 of 5`, or `All 5 met` once they all are.
-    ///
-    /// Sentence case, because this is a label and not a control — the pill
-    /// beside it is the button. Written out rather than formatted, for
-    /// `TaskRow.listed`'s reason: the suite's assertions are English. A
-    /// single line that holds reads `Met` rather than `All 1 met`, which is a
-    /// sentence nobody would write.
     public var sentence: String {
-        guard isComplete else { return "\(met) of \(total)" }
-        return total == 1 ? "Met" : "All \(total) met"
+        TaskBoardPresenter.ask("acceptance_words", ["met": met, "total": total]) ?? ""
     }
 }
 
@@ -196,21 +179,26 @@ extension TaskRow {
     /// this app cannot back: an older runner gets no link and no remark, never
     /// a guess from the task's worktree.
     public func agentPresence(livePanes: Int, runnerRecordsTasks: Bool) -> TaskAgentPresence {
-        guard runnerRecordsTasks else { return .unsaid }
+        struct Presence: Decodable {
+            let kind: String
+            let count: Int?
+        }
+        var fields: [String: Any] = [
+            "live": livePanes, "recorded": runnerRecordsTasks, "status": status.rawValue,
+        ]
+        if case .inLine(.build, let position)? = wait { fields["ranked"] = position > 0 }
         let subagents = subagentPresence
-        if livePanes > 0 {
-            if case .subagents(let n, .working)? = subagents { return .agents(livePanes + n) }
-            return .agents(livePanes)
+        if case .subagents(let count, let state)? = subagents {
+            fields["subagents"] = count
+            fields["state"] = state == .working ? "working" : "settled"
         }
-        if let subagents { return subagents }
-        // In progress with nobody on it is the alarm, unless the board says
-        // why: a card ranked in the build line stopped on purpose, and its
-        // line explains it. An unranked one says nothing, so it's no excuse.
-        if status == .inProgress {
-            if case .inLine(.build, let position)? = wait, position > 0 { return .unsaid }
-            return .noAgent
+        let view: Presence? = TaskBoardPresenter.ask("agent_presence", fields)
+        switch view?.kind {
+        case "agents": return .agents(view?.count ?? livePanes)
+        case "subagents": return subagents ?? .unsaid
+        case "no_agent": return .noAgent
+        default: return .unsaid
         }
-        return .unsaid
     }
 
     /// How far along its acceptance this task is, or nil when it has none.
@@ -219,9 +207,12 @@ extension TaskRow {
     /// there on every card whether or not it says anything is a line people
     /// learn to skip.
     public var acceptanceProgress: TaskAcceptanceProgress? {
-        guard !acceptance.isEmpty else { return nil }
-        return TaskAcceptanceProgress(
-            met: acceptance.filter(\.met).count, total: acceptance.count)
+        struct Progress: Decodable {
+            let met: Int
+            let total: Int
+        }
+        let progress: Progress? = TaskBoardPresenter.ask("acceptance", ["lines": acceptance.map(\.met)])
+        return progress.map { TaskAcceptanceProgress(met: $0.met, total: $0.total) }
     }
 }
 
@@ -236,14 +227,12 @@ extension TaskBoardModel {
 
     /// The tooltip on the sidebar's amber count, or nil at zero.
     public static func decisionsHelp(_ count: Int) -> String? {
-        guard count > 0 else { return nil }
-        return count == 1 ? "1 task needs a decision" : "\(count) tasks need a decision"
+        TaskBoardPresenter.ask("decisions", ["count": count])
     }
 
     /// The tooltip on the sidebar's quiet count, or nil at zero.
     public static func agentsHelp(_ count: Int) -> String? {
-        guard count > 0 else { return nil }
-        return count == 1 ? "An agent is on 1 task" : "Agents are on \(count) tasks"
+        TaskBoardPresenter.ask("agents", ["count": count])
     }
 }
 

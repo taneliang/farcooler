@@ -64,62 +64,38 @@ public struct RunnerBoardRow: Equatable, Sendable, Identifiable {
 }
 
 public enum RunnerBoards {
-    /// Every board a runner keeps, in the order its sections draw them: each
-    /// repository's workspaces, Main first and then by ordinal, or its one
-    /// implicit workspace where the runner named none.
-    ///
-    /// What a sweep reads — a link coming up, a reconnect, a `resync` — and so
-    /// what an open board relies on to be read again after a dropped link
-    /// whatever notices were lost with it. A sweep that walked repositories
-    /// while the boards were keyed by workspace would read the whole
-    /// repository into a key no view looks at, and leave every workspace's
-    /// board showing what the previous link read.
-    ///
-    /// - `repositories` are the runner's, in its order. A repository no
-    ///   workspace names is implicit: a runner without `workstreams`
-    ///   (`workspaces` nil), or one whose list left it out.
-    /// - A workspace in a repository missing from `repositories` still has a
-    ///   board, and comes after the rest: `repositories` is a separate read
-    ///   that can lag the fleet.
     public static func boards(
         repositories: [String], workspaces: [WorkspaceSummary]?
     ) -> [WorkspaceSummary] {
-        let all = workspaces ?? []
-        var order = repositories
-        for workspace in all {
-            if let repository = workspace.repository, !order.contains(repository) {
-                order.append(repository)
-            }
+        struct Group: Decodable {
+            let repository: String
+            let indices: [Int]
         }
-        return order.flatMap { repository in
+        let all = workspaces ?? []
+        let workspaceRepositories: [Any] = all.map { $0.repository.map { $0 as Any } ?? NSNull() }
+        let groups: [Group] = TaskBoardPresenter.ask("repository_groups", [
+            "repositories": repositories, "workspace_repositories": workspaceRepositories,
+        ]) ?? []
+        return groups.flatMap { group in
             WorkspaceGrouping.group(
-                repository: repository,
-                workspaces: all.filter { $0.repository == repository },
+                repository: group.repository,
+                workspaces: group.indices.map { all[$0] },
                 worktrees: [], orchestrators: [:]
             ).workspaces.map(\.workspace)
         }
     }
 
-    /// The boards a notice moved, of `boards`, which is what a connection
-    /// holds — plus the board it names when that board is not among them yet.
-    ///
-    /// `BoardNotice.touches` decides. The addition is for a workspace the
-    /// fleet has not listed yet: made by the CLI a moment ago, its first task
-    /// filed before the fleet read that would have listed it. Reading its
-    /// board now means its row is there the moment the fleet names it, rather
-    /// than after the next sweep, which on a quiet link is the next reconnect.
     public static func touched(
         by notice: BoardNotice, among boards: [WorkspaceSummary]
     ) -> [WorkspaceSummary] {
-        var found = boards.filter { notice.touches($0) }
-        for named in [notice.workspace, notice.fromWorkspace].compactMap({ $0 })
-        where !found.contains(where: { $0.id == named }) {
-            found.append(
-                WorkspaceSummary(
-                    id: named, name: "", taskPrefix: "", isMain: false, ordinal: 0,
-                    repository: notice.repository))
+        let found = boards.filter { notice.touches($0) }
+        var request: [String: Any] = ["found": found.map(\.id)]
+        request["workspace"] = notice.workspace
+        request["from"] = notice.fromWorkspace
+        let missing: [String] = TaskBoardPresenter.ask("missing_boards", request) ?? []
+        return found + missing.map {
+            WorkspaceSummary(id: $0, name: "", taskPrefix: "", isMain: false, ordinal: 0, repository: notice.repository)
         }
-        return found
     }
 
     /// The Board rows for one runner, in the order `boards` lists them.
@@ -192,13 +168,15 @@ public enum RunnerBoards {
     /// `items` are ONE runner's: the phone's connection holds a list per
     /// runner, and a merged list would need the runner matched too.
     public static func decisions(for workspace: WorkspaceSummary, in items: [NeedsYouItem]) -> Int {
-        items.filter { item in
-            guard item.kind.isDecision || item.also.contains(where: \.isDecision) else { return false }
-            if workspace.isImplicit {
-                return item.workspaceID == nil && item.repositoryID == workspace.id
-            }
-            return item.workspaceID == workspace.id
-        }.count
+        TaskBoardPresenter.ask("decision_count", [
+            "workspace": workspace.id, "implicit": workspace.isImplicit,
+            "items": items.map { item -> [String: Any] in
+                var data: [String: Any] = ["decision": item.kind.isDecision || item.also.contains(where: \.isDecision)]
+                data["workspace"] = item.workspaceID
+                data["repository"] = item.repositoryID
+                return data
+            },
+        ]) ?? 0
     }
 
     /// What a board says is waiting on the person: the decision items once
@@ -209,7 +187,9 @@ public enum RunnerBoards {
     public static func waiting(
         columnCount: Int, decisions: Int, listRead: Bool, listServed: Bool
     ) -> Int {
-        listRead && listServed ? decisions : columnCount
+        TaskBoardPresenter.ask("waiting_count", [
+            "column": columnCount, "decisions": decisions, "read": listRead, "served": listServed,
+        ]) ?? columnCount
     }
 
     /// What a workspace's board screen says is waiting, from the board it

@@ -113,7 +113,7 @@ internal fun TaskRow.subagentPresence(): TaskAgentPresence? {
  * canceled, in review or waiting on a decision is not held by one.
  */
 fun holdsBlocks(status: TaskStatus): Boolean =
-    status == TaskStatus.BACKLOG || status == TaskStatus.TODO || status == TaskStatus.IN_PROGRESS
+    TaskBoardPresenter.byWire.getValue(status.wire).holdsBlocks
 
 /** `a`, `a and b`, `a, b and c`: AgentKit's `TaskRow.listed`. */
 private fun listed(items: List<String>): String = when (items.size) {

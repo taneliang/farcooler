@@ -34,6 +34,7 @@ pub mod rows_json;
 pub mod session;
 pub mod ssh;
 pub mod task_starts_json;
+mod task_board_view;
 pub mod tasks_json;
 pub mod usage_json;
 pub mod workspaces_json;

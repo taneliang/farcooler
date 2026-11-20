@@ -118,9 +118,8 @@ import com.farcooler.net.TerminalRef
 import kotlinx.coroutines.launch
 
 // A workspace's task board on Android: the Board tab of its workspace screen,
-// and a card opened. Every rule and sentence is in `model/TaskBoard.kt`, the
-// Android twin of AgentKit's, so a card reads the same here as on the Mac and
-// the iPhone; the list form's rows are `BoardList`'s.
+// and a card opened. TaskBoardView adapts the shared Rust view for these views;
+// the list form's rows are BoardList's.
 
 /** The panes working [row] on one runner, named for a menu: the pane, then its worktree. */
 fun boardAgents(row: TaskRow, worktrees: List<Worktree>): List<Pair<Terminal, String>> {

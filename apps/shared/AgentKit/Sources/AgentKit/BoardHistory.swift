@@ -9,15 +9,13 @@ public enum BoardHistory {
 
         public var id: String { rawValue }
 
-        public var title: String {
-            switch self {
-            case .today: return "Today"
-            case .yesterday: return "Yesterday"
-            case .thisWeek: return "This Week"
-            case .earlier: return "Earlier"
-            }
-        }
+        public var title: String { BoardHistory.titles[self] ?? rawValue }
     }
+
+    private static let titles: [Period: String] = {
+        let labels: [String] = TaskBoardPresenter.ask("period_titles") ?? []
+        return Dictionary(uniqueKeysWithValues: zip(Period.allCases, labels))
+    }()
 
     public struct Group: Equatable, Sendable, Identifiable {
         public var period: Period
