@@ -585,7 +585,10 @@ class LandingTests(unittest.TestCase):
             (repo / "scripts/doc-comment-check.py").chmod(0o755)
             write(".github/workflows/ci.yml", "jobs:\n" + "".join(
                 f"  {job}:\n    steps:\n      - run: {'true' if job == 'wire' else 'exit 92'}\n"
-                for job in lane.JOBS if job != "doc-comments") + "".join(f"  {j}:\n    steps:\n      - run: exit 92\n" for j in ("tunnel-helper", "android-build", "android-ui")) + "  rust-build:\n    steps:\n      - name: Build the runtime binaries and test archive\n        run: ./scripts/rust-archive.sh x.tar.zst\n  rust-tests:\n    steps:\n      - name: Full Rust workspace shard\n        run: ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --no-fail-fast --archive-file x.tar.zst --partition hash:${{ matrix.shard }}/4\n" + "  ios-ui-plan:\n    steps: []\n")
+                for job in lane.JOBS if job != "doc-comments") + "".join(
+                f"  {j}:\n    steps:\n      - run: exit 92\n"
+                for j in ("tunnel-helper", "android-build", "android-ui", "web-tests", "web-bundles")
+            ) + "  rust-build:\n    steps:\n      - name: Build the runtime binaries and test archive\n        run: ./scripts/rust-archive.sh x.tar.zst\n  rust-tests:\n    steps:\n      - name: Full Rust workspace shard\n        run: ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --no-fail-fast --archive-file x.tar.zst --partition hash:${{ matrix.shard }}/4\n" + "  ios-ui-plan:\n    steps: []\n")
             write(".github/actions/ios-ui-build/action.yml", "runs:\n  steps: []\n")
             git("add", ".")
             git("commit", "-qm", "base")
