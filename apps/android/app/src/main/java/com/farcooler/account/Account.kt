@@ -281,21 +281,6 @@ class Account(context: Context) {
         return body is RelayAnswer.Answered
     }
 
-    /**
-     * Ask for a token that lets one runner notify this account.
-     *
-     * Returned once and stored on the relay only as a hash, so this is the only
-     * moment it exists in readable form — hand it straight to the runner.
-     */
-    suspend fun pairDaemon(label: String): String? {
-        val token = accessToken() ?: return null
-        val body = post(
-            "/v1/daemons",
-            buildJsonObject { put("label", JsonPrimitive(label)) },
-            bearer = token,
-        ).body
-        return body?.get("token")?.jsonPrimitive?.contentOrNull
-    }
 
     /**
      * One POST to the team directory with this session, answered as it came:

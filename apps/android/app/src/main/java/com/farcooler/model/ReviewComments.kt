@@ -273,9 +273,6 @@ class ReviewCommentQueue(
         update { state -> state.copy(pending = state.pending.filterNot { it.id == comment.id }) }
     }
 
-    fun clearFailure() {
-        updateLive { it.copy(failure = null) }
-    }
 
     /**
      * Everything queued, as one message.

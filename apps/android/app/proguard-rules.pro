@@ -60,7 +60,7 @@
 # are reachable from no Kotlin at all, so R8 drops them and a release APK has
 # thirty-one:
 #
-#   NativeVt.nativeRevision, nativeTakeBell, nativeAltScreen
+#   NativeVt.nativeAltScreen
 #       Declared and never called from anywhere in the app.
 #   NativeClient.nativeConnected, NativeVt.nativeTitle
 #       Called, but only by `ClientCore.isConnected()` and `VtCore.title()`,

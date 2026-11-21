@@ -76,7 +76,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.data.Reach
 import com.farcooler.data.Runner
 import com.farcooler.model.AgentActivity
-import com.farcooler.model.BoardRow
 import com.farcooler.model.FleetHeading
 import com.farcooler.model.FleetLayout
 import com.farcooler.model.FleetReading
@@ -819,51 +818,6 @@ private class HeaderDrag(
     val onCancel: () -> Unit,
 )
 
-/**
- * A workspace's heading in the worktree list: its name, and its repository
- * where the runner has more than one. Drawn for Main alone too — the workspace
- * level is the model, and it should be visible before anything is split.
- * "Unclaimed", the worktrees no workspace has taken, is quieter. Not a button:
- * a workspace has no actions on a phone.
- */
-@Composable
-private fun WorkspaceHeading(heading: FleetHeading, isEmpty: Boolean) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 2.dp)
-            .testTag("fleet-workspace-${heading.id}")
-            .semantics { heading() },
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                heading.name,
-                style = MaterialTheme.typography.titleSmall,
-                color = if (heading.isUnclaimed) MaterialTheme.colorScheme.onSurfaceVariant
-                else MaterialTheme.colorScheme.primary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            heading.repository?.let {
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    it,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                )
-            }
-        }
-        if (isEmpty) {
-            Text(
-                "No worktrees",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
 
 @Composable
 private fun WorktreeHeader(

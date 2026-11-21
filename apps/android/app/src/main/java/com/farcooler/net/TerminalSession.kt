@@ -284,18 +284,6 @@ class TerminalSession(
         }
     }
 
-    /**
-     * Re-assert the size this screen already wants, without anything having
-     * told it a new one.
-     *
-     * For triggers where the risk is not that this screen's own size changed
-     * but that the pane drifted while nothing here was watching it — chiefly
-     * the app returning to the foreground, where someone on a Mac could have
-     * resized the shared window while this device was backgrounded.
-     */
-    fun reassertSize() {
-        scope.launch { scheduleResize() }
-    }
 
     /**
      * The link under this session was replaced by a new one.

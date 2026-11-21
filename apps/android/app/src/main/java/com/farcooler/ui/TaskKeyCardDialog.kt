@@ -9,8 +9,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.farcooler.model.TaskKeyCard
@@ -55,7 +53,3 @@ fun TaskKeyCardBody(card: TaskKeyCard, failure: String? = null) {
         failure?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
 }
-
-/** A key's semantics: its title after it, so TalkBack says what "ov-190" is. */
-fun Modifier.taskKeyDescription(card: TaskKeyCard?): Modifier =
-    if (card == null) this else semantics { contentDescription = card.accessibilityLabel }

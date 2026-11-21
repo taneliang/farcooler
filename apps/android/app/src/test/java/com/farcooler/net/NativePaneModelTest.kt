@@ -386,6 +386,16 @@ class NativePaneModelTest {
     }
 
     @Test
+    fun someoneElsesAskRemainsAnswerableAfterRefusal() {
+        refuse = CoreException("Not yours", word = "not-yours", what = "not_yours")
+        val model = answering()
+        model.answer(held, AgentConversation.DENY)
+        eventually("the refusal is said") { model.answerIssues["hook-ask-1"] != null && model.answering == null }
+        assertEquals("The answer wasn’t sent. Answer in the terminal.", model.answerIssues["hook-ask-1"])
+        assertTrue(AgentConversation.answerable(held))
+    }
+
+    @Test
     fun `prompt images are read only where the runner offers them (ov-458)`() {
         val reader = PromptImageSource { _, _, _ -> byteArrayOf() }
         val model = NativePaneModel(

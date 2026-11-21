@@ -308,7 +308,6 @@ internal object NativeVt {
 
     external fun nativeResize(handle: Long, columns: Int, rows: Int)
 
-    external fun nativeRevision(handle: Long): Long
 
     /** See `Java_com_farcooler_core_NativeVt_nativeSnapshot` for the layout. */
     external fun nativeSnapshot(handle: Long): IntArray?
@@ -325,7 +324,6 @@ internal object NativeVt {
 
     external fun nativeTakeWrites(handle: Long): ByteArray?
 
-    external fun nativeTakeBell(handle: Long): Boolean
 
     external fun nativeTitle(handle: Long): String?
 

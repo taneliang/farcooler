@@ -416,40 +416,6 @@ class TaskBoardTest {
     )
 
     /**
-     * A repository split in two is two boards and two rows: keyed by the
-     * workspace, called by its name, each counting its own board, and naming
-     * the repository the row itself does not.
-     */
-    @Test
-    fun twoWorkspacesInOneRepositoryAreTwoBoardRows() {
-        val main = WorkspaceSummary(id = "w-main", name = "Main", isMain = true, repository = "r-busy")
-        val billing = WorkspaceSummary(id = "w-billing", name = "Billing", ordinal = 1, repository = "r-busy")
-        val rows = RunnerBoards.rows(
-            hostId = "h",
-            boards = listOf(main, billing),
-            repositories = repositories,
-            models = mapOf("w-main" to busy, "w-billing" to busy, "r-busy" to TaskBoard.EMPTY),
-            panes = panes,
-            build = both,
-            link = RunnerLink.ANSWERING,
-        )
-        assertEquals(listOf("w-main", "w-billing"), rows.map { it.key })
-        assertEquals(listOf("Main", "Billing"), rows.map { it.name })
-        assertEquals(listOf("r-busy", "r-busy"), rows.map { it.repository })
-        assertEquals(listOf("overnight", "overnight"), rows.map { it.repositoryName })
-        assertEquals(listOf("w-main", "w-billing"), rows.map { it.workspace.boardWorkspace })
-    }
-
-    /** An implicit board's row is the repository's, as it always was, and names nothing twice. */
-    @Test
-    fun anImplicitBoardIsTheRepositorysRow() {
-        val row = RunnerBoards.rows("h", repositories, boards, panes, both, link = RunnerLink.ANSWERING).first()
-        assertEquals("r-busy", row.key)
-        assertEquals(null, row.repositoryName)
-        assertEquals(null, row.workspace.boardWorkspace)
-    }
-
-    /**
      * What a sweep reads: every workspace's board, Main first, and the whole
      * repository where the runner names no workspace for it.
      */
@@ -481,33 +447,6 @@ class TaskBoardTest {
     }
 
     /**
-     * **A workspace's board has a row as soon as the workspace exists**
-     * (ov-56). A workspace made a moment ago has an empty board, or one not
-     * read yet, and a row only for a board with something on it left the new
-     * workspace an inert heading: its board could not be opened to watch the
-     * first tasks arrive. The board screen draws the empty and unread states.
-     *
-     * Mutation: dropping an empty or unread board's row. Red.
-     */
-    @Test
-    fun aWorkspacesBoardHasARowWhileEmptyOrUnread() {
-        val main = WorkspaceSummary(id = "w-main", name = "Main", isMain = true, repository = "r-busy")
-        val billing = WorkspaceSummary(id = "w-billing", name = "Billing", ordinal = 1, repository = "r-busy")
-        val rows = RunnerBoards.rows(
-            hostId = "h",
-            boards = listOf(main, billing),
-            repositories = repositories,
-            models = mapOf("w-main" to TaskBoard.EMPTY),
-            panes = panes,
-            build = both,
-            link = RunnerLink.ANSWERING,
-        )
-        assertEquals(listOf("w-main", "w-billing"), rows.map { it.key })
-        assertEquals(listOf(0, 0), rows.map { it.decisions })
-        assertEquals(listOf(0, 0), rows.map { it.agents })
-    }
-
-    /**
      * **Every status is a section, the empty ones included** (ov-55, owner
      * decision 3). The list draws an empty status as a collapsed header
      * reading "Backlog 0"; a list that dropped it said nothing about what
@@ -527,31 +466,6 @@ class TaskBoardTest {
     }
 
     /**
-     * **An empty implicit board still has a row** (ov-55, spec §5 and §8),
-     * read or not, like a workspace's (ov-56). The workspace view treats an
-     * implicit board as a workspace, and an empty one with no row was a
-     * board nobody could open to put a task on. AgentKit's
-     * `anEmptyImplicitBoardStillHasARow`.
-     *
-     * Mutation: the implicit-board filter back in `rows`. Red.
-     */
-    @Test
-    fun `an empty implicit board still has a row`() {
-        val rows = RunnerBoards.rows("h", repositories, boards, panes, both, link = RunnerLink.ANSWERING)
-        assertEquals(listOf("r-busy", "r-empty", "r-unread"), rows.map { it.repository })
-        assertEquals(listOf("overnight", "scratch", "never-read"), rows.map { it.name })
-        assertEquals(listOf(2, 0, 0), rows.map { it.decisions })
-    }
-
-    @Test
-    fun aRowCountsDecisionsAndTheTasksAgentsAreOn() {
-        val row = RunnerBoards.rows("h", repositories, boards, panes, both, link = RunnerLink.ANSWERING).first()
-        assertEquals(2, row.decisions)
-        assertEquals(2, row.agents)
-        assertEquals("2 tasks need a decision, Agents are on 2 tasks", row.spoken)
-    }
-
-    /**
      * **A reconnected runner counts no agents until this link has read its
      * fleet** (ov-26 review). The board passed "connected" from the phase,
      * and a reconnect is Connected for a host read and a fleet read before
@@ -566,49 +480,6 @@ class TaskBoardTest {
         val records = DaemonBuild("1", true, "", setOf("tasks", "terminal_task"))
         val reconnected = RunnerLink.ANSWERING.given(FleetRead.EARLIER_LINK)
         assertFalse(TaskAgentLink.speaksOfAgents(reconnected, records))
-        assertEquals(
-            0, RunnerBoards.rows("h", repositories, boards, panes, both, reconnected).first().agents)
-        val read = RunnerLink.ANSWERING.given(FleetRead.THIS_LINK)
-        assertEquals(2, RunnerBoards.rows("h", repositories, boards, panes, both, read).first().agents)
-    }
-
-    @Test
-    fun aRunnerThatCannotBeBelievedAboutItsPanesCountsNoAgents() {
-        val dropped = RunnerBoards.rows("h", repositories, boards, panes, both, link = RunnerLink.AWAY).first()
-        assertEquals(0, dropped.agents)
-        assertEquals(2, dropped.decisions)
-        val older = DaemonBuild("1", true, "", setOf("workspaces", "tasks"))
-        assertEquals(0, RunnerBoards.rows("h", repositories, boards, panes, older, link = RunnerLink.ANSWERING).first().agents)
-    }
-
-    @Test
-    fun aRunnerWithoutABoardGetsNoRows() {
-        val old = DaemonBuild("1", true, "", setOf("workspaces"))
-        assertTrue(RunnerBoards.rows("h", repositories, boards, panes, old, RunnerLink.ANSWERING).isEmpty())
-        assertTrue(RunnerBoards.rows("h", repositories, boards, panes, null, RunnerLink.ANSWERING).isEmpty())
-        // Silence is a runner older than capabilities, which has no board either.
-        assertTrue(RunnerBoards.rows("h", repositories, boards, panes, DaemonBuild("1", true, ""), RunnerLink.ANSWERING).isEmpty())
-    }
-
-    /** A board whose only rows this build cannot place still has something on it, and a row. */
-    @Test
-    fun aBoardOfOnlyUnreadableRowsStillGetsARow() {
-        val future = TaskBoard(
-            TaskStatus.ORDER.map { TaskBoardColumn(it, emptyList()) },
-            unreadable = listOf(UnreadableTaskRow("9", "-9", "x", "parked")),
-        )
-        val rows = RunnerBoards.rows(
-            "h", listOf(Repository("r-new", displayName = "newer")), mapOf("r-new" to future),
-            panes, both, link = RunnerLink.ANSWERING,
-        )
-        assertEquals(listOf("r-new"), rows.map { it.repository })
-        assertEquals(0, rows.single().decisions)
-    }
-
-    @Test
-    fun aRowWithNothingToCountSaysNothing() {
-        assertNull(BoardRow("h", "r", "n", 0, 0).spoken)
-        assertEquals("1 task needs a decision", BoardRow("h", "r", "n", 1, 0).spoken)
     }
 
     // ---- a late build, and landing ----

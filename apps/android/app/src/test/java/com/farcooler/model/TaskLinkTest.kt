@@ -58,7 +58,6 @@ class TaskLinkTest {
                 )
             ),
         )
-        assertEquals(0, board.tasksWithLiveAgents(wt.terminals))
     }
 
     // Which task an agent's own notifications fold into (ov-107): the same

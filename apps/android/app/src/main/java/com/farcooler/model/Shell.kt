@@ -710,12 +710,6 @@ object ShellGesture {
     fun overviewProgress(up: Float, tabCount: Int): Float =
         min(1f, max(0f, pageRise(up, tabCount) / ShellMetrics.OVER_RUN))
 
-    /** How far the column has unfurled, 0…1. A fleet with no tabs is fully out. */
-    fun columnProgress(up: Float, tabCount: Int): Float {
-        val full = columnFull(tabCount)
-        if (full <= 0f) return 1f
-        return min(1f, max(0f, up / full))
-    }
 
     /**
      * Whether a pull-down should leave the overview.

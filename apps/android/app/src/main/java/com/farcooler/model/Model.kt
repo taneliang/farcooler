@@ -1082,9 +1082,6 @@ val List<Terminal>.landingTerminal: Terminal?
         return firstOrNull()
     }
 
-/** The terminal a host lands on when its worktree list is skipped. */
-val Fleet.landingTerminal: Terminal?
-    get() = worktrees.flatMap { it.terminals }.landingTerminal
 
 /**
  * What went wrong, in two voices.

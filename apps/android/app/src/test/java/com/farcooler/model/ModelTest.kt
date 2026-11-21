@@ -118,45 +118,8 @@ class ModelTest {
         assertEquals(AgentActivity.NONE, AgentActivity.parse(null))
     }
 
-    @Test
-    fun theLandingTerminalPrefersOneThatNeedsYou() {
-        // An agent waiting on you outranks everything else, because that is the
-        // whole reason to have opened the app.
-        val fleet = Fleet(
-            worktrees = listOf(
-                Worktree(
-                    id = "w",
-                    terminals = listOf(
-                        terminal(id = "running", state = "running"),
-                        terminal(id = "blocked", state = "running", activity = "blocked"),
-                    ),
-                )
-            )
-        )
-        assertEquals("blocked", fleet.landingTerminal?.id)
-    }
 
-    @Test
-    fun aRunningTerminalBeatsOneThatExited() {
-        val fleet = Fleet(
-            worktrees = listOf(
-                Worktree(
-                    id = "w",
-                    terminals = listOf(
-                        terminal(id = "dead", state = "exited"),
-                        terminal(id = "alive", state = "running"),
-                    ),
-                )
-            )
-        )
-        assertEquals("alive", fleet.landingTerminal?.id)
-    }
 
-    @Test
-    fun aHostWithNoTerminalsHasNothingToLandOn() {
-        // Which is what sends the app to its worktree list instead.
-        assertNull(Fleet(worktrees = listOf(Worktree(id = "w"))).landingTerminal)
-    }
 
     // MARK: - The four bands
     //

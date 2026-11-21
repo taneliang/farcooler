@@ -978,14 +978,6 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeSetPalette(
     })
 }
 
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeRevision(
-    _env: JNIEnv,
-    _class: JClass,
-    handle: jlong,
-) -> jlong {
-    guarded(0, || unsafe { vt::farcooler_vt_revision(handle_of(handle)) as jlong })
-}
 
 /// The whole screen, as one flat `int[]`.
 ///
@@ -1107,14 +1099,6 @@ pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeTakeWrites(
     })
 }
 
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeTakeBell(
-    _env: JNIEnv,
-    _class: JClass,
-    handle: jlong,
-) -> jboolean {
-    guarded(0, || u8::from(unsafe { vt::farcooler_vt_take_bell(handle_of(handle)) }))
-}
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_farcooler_core_NativeVt_nativeTitle(

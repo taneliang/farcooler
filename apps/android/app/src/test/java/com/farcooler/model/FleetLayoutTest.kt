@@ -74,25 +74,6 @@ class FleetLayoutTest {
     fun anOrchestratorIsItsWorkspacesRowWhereverItsPaneRuns() {
         val headings = FleetLayout.of(fleet, emptyMap())
         assertEquals(listOf(null, "orch-b", null, null), headings!!.map { it.orchestrator })
-        assertEquals(setOf("orch-b"), FleetLayout.orchestrators(headings))
-    }
-
-    /**
-     * Each workspace's heading has its own Board row, as on the iPhone and the
-     * Mac; one whose board has no row yet has none, and Unclaimed never does.
-     */
-    @Test
-    fun eachWorkspaceHeadingHasItsOwnBoardRow() {
-        val headings = FleetLayout.of(fleet, emptyMap())
-        fun row(workspace: WorkspaceSummary) =
-            BoardRow(hostId = "h", repository = "r1", name = workspace.name, decisions = 0, agents = 0, workspace = workspace)
-        val main = row(fleet.workspaces!!.first { it.id == "m1" })
-        val billing = row(fleet.workspaces!!.first { it.id == "b1" })
-        // A row the fleet has no heading for, and one keyed like Unclaimed's.
-        val stray = row(WorkspaceSummary(id = "unclaimed/r1", name = "x", repository = "r1"))
-        val placed = FleetLayout.boardRows(headings, listOf(billing, main, stray))
-        assertEquals(mapOf("m1" to main, "b1" to billing), placed)
-        assertEquals(emptyMap<String, BoardRow>(), FleetLayout.boardRows(null, listOf(main)))
     }
 
     /** An orchestrator's tab is called after its workspace, and only a listed one's. */

@@ -80,23 +80,6 @@ object FleetLayout {
         }
     }
 
-    /** Every orchestrator's terminal id: the panes no worktree's rows list. */
-    fun orchestrators(headings: List<FleetHeading>?): Set<String> =
-        headings.orEmpty().mapNotNull { it.orchestrator }.toSet()
-
-    /**
-     * The Board row under each workspace's heading, by heading id, as the
-     * iPhone and the Mac draw one: a workspace's own row, which
-     * [RunnerBoards.rows] gives every workspace, its board empty or not.
-     * Unclaimed is no workspace and keeps no board, so it never has one.
-     */
-    fun boardRows(headings: List<FleetHeading>?, rows: List<BoardRow>): Map<String, BoardRow> {
-        val byKey = rows.associateBy { it.key }
-        return headings.orEmpty()
-            .filterNot { it.isUnclaimed }
-            .mapNotNull { heading -> byKey[heading.id]?.let { heading.id to it } }
-            .toMap()
-    }
 
     /** An orchestrator's tab title: "Billing Orchestrator", as its row under Billing says. */
     fun orchestratorTitle(workspace: String) = "$workspace orchestrator"

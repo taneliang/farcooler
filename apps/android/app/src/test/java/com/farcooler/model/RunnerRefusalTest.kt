@@ -319,16 +319,4 @@ class RunnerRefusalTest {
         assertEquals("tmux-timed-out", RunnerRefusal.TMUX_TIMED_OUT.word)
     }
 
-    /**
-     * Someone else's on a shared runner (ov-494): an answer refused that way
-     * keeps its card up and says why, never "answered elsewhere", which would
-     * hide an ask nobody answered.
-     */
-    @Test
-    fun someoneElsesAskStaysUpAndSaysWhy() {
-        val outcome = PermissionAnswering.outcome("not-yours")
-        assertTrue("$outcome", outcome is PermissionAnswering.Outcome.Failed)
-        val sentence = (outcome as PermissionAnswering.Outcome.Failed).sentence
-        assertTrue(sentence, sentence.endsWith(RunnerRefusal.NOT_YOURS.sentence))
-    }
 }

@@ -69,7 +69,6 @@ import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.coroutineScope
 import com.farcooler.model.BoardReads
-import com.farcooler.model.BoardRow
 import com.farcooler.model.BoardSummary
 import com.farcooler.model.Capability
 import com.farcooler.model.FirstRunCopy
