@@ -87,9 +87,10 @@ fn retain_plan_items(state: &mut State) {
         && !(item.group_of.is_some() && matches!(item.phase, Phase::Done | Phase::Cancelled)));
 }
 
-/// Shipped clients read the same state shape. Only fall back to this view
-/// when their original unmarked reply would otherwise fail at the frame cap.
-pub(crate) fn bound_legacy_get(mut value: serde_json::Value) -> String {
+/// Shipped Plan clients use the same unmarked read as workflow snapshots.
+/// Shed history when it fills the frame, keeping every current item. If the
+/// live snapshot is too large, preserve the transport's correlated refusal.
+pub(crate) fn bound_legacy_get(mut value: serde_json::Value) -> Option<String> {
     value.as_object_mut().expect("workflow get object")
         .retain(|key, _| matches!(key.as_str(), "schema" | "state" | "context" | "stops" | "configuration"));
     if let Some(state) = value["state"].as_object_mut() {
@@ -98,11 +99,7 @@ pub(crate) fn bound_legacy_get(mut value: serde_json::Value) -> String {
         state.insert("seen".into(), serde_json::json!([]));
     }
     let json = value.to_string();
-    if json.len() <= PLAN_WORKFLOW_BYTES {
-        return json;
-    }
-    value.as_object_mut().expect("workflow get object").remove("configuration");
-    encode_plan_get(value)
+    (json.len() <= PLAN_WORKFLOW_BYTES).then_some(json)
 }
 
 pub(crate) fn encode_plan_get(mut value: serde_json::Value) -> String {
@@ -120,9 +117,8 @@ pub(crate) fn encode_plan_get(mut value: serde_json::Value) -> String {
     }
     let mut remaining = PLAN_WORKFLOW_BYTES.saturating_sub(value.to_string().len());
     items.sort_by_key(|(_, item)| {
-        let tracker = item["definition"]["source"] == TICKET_SOURCE;
         let closed = matches!(item["phase"].as_str(), Some("Done" | "Failed" | "Cancelled"));
-        (tracker, closed, std::cmp::Reverse(item["since_ms"].as_i64().unwrap_or_default()))
+        (closed, std::cmp::Reverse(item["since_ms"].as_i64().unwrap_or_default()))
     });
     for (id, item) in items {
         let stop = stops.remove(&id);

@@ -830,8 +830,10 @@ impl Rpc {
                 }
                 let value = crate::workflow_starter::add_to_get(svc, workspace, value).await;
                 let mut json = value.to_string();
-                if action_is_get && req.accepts.is_empty() && json.len() > PLAN_WORKFLOW_BYTES {
-                    json = bound_legacy_get(value);
+                if action_is_get && req.accepts.is_empty() && json.len() > PLAN_WORKFLOW_BYTES
+                    && let Some(bounded) = bound_legacy_get(value)
+                {
+                    json = bounded;
                 }
                 Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema: 1, json }))
             }
