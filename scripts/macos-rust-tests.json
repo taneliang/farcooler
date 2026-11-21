@@ -21,6 +21,7 @@
       "proc_table": "Darwin process/signature and terminal identity APIs.",
       "proc_cwd": "Darwin process/signature and terminal identity APIs.",
       "foreground": "Darwin process/signature and terminal identity APIs.",
+      "native_hold": "Darwin process-group holds, responsibility tracking and pause rollback.",
       "caller_seat": "Darwin process/signature and terminal identity APIs.",
       "daemon_log": "Mac paths, notifications and platform-facing responses.",
       "paths": "Mac paths, notifications and platform-facing responses.",
