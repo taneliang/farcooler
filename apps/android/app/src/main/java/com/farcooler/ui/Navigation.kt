@@ -238,10 +238,7 @@ sealed interface Route {
     ) : Route
 
     /**
-     * A theme's or ticket's page of the plan layer on that board (ov-274), or
-     * an orchestrator's page (ov-285): [kind] is `theme`, `ticket` or `page`,
-     * [pageId] the plan's own id or the page's slot. Not a place a relaunch
-     * reopens; its workspace is.
+     * A theme's or ticket's page on that board (ov-274). Relaunch reopens its workspace.
      */
     @Serializable
     @SerialName("plan-page")

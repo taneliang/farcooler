@@ -658,7 +658,7 @@ data class PlanSegment(val kind: Kind, val count: Int) {
     enum class Kind { DONE, IN_REVIEW, IN_PROGRESS, NOT_STARTED }
 }
 
-/** A theme's or ticket's page, by the plan's own id, or an orchestrator's page by its slot (ov-285). */
+/** A theme's or ticket's page, by the plan's own id. */
 sealed interface PlanPage {
     val id: String
 
@@ -666,20 +666,16 @@ sealed interface PlanPage {
     /** A ticket's page: [id] is its card's task id. */
     data class Ticket(override val id: String) : PlanPage
 
-    /** An orchestrator's page (ov-269): [id] is its slot, `landing` or `spend`. */
-    data class Page(override val id: String) : PlanPage
 
     /** The word [Route.PlanPage] keeps it under. */
     val kind: String get() = when (this) {
         is Theme -> "theme"
         is Ticket -> "ticket"
-        is Page -> "page"
     }
 
     companion object {
         fun of(kind: String, id: String): PlanPage = when (kind) {
             "theme" -> Theme(id)
-            "page" -> Page(id)
             else -> Ticket(id)
         }
     }

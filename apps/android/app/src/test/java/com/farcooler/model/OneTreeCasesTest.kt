@@ -58,7 +58,6 @@ class OneTreeCasesTest {
                 json.decodeFromJsonElement(kotlinx.serialization.builtins.ListSerializer(Worktree.serializer()), c["worktrees"]!!),
                 json.decodeFromJsonElement(kotlinx.serialization.builtins.ListSerializer(NeedsYouItem.serializer()), c["items"]!!),
                 filter(c["filter"]?.jsonPrimitive?.contentOrNull),
-                BoardPage.list(c["pages"]!!.jsonObject),
             )
             val expected = c["outline"]!!.jsonArray.map { it.jsonPrimitive.content }
             val actual = outline(tree.work + tree.below)

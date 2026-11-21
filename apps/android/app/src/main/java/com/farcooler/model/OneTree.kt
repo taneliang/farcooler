@@ -37,7 +37,7 @@ object OneTree {
         }
     }
 
-    enum class Kind { THEME, TASK, DONE_FOLD, TICKET, TERMINAL, SUBAGENT, PAGE, GROUP, WORKTREE }
+    enum class Kind { THEME, TASK, DONE_FOLD, TICKET, TERMINAL, SUBAGENT, GROUP, WORKTREE }
 
     /** Where a node goes when it's chosen. */
     sealed interface Target {
@@ -47,8 +47,6 @@ object OneTree {
         data class Ticket(val id: String) : Target
         data class Worktree(val id: String) : Target
         data class Terminal(val worktree: String, val terminal: String) : Target
-        /** An orchestrator's page, by slot. */
-        data class Page(val slot: String) : Target
         /** A subagent's: it has no pane, and runs inside the orchestrator. */
         data object Orchestrator : Target
     }
@@ -174,9 +172,7 @@ object OneTree {
         worktrees: List<Worktree>,
         items: List<NeedsYouItem>,
         filter: Filter,
-        /** The board's orchestrator pages: each anchored one hangs under its theme. */
-        pages: List<BoardPage> = emptyList(),
-    ): Tree = Builder(workspace, board, plan, worktrees, items, filter, pages).build()
+    ): Tree = Builder(workspace, board, plan, worktrees, items, filter).build()
 
     /** Card statuses as the plan's CLI words them: "In Review", "in_review". */
     internal fun status(word: String): TaskStatus? {
@@ -193,7 +189,6 @@ object OneTree {
         allWorktrees: List<Worktree>,
         items: List<NeedsYouItem>,
         val filter: Filter,
-        val pages: List<BoardPage>,
     ) {
         val rows = board?.rows.orEmpty()
         val unreadable = board?.unreadable.orEmpty()
@@ -278,7 +273,6 @@ object OneTree {
                     children += Node("$id/done", Kind.DONE_FOLD, Words.done(done.size), children = done.map { taskNode(it, id) }, quiet = true)
                 }
             }
-            children += pages.filter { it.themeAnchor == theme.id }.map { Node("$id/page:${it.slot}", Kind.PAGE, it.title, target = Target.Page(it.slot)) }
             Node(id, Kind.THEME, theme.name, detail = Words.progress(theme.counts), target = Target.Theme(theme.id), children = children, asks = theme.id in askThemes)
         }
 

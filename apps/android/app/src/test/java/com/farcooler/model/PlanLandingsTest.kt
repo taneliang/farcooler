@@ -1,7 +1,6 @@
 package com.farcooler.model
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -10,10 +9,7 @@ import java.io.File
 
 /**
  * Landings (ov-309, ov-872) and the runner's CI reads (ov-306) on Android, against
- * `test/fixtures/plan.json`, the Rust client's own output; and a page's live
- * references against `test/fixtures/pages/normalized/live.json`, what the
- * runner stores. AgentKit's `PlanLandingsTests` and `PageLiveDataTests` hold
- * the Mac and the iPhone to the same files and the same words.
+ * `test/fixtures/plan.json`, the Rust client's own output.
  */
 class PlanLandingsTest {
     private fun repositoryFile(relative: String): String {
@@ -62,8 +58,6 @@ class PlanLandingsTest {
         val read = PlanCiRead("main", status = CiStatus.PASSED, fetchedAt = now - 3 * 3_600_000L)
         assertEquals("as of 3 h ago", LandingWords.ciStale(read, now))
         assertNull(LandingWords.ciStale(read.copy(fetchedAt = now - 60_000), now))
-        val world = PageWorld(plan = Plan(nowMs = now, ci = listOf(read)))
-        assertEquals("Passed · as of 3 h ago", world.resolve(PageRef(PageTarget.Ci("main"))).status)
     }
 
     @Test
@@ -80,42 +74,6 @@ class PlanLandingsTest {
         assertEquals("Running · 1 of 2 jobs done", LandingWords.ciSummary(PlanCiRead("main", status = CiStatus.RUNNING, jobs = jobs)))
         assertEquals("No runs yet", LandingWords.ciSummary(PlanCiRead("main", status = CiStatus.NONE)))
         assertEquals("CI unknown", LandingWords.ciSummary(PlanCiRead("main", status = CiStatus.UNKNOWN)))
-    }
-
-    private val live = PageDoc.decode(repositoryFile("test/fixtures/pages/normalized/live.json"))
-
-    @Test
-    fun `figures on the live page draw from the plan, failed CI in amber`() {
-        val stats = live.blocks[1] as PageBlock.Stats
-        // The runner gives a live figure the value and the reference the label an older app draws (review 1005c M4).
-        assertEquals(PageRef(PageTarget.Ci("main"), "Main"), stats.items[0].ref)
-        assertEquals("Main", stats.items[0].value)
-        val world = PageWorld(plan = plan)
-        val shown = stats.items.map(world::statText)
-        // Main isn't read in the fixture: its name, as plain text.
-        assertEquals("Main", shown[0].value)
-        assertEquals(PageWorld.StatShown("Failed", "pushed at midnight", PageTone.ATTENTION), shown[1])
-        assertEquals("3", shown[2].value)
-        assertEquals("9", shown[3].value)
-        assertEquals("320K", shown[4].value)
-        // The runner no longer knows lanes: a page's `lane` reference to a name no ticket has draws as the plain word.
-        assertEquals("mac-ux", shown[5].value)
-    }
-
-    @Test
-    fun `a CI reference opens its run and says how it stands, and a count is a number`() {
-        val world = PageWorld(plan = plan)
-        val ci = world.resolve(PageRef(PageTarget.Ci("c85bf83d")))
-        assertEquals("c85bf83d", ci.name)
-        assertEquals("Failed · 1 of 3 jobs failed", ci.status)
-        assertEquals(PageTone.ATTENTION, ci.statusTone)
-        assertEquals(PageDestination.Url("https://github.com/taneliang/farcooler/actions/runs/37275435256"), ci.destination)
-        assertEquals("11", world.cellText(PageCell(ref = PageRef(PageTarget.Cards("done")))))
-        assertEquals("320K", world.cellText(PageCell(ref = PageRef(PageTarget.Theme("Visual language")), show = PageShow.SPEND)))
-        val bare = PageWorld()
-        assertEquals(PageResolved("Run 37275435256"), bare.resolve(PageRef(PageTarget.Ci("run:37275435256"))))
-        assertEquals(PageResolved("In review"), bare.resolve(PageRef(PageTarget.Cards("in_review"))))
-        assertFalse(bare.resolve(PageRef(PageTarget.Ci("main"))).destination != null)
     }
 
     private fun <T> assertNotNullOf(value: T?): T {

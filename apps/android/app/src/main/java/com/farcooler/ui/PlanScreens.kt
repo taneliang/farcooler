@@ -117,8 +117,6 @@ fun LazyListScope.planItems(
     onNeedsYou: (() -> Unit)? = null,
     /** The themes grid's columns: one on a phone, two on a tablet. */
     themeColumns: Int = 1,
-    /** The board's orchestrator pages (ov-285); null on a runner without `board_pages`. */
-    pages: PagesHook? = null,
     /** Copy reference for rulings (ov-304); null on a runner without `board_rulings`. */
     rulings: RulingsHook? = null,
     /** Which of Now and Next the plan opens with; the peek leaves out what its card behind already says (ov-659). */
@@ -151,7 +149,7 @@ fun LazyListScope.planItems(
             }
         }
         is PlanReadState.Loaded -> {
-            loaded(state.plan, statuses, onOpen, folds, needsYou, onNeedsYou, themeColumns, pages, rulingsShown = rulings != null && state.plan.rulings.isNotEmpty(), band = band)
+            loaded(state.plan, statuses, onOpen, folds, needsYou, onNeedsYou, themeColumns, rulingsShown = rulings != null && state.plan.rulings.isNotEmpty(), band = band)
             // Last, as on the Mac and the iPhone: rulings ask nothing, and stand until the owner says otherwise.
             rulingItems(state.plan, rulings)
         }
@@ -166,7 +164,6 @@ private fun LazyListScope.loaded(
     needsYou: Int,
     onNeedsYou: (() -> Unit)?,
     themeColumns: Int,
-    pages: PagesHook?,
     rulingsShown: Boolean = false,
     band: BandShown = BandShown.ALL,
 ) {
@@ -177,7 +174,6 @@ private fun LazyListScope.loaded(
         if (!rulingsShown) item(key = "plan/empty") {
             PlanNotice(PlanWords.NOTHING_PLANNED, PlanWords.NOTHING_PLANNED_DETAIL, Modifier.testTag("plan-empty"))
         }
-        pages?.let { pageItems(it, plan, onOpen) }
         return
     }
     // The same Rust answer supplies the band and every section, so they can't disagree (ov-1016).
@@ -192,9 +188,6 @@ private fun LazyListScope.loaded(
         item(key = "plan/cost") { PlanHeader("Cost", null, Modifier.testTag("plan-cost-header")) }
         item(key = "plan/cost/block") { PlanCostBlock(cost) }
     }
-    // After Themes, as on the Mac and the iPhone (design 6.1): pages of their
-    // own, and anchored ones whose theme is gone.
-    pages?.let { pageItems(it, plan, onOpen) }
     view?.section(PlanViewKind.LandedToday)?.let { landed ->
         val open = folds.isOpen(PlanFold.LANDED_TODAY, default = !landed.folded)
         item(key = "plan/landed") {

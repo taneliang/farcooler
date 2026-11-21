@@ -208,12 +208,8 @@ fun BoardTab(
     LaunchedEffect(showsPlan, workspace.id) {
         if (showsPlan) {
             connection.plans.read(workspace)
-            connection.pages.read(workspace)
         }
     }
-    // The board's orchestrator pages (ov-285), read with the plan.
-    val pageLists by connection.pages.lists.collectAsStateWithLifecycle()
-    val keepsPages = daemon?.can(Capability.BOARD_PAGES) == true
     val keepsRulings = daemon?.can(Capability.BOARD_RULINGS) == true
     // The owner's marks on a ruling (ov-333): Keep and Keep all, and Reverse and
     // Discuss to the orchestrator, which they never start.
@@ -246,7 +242,6 @@ fun BoardTab(
                     connection.readBoard(workspace)
                     if (showsPlan) {
                         connection.plans.read(workspace)
-                        connection.pages.read(workspace)
                     }
                     refreshing = false
                 }
@@ -373,11 +368,6 @@ fun BoardTab(
                             folds = planFolds,
                             needsYou = PlanStrip.needsYouCount(workspace, board, (planStates[workspace.id] as? PlanReadState.Loaded)?.plan ?: Plan(), needsYou),
                             onNeedsYou = onNeedsYou,
-                            pages = if (keepsPages) {
-                                PagesHook(pageLists[workspace.id], System.currentTimeMillis()) {
-                                    scope.launch { connection.pages.read(workspace) }
-                                }
-                            } else null,
                             rulings = rulingsHook,
                         )
                     } else if (board.unreadable.isNotEmpty()) {
