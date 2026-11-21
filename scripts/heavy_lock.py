@@ -233,7 +233,22 @@ def pid_alive(pid):
         return False
     except PermissionError:
         return True
-    return True
+    # kill(pid, 0) also succeeds for zombies. A stopped parent may never reap
+    # one, so an unreaped wrapper must not keep its place in the heavy queue.
+    if sys.platform.startswith("linux"):
+        try:
+            stat = pathlib.Path(f"/proc/{pid}/stat").read_text()
+        except FileNotFoundError:
+            return False
+        except OSError:
+            return True
+        return not stat.rpartition(")")[2].lstrip().startswith(("Z", "X"))
+    try:
+        stat = subprocess.run(["/bin/ps", "-o", "stat=", "-p", str(pid)],
+                              capture_output=True, text=True).stdout.strip()
+    except OSError:
+        return True
+    return not stat.startswith("Z")
 
 
 def live_tickets(qd):
@@ -557,6 +572,28 @@ def _self_test():
         expect("a dead holder's ticket is skipped", (got, list(qd.glob(f"*-{dead.pid}.ticket"))), (["ran"], []))
         for t in qd.glob("*.ticket"):
             t.unlink()
+
+        # Keep the child unreaped while a real waiter encounters its ticket.
+        zombie = subprocess.Popen([sys.executable, "-c", "pass"])
+        ticket = qd / f"{1:020d}-{zombie.pid}.ticket"
+        try:
+            deadline = time.monotonic() + 2
+            while not subprocess.run(["/bin/ps", "-o", "stat=", "-p", str(zombie.pid)],
+                                     capture_output=True, text=True).stdout.strip().startswith("Z"):
+                if time.monotonic() >= deadline:
+                    raise AssertionError("fixture child did not become a zombie")
+                time.sleep(0.01)
+            ticket.write_text(f"worktree /wt/zombie, PID {zombie.pid}\n")
+            try:
+                waiter = subprocess.run([heavy, "--", "echo", "zombie-skipped"], env=env,
+                                        capture_output=True, text=True, timeout=2)
+                expect("an unreaped zombie's ticket is skipped",
+                       (waiter.stdout.strip(), ticket.exists()), ("zombie-skipped", False))
+            except subprocess.TimeoutExpired:
+                fails.append("a waiter remained blocked on an unreaped zombie")
+        finally:
+            zombie.wait()
+            ticket.unlink(missing_ok=True)
 
         # Nested: a command run by scripts/heavy that itself takes the lock (train-gate.sh running lane-gate) does not wait on its parent.
         out = subprocess.run([heavy, "--", sys.executable, str(here / "heavy"), "--", "echo", "nested-ok"], env=env, capture_output=True, text=True, timeout=10).stdout
