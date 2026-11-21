@@ -733,7 +733,7 @@ The cold Swift job's named steps add 26.3 minutes (9.2 native build, 4.8 AgentKi
 
 ### CI job list
 
-Matrix rows list the executed variants of each job. This is the job inventory for `ci.yml`; the existing path filters still decide which jobs execute for a particular change.
+The full inventory is also recorded in ov-1390 ticket note `98e65012`. Counting matrix variants, `ci.yml` defines 27 jobs before the change and 29 after it. The existing path filters still decide which jobs execute for a particular change.
 
 | Before | After |
 |---|---|
