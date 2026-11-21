@@ -57,8 +57,7 @@ declare module 'fc-web' {
     workflow_call(method: string, args: string): Promise<string>
     terminals(): Promise<string>
     attach(terminal: string, output: (bytes: Uint8Array) => void, ended: () => void): Promise<WebPane>
-    /// The phones' shapes (crates/client's needs_you_json, plan_json and
-    /// page_json), as JSON. Needs You (needs.ts) and the plan (plan.ts) are shown.
+    /// Needs You in the phones' shape (crates/client's needs_you_json).
     needsYou(): Promise<string>
     /// Answer an ask Needs You lists (its `ask_id`, the action's `id`). A
     /// refusal rejects with message `refused` and the runner's `code` and

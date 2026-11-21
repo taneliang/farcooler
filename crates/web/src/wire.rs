@@ -6,7 +6,7 @@
 //! channel, and a second session per pane. Now it is that `Session`, built
 //! for the browser (`farcooler-client`'s `web` feature) over the connection
 //! `ssh::connect` authenticated with the passkey. What a phone reads, the page
-//! reads in the same shapes: `needs_you_json`, `plan_json`, `page_json`.
+//! reads in the same shapes: `needs_you_json` and `plan_json`.
 //!
 //! The layout is the session's: calls on the control channel, a pane's bytes
 //! on a channel of their own, both running `~/.local/bin/<daemon> --stdio`.
