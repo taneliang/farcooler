@@ -196,9 +196,9 @@ impl Exec {
     pub(super) fn native_socket(&self, binding: &Binding) -> PathBuf {
         self.root.join(format!("n-{}.sock", &terminal(binding).simple().to_string()[..12]))
     }
-    /// Where the build's hold listens (ov-1330). Beside its hook socket, in the runner's private root.
+    /// The hold listens beside the hook socket, with the same path length budget on Darwin.
     pub(super) fn native_hold_socket(&self, binding: &Binding) -> PathBuf {
-        self.root.join(format!("n-{}.hold.sock", &terminal(binding).simple().to_string()[..12]))
+        self.root.join(format!("h-{}.sock", &terminal(binding).simple().to_string()[..12]))
     }
     /// The pane command that runs `script` under this binding's hold.
     pub(super) fn held(&self, binding: &Binding, script: &str) -> Result<String> {
