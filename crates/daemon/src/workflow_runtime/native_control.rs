@@ -97,11 +97,16 @@ pub(super) async fn controlled<T>(turn: impl std::future::Future<Output = Result
                         match tmux.pane_life(pane, id).await {
                             Ok(farcooler_tmux::PaneLife::Live) => {
                                 match crate::yielding::manual_pause_latch(yielded, tty, supervisor) {
-                                    Ok(_enter) => {
+                                    Ok(mut enter) => {
                                         // Keep the latch through freeze. Record the hand pause first so the end of a
                                         // gate cannot continue the processes while we are stopping them ourselves.
                                         if let Some(y) = yielded { y.manual(true); }
-                                        match freeze(tty, supervisor).await {
+                                        let checked = freeze(tty, supervisor).await.and_then(|stopped| {
+                                            // Drop the freeze on error so a late legacy wrapper can release its ticket.
+                                            enter.check(tty, supervisor)?;
+                                            Ok(stopped)
+                                        });
+                                        match checked {
                                             Ok(stopped) => {
                                                 remaining = remaining.saturating_sub(active_since.elapsed());
                                                 *frozen = Some(stopped); clock.pause(); engine_steering::paused(id, true); Ok(())

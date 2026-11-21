@@ -26,15 +26,24 @@ fn end(mut child: std::process::Child) { unsafe { libc::killpg(child.id() as i32
 
 #[tokio::test]
 async fn a_landing_gate_runs_after_a_builder_releases_its_heavy_ticket() {
-    landing_after_heavy_builder(false).await;
+    landing_after_heavy_builder(HeavyBuilder::Current).await;
 }
 
 #[tokio::test]
 async fn a_builder_holding_a_legacy_tmpdir_ticket_stays_runnable_during_landing() {
-    landing_after_heavy_builder(true).await;
+    landing_after_heavy_builder(HeavyBuilder::Legacy).await;
 }
 
-async fn landing_after_heavy_builder(legacy: bool) {
+#[tokio::test]
+async fn a_legacy_wrapper_launched_after_the_pause_snapshot_does_not_block_landing() {
+    landing_after_heavy_builder(HeavyBuilder::LateLegacy).await;
+}
+
+enum HeavyBuilder { Current, Legacy, LateLegacy }
+
+async fn landing_after_heavy_builder(builder: HeavyBuilder) {
+    let legacy = !matches!(builder, HeavyBuilder::Current);
+    let late = matches!(builder, HeavyBuilder::LateLegacy);
     let dir = tempfile::tempdir().unwrap();
     let scripts = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts");
     let old_tmp = dir.path().join("old temp");
@@ -55,36 +64,59 @@ else:
     hl.legacy_queues = lambda queue: [q for q in discover(queue) if lock.parent.resolve() in q.parents]
 runpy.run_path(sys.argv.pop(1), run_name='__main__')
 "#;
-    let command = |old| {
-        let mut cmd = Command::new("python3");
+    let command = |old, delayed| {
+        let mut cmd = if delayed {
+            let mut shell = Command::new("/bin/sh");
+            shell.args(["-c", "read -r line && { TMPDIR=\"$1\"; shift; TMPDIR=\"$TMPDIR\" \"$@\"; exit $?; }", "sh"])
+                .arg(&old_tmp).arg("python3");
+            shell.stdin(Stdio::piped());
+            shell
+        } else { Command::new("python3") };
         cmd.args(["-c", driver]).arg(&scripts).arg(if old { old_tmp.join("lane-gate.lock") } else { lock.clone() })
             .arg(if old { "legacy" } else { "current" }).arg(scripts.join("heavy"));
         cmd.env_remove("CI").env_remove("HEAVY_LOCK_HELD").env_remove("FARCOOLER_OPERATION_BINDING")
-            .env("TMPDIR", if old { &old_tmp } else { dir.path() }).env("HEAVY_LOAD_LIMIT", "100000").env("HEAVY_POLL", "0.02")
+            .env("TMPDIR", if old && !delayed { &old_tmp } else { dir.path() }).env("HEAVY_LOAD_LIMIT", "100000").env("HEAVY_POLL", "0.02")
             .current_dir(dir.path()).process_group(0);
         cmd
     };
-    let holder = command(legacy).args(["--", "/bin/sh", "-c", "touch ready; while [ ! -f release ]; do sleep 0.02; done"])
+    let mut holder = command(legacy, late).args(["--", "/bin/sh", "-c", "touch ready; while [ ! -f release ]; do sleep 0.02; done"])
         .spawn().unwrap();
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    while !dir.path().join("ready").exists() {
-        if tokio::time::Instant::now() >= deadline { end(holder); panic!("the builder did not acquire the lock"); }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    let wait_ready = || {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !dir.path().join("ready").exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        dir.path().join("ready").exists()
+    };
+    if !late && !wait_ready() { end(holder); panic!("the builder did not acquire the lock"); }
     let y = Yielding::new(None, dir.path().join(heavy_queue::NAME));
     let _builder = y.builder(group(&holder));
-    let gate = y.admit_gate().await.unwrap();
-    let mut landing = command(false).env("FARCOOLER_OPERATION_BINDING", "landing")
+    let gate = if late {
+        let mut state = y.0.state.lock().unwrap();
+        let mut ready = false;
+        stop_builders_with_snapshot(&mut state, &y.0.queue, || {
+            let raw = crate::proc_table::snapshot();
+            // Release the shell only after discovery has its process list.
+            std::io::Write::write_all(&mut holder.stdin.take().unwrap(), b"start\n").unwrap();
+            ready = wait_ready();
+            raw
+        });
+        drop(state);
+        if !ready { end(holder); panic!("the late wrapper did not publish its ticket"); }
+        None
+    } else { Some(y.admit_gate().await.unwrap()) };
+    let notes = dir.path().join("landing.log");
+    let mut landing = command(false, false).env("FARCOOLER_OPERATION_BINDING", "landing").stderr(File::create(&notes).unwrap())
         .args(["--", "touch", "landed"]).spawn().unwrap();
-    let queue = dir.path().join("lane-gate.lock.queue");
+    let waiting_on_holder = || std::fs::read_to_string(&notes).unwrap().lines()
+        .any(|line| line.contains("held by") && line.contains("touch ready"));
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-    let expected_tickets = if legacy { 1 } else { 2 };
-    while std::fs::read_dir(&queue).unwrap().flatten().filter(|e| e.path().extension().is_some_and(|e| e == "ticket")).count() < expected_tickets
+    while !waiting_on_holder()
         && !dir.path().join("landed").exists()
         && tokio::time::Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    let was_waiting = !dir.path().join("landed").exists()
+    let was_waiting = waiting_on_holder() && !dir.path().join("landed").exists()
         && !crate::proc_table::stopped_or_gone(holder.id() as i32);
     let holder_state = states(&holder);
     std::fs::write(dir.path().join("release"), "").unwrap();
@@ -96,7 +128,8 @@ runpy.run_path(sys.argv.pop(1), run_name='__main__')
     };
     drop(gate);
     end(holder);
-    assert!(was_waiting && passed, "landing waited on the builder; its process states were {holder_state:?}");
+    assert!(was_waiting && passed, "landing must wait on a runnable builder; states {holder_state:?}, landing output: {}",
+        std::fs::read_to_string(notes).unwrap());
 }
 
 #[tokio::test]
