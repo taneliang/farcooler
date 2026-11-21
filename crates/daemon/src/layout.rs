@@ -58,16 +58,7 @@ impl LayoutView {
     }
 }
 
-pub fn parse_preset(text: &str) -> Option<LayoutPreset> {
-    Some(match text.trim().to_ascii_lowercase().replace('_', "-").as_str() {
-        "even-horizontal" | "columns" | "cols" | "row" => LayoutPreset::EvenHorizontal,
-        "even-vertical" | "rows" | "stack" | "column" => LayoutPreset::EvenVertical,
-        "main-vertical" | "main" | "main-v" => LayoutPreset::MainVertical,
-        "main-horizontal" | "main-h" => LayoutPreset::MainHorizontal,
-        "tiled" | "grid" | "tile" => LayoutPreset::Tiled,
-        _ => return None,
-    })
-}
+pub use farcooler_daemon_contracts::layout::parse_preset;
 
 pub fn preset_name(preset: LayoutPreset) -> &'static str {
     tmux_preset(preset).as_str()

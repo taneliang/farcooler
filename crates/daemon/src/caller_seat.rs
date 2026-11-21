@@ -64,16 +64,7 @@ use std::path::{Path, PathBuf};
 
 use uuid::Uuid;
 
-/// Who a caller is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Seat {
-    /// A person: in no pane, or in their own shell pane with no agent above.
-    Person,
-    /// An agent, in this pane when it's one of the runner's.
-    Agent(Option<Uuid>),
-    /// Not known: never taken for a person.
-    Unreadable,
-}
+pub use farcooler_daemon_contracts::caller::{Seat};
 
 /// Only a person or the occupant may displace an orchestrator seat.
 pub(crate) fn authorize_orchestrator(caller: Seat, target: Uuid) -> farcooler_core::error::Result<()> {

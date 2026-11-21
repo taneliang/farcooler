@@ -53,13 +53,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-/// What the gate says about one tool call.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Verdict {
-    Allow,
-    /// Refused, with the reason the model reads.
-    Deny(&'static str),
-}
+pub use farcooler_daemon_contracts::caller::{Verdict};
 
 /// The skill a rep runs on, the one skill it may load.
 pub const REP_SKILL: &str = "farcooler:rep";

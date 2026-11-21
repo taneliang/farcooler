@@ -1,6 +1,6 @@
 //! Finite trusted-local configuration. No registry, Service activation or login writes.
 use super::*;
-use std::collections::BTreeMap;
+use farcooler_daemon_contracts::coding_pins;
 use crate::hook_install::CODEX_HOOKS;
 
 pub use farcooler_protocol::workflow_config::*;
@@ -105,7 +105,7 @@ impl CodingConfigExt for CodingConfig {
         self.ci.command.validate()
     }
     fn operation(&self, version: &str, argument: &str) -> OperationSpec {
-        OperationSpec { adapter_version: version.into(), arguments: vec![self.pin(), argument.into()], environment: BTreeMap::new() }
+        coding_pins::operation(self, version, argument)
     }
     fn definition(&self) -> Result<Definition> {
         self.validate()?;
@@ -133,11 +133,10 @@ impl CodingConfigExt for CodingConfig {
         self.validate_pinned_definition(definition)
     }
     fn landing_resource(&self) -> Option<String> {
-        self.landing.as_ref().map(|l| digest(&("landing-target/v1", &l.repository, &l.target)))
+        coding_pins::landing_resource(self)
     }
     fn wait_operation(&self, version: &str, argument: &str, every_ms: u64, patience_ms: u64) -> OperationSpec {
-        OperationSpec { adapter_version: version.into(), environment: BTreeMap::new(),
-            arguments: vec![self.pin(), argument.into(), every_ms.to_string(), patience_ms.to_string()] }
+        coding_pins::wait_operation(self, version, argument, every_ms, patience_ms)
     }
 }
 /// The identity an agent's review gate pins, and the one its verdict receipt carries (ov-969).

@@ -9,7 +9,8 @@
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
-use farcooler_daemon::rep_gate::{Gate, Verdict, decide};
+use farcooler_daemon::rep_gate::{Gate, decide};
+use farcooler_daemon_contracts::caller::{CONNECTORS_FILE_MAX, ConnectorsFile, Verdict};
 
 /// The most a hook's input may be. A tool call's input is far smaller; past
 /// this it's refused rather than read.
@@ -85,10 +86,10 @@ pub(crate) fn answer(
 pub(crate) fn read_connectors(path: &Path) -> Vec<String> {
     let Ok(file) = std::fs::File::open(path) else { return Vec::new() };
     let mut text = String::new();
-    if file.take(farcooler_daemon::reps::CONNECTORS_FILE_MAX).read_to_string(&mut text).is_err() {
+    if file.take(CONNECTORS_FILE_MAX).read_to_string(&mut text).is_err() {
         return Vec::new();
     }
-    serde_json::from_str::<farcooler_daemon::reps::ConnectorsFile>(&text).map(|f| f.connectors).unwrap_or_default()
+    serde_json::from_str::<ConnectorsFile>(&text).map(|f| f.connectors).unwrap_or_default()
 }
 
 /// Refuse `--runner` in a rep's pane (`FARCOOLER_REP` set): a rep works only
@@ -176,7 +177,7 @@ mod tests {
         assert!(methods.contains(&"task.list") && methods.contains(&"task.get_by_key"), "{methods:?}");
         for method in methods {
             let req = farcooler_protocol::v1::Request { method: method.into(), ..Default::default() };
-            assert!(farcooler_daemon::people::rep_may(&req), "{method} isn't a rep's to call");
+            assert!(farcooler_daemon_contracts::caller::rep_may(&req), "{method} isn't a rep's to call");
         }
     }
 

@@ -2,7 +2,7 @@
 //! definition to publish. Drafting changes nothing on the runner; publishing is `workspace set-workflow`,
 //! which the owner and the workspace's orchestrator do (ov-1267).
 use clap::Args;
-use farcooler_daemon::landing_templates::{self as lt, Bundle, Extra};
+use farcooler_daemon_contracts::landing_templates::{self as lt, Bundle, Extra};
 use farcooler_protocol::workflow_config::{AdapterConfiguration, NotificationPolicy};
 use lt::Template;
 use uuid::Uuid;

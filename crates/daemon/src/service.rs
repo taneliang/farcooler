@@ -89,101 +89,11 @@ fn pane_host_command(kind: &str) -> String {
     format!("{} pane-host --kind {kind}", shell_quote(&binary))
 }
 
-/// What Far Cooler hands a claude pane beyond its preset: both are files in
-/// this daemon's runtime directory. `--settings` is claude's alone;
-/// `--plugin-dir` is claude's and cursor's.
-///
-/// - `settings` is `--settings <file>`, the hooks that make the pane report
-///   itself (`write_claude_hook_settings`).
-/// - `plugin_dir` is `--plugin-dir <dir>`, the plugin that carries the manager
-///   skill (`write_plugin`), invoked as `/farcooler:manager` in claude and
-///   `/manager` in cursor.
-///
-/// One struct rather than a parameter each, because every launch path gets
-/// both from one call to `Service::prepare_launch_hooks` and hands both to
-/// the same builders; a second parameter threaded beside the first is a
-/// second thing each of the four launch paths could forget.
-///
-/// Two more that are not files:
-///
-/// - `trust_workspace` is cursor's `--trust`, set by `prepare_launch_hooks`
-///   for a worktree this runner made itself (`Service::made_this_worktree`).
-///   cursor trusts per directory, and every new worktree is a new directory,
-///   so without it every task started on a worktree Far Cooler had just made
-///   sat on "Trust this workspace?" until someone answered it. It is on every
-///   launch in such a worktree, restarts included: a restarted pane that
-///   asked again would be the same gate one click later.
-/// - `prompt` is the agent's first message, as its launch argument. **Set by
-///   `create_terminal_with_prompt` and nowhere else**, which is how "first
-///   launch only" is kept: every other launch path builds its extras from
-///   `prepare_launch_hooks`, which never sets it, so a restart, a split or a
-///   pane coming back from chat cannot send the task a second time.
-/// - `orchestrator` is set when the pane is its workspace's orchestrator
-///   (`Service::orchestrator_launch`), and adds the arguments that point the
-///   harness back at the repository (`orchestrator::extra_args`). For such a
-///   claude pane, `settings` is the orchestrator's own file
-///   (`write_orchestrator_settings`), not `claude-hooks.json`.
-/// - `rep` is what a member's rep launches with (`reps::RepLaunch`): its
-///   permission arguments, its gate's settings file in place of `settings`,
-///   and its first message for a restart with nothing to resume. Set by
-///   `orchestrate` from the record on every launch, so a resumed rep carries
-///   it as a fresh one does.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct LaunchExtras {
-    pub settings: Option<PathBuf>,
-    pub plugin_dir: Option<PathBuf>,
-    pub trust_workspace: bool,
-    pub prompt: Option<LaunchPrompt>,
-    pub orchestrator: Option<crate::orchestrator::OrchestratorLaunch>,
-    pub rep: Option<crate::reps::RepLaunch>,
-    /// A member's `CLAUDE_CONFIG_DIR`, exactly as recorded (`claude_logins`);
-    /// `None`, and no variable at all, for the runner's own login.
-    pub claude_dir: Option<String>,
-    /// A member's pane on the runner's own login: what it's kept from (`shared_logins`).
-    pub shared: Option<crate::shared_logins::Kept>,
-    /// A member's pane's `CODEX_HOME`, an empty one of theirs (`shared_logins`).
-    pub codex_home: Option<String>,
-    /// Private file containing the engine-pinned config override, independent of project discovery.
-    pub codex_hooks: Option<PathBuf>,
-}
+pub use farcooler_daemon_contracts::launch::{LaunchExtras, LaunchPrompt};
 
-/// An agent's first message, and how it reaches the agent's argv.
-///
-/// Two forms because tmux has a ceiling. The whole `new-window` command,
-/// every argument of it, travels from the tmux client to the server as one
-/// message, and a message is capped: measured on tmux 3.7c, a 16 300-byte
-/// command is accepted and a 17 000-byte one is refused with "command too
-/// long". A prompt is quoted twice on its way in, and a pasted stack trace is
-/// easily past that. So a long one goes into a file instead, and the command
-/// carries the file's name (`MAX_INLINE_LAUNCH_BYTES`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LaunchPrompt {
-    /// The text itself, `shell_quote`d into the command.
-    Inline(String),
-    /// A file in the runtime directory holding the text. The launch reads it
-    /// with `"$(cat …)"` and removes it; see `prompt_argument`.
-    File(PathBuf),
-}
-
-impl LaunchExtras {
-    /// An ordinary launch: nothing handed over.
-    pub const NONE: LaunchExtras = LaunchExtras {
-        settings: None,
-        plugin_dir: None,
-        trust_workspace: false,
-        prompt: None,
-        orchestrator: None,
-        rep: None,
-        claude_dir: None,
-        shared: None,
-        codex_home: None,
-        codex_hooks: None,
-    };
-
-    #[cfg(test)]
-    fn settings_only(path: &Path) -> Self {
-        Self { settings: Some(path.to_path_buf()), ..Self::NONE }
-    }
+#[cfg(test)]
+fn settings_only(path: &Path) -> LaunchExtras {
+    LaunchExtras { settings: Some(path.to_path_buf()), ..LaunchExtras::NONE }
 }
 
 /// The largest launch command that carries its prompt inline. Past this the
@@ -5775,7 +5685,7 @@ mod preset_tests {
         let command = preset_command_with_hooks(
             "claude",
             Some(SESSION),
-            &LaunchExtras::settings_only(Path::new("/tmp/fc/hooks.json")),
+            &settings_only(Path::new("/tmp/fc/hooks.json")),
         );
         assert!(command.contains("--settings"), "a launched pane reports what it is doing: {command}");
         assert!(
@@ -5788,7 +5698,7 @@ mod preset_tests {
     #[test]
     fn the_settings_path_is_quoted_like_every_other_interpolation_here() {
         let command =
-            preset_command_with_hooks("claude", None, &LaunchExtras::settings_only(Path::new("/tmp/My Runner/hooks.json")));
+            preset_command_with_hooks("claude", None, &settings_only(Path::new("/tmp/My Runner/hooks.json")));
         assert!(
             command.contains("'/tmp/My Runner/hooks.json'")
                 || command.contains("\"/tmp/My Runner/hooks.json\""),
@@ -5829,7 +5739,7 @@ mod preset_tests {
     #[test]
     fn no_other_agent_is_handed_claudes_settings_flag() {
         for preset in ["codex", "cursor", "shell", "aider", "claude-ish"] {
-            let with = preset_command_with_hooks(preset, None, &LaunchExtras::settings_only(Path::new("/tmp/fc/h.json")));
+            let with = preset_command_with_hooks(preset, None, &settings_only(Path::new("/tmp/fc/h.json")));
             assert!(!with.contains("--settings"), "{preset}: {with}");
             assert_eq!(with, preset_command_with_hooks(preset, None, &LaunchExtras::NONE), "{preset}: {with}");
         }
@@ -5853,7 +5763,7 @@ mod preset_tests {
         // Real names: runs the builder's command through a shell with the agent swapped for printf; nothing reaches tmux.
         let _real = crate::service::test_agent::real_names();
         let path = "/tmp/My Runner/hooks.json";
-        let command = preset_command_with_hooks("claude", None, &LaunchExtras::settings_only(Path::new(path)));
+        let command = preset_command_with_hooks("claude", None, &settings_only(Path::new(path)));
 
         // The login shell is whatever this machine's user has; `sh` is enough
         // to parse the `-ilc` payload and is the same parser in the way that
@@ -9588,7 +9498,7 @@ mod hook_file_tests {
             "claude",
             "018f5b2c-0000-7000-8000-00000000000b",
             true,
-            &LaunchExtras::settings_only(Path::new("/tmp/fc/hooks.json")),
+            &settings_only(Path::new("/tmp/fc/hooks.json")),
         );
         assert!(command.contains("--resume"), "it is still a resume: {command}");
         assert!(command.contains("--settings"), "and it still reports itself: {command}");
@@ -9600,7 +9510,7 @@ mod hook_file_tests {
         // The other half of the claude branch: a session with nothing on disk
         // behind it starts fresh, and a fresh start is a launch like any other.
         let command =
-            terminal_mode_command("claude:opus", "", false, &LaunchExtras::settings_only(Path::new("/tmp/fc/hooks.json")));
+            terminal_mode_command("claude:opus", "", false, &settings_only(Path::new("/tmp/fc/hooks.json")));
         assert!(!command.contains("--resume"), "nothing to resume: {command}");
         assert!(command.contains("--model opus"), "the model survives: {command}");
         assert!(command.contains("--settings"), "and so does the live view: {command}");
@@ -9617,7 +9527,7 @@ mod hook_file_tests {
                 "codex",
                 "018f5b2c-0000-7000-8000-00000000000c",
                 resumable,
-                &LaunchExtras::settings_only(Path::new("/tmp/fc/hooks.json")),
+                &settings_only(Path::new("/tmp/fc/hooks.json")),
             );
             assert!(!command.contains("--settings"), "resumable={resumable}: {command}");
         }
@@ -9634,7 +9544,7 @@ mod hook_file_tests {
         let _real = crate::service::test_agent::real_names();
         let path = "/tmp/My Runner/hooks.json";
         let sid = "018f5b2c-0000-7000-8000-00000000000d";
-        let command = terminal_mode_command("claude", sid, true, &LaunchExtras::settings_only(Path::new(path)));
+        let command = terminal_mode_command("claude", sid, true, &settings_only(Path::new(path)));
         let prefix = format!("{} -ilc", farcooler_core::shell::login_shell());
         let probe = command.replace(&prefix, "/bin/sh -c").replace("claude", "printf ,%s");
         assert!(probe.starts_with("/bin/sh -c"), "the prefix was found and replaced: {probe}");

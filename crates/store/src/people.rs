@@ -150,19 +150,7 @@ pub struct Rep {
     pub handle: String,
 }
 
-/// Handles the runner keeps for itself: `owner` names the owner in `workspace
-/// lead`, and `orchestrator` is a message's other address.
-const RESERVED: &[&str] = &["owner", "orchestrator", "rep", "runner", "manager", "user"];
-
-/// A handle: 1 to 32 of lowercase ASCII letters, digits and `-`, starting
-/// with a letter, and none the runner keeps (`RESERVED`).
-pub fn valid_handle(handle: &str) -> bool {
-    let mut chars = handle.chars();
-    matches!(chars.next(), Some('a'..='z'))
-        && handle.len() <= 32
-        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-        && !RESERVED.contains(&handle)
-}
+pub use farcooler_core::validate::valid_handle;
 
 /// Whether `name` would read as one of the runner's own message tags
 /// (`[from the orchestrator]`, `[from Alice's rep]`), which only the runner

@@ -1,0 +1,16 @@
+[package]
+name = "farcooler-daemon-contracts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+directories.workspace = true
+farcooler-core.workspace = true
+farcooler-protocol.workspace = true
+farcooler-workflow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+uuid.workspace = true

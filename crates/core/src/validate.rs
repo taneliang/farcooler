@@ -34,6 +34,20 @@ pub fn command_preset(s: &str) -> Result<()> {
     Ok(())
 }
 
+/// Handles the runner keeps for itself: `owner` names the owner in `workspace
+/// lead`, and `orchestrator` is a message's other address.
+const RESERVED: &[&str] = &["owner", "orchestrator", "rep", "runner", "manager", "user"];
+
+/// A handle: 1 to 32 of lowercase ASCII letters, digits and `-`, starting
+/// with a letter, and none the runner keeps (`RESERVED`).
+pub fn valid_handle(handle: &str) -> bool {
+    let mut chars = handle.chars();
+    matches!(chars.next(), Some('a'..='z'))
+        && handle.len() <= 32
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        && !RESERVED.contains(&handle)
+}
+
 fn scalar_len(s: &str, min: usize, max: usize, what: &'static str) -> Result<()> {
     let n = s.chars().count();
     if n < min || n > max {

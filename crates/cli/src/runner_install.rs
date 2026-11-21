@@ -472,7 +472,7 @@ fn first_key_words(plan: FirstKeyPlan, kept: Option<(farcooler_daemon::first_key
 /// `runner keep-first-key`: on the runner, keep `hash` (see [`first_key`]),
 /// and say what happened and where, tab-separated.
 pub fn keep_first_key(hash: &str) -> Fallible {
-    println!("{}", keep_answer(&farcooler_daemon::paths::ensure_runtime_dir()?, hash)?);
+    println!("{}", keep_answer(&farcooler_daemon_contracts::paths::ensure_runtime_dir()?, hash)?);
     Ok(())
 }
 

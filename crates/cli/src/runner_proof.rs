@@ -20,7 +20,7 @@
 //! The private key never reaches this output. Only the public key and the
 //! signature are printed.
 
-use farcooler_daemon::paths;
+use farcooler_daemon_contracts::paths;
 use farcooler_daemon::runner_key::{Action, RunnerKey};
 use farcooler_protocol::v1::Scope;
 use farcooler_transport::Peer;
@@ -57,7 +57,7 @@ pub struct ProofArgs {
 /// Every value is quoted. None is a secret: an account id, a team id and a
 /// relay address, all of which the relay already knows.
 pub fn remote_command(cli: &str, claim: bool, args: &ProofArgs) -> String {
-    use farcooler_daemon::service::shell_quote;
+    use farcooler_core::shell::shell_quote;
     let relay = args.relay.as_deref().map(|r| format!(" --relay {}", shell_quote(r))).unwrap_or_default();
     let verb = if claim { "claim" } else { "sign-registration" };
     format!(

@@ -28,7 +28,7 @@ async fn a_theme_is_moved_in_one_call() {
     assert_eq!(r.required_capabilities, [capability::BOARD_PLAN, capability::BOARD_THEME_MOVE].map(String::from));
     let Some(request::Payload::BoardThemeMove(p)) = &r.payload else { panic!("{:?}", r.payload) };
     assert_eq!((p.theme_id.clone(), p.to, p.actor.as_str()), (tid(0x3000 + 12), 1, "manager"));
-    assert!(farcooler_daemon::people::rep_may(r), "a rep's pane may send it");
+    assert!(farcooler_daemon_contracts::caller::rep_may(r), "a rep's pane may send it");
 }
 
 /// A place off the ranking and a theme that isn't there are refused before

@@ -26,24 +26,11 @@ use std::path::{Path, PathBuf};
 
 use uuid::Uuid;
 
-/// The charter's file name inside a home.
-pub const CHARTER_FILE: &str = "charter.md";
+pub use farcooler_daemon_contracts::workspace_paths::{CHARTER_FILE, charter_path, home};
 
 /// Where a pre-workspaces repository kept its charter, relative to the main
 /// checkout.
 pub const REPOSITORY_CHARTER: &str = ".farcooler/manager.md";
-
-/// A workspace's home: `<root>/workspaces/<workspace id>`. `root` is the
-/// runtime directory (`FARCOOLER_HOME` when set). Only computed; see
-/// `make_home`.
-pub fn home(root: &Path, workspace: Uuid) -> PathBuf {
-    root.join("workspaces").join(workspace.to_string())
-}
-
-/// A workspace's charter: `home/charter.md`. It may not exist yet.
-pub fn charter_path(root: &Path, workspace: Uuid) -> PathBuf {
-    home(root, workspace).join(CHARTER_FILE)
-}
 
 /// Make `workspace`'s home if it isn't there, and give it a charter copied
 /// from `seed_from` if it has none and the seed exists.

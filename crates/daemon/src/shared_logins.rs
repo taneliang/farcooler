@@ -90,22 +90,7 @@ impl LoginHarness {
 const ALL_ON: farcooler_store::member_login_policy::MemberLoginPolicy =
     farcooler_store::member_login_policy::MemberLoginPolicy { claude: true, codex: true, cursor: true };
 
-/// What a member's pane on the runner's own login is kept from (review 1,
-/// item 1): the owner's connected apps and MCP servers, which aren't the
-/// owner's account but things it reaches in the owner's name. Claude:
-/// `--strict-mcp-config` with no `--mcp-config`, which drops the user's and
-/// project's servers and claude.ai's connectors (claude 2.1.301, as `reps`
-/// measured). Codex: its connected apps off (`features.apps`), and each MCP
-/// server the owner's or the checkout's config.toml names turned off by
-/// name, since `-c mcp_servers={}` merges rather than replaces (codex
-/// 0.153.4, measured in a scratch `CODEX_HOME`). Cursor has no such switch:
-/// its MCP servers stay, and the admins' copy says so. Hooks, plugins and
-/// CLAUDE.md stay: Far Cooler's own hooks need them.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Kept {
-    /// The codex MCP servers to turn off, by name.
-    pub codex_servers: Vec<String>,
-}
+pub use farcooler_daemon_contracts::launch::{Kept};
 
 /// The claude flags a shared pane adds. A rep has its own (`reps`).
 pub(crate) fn claude_flags(extras: &crate::service::LaunchExtras) -> &'static str {

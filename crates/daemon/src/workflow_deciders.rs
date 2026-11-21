@@ -17,14 +17,7 @@
 use farcooler_store::Store;
 use farcooler_workflow::{Definition, Phase, Progression, Reviewer, StageKind, State};
 
-/// The role every Maintainer holds as a decider.
-pub(crate) const MAINTAINER: &str = "role:maintainer";
-
-/// Whether `name` is one a gate may name, by its shape alone.
-pub(crate) fn well_formed(name: &str) -> bool {
-    name == "owner" || name == MAINTAINER
-        || name.strip_prefix("member:").is_some_and(farcooler_store::people::valid_handle)
-}
+pub(crate) use farcooler_daemon_contracts::caller::{MAINTAINER, is_decider_name as well_formed};
 
 /// The deciders `definition` names, a group's steps included, in step order, each once.
 pub(crate) fn named(definition: &Definition) -> Vec<&str> { definition.deciders() }

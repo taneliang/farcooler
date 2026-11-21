@@ -11,8 +11,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::Args;
 use farcooler_core::usage_words::tokens;
-use farcooler_daemon::report::spend::{SpendLine, SpendReport};
-use farcooler_daemon::report::{Group, Report, Spread, Tally};
+use farcooler_daemon_contracts::report::spend::{SpendLine, SpendReport};
+use farcooler_daemon_contracts::report::{Group, Report, Spread, Tally};
 use farcooler_protocol::v1::{self as pb, request, result};
 use farcooler_transport::ClientError;
 use uuid::Uuid;

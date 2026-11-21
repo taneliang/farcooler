@@ -3890,7 +3890,7 @@ mod tests {
     fn every_command_the_opening_prompt_names_parses() {
         use clap::Parser;
         for key in ["fc-12", "-1"] {
-            let prompt = farcooler_daemon::service::opening_prompt("farcooler", key);
+            let prompt = farcooler_daemon_contracts::opening::opening_prompt("farcooler", key);
             let commands = commands_in_prose(&prompt);
             assert!(commands.len() >= 4, "too few commands to be checking anything: {commands:?}");
             for words in &commands {

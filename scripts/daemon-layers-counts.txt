@@ -24,7 +24,7 @@ board -> agents: 12
 board -> composition: 23
 board -> delivery: 2
 board -> engine: 3
-board -> service: 57
+board -> service: 56
 board -> unresolved: 39
 board -> watch: 17
 delivery -> access: 4
@@ -40,7 +40,7 @@ engine -> board: 8
 engine -> composition: 7
 engine -> delivery: 3
 engine -> service: 18
-engine -> unresolved: 62
+engine -> unresolved: 61
 engine -> watch: 8
 git -> access: 1
 git -> agents: 3

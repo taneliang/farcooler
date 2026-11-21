@@ -95,7 +95,7 @@ pub(crate) async fn app(runner: Option<&str>, cmd: AppCmd, json: bool) -> crate:
 /// Where this channel's app listens: beside its daemon's socket, so
 /// `FARCOOLER_HOME` moves both together.
 fn socket_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    Ok(farcooler_daemon::paths::runtime_dir()?.join("app.sock"))
+    Ok(farcooler_daemon_contracts::paths::runtime_dir()?.join("app.sock"))
 }
 
 /// What a channel's app is called and how to open it. The same mapping as

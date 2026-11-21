@@ -37,51 +37,11 @@
 //! resolved path, and skipped a repository's hooks when handed `--cd /tmp/…`.
 //! Claude Code names its memory directory after the resolved path too.
 
-use std::path::{Path, PathBuf};
-
-use uuid::Uuid;
+use std::path::PathBuf;
 
 pub use crate::skill_install::Harness;
 
-/// Where an orchestrator runs and what it's pointed back at. Built by
-/// `OrchestratorLaunch::new`, which resolves the main checkout.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OrchestratorLaunch {
-    pub workspace: Uuid,
-    /// `<runtime dir>/workspaces/<workspace>`.
-    pub home: PathBuf,
-    /// The repository's main checkout, resolved.
-    pub main_checkout: PathBuf,
-    /// `home/charter.md`. It may not exist yet: that's the manager skill's
-    /// cue to interview for one.
-    pub charter: PathBuf,
-    /// Claude Code's `autoMemoryDirectory`. `None` when this user's home
-    /// directory can't be found, and then Claude Code picks its own.
-    pub memory_dir: Option<PathBuf>,
-}
-
-impl OrchestratorLaunch {
-    /// The launch for `workspace`, whose home and charter are under `root`
-    /// (`workspace_home`), in the repository checked out at `main_checkout`.
-    /// `user_home` is this user's home directory, where Claude Code keeps its
-    /// memory.
-    pub fn new(root: &Path, workspace: Uuid, main_checkout: &Path, user_home: Option<&Path>) -> Self {
-        let main_checkout = resolved(main_checkout);
-        OrchestratorLaunch {
-            workspace,
-            home: crate::workspace_home::home(root, workspace),
-            charter: crate::workspace_home::charter_path(root, workspace),
-            memory_dir: user_home.map(|home| claude_memory_dir(home, &main_checkout)),
-            main_checkout,
-        }
-    }
-}
-
-/// `path` with every link and `..` resolved, or `path` itself when it can't
-/// be (it doesn't exist). See the module doc for why.
-fn resolved(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
-}
+pub use farcooler_daemon_contracts::launch::{OrchestratorLaunch, claude_memory_dir, slug};
 
 /// The harness a preset runs, with or without a model: `claude:opus` is
 /// Claude Code. `None` for anything that can't orchestrate.
@@ -178,27 +138,11 @@ pub fn first_prompt(h: Harness, handoff: Option<&str>) -> String {
 /// Claude Code's switch for reading `CLAUDE.md` from an `--add-dir`.
 pub const ADDITIONAL_DIRECTORIES_CLAUDE_MD: &str = "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD";
 
-/// The memory directory Claude Code gives every session in the repository
-/// whose main checkout is `main_checkout`:
-/// `<user home>/.claude/projects/<slug>/memory`.
-///
-/// Measured: every worktree of a repository shares the main checkout's
-/// memory directory, and the slug is the resolved path with every character
-/// outside `[A-Za-z0-9]` replaced by `-`, so `/private/tmp/r/.worktrees/n`
-/// is `-private-tmp-r--worktrees-n`. Nothing here creates it or writes to it:
-/// it's handed to Claude Code as `autoMemoryDirectory`.
-pub fn claude_memory_dir(user_home: &Path, main_checkout: &Path) -> PathBuf {
-    user_home.join(".claude/projects").join(slug(&resolved(main_checkout))).join("memory")
-}
-
-/// Claude Code's name for a directory under `~/.claude/projects`.
-pub fn slug(path: &Path) -> String {
-    path.to_string_lossy().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
+    use uuid::Uuid;
 
     fn launch() -> OrchestratorLaunch {
         OrchestratorLaunch {

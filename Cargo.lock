@@ -916,6 +916,7 @@ dependencies = [
  "farcooler-client",
  "farcooler-core",
  "farcooler-daemon",
+ "farcooler-daemon-contracts",
  "farcooler-fence",
  "farcooler-protocol",
  "farcooler-store",
@@ -1005,6 +1006,7 @@ dependencies = [
  "farcooler-ceremony",
  "farcooler-client",
  "farcooler-core",
+ "farcooler-daemon-contracts",
  "farcooler-fence",
  "farcooler-ffi-guard",
  "farcooler-protocol",
@@ -1039,6 +1041,20 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "zeroize",
+]
+
+[[package]]
+name = "farcooler-daemon-contracts"
+version = "0.1.0"
+dependencies = [
+ "directories",
+ "farcooler-core",
+ "farcooler-protocol",
+ "farcooler-workflow",
+ "serde",
+ "serde_json",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

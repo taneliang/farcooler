@@ -13,7 +13,7 @@
 
 use std::io::{IsTerminal as _, Read as _};
 
-use farcooler_daemon::paths;
+use farcooler_daemon_contracts::paths;
 
 use farcooler_client::ssh::Reach;
 

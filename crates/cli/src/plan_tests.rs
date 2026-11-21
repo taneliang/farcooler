@@ -1290,7 +1290,7 @@ async fn the_plan_a_rep_reads_calls_only_what_a_rep_may() {
         run_on(&mut link, &the_board(), parsed(""), "manager", json, NOW).await.expect("the overview");
         assert!(!link.sent.is_empty());
         for req in &link.sent {
-            assert!(farcooler_daemon::people::rep_may(req), "{} isn't a rep's to call", req.method);
+            assert!(farcooler_daemon_contracts::caller::rep_may(req), "{} isn't a rep's to call", req.method);
         }
     }
 }

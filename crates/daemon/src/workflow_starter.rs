@@ -21,12 +21,8 @@ use crate::workflow_runtime::{CodingCi, CodingCommand, CodingConfig, CodingHarne
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-/// The harness a first draft runs its agents with.
-pub const HARNESS: &str = "claude";
-/// The models a build step may run with, its default first: Sonnet builds.
-pub const BUILD_MODELS: [&str; 2] = ["claude:sonnet", "claude:opus"];
-/// The models an agent's review gate may run with, its default first: Opus reviews.
-pub const REVIEW_MODELS: [&str; 2] = ["claude:opus", "claude:sonnet"];
+pub use farcooler_daemon_contracts::landing_templates::{BUILD_MODELS, HARNESS, REVIEW_MODELS, default_models};
+
 /// The name of the landing a first draft pushes through.
 pub const LANDING_JOB: &str = "landing-main";
 /// The CI workflow a first draft waits for, by its name on GitHub.
@@ -341,19 +337,6 @@ pub fn github_repository(origin: &str) -> Option<String> {
     let (owner, name) = rest.split_once('/')?;
     let part = |p: &str| !p.is_empty() && p.len() <= 100 && p.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b));
     (part(owner) && part(name)).then(|| format!("{owner}/{name}"))
-}
-
-/// The models each agent step of `definition` may run with: builds Sonnet first, agent reviews Opus first.
-pub fn default_models(definition: &mut farcooler_workflow::Definition) {
-    use farcooler_workflow::{Reviewer, StageKind};
-    for stage in &definition.stages {
-        let list = match stage.kind {
-            StageKind::Build => BUILD_MODELS,
-            StageKind::Review(Reviewer::Agent) => REVIEW_MODELS,
-            _ => continue,
-        };
-        definition.models.insert(stage.id.clone(), list.iter().map(|m| m.to_string()).collect());
-    }
 }
 
 #[cfg(test)]

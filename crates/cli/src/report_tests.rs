@@ -1,7 +1,7 @@
 //! `farcooler report`: the period it sends, the words it prints, and how it
 //! is refused.
 
-use farcooler_daemon::report::{
+use farcooler_daemon_contracts::report::{
     Acceptance, Decisions, NeedsYou, Notable, NotableTask, NotableWait, Scope, StatusTime, Usage,
 };
 use farcooler_transport::ClientError;
@@ -68,7 +68,7 @@ impl DispatchLink for FakeLink {
 
 fn empty_report(since: i64, until: i64) -> Report {
     Report {
-        schema: farcooler_daemon::report::SCHEMA,
+        schema: farcooler_daemon_contracts::report::SCHEMA,
         since,
         until,
         generated_at: until,

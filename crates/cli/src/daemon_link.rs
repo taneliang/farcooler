@@ -89,8 +89,8 @@ pub async fn connect_to(target: Option<&str>) -> Result<Link, Box<dyn std::error
 
 /// Connect to the local daemon, starting it if nothing answers.
 pub async fn connect() -> Result<Link, Box<dyn std::error::Error>> {
-    let socket = farcooler_daemon::paths::socket_path()?;
-    let database = farcooler_daemon::paths::database_path()?;
+    let socket = farcooler_daemon_contracts::paths::socket_path()?;
+    let database = farcooler_daemon_contracts::paths::database_path()?;
     connect_in(&socket, &database).await
 }
 
@@ -172,7 +172,7 @@ fn peer_pid(_stream: &tokio::net::UnixStream) -> Option<i32> {
 /// quietly fixed. Anything managing the daemon's lifecycle has to be able to
 /// ask that question without changing it.
 pub async fn connect_existing() -> Result<Option<Link>, Box<dyn std::error::Error>> {
-    let socket = farcooler_daemon::paths::socket_path()?;
+    let socket = farcooler_daemon_contracts::paths::socket_path()?;
     match dial(&socket).await {
         Ok(link) => Ok(Some(link)),
         Err(ClientError::Connect(_)) => Ok(None),
@@ -229,8 +229,8 @@ impl Ensured {
 /// this entirely, agent shims reconnect on the next start, and durable state is
 /// committed to SQLite per call.
 pub async fn ensure_local() -> Result<(Ensured, String), Box<dyn std::error::Error>> {
-    let socket = farcooler_daemon::paths::socket_path()?;
-    let database = farcooler_daemon::paths::database_path()?;
+    let socket = farcooler_daemon_contracts::paths::socket_path()?;
+    let database = farcooler_daemon_contracts::paths::database_path()?;
     ensure_in(&socket, &database).await
 }
 
@@ -326,7 +326,7 @@ pub fn cutover_held_here(database: &std::path::Path) -> bool {
 
 /// [`cutover_held_here`] for this runner's own database.
 pub fn cutover_held_local() -> bool {
-    farcooler_daemon::paths::database_path().is_ok_and(|db| cutover_held_here(&db))
+    farcooler_daemon_contracts::paths::database_path().is_ok_and(|db| cutover_held_here(&db))
 }
 
 const CUTOVER_STRANDED: &str = "A cutover started on this runner by another build is unfinished, and this build can't finish or undo it. Reinstall the build that started it, then finish or recover there.";

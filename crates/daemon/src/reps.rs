@@ -179,18 +179,7 @@ pub fn mcp_policy(connectors_on: bool) -> serde_json::Map<String, serde_json::Va
     keys
 }
 
-/// The file a rep's gate reads its member's connectors from, on every call
-/// (`rep-gate --connectors`): written by the runner at each launch and each
-/// change (`Service::write_rep_connectors`), so one turned off is refused at
-/// once.
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ConnectorsFile {
-    pub connectors: Vec<String>,
-}
-
-/// The most of that file the gate reads; past it, it refuses every MCP tool.
-pub const CONNECTORS_FILE_MAX: u64 = 64 * 1024;
+pub use farcooler_daemon_contracts::caller::{CONNECTORS_FILE_MAX, ConnectorsFile};
 
 /// One lock per rep pane, held across each of its launches: a resume
 /// (`Service::resume_rep`) and a restart from a client alike (`relaunch`).
@@ -244,17 +233,7 @@ pub fn absolute_cli(cli: Option<&std::path::Path>) -> Option<String> {
 /// is a gate that said nothing, which `permission_args` leaves refused.
 pub const GATE_TIMEOUT_S: u64 = 10;
 
-/// What a rep's launch carries beyond any agent's (`LaunchExtras::rep`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RepLaunch {
-    /// `permission_args`.
-    pub args: Vec<String>,
-    /// Its settings file, with the gate hook in it (`rep_settings`).
-    pub settings: std::path::PathBuf,
-    /// Its first message, sent again by a restart that has no conversation
-    /// to resume, so it still starts on its skill.
-    pub opening: String,
-}
+pub use farcooler_daemon_contracts::launch::{RepLaunch};
 
 /// A rep's claude settings: the hooks every pane reports with
 /// (`hook_install::claude_settings`), plus the rep gate as one more

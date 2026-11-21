@@ -1083,7 +1083,7 @@ enum TerminalCmd {
 
 #[tokio::main]
 async fn main() {
-    if let Err(e) = farcooler_daemon::paths::selection() {
+    if let Err(e) = farcooler_daemon_contracts::paths::selection() {
         eprintln!("invalid runtime root: {e}");
         std::process::exit(1);
     }
@@ -1164,7 +1164,7 @@ async fn push(runner: Option<&str>, cmd: PushCmd) -> Fallible {
     // through unquoted, and the daemon's, which always wraps — and a third one
     // on the path that forwards a credential over ssh is the one that gets it
     // wrong later.
-    use farcooler_daemon::service::shell_quote;
+    use farcooler_core::shell::shell_quote;
 
     if let Some(target) = runner {
         // This channel's CLI on that runner, not the bare name: it is the one
@@ -1198,7 +1198,7 @@ async fn push(runner: Option<&str>, cmd: PushCmd) -> Fallible {
         }
     }
 
-    let dir = farcooler_daemon::paths::ensure_runtime_dir()?;
+    let dir = farcooler_daemon_contracts::paths::ensure_runtime_dir()?;
     match cmd {
         PushCmd::Pair { relay } => {
             // The default lives in the daemon, not restated here: two
@@ -2291,7 +2291,7 @@ async fn events(runner: Option<&str>) -> Fallible {
 // ---------------------------------------------------------------------------
 
 async fn layout(runner: Option<&str>, cmd: LayoutCmd, json: bool) -> Fallible {
-    use farcooler_daemon::layout::parse_preset;
+    use farcooler_daemon_contracts::layout::parse_preset;
     use farcooler_protocol::v1::LayoutUpdate;
 
     let mut link = connect_to(runner).await?;

@@ -117,7 +117,7 @@ mod tests {
         let r = request(Uuid::from_u128(7));
         assert_eq!(r.method, "workspace.charter");
         assert_eq!(r.required_capabilities, [capability::WORKSPACE_CHARTER]);
-        assert!(farcooler_daemon::people::rep_may(&r), "a rep's pane may ask for it");
+        assert!(farcooler_daemon_contracts::caller::rep_may(&r), "a rep's pane may ask for it");
     }
 
     /// The edit carries its text, the hash it was made to, and the
@@ -129,7 +129,7 @@ mod tests {
         assert_eq!(r.required_capabilities, [capability::MEMBER_ROLES]);
         let Some(request::Payload::WorkspaceSetCharter(p)) = &r.payload else { panic!("no payload") };
         assert_eq!((p.text.as_str(), p.expected_sha256.as_str()), ("## Who decides\n", "ab12"));
-        assert!(!farcooler_daemon::people::rep_may(&r), "a rep's pane asks the orchestrator instead");
+        assert!(!farcooler_daemon_contracts::caller::rep_may(&r), "a rep's pane asks the orchestrator instead");
     }
 
     /// A `## Landing` section that doesn't read is named by its line before

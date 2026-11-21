@@ -242,7 +242,7 @@ pub enum PipeError {
 /// Runs until the far end closes, which for a `ProxyCommand` is when the SSH
 /// session ends.
 pub async fn run(runner_id: &str) -> Fallible {
-    let runtime_dir = farcooler_daemon::paths::runtime_dir()?;
+    let runtime_dir = farcooler_daemon_contracts::paths::runtime_dir()?;
     let store = RunnerStore::load_in(&runtime_dir)?;
     let stream = match dial(&store, runner_id).await {
         Ok(stream) => stream,
