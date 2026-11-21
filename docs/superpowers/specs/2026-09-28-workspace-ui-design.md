@@ -1,7 +1,7 @@
 # The workspace UI
 
 Date: 2026-09-28
-Status: design, decided (rulings in §12); plan: `docs/superpowers/plans/2026-09-28-workspace-ui.md`
+Status: design, decided (rulings in §12)
 Card: follows ov-55 (the UI/UX review)
 Builds on: [`2026-09-27-workspaces-as-workstreams-design.md`](2026-09-27-workspaces-as-workstreams-design.md)
 Evidence: `.claude/agent/reports/workspaces-ux-map*.md` (four maps of `main` at 69b97934), re-checked against
@@ -1135,8 +1135,7 @@ otherwise as the kanban. That kanban is cramped in 340 pt but works, since it sc
 
 ### What can run in parallel
 
-The plan (`docs/superpowers/plans/2026-09-28-workspace-ui.md`) assigns every shared file to one owning task and
-fixes the groups:
+The proposed work groups assign every shared file to one owning task:
 
 1. **Day one:** the daemon (1A), the relay (1B), the shared board rules then the Mac board (3A → 3B), and the
    column measurement (2A).
