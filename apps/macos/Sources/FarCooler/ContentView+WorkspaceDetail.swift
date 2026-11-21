@@ -416,6 +416,14 @@ extension ContentView {
             } else {
                 ContentUnavailableView("Board Not Found", systemImage: "flag").contentCard()
             }
+        case .workspace(let host, let id, .plan(.engine(let focus))?):
+            if let client = store.clients[host], let workspace = board(host: host, id: id) {
+                EnginePage(client: client, workspace: workspace, focus: focus, visible: current && settled) {
+                    openTask($0, host: host, workspace: id)
+                }
+            } else {
+                ContentUnavailableView("Engine Unavailable", systemImage: "gearshape.2")
+            }
         case .workspace(let host, let id, .plan(let page)?):
             if let client = store.clients[host], let workspace = board(host: host, id: id) {
                 let board = boardStore(for: workspace, client: client, host: host)

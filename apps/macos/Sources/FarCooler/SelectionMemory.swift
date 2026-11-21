@@ -45,6 +45,7 @@ enum SelectionMemory {
             case .plan(.ticket(let ticket)): third = "plan:ticket:\(ticket)"
             case .plan(.page(let slot)): third = "plan:page:\(slot)"
             case .plan(.needsYou): third = "plan:needs-you"
+            case .plan(.engine): third = "plan:engine"
             // A stage list is a view of the column, not kept.
             case .plan(.stage): third = ""
             }
@@ -75,6 +76,8 @@ enum SelectionMemory {
             focus = .plan(.ticket(String(third.dropFirst("plan:ticket:".count))))
         } else if third == "plan:needs-you" {
             focus = .plan(.needsYou)
+        } else if third == "plan:engine" {
+            focus = .plan(.engine(nil))
         } else if third.hasPrefix("plan:page:"), third.count > "plan:page:".count {
             focus = .plan(.page(String(third.dropFirst("plan:page:".count))))
         } else if !third.isEmpty {

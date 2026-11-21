@@ -66,6 +66,9 @@ struct PlanPageView: View {
                 // Drawn by the window, which holds the answers
                 // (`PlanNeedsYouPage`); never reached through here.
                 missing("Needs You")
+            case .engine:
+                // The window supplies the Engine page's runner link.
+                EmptyView()
             }
         }
         // One card for every page and every state it can be in (ov-297).

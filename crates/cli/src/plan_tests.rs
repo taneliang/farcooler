@@ -339,6 +339,12 @@ impl DispatchLink for Runner {
         Ok(pb::Result {
             value: Some(match (method.as_str(), payload) {
                 ("plan.get", _) => result::Value::Plan(plan),
+                ("workflow.get", _) => result::Value::WorkflowReply(pb::WorkflowReply {
+                    schema: 1,
+                    json: serde_json::json!({"context": {"binding": "test", "capabilities": {
+                        "workspace": WORKSPACE, "epoch": 1, "inspect": true, "controller": false
+                    }}, "places": {"agent": {"cap": 4, "used": 0}}}).to_string(),
+                }),
                 ("task.list", _) => result::Value::TaskList(pb::TaskList { next_page_after: None, items: items(), reads: None }),
                 ("plan.events", _) => result::Value::PlanEventList(pb::PlanEventList { events: self.events.clone() }),
                 ("line.order", Some(request::Payload::LineOrder(p))) => {
@@ -581,6 +587,20 @@ async fn plan_json_is_the_apps_shape() {
     assert_eq!(v["landings"][0]["number"], 9);
     assert_eq!(v["agents"][0]["short"], "0000a002");
     assert!(v.get("lanes").is_none() && v.get("trains").is_none(), "no lanes or trains in the shape");
+}
+
+#[tokio::test]
+async fn engine_returns_the_projection_from_the_authorized_workspace_read() {
+    let mut link = runner();
+    link.capabilities.push(capability::WORKFLOW_COMMANDS.into());
+    let view = say_json(&mut link, "engine").await;
+    assert_eq!(view["workspace"], WORKSPACE.to_string());
+    assert_eq!(view["capacity"][0]["used"], 0);
+    assert!(view.get("context").is_none());
+    assert_eq!(link.sent.iter().map(|r| r.method.as_str()).collect::<Vec<_>>(), ["workflow.get", "plan.get"]);
+    let read = &link.sent[0];
+    assert_eq!(read.target_resource_id.as_ref(), Some(&id_bytes(WORKSPACE)));
+    assert_eq!(read.required_capabilities, [capability::WORKFLOW_COMMANDS]);
 }
 
 /// `plan set` takes waiting tickets by key and sends their ids in order; a

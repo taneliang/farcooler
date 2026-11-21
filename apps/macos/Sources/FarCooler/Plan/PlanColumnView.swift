@@ -30,6 +30,7 @@ struct PlanColumnActions {
     }
     /// Open the board's list for a status.
     var openList: (TaskStatus) -> Void = { _ in }
+    var openRun: ((String) -> Void)?
 
     /// The same, each putting `close` first: the peek goes before anything
     /// opens.
@@ -38,7 +39,8 @@ struct PlanColumnActions {
             quote: { close(); quote($0) }, openAgent: { close(); openAgent($0) },
             openTicket: { close(); openTicket($0) },
             openTicketUnder: openTicketUnder.map { under in { agent, ticket in close(); under(agent, ticket) } },
-            openList: { close(); openList($0) })
+            openList: { close(); openList($0) },
+            openRun: openRun.map { openRun in { key in close(); openRun(key) } })
     }
 }
 
@@ -54,6 +56,14 @@ struct PlanColumnView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            Button {
+                onOpen(.engine(nil))
+            } label: {
+                Label("Engine", systemImage: "gearshape.2")
+            }
+            .buttonStyle(.link)
+            .padding(.bottom, Spacing.inset)
+            .identified("plan-open-engine")
             if plan.hasRead, plan.reconnecting { PlanReconnecting() }
             if plan.hasRead, let line = plan.staleLine { PlanStale(line: line) { Task { await plan.tryAgain() } } }
             content
@@ -91,9 +101,13 @@ struct PlanColumnView: View {
                 PlanColumnHeading(title: view.section(.landing)?.title ?? "Landings", prominent: true)
                     .identified("plan-landing")
                 ForEach(groups, id: \.id) { group in
-                    PlanLandingGroupView(group: group)
-                        .padding(.vertical, Spacing.group)
-                        .identified("plan-landing-group-\(group.id)")
+                    VStack(alignment: .leading, spacing: Spacing.group) {
+                        PlanLandingGroupView(group: group)
+                        Button("Show in Engine") { onOpen(.engine(.landing(group.id))) }
+                            .buttonStyle(.link)
+                    }
+                    .padding(.vertical, Spacing.group)
+                    .identified("plan-landing-group-\(group.id)")
                 }
             }
             if plan.plan.isEmpty && !plan.plan.hasColumnAgents && needsYou.items.isEmpty && groups.isEmpty {
@@ -348,7 +362,7 @@ struct PlanPipelineSection: View {
                         title: group.title, count: group.countWords, top: index == 0 ? 0 : PlanColumnMetrics.stage)
                     VStack(alignment: .leading, spacing: PlanColumnMetrics.cards) {
                         ForEach(group.assigned) { ticket in
-                            PlanTicketRow(ticket: ticket) { actions.openTicket(ticket.task) }
+                            PlanTicketRow(ticket: ticket, openRun: actions.openRun) { actions.openTicket(ticket.task) }
                         }
                         if let words = group.unattendedWords {
                             PlanUnattendedCard(
@@ -387,7 +401,7 @@ struct PlanAgentCard: View {
                 .identified("plan-agent-\(agent.id)")
             if showTickets {
                 ForEach(agent.tickets) { ticket in
-                    PlanTicketRow(ticket: ticket) { actions.open(ticket: ticket.task, under: agent) }
+                    PlanTicketRow(ticket: ticket, openRun: actions.openRun) { actions.open(ticket: ticket.task, under: agent) }
                 }
             } else {
                 if !agent.title.isEmpty {
@@ -459,7 +473,9 @@ struct PlanUnattendedCard: View {
                 .padding(.horizontal, Spacing.section)
                 .padding(.vertical, Spacing.tight)
                 .padding(.top, Spacing.tight)
-            ForEach(group.preview) { ticket in PlanTicketRow(ticket: ticket) { actions.openTicket(ticket.task) } }
+            ForEach(group.preview) { ticket in
+                PlanTicketRow(ticket: ticket, openRun: actions.openRun) { actions.openTicket(ticket.task) }
+            }
             // A tall stage shows its first few; the rest are one click away.
             if !group.unattended.isEmpty {
                 PlanMoreButton(words: "Show All \(group.unattended.count)", action: openAll)
@@ -501,12 +517,33 @@ struct PlanMoreButton: View {
 /// A ticket under its agent: a quiet dot, its title, its initiative.
 struct PlanTicketRow: View {
     let ticket: WireColumnTicket
+    var openRun: ((String) -> Void)?
     let open: () -> Void
     @State private var hovering = false
     /// Room for "ov-0000" at the callout size, which follows the system's text size.
     @ScaledMetric(relativeTo: .callout) private var keyWidth: CGFloat = 46
 
     var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.tight) {
+            row
+            if let note = ticket.run, let openRun {
+                Button {
+                    openRun(ticket.key)
+                } label: {
+                    Text(note.text)
+                        .font(.callout)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .buttonStyle(.link)
+                .help("Show Run in Engine")
+                .accessibilityHint("Opens the run in Engine")
+                .padding(.leading, PlanColumnMetrics.ticketIndent + keyWidth + 10)
+                .identified("plan-open-run-\(ticket.key)")
+            }
+        }
+    }
+
+    private var row: some View {
         Button(action: open) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 // Its key, in secondary ink at one width so every title starts

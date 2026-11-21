@@ -104,6 +104,9 @@ pub(crate) struct Common {
 
 #[derive(Debug, Clone, Subcommand)]
 enum PlanCmd {
+    /// Read the Mac Engine presentation for this workspace.
+    #[command(hide = true)]
+    Engine,
     /// Replace the plan: these waiting tickets, in this order. The first is next up.
     ///
     /// A ticket not named leaves the plan. Only a waiting ticket on the line
@@ -279,12 +282,28 @@ async fn run_on<L: DispatchLink>(
 ) -> Result<String, Failed> {
     needs_the_layer(&link.capabilities())?;
     // Themes and rulings were kept before the line was; everything else reads it.
-    if !matches!(cmd, Some(PlanCmd::Theme(_) | PlanCmd::Ruling(_))) {
+    if !matches!(cmd, Some(PlanCmd::Theme(_) | PlanCmd::Ruling(_) | PlanCmd::Engine)) {
         needs_the_line(&link.capabilities())?;
     }
     let (board, ws) = on_a_board(link, board).await?;
     let board = &board;
     match cmd {
+        Some(PlanCmd::Engine) => {
+            let workspace = crate::uuid_of(&ws);
+            let request = farcooler_client::plan_json::workflow_request(workspace);
+            let reply = link.call(request).await?;
+            let result::Value::WorkflowReply(reply) = expect_value(reply.value)? else {
+                return Err("Invalid workflow reply".into());
+            };
+            if reply.schema != 1 { return Err("Invalid workflow reply schema".into()); }
+            let raw = serde_json::from_str(&reply.json)?;
+            // A slow or unavailable Plan read should only cost titles and CI enrichment.
+            let plan = tokio::time::timeout(std::time::Duration::from_secs(2), get_plan(link, &ws, false))
+                .await.ok().and_then(Result::ok);
+            let view = farcooler_client::engine_view::from_workflow_reply(
+                workspace, &raw, plan.as_ref(), farcooler_client::workflow_presentation::Style::Apple)?;
+            Ok(serde_json::to_string(&view)?)
+        }
         None => {
             let plan = get_plan(link, &ws, false).await?;
             if !json { return Ok(overview(&plan, now)); }

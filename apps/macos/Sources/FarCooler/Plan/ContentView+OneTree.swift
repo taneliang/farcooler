@@ -45,6 +45,8 @@ extension ContentView {
     @ViewBuilder
     func treeMenu(_ node: OneTreeNode, host: String, workspace: WorkspaceSummary, client: DaemonClient) -> some View {
         switch node.target {
+        case .plan?:
+            Button("Open Engine") { openPlan(.engine(nil), host: host, workspace: workspace.id) }
         case .task(let id)?:
             if let row = boardStore(for: workspace, client: client, host: host).board.rows.first(where: { $0.id == id }) {
                 let agents = boardAgents(host: host, client: client)
@@ -156,7 +158,7 @@ extension ContentView {
             case .ticket(let id): return .ticket(id)
             case .page(let slot): return .page(slot)
             case .needsYou: return .needsYou
-            case .stage: return .plan
+            case .stage, .engine: return .plan
             }
         case .workspace(_, workspace, .worktree(let id, let terminal)?)?, .looseWorktree(_, let id, let terminal)?:
             return terminal.map { .terminal(worktree: id, terminal: $0) } ?? .worktree(id)

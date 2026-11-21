@@ -27,6 +27,7 @@ enum PlanPage: Hashable {
     /// A pipeline stage's tickets nobody is on (ov-874), by `WirePipeStage`
     /// raw value: where the column's "N more" line opens.
     case stage(String)
+    case engine(EngineFocus?)
 
     /// What it is, for a menu with no name to give it.
     var word: String {
@@ -36,6 +37,7 @@ enum PlanPage: Hashable {
         case .page: "Page"
         case .needsYou: "Needs You"
         case .stage: "Stage"
+        case .engine: "Engine"
         }
     }
 
@@ -47,6 +49,7 @@ enum PlanPage: Hashable {
         case .page: "doc.text"
         case .needsYou: "flag"
         case .stage: "list.bullet"
+        case .engine: "gearshape.2"
         }
     }
 }
@@ -325,7 +328,7 @@ final class PlanStore: ObservableObject {
     func readRecord(_ page: PlanPage) async {
         let data: Data?
         switch page {
-        case .page, .needsYou, .stage:
+        case .page, .needsYou, .stage, .engine:
             // A page has no record: it's replaced whole.
             return
         case .theme(let id):
@@ -350,6 +353,7 @@ final class PlanStore: ObservableObject {
         case .page(let slot): self.page(slot)?.title
         case .needsYou: OneTreeWords.needsYou
         case .stage(let raw): WirePipeStage(rawValue: raw)?.title
+        case .engine: page.word
         }
     }
 }

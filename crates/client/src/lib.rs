@@ -39,5 +39,6 @@ pub mod tasks_json;
 pub mod usage_json;
 pub mod workspaces_json;
 pub mod workflow_presentation;
+pub mod engine_view;
 
 pub mod recovery_view;

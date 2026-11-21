@@ -110,7 +110,8 @@ extension ContentView {
             openList: { status in
                 trail = nil
                 selection = .workspace(host: host, workspace: workspace.id, focus: .history(status))
-            })
+            },
+            openRun: { key in openPlan(.engine(.ticket(key)), host: host, workspace: workspace.id) })
     }
 
     /// `workspace`'s own Needs You, answered in place as the Needs You page
