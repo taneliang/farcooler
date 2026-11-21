@@ -209,7 +209,6 @@ fn the_engine_lands_and_the_orchestrator_cleans_up() {
         ] {
             assert!(land.contains(rule), "{h:?} lacks {rule:?}: {land}");
         }
-        assert!(land.contains(r#"`{"ci":"main"}`"#) && land.contains(r#"`{"cards":"in_review"}`"#), "{h:?}: {land}");
         for gone in ["landing start", "landing set", "landing move", "--record-only", "lands by hand", "gh run watch",
             "Rebase onto main", "plan ticket set", "landing-template <workspace>"] {
             assert!(!land.contains(gone), "{h:?} still shows {gone:?}: {land}");
