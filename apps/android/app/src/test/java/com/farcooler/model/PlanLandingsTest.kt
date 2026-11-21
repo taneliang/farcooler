@@ -45,6 +45,27 @@ class PlanLandingsTest {
     }
 
     @Test
+    fun `a CI run link opens only over HTTPS with a plain domain and no credentials`() {
+        val run = "https://github.com/o/r/actions/runs/1"
+        val read = PlanCiRead("main", status = CiStatus.PASSED, url = run)
+        assertEquals(run, read.runUrl)
+
+        val rejected = listOf(
+            "http://github.com/",
+            "javascript:alert(1)",
+            "https://user@github.com/",
+            "https://user:pw@github.com/",
+            "file:///etc/passwd",
+            "https://gіthub.com/", // Cyrillic і
+            "/relative",
+            "https://",
+        )
+        for (url in rejected) {
+            assertNull("Rejected URL: $url", read.copy(url = url).runUrl)
+        }
+    }
+
+    @Test
     fun `a landing is its tickets' home while it is live, and a ticket says it's in it`() {
         val landing = plan.landings.single { !it.state.isSettled }
         assertEquals(listOf("ov-4"), landing.tickets.map { it.key })

@@ -122,7 +122,12 @@ data class PlanCiRead(
     /** When a read last worked: what's here is as of then. 0 if none has. */
     val fetchedAt: Long = 0,
 ) {
-    /** The HTTPS link a landing card may open. */
+    /**
+     * The HTTPS link a landing card may open.
+     * The host uses plain ASCII (letters, digits, dots and hyphens) to avoid
+     * look-alike characters from other scripts. User names and passwords are
+     * refused because text before the @ can be mistaken for the destination.
+     */
     val runUrl: String? get() {
         val uri = runCatching { URI(url) }.getOrNull() ?: return null
         val host = uri.host ?: return null
