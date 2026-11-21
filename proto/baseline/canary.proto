@@ -1,8 +1,4 @@
-// Shipped by Canary at 63374831f3903403f60dcc35c6f1f1b04a1e383a. Written by canary-baseline.yml; see scripts/proto-lint.py.
-// Manual recovery (ov-1317): next_after never shipped. This existing main
-// anchor excludes the unshipped rename interval and survives cherry-pick landing.
-// The snapshot restores next_page_after on tag 3, as originally added in
-// 60ddb56c71, and is additive against the last shipped baseline (4a0fee927).
+// Shipped by Canary at 8211fa2333bdc1a0ca7ef6bcf7a6727fadfd3b65. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -4901,6 +4897,10 @@ message TicketRun {
   string gate = 4;
   // Who decides, with a gate.
   string gate_principal = 5;
+  // The failed step, its verdict, and the receipt when available.
+  optional string reason = 6;
+  // The latest refused send-back for this step's run.
+  optional string send_back_refused = 7;
 }
 
 // A ticket an agent works now.
@@ -5994,6 +5994,8 @@ message Landing {
   int64 phase_since = 20;
   // What its lander has spent; zero without one.
   Spend spend = 21;
+  // Why the workflow group failed.
+  optional string reason = 22;
 }
 
 enum BoardCiStatus {
