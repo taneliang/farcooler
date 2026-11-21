@@ -1,4 +1,4 @@
-//! `workspace landing-templates`, `landing-template` and `import-landing` (ov-959): draft a landing
+//! `workspace landing-templates` and `landing-template` (ov-959): draft a landing
 //! definition to publish. Drafting changes nothing on the runner; publishing is `workspace set-workflow`,
 //! which the owner and the workspace's orchestrator do (ov-1267).
 use clap::Args;
@@ -52,7 +52,7 @@ pub struct Output {
 
 /// What a runner already holds, from `workflow get`: the adapter to pin to and the definition published. A workspace
 /// that has never published has neither, and the runner suggests settings for its first draft instead (ov-1010).
-pub struct Held { pub pin: Option<String>, pub adapter: Option<farcooler_protocol::workflow_config::CodingConfig>, pub source: Option<String>,
+pub struct Held { pub pin: Option<String>, pub adapter: Option<farcooler_protocol::workflow_config::CodingConfig>,
     pub suggested: Result<Option<farcooler_protocol::workflow_config::CodingConfig>, String> }
 impl Held {
     /// The settings a draft pins to: the published ones, else the runner's suggestion.
@@ -72,7 +72,7 @@ pub fn held(get: &serde_json::Value) -> Result<Held, Box<dyn std::error::Error>>
             (None, Some(why)) => Err(why.to_string()),
             (None, None) => Ok(None),
         };
-        return Ok(Held { pin: None, adapter: None, source: None, suggested });
+        return Ok(Held { pin: None, adapter: None, suggested });
     };
     // The runner's re-pin of the published adapter, when a pinned file changed since (ov-1259): a draft pins to the
     // files as they are now, never to a digest copied from the publication that stopped being true.
@@ -81,7 +81,7 @@ pub fn held(get: &serde_json::Value) -> Result<Held, Box<dyn std::error::Error>>
         None => None,
     };
     Ok(Held { pin: configuration.get("pin").and_then(|p| p.as_str()).map(String::from),
-        source: configuration.pointer("/definition/source").and_then(|s| s.as_str()).map(String::from), adapter, suggested: Ok(None) })
+        adapter, suggested: Ok(None) })
 }
 
 #[derive(serde::Serialize)]
@@ -115,11 +115,6 @@ pub const REPIN_REASON: &str = "Re-pin the published workflow to its files as th
 
 pub fn list() -> String {
     Template::ALL.iter().map(|t| format!("{:<14} {}\n", t.name(), t.about())).collect()
-}
-
-pub fn import(charter: &str, held: &Held, gates: &Gates) -> Result<(Bundle, Vec<String>), lt::Error> {
-    let config = held.config()?;
-    lt::import_charter(charter, config, held.source.as_deref(), &gates.extras(), &gates.gate_env)
 }
 
 pub fn template(name: &str, held: &Held, commands: &[String], gates: &Gates, routes: &Routes, batch: Option<u32>) -> Result<Bundle, lt::Error> {
@@ -236,27 +231,6 @@ mod tests {
     fn the_list_names_all_four_templates() {
         let text = list();
         for name in ["batched-push", "ticket-push", "ticket-pr", "batched-pr"] { assert!(text.contains(name), "{text}"); }
-    }
-    #[test]
-    fn a_draft_pins_to_the_runners_adapter_and_names_the_pin_it_was_read_at() {
-        let held = held(&get(None)).unwrap();
-        assert_eq!(held.pin.as_deref(), Some("wf1:abc"));
-        let (bundle, _) = import("## Landing\n\n- Gate: `make check`\n", &held, &Gates::default()).unwrap();
-        assert_eq!(bundle.definition.source, "landing/batched-push");
-    }
-    #[test]
-    fn the_import_is_once_only_whatever_way_the_landing_definition_got_there() {
-        for template in Template::ALL {
-            let held = held(&get(Some(&format!("landing/{}", template.name())))).unwrap();
-            let err = import("## Landing\n\n- Gate: `make check`\n", &held, &Gates::default()).unwrap_err();
-            assert!(matches!(err, lt::Error::AlreadyImported(_)), "{err}");
-        }
-    }
-    #[test]
-    fn a_runner_with_no_adapter_gets_a_plain_refusal_not_a_guess() {
-        let held = held(&serde_json::json!({"schema": 1, "configuration": null})).unwrap();
-        assert_eq!(import("## Landing\n\n- Gate: none\n", &held, &Gates::default()).unwrap_err(), lt::Error::NoAdapter);
-        assert!(lt::Error::NoAdapter.to_string().ends_with('.'));
     }
     #[test]
     fn a_workspace_with_no_workflow_drafts_on_the_runners_suggestion_or_says_why_it_cant() {

@@ -52,13 +52,11 @@ fn section(body: &str, title: &str) -> String {
     lines.join("\n").split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// The real asset includes a charter example with its own `## Landing`.
-/// It must not hide the manual landing and PR rules that follow it.
+/// The landing section retains the manual landing and PR rules.
 #[test]
-fn a_charter_example_does_not_end_the_landing_section() {
+fn the_landing_section_keeps_the_pr_rules() {
     for h in ALL {
         let land = section(&skill(h), "4. Land");
-        assert!(land.contains("- Route: push"), "{h:?}: {land}");
         assert!(land.contains("Never push main and never merge without the required approvals"), "{h:?}: {land}");
         assert!(!land.contains("At each check-in"), "{h:?}: the next section leaked in");
     }

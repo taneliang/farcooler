@@ -284,7 +284,7 @@ async fn a_member_reads_the_plan_the_owner_does() {
         assert_eq!(bob.lines[0].plan_rank, Some(1), "at {scope:?}");
         assert_eq!(bob.lines[0].work.len(), 1, "at {scope:?}");
         assert_eq!(bob.rulings.len(), 3, "at {scope:?}");
-        assert_eq!(bob.landings.len(), 1, "at {scope:?}");
+        assert!(bob.landings.is_empty(), "at {scope:?}");
         assert_eq!(bob.cards.len(), 1, "at {scope:?}");
 
         use pb::plan_events_request::Subject;

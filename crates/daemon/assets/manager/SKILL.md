@@ -45,10 +45,6 @@ That includes the Defaults at the end: each holds until the charter says otherwi
 engine pushes it; you never do). **PR**: each change is a pull request a person approves. A protected
 main (`gh api repos/<owner>/<name>/branches/main --jq .protected`, or a refused
 push) means PR mode whatever the charter says: work that way, and tell the owner.
-`## Landing`, when the charter has one, is how the runner lands for you, in a
-fixed form it reads (section 4). It isn't an interview heading: offer it once
-the workflow is settled.
-
 ## 2. Read the board
 
 `{{cli}} workspace show "$FARCOOLER_WORKSPACE"` names your workspace, its
@@ -199,19 +195,10 @@ environment, hook or approval before one needs a person, as does all of it once 
 it on the board. For a complete definition and adapter bundle, use `workspace workflow-draft <ws> --file <bundle.json> --reason "<the owner's words>"`; the card shows its field changes for the person to review. A gate is a command (`--gate`, the whole list each time; `--gate-env NAME=value`), an agent the engine starts
 (`--agent-gate`), you (`--orchestrator-gate`) or the owner (`--person-gate owner`); each holds the ticket for its verdict.
 `--route 'site/**=ask'` routes by changed paths, and `ask` holds those tickets for the owner's word. PR templates aren't live: in PR mode draft none and tell the owner the engine
-can't land this workspace yet. `import-landing` reads the charter's `## Landing` once (path rules become a `route` step, `Gate: none` a gate that passes):
-```
-## Landing
-- Route: push
-- Route `services/site/**`: ask
-- Gate: `scripts/landing-gate.sh`
-```
-Routes: push, pull request or ask. Globs: `*` stays in a folder, `**` crosses them. Repeat `Gate:` for several; `none` skips gates,
-but a push-capable section must name one. Optional: `Base: main`, `Remote: origin`, `CI: github` (or none).
+can't land this workspace yet.
 ```
 {{cli}} workspace workflow-draft <ws> batched-push --reason "<the owner's words>" --gate "scripts/landing-gate.sh" --orchestrator-gate
 {{cli}} workspace workflow-draft-status <ws>
-{{cli}} workspace import-landing <workspace> --out landing.json
 ```
 **Pull requests.** Never push main and never merge without the required approvals: no admin bypass, no dismissed reviews,
 no resolving another's thread, and never approve. One PR per card, under the owner's own `gh` login so teammates approve.

@@ -19,8 +19,8 @@ use farcooler_core::Result;
 
 use crate::board_ci::{CiRead, ci_of};
 use crate::error::map_err;
-use crate::landing_phase::{LandingPhase, history};
-use crate::landings::{Landing, LandingState, Route, landing_title, landings_for_plan};
+use crate::landing_phase::LandingPhase;
+use crate::landings::{Landing, LandingState, Route, landing_title};
 use crate::models::{TaskStatus, get_uuid, uuid_blob};
 use crate::plan::{BoardTheme, THEME_COLS, row_to_theme};
 use crate::plan_cost::{PlanCost, TREND_DAYS, budgets_of, cost_of, ticket_days, trend_start};
@@ -205,8 +205,7 @@ pub struct Plan {
     /// Decided for you (ov-304): every standing ruling, newest first, then the
     /// settled ones, most recently settled first (`rulings_of` says how many).
     pub rulings: Vec<Ruling>,
-    /// The old landings that moved since `closed_since_ms`, most recent first,
-    /// each read as history (ov-960); then the engine's landing groups
+    /// The engine's landing groups
     /// (ov-958).
     pub landings: Vec<LandingView>,
     /// What the runner last read of CI for the subjects the board names: its
@@ -386,36 +385,7 @@ impl Store {
             view.last_moved_at = theme_last_moved(view, &lines, &rulings, &moved);
         }
 
-        // The old landings are history: each reads as where it ended (ov-960).
         let mut landings = Vec::new();
-        for landing in landings_for_plan(&conn, workspace, closed_since_ms)? {
-            for task in &landing.tickets {
-                if statuses.contains_key(task) {
-                    named.insert(*task, ());
-                }
-            }
-            let summary = landing
-                .tickets
-                .iter()
-                .filter_map(|t| statuses.get(t))
-                .map(|c| sentence(&c.title))
-                .collect::<Vec<_>>()
-                .join("; ");
-            let spend = match landing.lander_id {
-                Some(id) => spend_of_agent(&conn, &crate::agents::agent_in(&conn, id)?)?,
-                None => Spend::default(),
-            };
-            let ended = history(&landing);
-            landings.push(LandingView {
-                title: landing_title(&landing),
-                landing,
-                summary,
-                spend,
-                phase: ended.phase,
-                phase_since: ended.since,
-                reason: None,
-            });
-        }
         let ci = ci_of(&conn, workspace)?;
         // The engine's landing groups draw as landings too (ov-958); their tickets are named here.
         drop(conn);
@@ -652,31 +622,6 @@ pub(crate) fn spend_of_ticket(conn: &Connection, task: Uuid) -> Result<Spend> {
         )
         .map_err(map_err)?;
     Ok(spend_from(row, (agents - measured).max(0) as u32, shared.max(0) as u32))
-}
-
-/// What one agent spent, all its turns (`TURNS_OF_AGENT`). An agent no turn
-/// of is read is `unmeasured_agents`, never zero.
-pub(crate) fn spend_of_agent(conn: &Connection, agent: &crate::agents::Agent) -> Result<Spend> {
-    let row: (i64, i64, i64, i64, i64, i64, i64) = conn
-        .query_row(
-            &format!(
-                "SELECT CAST(coalesce(sum(m.input_tokens), 0) AS INTEGER),
-                        CAST(coalesce(sum(m.output_tokens), 0) AS INTEGER),
-                        CAST(coalesce(sum(m.cache_read_tokens), 0) AS INTEGER),
-                        CAST(coalesce(sum(m.cache_write_tokens), 0) AS INTEGER),
-                        CAST(coalesce(sum(m.cost_micros), 0) AS INTEGER),
-                        coalesce(sum(m.cost_micros IS NULL), 0),
-                        count(DISTINCT t.id)
-                   FROM agents a JOIN agent_turns t ON {TURNS_OF_AGENT}
-                   JOIN agent_turn_models m ON m.turn_id = t.id
-                  WHERE a.id = ?1"
-            ),
-            params![uuid_blob(agent.id)],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
-        )
-        .map_err(map_err)?;
-    let runs = row.6;
-    Ok(spend_from(row, u32::from(runs == 0), 0))
 }
 
 #[cfg(test)]

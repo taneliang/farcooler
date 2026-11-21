@@ -240,22 +240,6 @@ impl Landing {
     }
 }
 
-/// A board's landings for the plan read, most recent move first: those that
-/// moved at or after `since_ms`. Every one is history (ov-960), so an old
-/// landing left pushed or open drops out of the read with the settled ones.
-pub(crate) fn landings_for_plan(conn: &Connection, workspace: Uuid, since_ms: i64) -> Result<Vec<Landing>> {
-    let ids: Vec<Uuid> = {
-        let mut stmt = conn
-            .prepare("SELECT id FROM landings WHERE workspace_id = ?1 AND state_since >= ?2 ORDER BY state_since DESC, id")
-            .map_err(map_err)?;
-        stmt.query_map(params![uuid_blob(workspace), since_ms], |r| get_uuid(r, 0))
-            .map_err(map_err)?
-            .collect::<rusqlite::Result<_>>()
-            .map_err(map_err)?
-    };
-    ids.into_iter().map(|id| landing_in(conn, id)).collect()
-}
-
 #[cfg(test)]
 #[path = "landings_tests.rs"]
 mod tests;

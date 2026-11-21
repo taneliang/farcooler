@@ -1,5 +1,4 @@
-//! Landings (ov-309, ov-872) as the plan read carries them: the old landing
-//! rows, kept as history, and the engine's landing groups (ov-958). This file
+//! Landings as the plan read carries them: the engine's landing groups. This file
 //! converts `Plan.landings` and `Plan.ci` for `plan.get`.
 //!
 //! The old writes, `landing.start` and `landing.set`, are gone (ov-960): the

@@ -125,17 +125,6 @@ pub enum WorkspaceCmd {
     WorkflowDraftShow { workspace: String, draft: String, #[arg(long)] repo: Option<String> },
     /// Every workflow draft for a workspace, newest first, with where each stands.
     WorkflowDraftStatus { workspace: String, #[arg(long)] repo: Option<String> },
-    /// Draft a landing definition from the charter's Landing section, once. After it is published
-    /// the definition is the source: change landing by publishing a new one, not by editing the charter.
-    ImportLanding {
-        workspace: String,
-        #[command(flatten)]
-        gates: crate::landing_templates::Gates,
-        #[command(flatten)]
-        output: crate::landing_templates::Output,
-        #[arg(long)]
-        repo: Option<String>,
-    },
     /// Make a workstream: a board, a task prefix, and later an orchestrator.
     ///
     /// Its charter starts as a copy of Main's. It owns no worktree until one
@@ -727,14 +716,6 @@ async fn workspace_via(
             let (ws, _) = named(&mut link, repo.as_deref(), &workspace, env).await?;
             let reply = crate::workflow::ask(&mut link, uuid_of(&ws.id), &farcooler_protocol::workflow_commands::Action::Drafts { draft: None }).await?;
             crate::landing_templates::print_drafts(&reply, json)?;
-        }
-
-        WorkspaceCmd::ImportLanding { workspace, gates, output, repo } => {
-            let (ws, _) = named(&mut link, repo.as_deref(), &workspace, env).await?;
-            let charter = charter::read(&mut link, uuid_of(&ws.id)).await?;
-            let held = crate::landing_templates::held(&crate::workflow::get_for_draft(&mut link, uuid_of(&ws.id)).await?)?;
-            let (bundle, notes) = crate::landing_templates::import(&charter.text, &held, &gates)?;
-            crate::landing_templates::deliver(&bundle, &notes, &held, uuid_of(&ws.id), &output)?;
         }
 
         WorkspaceCmd::Charter { workspace, repo } => {

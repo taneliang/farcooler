@@ -1,9 +1,8 @@
-//! Landing templates on a host, and the one-time import of a charter's `## Landing` section (ov-959).
+//! Landing templates pinned to a host.
 //!
 //! The templates themselves are `farcooler_workflow::templates`; this is what pins them to a runner's
-//! configured adapter and what turns a charter into a draft bundle. Nothing here publishes: a person
+//! configured adapter. Nothing here publishes: a person
 //! reads the draft and publishes it, as for any definition.
-use farcooler_core::charter_landing::{self, Route};
 use farcooler_protocol::workflow_config::{AdapterConfiguration, CodingCommand, CodingConfig, CodingHarness};
 pub use farcooler_workflow::templates::Template;
 pub use farcooler_workflow::{Reviewer, StageKind};
@@ -18,10 +17,6 @@ use crate::path_routes::PathRules;
 pub const GATE_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin";
 /// How long a gate may run: the landing job's own allowance.
 pub const GATE_TIMEOUT_MS: u64 = 3 * 3_600_000;
-/// The command `Gate: none` becomes: a gate that always passes, written into the definition so the
-/// absence of a check is something a person reads and publishes, not something a validator skips.
-pub const NO_GATE: &str = "/usr/bin/true";
-
 /// A runner's configured adapter, answering for the templates.
 pub struct Host<'a>(pub &'a CodingConfig);
 impl Pins for Host<'_> {
@@ -45,12 +40,6 @@ pub struct Bundle { pub definition: Definition, pub adapter: AdapterConfiguratio
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
-    /// The charter's `## Landing` section didn't read.
-    Charter(String),
-    NoSection,
-    /// A landing definition is already published here: the import is for the first one only.
-    AlreadyImported(String),
-    BaseDiffers { charter: String, configured: String },
     TooManyGates,
     NoSuchTemplate(String),
     /// The plan can't be built into a sound definition.
@@ -67,16 +56,10 @@ pub enum Error {
     NoReviewer,
     /// A `--route` that isn't `GLOB=push` or `GLOB=ask`.
     BadRoute(String),
-    /// A charter that mixes pull requests with other routes: no definition can say that yet.
-    MixedRoutes,
 }
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Charter(why) => write!(f, "The charter's Landing section doesn't read: {why}"),
-            Self::NoSection => f.write_str("This charter has no Landing section to import. Add one, or draft a template with `workflow template`."),
-            Self::AlreadyImported(source) => write!(f, "A landing definition is already published here ({source}). The charter imports once; change landing by publishing a new definition."),
-            Self::BaseDiffers { charter, configured } => write!(f, "The charter lands on {charter}, but this runner is set up to land on {configured}. Change one of them and try again."),
             Self::TooManyGates => f.write_str("That is more gates than a runner can pin (8 in all)."),
             Self::NoSuchTemplate(name) => write!(f, "There's no template called {name}. The four are batched-push, ticket-push, ticket-pr and batched-pr."),
             Self::Unsound => f.write_str("Those choices don't make a sound definition. A push needs at least one command gate to stand behind it."),
@@ -86,13 +69,12 @@ impl std::fmt::Display for Error {
             Self::NotADecider(who) => write!(f, "{who} can't decide a gate. Name owner, a member as member:<handle>, or role:maintainer for any Maintainer."),
             Self::NoReviewer => f.write_str("An agent gate needs an agent to start or a reviewer to run, and this runner isn't set up with either."),
             Self::BadRoute(text) => write!(f, "`{text}` isn't a route. Write it as PATTERN=push or PATTERN=ask."),
-            Self::MixedRoutes => f.write_str("This charter sends some paths by pull request and others another way, and a definition can't say that yet. Make them all one route, or wait for the pull request steps."),
         }
     }
 }
 impl std::error::Error for Error {}
 
-/// A gate beyond the charter's commands. The charter can only say commands; an agent or a person is chosen here.
+/// A review gate selected in addition to command gates.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Extra {
     /// An agent reviews: one the engine starts when the runner has a native harness, else the configured reviewer.
@@ -137,63 +119,6 @@ fn extra_gate(config: &CodingConfig, extra: &Extra) -> Result<Gate, Error> {
 fn person(principal: &str) -> Result<Gate, Error> {
     if !crate::caller::is_decider_name(principal) { return Err(Error::NotADecider(principal.into())); }
     Ok(Gate::Person { principal: principal.into() })
-}
-
-/// What a charter's landing section says, as a draft bundle for `config`.
-///
-/// - Path rules become a `route` step: a ticket takes the route its most careful changed file earns, `push`
-///   straight to the landing or `ask` through a person first. One route for every path needs no step.
-///   A charter that mixes pull requests with the other routes is refused: that needs pull request steps.
-/// - Each `Gate:` becomes one command gate, run with `sh -c` and a pinned environment. `Gate: none` is
-///   a gate that always passes, written out.
-/// - `Ask` adds a gate a person decides before the ticket lands.
-/// - `published` is the source of the definition already published, if any: the import is once only.
-pub fn import_charter(charter: &str, config: &CodingConfig, published: Option<&str>, extra: &[Extra], environment: &[String]) -> Result<(Bundle, Vec<String>), Error> {
-    let rules = charter_landing::parse(charter).map_err(|e| Error::Charter(e.to_string()))?.ok_or(Error::NoSection)?;
-    if let Some(source) = published.filter(|s| s.starts_with("landing/")) { return Err(Error::AlreadyImported(source.into())); }
-    // The push goes to the landing target when the runner has one, so that is the branch the charter's must match.
-    let configured = config.landing.as_ref().map_or(config.landing_ref.as_str(), |l| l.target.as_str());
-    let configured = configured.strip_prefix("refs/heads/").unwrap_or(configured);
-    let environment = gate_environment(environment)?;
-    if rules.base != configured { return Err(Error::BaseDiffers { charter: rules.base.clone(), configured: configured.into() }); }
-    let mut notes = Vec::new();
-    let mut every = std::iter::once(rules.default_route).chain(rules.rules.iter().map(|(_, r)| *r));
-    let all_pull_requests = every.clone().all(|r| r == Route::PullRequest);
-    if !all_pull_requests && every.any(|r| r == Route::PullRequest) { return Err(Error::MixedRoutes); }
-    let differs = rules.rules.iter().any(|(_, r)| *r != rules.default_route);
-    let by_path = differs.then(|| PathRules::new(rules.default_route, &rules.rules));
-    // With one route for every path, nothing needs routing: ask is one more gate, and the rest is the default.
-    let route = if by_path.is_some() { Route::Push } else { rules.default_route };
-    if by_path.is_some() {
-        notes.push(format!("Each ticket takes the route its changed paths earn: {}. The most careful file decides.",
-            rules.rules.iter().map(|(g, r)| format!("`{g}` {}", crate::path_routes::label(*r).replace('_', " "))).collect::<Vec<_>>().join(", ")
-                + &format!(", else {}", crate::path_routes::label(rules.default_route).replace('_', " "))));
-    } else if !rules.rules.is_empty() {
-        notes.push("The charter's path rules all agree with its default route, so none is written.".into());
-    }
-    let mut config = config.clone();
-    if !config.checks.is_empty() { notes.push(format!("The runner's {} configured check(s) aren't part of this definition: its gates are the charter's own.", config.checks.len())); }
-    config.checks.clear();
-    let template = match route { Route::PullRequest => Template::TicketPr, Route::Push | Route::Ask => Template::BatchedPush };
-    let mut commands: Vec<String> = rules.gate.clone();
-    if template.pushes() && commands.is_empty() { notes.push("`Gate: none` is written as a gate that always passes.".into()); commands.push(NO_GATE.into()); }
-    if rules.base != "main" || rules.remote != "origin" { notes.push(format!("Lands on {} through the remote the runner is set up with; the charter's remote ({}) isn't a setting here.", rules.base, rules.remote)); }
-    let mut gates = Vec::new();
-    for text in &commands {
-        if config.checks.len() >= 8 { return Err(Error::TooManyGates); }
-        gates.push(Gate::Command(config.checks.len()));
-        config.checks.push(if text == NO_GATE { CodingCommand { argv: vec![NO_GATE.into()], ..command("", &environment) } } else { command(text, &environment) });
-    }
-    if route == Route::Ask { gates.push(person("owner")?); }
-    for e in extra { gates.push(extra_gate(&config, e)?); }
-    if template == Template::TicketPr { notes.push("A pull request route can't be published yet: the steps that open and merge pull requests aren't built in.".into()); }
-    let mut plan = Plan::new(template, gates);
-    plan.ci = rules.ci;
-    plan.green_base = rules.ci;
-    plan.paths = by_path.map(|p| PathRoutes { argument: p.argument(), approver: Some("owner".into()) });
-    let mut definition = templates::build(&plan, &Host(&config)).map_err(|_| Error::Unsound)?;
-    models(&config, &mut definition);
-    Ok((Bundle { definition, adapter: AdapterConfiguration::Coding(config) }, notes))
 }
 
 /// What a template draft can be told besides its gates.

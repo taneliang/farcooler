@@ -261,6 +261,13 @@ fn populated() -> (Store, Uuid, Vec<Task>) {
     (store, main, t)
 }
 
+#[test]
+fn old_landing_rows_remain_readable_but_do_not_enter_the_plan() {
+    let (store, main, _) = populated();
+    assert_eq!(store.plan(main, 0).unwrap().landings.len(), 0);
+    assert_eq!(store.landings(main).unwrap().len(), 2);
+}
+
 fn repo_of(store: &Store, main: Uuid) -> Uuid {
     store.get_workspace(main).unwrap().repository_id
 }
