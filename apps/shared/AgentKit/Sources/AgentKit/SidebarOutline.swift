@@ -66,7 +66,7 @@ public struct SidebarOutline: Equatable, Sendable {
         let id = "theme:\(theme.id)"
         let state = builder.themes.first { $0.id == theme.id }?.state ?? "active"
         var live = false
-        var children = theme.cards.map { card -> OneTreeNode in
+        let children = theme.cards.map { card -> OneTreeNode in
             if let ticket = card.ticketID { ticketOfCard[card.task] = ticket }
             live = live || (builder.line(of: card.task)?.stage.isPastWaiting ?? false)
             var node = OneTreeNode(
@@ -76,7 +76,6 @@ public struct SidebarOutline: Equatable, Sendable {
             node.asks = builder.input.asks.tasks.contains(card.task)
             return builder.finish(node)
         }
-        children += builder.input.pages.filter { $0.themeID == theme.id }.map { builder.pageNode($0, under: id) }
         var node = OneTreeNode(
             id: id, kind: .theme, title: theme.name, detail: theme.progress, glyph: OneTreeGlyph.theme(state: state),
             target: .theme(theme.id), children: children)

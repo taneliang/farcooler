@@ -526,22 +526,6 @@
           "open_tasks": []
         }
       ],
-      "pages": {
-        "pages": [
-          {
-            "id": "p1",
-            "slot": "copy",
-            "title": "Copy rules",
-            "anchor_kind": "theme",
-            "anchor": "theme-mac"
-          },
-          {
-            "id": "p2",
-            "slot": "train",
-            "title": "Train"
-          }
-        ]
-      },
       "items": [
         {
           "id": "decision:t3",
@@ -585,7 +569,6 @@
         "    ticket ov-3 · building",
         "      terminal claude · agent",
         "      terminal shell",
-        "  page copy rules",
         "group no theme · 5",
         "  task ov-6 title t6",
         "    ticket ov-6 · building",
@@ -1133,22 +1116,6 @@
           "open_tasks": []
         }
       ],
-      "pages": {
-        "pages": [
-          {
-            "id": "p1",
-            "slot": "copy",
-            "title": "Copy rules",
-            "anchor_kind": "theme",
-            "anchor": "theme-mac"
-          },
-          {
-            "id": "p2",
-            "slot": "train",
-            "title": "Train"
-          }
-        ]
-      },
       "items": [
         {
           "id": "decision:t3",
@@ -1184,7 +1151,6 @@
         "    ticket ov-3 · building",
         "      terminal claude · agent",
         "      terminal shell",
-        "  page copy rules",
         "group not on this version · 1 · this runner uses states this far cooler doesn’t have yet.",
         "  task ov-9 title t9 · parked",
         "group main checkout · 1 shell",
@@ -1723,22 +1689,6 @@
           "open_tasks": []
         }
       ],
-      "pages": {
-        "pages": [
-          {
-            "id": "p1",
-            "slot": "copy",
-            "title": "Copy rules",
-            "anchor_kind": "theme",
-            "anchor": "theme-mac"
-          },
-          {
-            "id": "p2",
-            "slot": "train",
-            "title": "Train"
-          }
-        ]
-      },
       "items": [
         {
           "id": "decision:t3",
@@ -1784,7 +1734,6 @@
         "    ticket ov-3 · building",
         "      terminal claude · agent",
         "      terminal shell",
-        "  page copy rules",
         "group no theme · 5",
         "  task ov-6 title t6",
         "    ticket ov-6 · building",
@@ -2119,9 +2068,6 @@
           "open_tasks": []
         }
       ],
-      "pages": {
-        "pages": []
-      },
       "items": [],
       "filter": "open",
       "outline": [

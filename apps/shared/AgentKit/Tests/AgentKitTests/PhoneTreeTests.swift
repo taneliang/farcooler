@@ -96,7 +96,7 @@ struct PhoneTreeTests {
         let f = try fixture()
         return OneTree.build(
             PhoneTree.input(
-                summary: summary, board: f.board, plan: f.plan, worktrees: f.worktrees, pages: [], items: items,
+                summary: summary, board: f.board, plan: f.plan, worktrees: f.worktrees, items: items,
                 filter: filter, needsYouCount: 0))
     }
 
@@ -116,7 +116,7 @@ struct PhoneTreeTests {
     func whichWorktrees() throws {
         let f = try Self.fixture()
         let input = PhoneTree.input(
-            summary: Self.summary, board: f.board, plan: f.plan, worktrees: f.worktrees, pages: [], items: [],
+            summary: Self.summary, board: f.board, plan: f.plan, worktrees: f.worktrees, items: [],
             filter: .open, needsYouCount: 0)
         #expect(input.worktrees.map(\.name) == ["copy", "borrowed", "spike"])
         // The borrowed one hangs under its card, the spike is loose.
@@ -209,7 +209,6 @@ struct PhoneTreeTests {
         let place = PhoneWorkspace(runner: "r1", workspace: Self.billing)
         #expect(PhoneTree.route(.theme("th"), in: place) == .plan(place, page: .theme("th")))
         #expect(PhoneTree.route(.ticket("t"), in: place) == .plan(place, page: .ticket("t")))
-        #expect(PhoneTree.route(.page("landing"), in: place) == .plan(place, page: .page("landing")))
         #expect(PhoneTree.route(.task("t1"), in: place) == .task(place, task: "t1"))
         #expect(PhoneTree.route(.worktree("w"), in: place) == .worktree(runner: "r1", worktree: "w", landing: .resume))
         #expect(

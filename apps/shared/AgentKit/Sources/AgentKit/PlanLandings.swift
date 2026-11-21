@@ -3,8 +3,7 @@ import Foundation
 // Landings (ov-309, ov-872) and the CI the runner reads (ov-306), as the plan
 // carries them: a landing is tickets going into the product together, with a
 // base, the SHA it pushed and where it stands, and the runner reads that SHA's
-// CI through `gh` and moves a pushed landing to green or red. The same reads
-// draw a page's CI references.
+// CI through `gh` and moves a pushed landing to green or red.
 //
 // The Mac reads `farcooler plan --json` and the phones the client's
 // `plan_json`, both held to `test/fixtures/plan.json`.
@@ -164,6 +163,15 @@ public struct PlanCIRead: Decodable, Equatable, Sendable {
         self.fetchedAt = fetchedAt
         self.changedAt = changedAt
         self.askedAt = askedAt
+    }
+
+    /// The HTTPS link a landing card may open.
+    public var runURL: URL? {
+        guard let url = URL(string: url), url.scheme?.lowercased() == "https", let host = url.host(), !host.isEmpty,
+            url.user() == nil, url.password() == nil,
+            host.unicodeScalars.allSatisfy({ $0.isASCII && (CharacterSet.alphanumerics.contains($0) || $0 == "." || $0 == "-") })
+        else { return nil }
+        return url
     }
 
     /// A failed run needs the owner: the one CI state drawn in color.

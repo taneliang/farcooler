@@ -6,7 +6,7 @@ import Testing
 /// The cases both phones' trees and strips must agree on (ov-300 review 7):
 /// `test/fixtures/one-tree-cases.json`, read here and by Android's
 /// `OneTreeCasesTest`. Inputs are in the wire's own shapes (a board's
-/// `tasks`, `plan --json`, the fleet's worktrees, `page.list`, `needs_you`
+/// `tasks`, `plan --json`, the fleet's worktrees, `needs_you`
 /// items), decoded by the parsers the app reads them with; the expected
 /// outline and strip are lowercased, since iOS titles in title case and
 /// Android in sentence case.
@@ -56,11 +56,10 @@ struct PhoneTreeCasesTests {
             let board = try TaskBoardModel.decode(Self.data(c["board"] as Any))
             let plan = try PlanModel.decode(Self.data(c["plan"] as Any))
             let worktrees = try JSONDecoder().decode([Worktree].self, from: Self.data(c["worktrees"] as Any))
-            let pages = try BoardPageList.decode(Self.data(c["pages"] as Any)).pages
             let items = try JSONDecoder().decode([NeedsYouItem].self, from: Self.data(c["items"] as Any))
             let tree = OneTree.build(
                 PhoneTree.input(
-                    summary: summary, board: board, plan: plan, worktrees: worktrees, pages: pages, items: items,
+                    summary: summary, board: board, plan: plan, worktrees: worktrees, items: items,
                     filter: Self.filter(c["filter"] as? String ?? ""), needsYouCount: 0))
             let root = PhoneTree.root(tree)
             let actual = Self.outline(root.work + root.below)

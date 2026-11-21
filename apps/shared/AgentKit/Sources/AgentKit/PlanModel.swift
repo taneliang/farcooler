@@ -238,10 +238,9 @@ public struct PlanModel: Decodable, Equatable, Sendable {
     /// then the settled ones.
     public var landings: [PlanLanding]
     /// What the runner last read of CI for each subject the board names: its
-    /// landings' pushed SHAs and its pages' CI references (ov-306).
+    /// landing groups' pushed SHAs.
     public var ci: [PlanCIRead]
-    /// How many of the board's cards are in each status (ov-306), what a
-    /// page's card counts draw; nil from a runner before it.
+    /// How many of the board's cards are in each status (ov-306).
     public var boardCounts: PlanCounts?
     /// The week's tokens and the harness and model comparison (ov-307); nil
     /// from a runner without `board_cost`.

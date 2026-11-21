@@ -27,9 +27,4 @@ struct OneTreeFilterTests {
         #expect(OneTreeFilter.allHelp.contains("\nIn Review: "))
     }
 
-    @Test("A page's \"open\" card count says Not Done, as the filter does")
-    func pageCountWord() {
-        #expect(PageWorld.statusName("open") == OneTreeFilter.open.title)
-        #expect(PageWorld.statusName("in_review") == "In Review")
-    }
 }

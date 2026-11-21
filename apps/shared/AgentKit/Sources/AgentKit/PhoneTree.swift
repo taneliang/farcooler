@@ -15,11 +15,11 @@ enum PhoneTree {
     // MARK: What the tree is built from
 
     /// `summary`'s tree input, from what a phone's connection holds: its
-    /// board, its plan and pages, the runner's worktrees, and its own
+    /// board, its plan, the runner's worktrees, and its own
     /// Needs You (for the dots; `needsYouCount` is the strip's number).
     static func input(
         summary: WorkspaceSummary, board: TaskBoardModel?, plan: PlanModel, worktrees: [Worktree],
-        pages: [BoardPage], items: [NeedsYouItem], filter: OneTreeFilter, narrow: PlanFilter? = nil, needsYouCount: Int
+        items: [NeedsYouItem], filter: OneTreeFilter, narrow: PlanFilter? = nil, needsYouCount: Int
     ) -> OneTreeInput {
         let rows = board?.rows ?? []
         let cards = Set(rows.map(\.id)).union(plan.cards.map(\.task))
@@ -51,7 +51,6 @@ enum PhoneTree {
                     terminals: checkout.terminals.filter { !$0.isOrchestrator && $0.taskId == nil && !$0.isClientDrawn }
                         .map(treeTerminal))
             },
-            pages: pages.map(OneTreePage.init),
             unreadable: (board?.unreadable ?? []).map {
                 OneTreeUnreadable(id: $0.id, key: $0.key, title: $0.title, status: $0.status)
             },
@@ -193,7 +192,6 @@ enum PhoneTree {
         case .theme(let id): .plan(place, page: .theme(id))
         case .task(let id): .task(place, task: id)
         case .ticket(let id): .plan(place, page: .ticket(id))
-        case .page(let slot): .plan(place, page: .page(slot))
         case .worktree(let id): .worktree(runner: place.runner, worktree: id, landing: .resume)
         case .terminal(let worktree, let terminal):
             .worktree(runner: place.runner, worktree: worktree, landing: .terminal(terminal))

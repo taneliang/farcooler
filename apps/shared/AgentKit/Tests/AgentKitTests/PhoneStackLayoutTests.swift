@@ -13,7 +13,7 @@ struct PhoneStackLayoutTests {
         let f = try Tree.fixture()
         return OneTree.build(
             PhoneTree.input(
-                summary: Tree.summary, board: f.board, plan: f.plan, worktrees: f.worktrees, pages: [], items: items,
+                summary: Tree.summary, board: f.board, plan: f.plan, worktrees: f.worktrees, items: items,
                 filter: .open, narrow: narrow, needsYouCount: 0))
     }
 
@@ -47,7 +47,7 @@ struct PhoneStackLayoutTests {
         board = Tree.board(board.rows + [Tree.row("t6", .done)])
         let done = OneTree.build(
             PhoneTree.input(
-                summary: Tree.summary, board: board, plan: f.plan, worktrees: f.worktrees, pages: [], items: [],
+                summary: Tree.summary, board: board, plan: f.plan, worktrees: f.worktrees, items: [],
                 filter: .open, narrow: .done, needsYouCount: 0))
         #expect(Self.tasks(done) == ["t6"])
         #expect(!done.allNodes.contains { $0.kind == .doneFold }, "nothing folds under Done")

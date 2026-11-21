@@ -8,7 +8,7 @@ import Foundation
 // where a ticket's row IS its worktree. The board has two hierarchies that meet
 // at the task: the why (theme › task) and the how (ticket › worktree ›
 // terminals). The
-// old sidebar listed kinds (Themes, Pages, Tasks, Terminals, Worktrees) and
+// old sidebar listed kinds (Themes, Tasks, Terminals, Worktrees) and
 // drew none of the joins; this draws them.
 //
 // Every rule is here, as values, so the Mac's sidebar and (later) the phones'
@@ -144,24 +144,6 @@ public struct OneTreeUnreadable: Equatable, Sendable {
     }
 }
 
-/// An orchestrator's page, and the theme it's anchored to.
-public struct OneTreePage: Equatable, Sendable {
-    public var slot: String
-    public var title: String
-    /// The theme's id, or nil for a page anchored to none.
-    public var themeID: String?
-
-    public init(slot: String, title: String, themeID: String? = nil) {
-        self.slot = slot
-        self.title = title
-        self.themeID = themeID
-    }
-
-    public init(_ page: BoardPage) {
-        self.init(slot: page.slot, title: page.title, themeID: page.anchorKind == "theme" && !page.anchor.isEmpty ? page.anchor : nil)
-    }
-}
-
 /// What asks for the owner, by what it's on: the items of the workspace's
 /// Needs You, and the themes with an `owner_ask`.
 public struct OneTreeAsks: Equatable, Sendable {
@@ -245,7 +227,6 @@ public struct OneTreeInput: Equatable, Sendable {
     public var worktrees: [OneTreeWorktree]
     /// The repository's own checkout, holding the project terminals.
     public var mainCheckout: OneTreeWorktree?
-    public var pages: [OneTreePage]
     /// Cards in a status this build can't read, by the runner's word.
     public var unreadable: [OneTreeUnreadable] = []
     public var asks: OneTreeAsks
@@ -258,7 +239,7 @@ public struct OneTreeInput: Equatable, Sendable {
 
     public init(
         tasks: [OneTreeTask], plan: PlanModel = .empty, worktrees: [OneTreeWorktree] = [],
-        mainCheckout: OneTreeWorktree? = nil, pages: [OneTreePage] = [], unreadable: [OneTreeUnreadable] = [],
+        mainCheckout: OneTreeWorktree? = nil, unreadable: [OneTreeUnreadable] = [],
         asks: OneTreeAsks = OneTreeAsks(),
         filter: OneTreeFilter = .open, narrow: PlanFilter? = nil, needsYouCount: Int = 0
     ) {
@@ -266,7 +247,6 @@ public struct OneTreeInput: Equatable, Sendable {
         self.plan = plan
         self.worktrees = worktrees
         self.mainCheckout = mainCheckout
-        self.pages = pages
         self.unreadable = unreadable
         self.asks = asks
         self.filter = filter
@@ -292,7 +272,6 @@ public enum OneTreeTarget: Hashable, Sendable {
     /// A worktree opened whole: a task's own with no ticket, or a loose one.
     case worktree(String)
     case terminal(worktree: String, terminal: String)
-    case page(String)
 }
 
 /// One node of the outline.
@@ -309,7 +288,6 @@ public struct OneTreeNode: Equatable, Sendable, Identifiable {
         case terminal
         /// An agent with no pane: it runs inside the orchestrator.
         case subagent
-        case page
         /// No Theme, Main Checkout, Loose Worktrees.
         case group
         case worktree
@@ -389,8 +367,6 @@ public struct OneTree: Equatable, Sendable {
 public enum OneTreeWords {
     public static let needsYou = "Needs You"
     public static let plan = "Plan"
-    /// What a page under Plan is, for its tooltip (ov-332).
-    public static let pageHelp = "A page the orchestrator wrote to explain where things stand. It updates as the work does."
     public static let noTheme = "No Theme"
     public static let mainCheckout = "Main Checkout"
     public static let looseWorktrees = "Loose Worktrees"
@@ -548,18 +524,9 @@ struct OneTreeBuilder {
             OneTreeNode(
                 id: "place:needs-you", kind: .place, title: OneTreeWords.needsYou,
                 detail: input.needsYouCount > 0 ? "\(input.needsYouCount)" : "", glyph: OneTreeGlyph.needsYou, target: .needsYou))
-        let shownThemes = Set(themes.map(\.id))
-        let unanchored = input.pages.filter { page in page.themeID.map { !shownThemes.contains($0) } ?? true }
         out.append(
-            finish(
-                OneTreeNode(
-                    id: "place:plan", kind: .place, title: OneTreeWords.plan, glyph: OneTreeGlyph.plan, target: .plan,
-                    children: unanchored.map { pageNode($0, under: "place:plan") })))
+            OneTreeNode(id: "place:plan", kind: .place, title: OneTreeWords.plan, glyph: OneTreeGlyph.plan, target: .plan))
         return out
-    }
-
-    func pageNode(_ page: OneTreePage, under parent: String) -> OneTreeNode {
-        OneTreeNode(id: "\(parent)/page:\(page.slot)", kind: .page, title: page.title, glyph: OneTreeGlyph.page, target: .page(page.slot))
     }
 
     // MARK: Themes
@@ -602,7 +569,6 @@ struct OneTreeBuilder {
                                 children: done.map { taskNode($0, under: id, themeLive: live) }, quiet: true)))
                 }
             }
-            children += input.pages.filter { $0.themeID == theme.id }.map { pageNode($0, under: id) }
             var node = OneTreeNode(
                 id: id, kind: .theme, title: theme.name, detail: OneTreeWords.progress(theme.counts),
                 glyph: OneTreeGlyph.theme(state: theme.state),

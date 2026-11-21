@@ -13,7 +13,6 @@ public enum OneTreeGlyph {
     public static let orchestrator = "person.wave.2"
     public static let needsYou = "flag"
     public static let plan = "map"
-    public static let page = "doc.text"
     /// A worktree, and a ticket's own with no stage: a branch.
     public static let worktree = "arrow.triangle.branch"
     public static let doneFold = "checkmark"

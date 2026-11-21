@@ -88,7 +88,6 @@ struct OneTreeTests {
             mainCheckout: OneTreeWorktree(
                 id: "main", name: "overnight", isMainCheckout: true,
                 terminals: [OneTreeTerminal(id: "m1", title: "zsh", isAgent: false), OneTreeTerminal(id: "m2", title: "logs", isAgent: false)]),
-            pages: [OneTreePage(slot: "landing", title: "Landing"), OneTreePage(slot: "copy", title: "Copy rules", themeID: "theme-Mac")],
             asks: asks, filter: filter, needsYouCount: 2)
     }
 
@@ -112,7 +111,7 @@ struct OneTreeTests {
         #expect(tree.places[0].detail == "2")
     }
 
-    @Test("Under a theme: its open cards in the theme's order, then its done ones folded, then its pages")
+    @Test("Under a theme: its open cards in the theme's order, then its done ones folded")
     func underATheme() throws {
         let tree = OneTree.build(try Self.board())
         let plan = try #require(tree.tree.first)
@@ -121,8 +120,6 @@ struct OneTreeTests {
         #expect(plan.children[2].title == "1 done")
         #expect(plan.children[2].children.map(\.key) == ["ov-9"])
         let mac = tree.tree[1]
-        #expect(mac.children.last?.kind == .page)
-        #expect(mac.children.last?.title == "Copy rules")
         #expect(mac.detail == "0/0")
     }
 
@@ -246,17 +243,6 @@ struct OneTreeTests {
         #expect(main.children.map(\.title) == ["zsh", "logs"])
         #expect(main.detail == "2 shells")
         #expect(main.target == .worktree("main"))
-    }
-
-    @Test("Pages anchored to a theme sit under it; the rest sit under Plan")
-    func pages() throws {
-        let tree = OneTree.build(try Self.board())
-        #expect(tree.places[1].children.map(\.title) == ["Landing"])
-        #expect(tree.places[1].children[0].target == .page("landing"))
-        // Anchored to a theme the tree doesn't show: under Plan, never lost.
-        var input = try Self.board()
-        input.pages.append(OneTreePage(slot: "old", title: "Old", themeID: "theme-gone"))
-        #expect(OneTree.build(input).places[1].children.map(\.title) == ["Landing", "Old"])
     }
 
     @Test("No Theme holds the unthemed open cards, needing a decision first, then the most recently moved")
@@ -436,7 +422,6 @@ struct OneTreeTests {
     func noPlan() throws {
         var input = try Self.board()
         input.plan = .empty
-        input.pages = []
         let tree = OneTree.build(input)
         #expect(tree.places.map(\.title) == ["Needs You", "Plan"])
         #expect(tree.places[1].children.isEmpty)
@@ -499,7 +484,6 @@ struct OneTreeTests {
         #expect(tree.parent(of: .task("t9")) == .theme("theme-Plan"))
         #expect(tree.parent(of: .theme("theme-Mac")) == .plan)
         #expect(tree.parent(of: .task("t5")) == .plan)
-        #expect(tree.parent(of: .page("landing")) == .plan)
         #expect(tree.parent(of: .plan) == nil)
         #expect(tree.parent(of: .task("nowhere")) == nil)
     }
