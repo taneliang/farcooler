@@ -274,12 +274,6 @@ data class TaskBoard(
             TaskBoardColumn(status, columns.firstOrNull { it.status == status }?.rows.orEmpty())
         }
 
-    /** Tasks (not panes) at least one live agent is on. */
-    fun tasksWithLiveAgents(panes: List<Terminal>): Int = TaskBoardPresenter.ask("live_task_count", mapOf(
-        "tasks" to JsonArray(rows.map { JsonPrimitive(it.id) }),
-        "panes" to JsonArray(panes.map(TaskAgentLink::paneInput)),
-    ))
-
     fun row(id: String): TaskRow? = rows.firstOrNull { it.id == id }
 
     companion object {
@@ -394,49 +388,6 @@ object TaskAgentLink {
     val PANE_HAS_CLOSED: String by lazy { TaskBoardPresenter.ask("closed_pane") }
 }
 
-/**
- * One workspace's Board row on the front door.
- *
- * A repository has a board per workspace now. On a runner without
- * `workstreams` the one workspace is implicit — its id the repository's — and
- * the row is the repository's board, named for the repository, as it was.
- */
-data class BoardRow(
-    val hostId: String,
-    val repository: String,
-    val name: String,
-    val decisions: Int,
-    val agents: Int,
-    /** The board: which workspace, and how to read it ([WorkspaceSummary.boardWorkspace]). */
-    val workspace: WorkspaceSummary = WorkspaceSummary.implicit(repository),
-    /**
-     * The repository's display name, for a real workspace's row: "Main board"
-     * alone would not say which repository's Main. Null for an implicit one,
-     * whose [name] already is the repository's.
-     */
-    val repositoryName: String? = null,
-) {
-    /** What the boards are keyed by: the workspace's id. */
-    val key: String get() = workspace.id
-
-    /**
-     * What a screen reader says after the row's name: the counts in words, or
-     * null. Joined with ", " as the iPhone joins them (`RunnerBoardRow.spoken`).
-     */
-    val spoken: String? get() = TaskBoardPresenter.ask("overview_spoken", buildJsonObject {
-        put("decisions", decisions)
-        put("agents", agents)
-    })
-
-    companion object {
-        fun decisionsSentence(count: Int): String? =
-            TaskBoardPresenter.ask("decisions", mapOf("count" to JsonPrimitive(count)))
-
-        fun agentsSentence(count: Int): String? =
-            TaskBoardPresenter.ask("agents", mapOf("count" to JsonPrimitive(count)))
-    }
-}
-
 object RunnerBoards {
     @Serializable
     private data class RepositoryGroup(val repository: String, val indices: List<Int>)
@@ -467,50 +418,6 @@ object RunnerBoards {
         return found + missing.map { WorkspaceSummary(id = it, repository = notice.repository) }
     }
 
-    @Serializable
-    private data class OverviewRow(
-        val name: String,
-        val repository: String,
-        @SerialName("repository_name") val repositoryName: String?,
-        val decisions: Int,
-        val agents: Int,
-    )
-
-    /** One runner's Board rows, in the order the runner lists the boards. */
-    fun rows(
-        hostId: String,
-        boards: List<WorkspaceSummary>,
-        repositories: List<Repository>,
-        models: Map<String, TaskBoard>,
-        panes: List<Terminal>,
-        build: DaemonBuild?,
-        link: RunnerLink,
-    ): List<BoardRow> {
-        val view: List<OverviewRow> = TaskBoardPresenter.ask("overview", buildJsonObject {
-            put("tasks_served", build?.can(Capability.TASKS) == true)
-            put("connected", link == RunnerLink.ANSWERING)
-            put("recorded", build?.can(Capability.TERMINAL_TASK) == true)
-            put("panes", JsonArray(panes.map(TaskAgentLink::paneInput)))
-            put("names", JsonObject(repositories.associate { it.id to JsonPrimitive(it.displayName.ifEmpty { it.short }) }))
-            put("boards", buildJsonArray {
-                boards.forEach { workspace ->
-                    val board = models[workspace.id]
-                    add(buildJsonObject {
-                        put("id", workspace.id)
-                        put("repository", workspace.repository)
-                        put("name", workspace.name)
-                        put("implicit", workspace.isImplicit)
-                        put("column", board?.waitingOnYou ?: 0)
-                        put("tasks", JsonArray(board?.rows.orEmpty().map { JsonPrimitive(it.id) }))
-                    })
-                }
-            })
-        })
-        return view.mapIndexed { index, row ->
-            BoardRow(hostId, row.repository, row.name, row.decisions, row.agents, boards[index], row.repositoryName)
-        }
-    }
-
     fun decisions(workspace: WorkspaceSummary, items: List<NeedsYouItem>): Int =
         TaskBoardPresenter.ask("decision_count", buildJsonObject {
             put("workspace", workspace.id)
@@ -534,26 +441,7 @@ object RunnerBoards {
             put("served", listServed)
         })
 
-    /**
-     * The Board rows of a runner without workspaces: one per repository, each
-     * its repository's implicit board. [rows] over [WorkspaceSummary.implicit].
-     */
-    fun rows(
-        hostId: String,
-        repositories: List<Repository>,
-        boards: Map<String, TaskBoard>,
-        panes: List<Terminal>,
-        build: DaemonBuild?,
-        link: RunnerLink,
-    ): List<BoardRow> = rows(
-        hostId = hostId,
-        boards = repositories.map { WorkspaceSummary.implicit(it.id) },
-        repositories = repositories,
-        models = boards,
-        panes = panes,
-        build = build,
-        link = link,
-    )
+
 }
 
 /** The current link's board sweep state, projected by the shared board model. */
