@@ -3,8 +3,7 @@
 //! the store's `board_ci` (`farcooler_store::board_ci`).
 //!
 //! A board names a subject when an engine landing group pushes (`sha:<pushed
-//! sha>`, ov-958) or by a page's CI reference (a SHA, a run, or `main`);
-//! publishing a page kicks the watch. The watch reads each one while it's
+//! sha>`, ov-958). The watch reads each one while it's
 //! named: every minute while any run is still going, and every ten minutes
 //! once everything it watches has finished, so a re-run is still seen. A read
 //! that changed what a board shows announces `plan_changed`. The old landings
@@ -26,7 +25,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 use farcooler_store::board_ci::{self, CiJob, CiRead, CiStatus, MAIN_SUBJECT};
@@ -53,16 +52,6 @@ pub const RUN_JQ: &str = "{id, name, head_sha, status, conclusion, html_url, cre
 /// A run's jobs.
 pub const JOBS_JQ: &str = "[.jobs[] | {name, status, conclusion, html_url}]";
 
-fn kicked() -> &'static tokio::sync::Notify {
-    static KICK: OnceLock<tokio::sync::Notify> = OnceLock::new();
-    KICK.get_or_init(tokio::sync::Notify::new)
-}
-
-/// Read now rather than at the next turn: a page just named a subject.
-pub fn kick() {
-    kicked().notify_one();
-}
-
 /// The watch, for the life of the daemon.
 pub async fn run(svc: Arc<Service>, watcher: Arc<Watcher>) {
     let mut memo = Memo::default();
@@ -70,10 +59,7 @@ pub async fn run(svc: Arc<Service>, watcher: Arc<Watcher>) {
         let Ok(ticket) = svc.writers.admit("landing-jobs") else { return };
         let wait = read_all(&svc, &watcher, &mut memo).await;
         ticket.finish();
-        tokio::select! {
-            _ = tokio::time::sleep(wait) => {}
-            _ = kicked().notified() => {}
-        }
+        tokio::time::sleep(wait).await;
     }
 }
 
@@ -91,7 +77,7 @@ pub struct Memo {
 
 /// How long after `misses` reads in a row that GitHub couldn't or didn't
 /// answer to ask again: a minute, doubling, at most `QUIET`. A runner whose gh
-/// is logged out, or a page naming a SHA nobody pushed, settles at one read
+/// is logged out settles at one read
 /// every ten minutes instead of one a minute forever.
 pub fn backoff_after(misses: u32) -> Duration {
     let doubled = BUSY.saturating_mul(1u32 << misses.saturating_sub(1).min(16));
@@ -390,17 +376,11 @@ pub(crate) fn tree_of(svc: &Service, workspace: Uuid) -> Option<(Uuid, PathBuf)>
     Some((repo.id, svc.repository_worktree(&repo)))
 }
 
-/// Every board's CI subjects: its landing groups' pushed SHAs, and what its
-/// pages' CI references name (ov-306). The old landings are history and are
-/// not followed (ov-960).
+/// Every board's CI subjects from its engine landing groups.
 pub fn wanted(svc: &Service) -> BTreeMap<Uuid, BTreeSet<String>> {
     let mut wanted: BTreeMap<Uuid, BTreeSet<String>> = BTreeMap::new();
     // A landing group's pushed commit, from the engine's state (ov-958).
     for (workspace, subject) in svc.store.workflow_ci_subjects().unwrap_or_default() {
-        wanted.entry(workspace).or_default().insert(subject);
-    }
-    // The pages' own file reads them, so nothing here names pages.
-    for (workspace, subject) in crate::rpc_pages::ci_subjects(svc) {
         wanted.entry(workspace).or_default().insert(subject);
     }
     wanted

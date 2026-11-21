@@ -86,7 +86,7 @@ struct Written {
 /// its branch and reason, ranked in the plan; an agent recorded on it, its
 /// work ended and the agent ended; a ruling kept and one kept with the rest;
 /// a landing's start and move refused from every seat, the engine landing now,
-/// with an old one left as history (ov-960); a page set and removed. Bob makes most of
+/// with an old one left as history (ov-960). Bob makes most of
 /// them; the owner's phone and the orchestrator make the rest, as before,
 /// and the orchestrator's record (an agent, a landing's state) is theirs
 /// alone (`a_member_writes_none_of_the_orchestrators_record`).
@@ -157,20 +157,6 @@ async fn write_the_plan(r: &Runner) -> Written {
     // An old landing (before the engine, ov-960) is read as history.
     farcooler_store::testing::old_landing(&r.svc.store, r.workspace, 1, "gating", None, &[], farcooler_store::testing::now_millis());
 
-    // The orchestrator's pages are the plan's too.
-    let page = |actor: &str| {
-        P::PageSet(pb::PageSet {
-            workspace_id: ws(),
-            slot: "exports".into(),
-            doc_json: r#"{"v":1,"title":"Exports","summary":"Where the PDF exports stand","blocks":[{"type":"heading","text":"Invoices"}]}"#.into(),
-            actor: actor.into(),
-            ..Default::default()
-        })
-    };
-    written(r, "page.set", page, LOCAL).await;
-    written(r, "page.set", page, BOB).await;
-    written(r, "page.remove", |actor| P::PageRemove(pb::PageRemove { workspace_id: ws(), slot: "exports".into(), actor: actor.into() }), BOB).await;
-    written(r, "page.set", page, LOCAL).await;
     Written { theme, task }
 }
 
@@ -206,10 +192,10 @@ async fn a_member_changes_the_plan_under_their_name() {
     assert_eq!(ruling.state, pb::BoardRulingState::Confirmed as i32, "Bob kept it");
 }
 
-/// The capabilities the plan rides on (ov-268, ov-269, ov-304, ov-333, ov-872).
-const PLAN_CAPABILITIES: [&str; 5] = {
+/// The capabilities the plan rides on (ov-268, ov-304, ov-333, ov-872).
+const PLAN_CAPABILITIES: [&str; 4] = {
     use farcooler_protocol::capability::*;
-    [BOARD_PLAN, BOARD_PAGES, BOARD_RULINGS, BOARD_RULING_ACTIONS, BOARD_LINE]
+    [BOARD_PLAN, BOARD_RULINGS, BOARD_RULING_ACTIONS, BOARD_LINE]
 };
 
 /// Of `methods` (name, capability, scope), the plan's writes the gate lets a
@@ -242,7 +228,6 @@ fn every_plan_write_is_covered() {
     let mut made = vec![
         "board_theme.create", "board_theme.update", "board_theme.cards", "line.set", "line.order", "agent.record",
         "agent.work", "agent.end", "ruling.add", "ruling.set", "ruling.keep_all",
-        "page.set", "page.remove",
     ];
     made.sort_unstable();
     assert_eq!(writes, made, "write_the_plan makes every plan write");

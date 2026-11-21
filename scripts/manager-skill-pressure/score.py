@@ -11,8 +11,8 @@ agent's final reply, saved there by whoever ran the scenario. S7 also reads
 <dir>/reply1.txt, the agent's FIRST reply.
 
 Prints one PASS or FAIL line per criterion and exits 1 if any failed.
-S6 (every write names the manager) is checked in every scenario, plan and
-page writes included. S14, S17 and S18 also read <dir>/gh.log, every call the
+S6 (every write names the manager) is checked in every scenario, including plan
+writes. S14, S17 and S18 also read <dir>/gh.log, every call the
 fake gh (fake-gh.sh) took, and S14 and S18 the bare remote <dir>/origin.git.
 """
 import json
@@ -73,7 +73,7 @@ def main():
     def note(key, kind):
         return [c for c in writes if c[1] == "note" and key in c and has(c, "--kind", kind)]
 
-    # The plan and pages (ov-217): writes too, so S6 covers them.
+    # The plan writes (ov-217) are included in S6.
     plan_writes = [c for c in map(subcommand, calls) if is_plan_write(c)]
 
     # A message (ov-455) is a write too.
@@ -316,13 +316,13 @@ def score_split(calls, writes, has, check, changed, status, reply, d):
 
 
 def is_plan_write(c):
-    """A plan or page call that changes something: not a read, not --help."""
+    """A plan call that changes something: not a read, not --help."""
     if "--help" in c or "-h" in c or len(c) < 2:
         return False
     if c[0] == "plan":
         return c[1] == "set" or (c[1] in ("lane", "theme", "ruling", "train") and len(c) > 2
                                  and c[2] not in ("list", "show"))
-    return c[0] == "page" and c[1] in ("set", "rm")
+    return False
 
 
 def git(*args):

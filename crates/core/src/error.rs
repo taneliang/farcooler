@@ -168,16 +168,10 @@ pub enum DomainError {
     #[error("This runner's data is being upgraded. Finish the upgrade on the runner to use it.")]
     CutoverHeld,
 
-    /// A page (ov-269) the runner refused, in the sentence that says where and
-    /// why: `blocks[3].rows[50]: a table has at most 50 rows.`
-    ///
-    /// The one variant that carries text, because the whole value of the
-    /// refusal is the JSON path and the limit, and the reader is a language
-    /// model fixing one line of a document. The text is built from the page's
-    /// own words and this runner's own limits, never from a path, a terminal
-    /// or a session. `InvalidArgument`'s code, with `what` `page`.
+    /// A refusal carrying the runner's sentence. Its wire discriminator
+    /// remains `page` for compatibility with callers of `refused`.
     #[error("{said}")]
-    PageRefused {
+    Refused {
         /// The refusal, as a sentence.
         said: String,
     },
@@ -185,7 +179,7 @@ pub enum DomainError {
 
 impl DomainError {
     /// A refusal that carries its sentence over the wire, for callers outside the board.
-    pub fn refused(said: String) -> DomainError { DomainError::PageRefused { said } }
+    pub fn refused(said: String) -> DomainError { DomainError::Refused { said } }
 
     /// A retired method's refusal, saying what took its place: lanes' and
     /// trains' (ov-872), or chat mode's (ov-377).
@@ -249,7 +243,7 @@ impl DomainError {
             // `Conflict` shares `ResourceConflict`'s: the two sides disagree
             // about versions, and only installing something fixes it.
             DomainError::NewerData | DomainError::CutoverHeld => (ErrorCode::VersionIncompatible, false),
-            DomainError::PageRefused { .. } => (ErrorCode::InvalidArgument, false),
+            DomainError::Refused { .. } => (ErrorCode::InvalidArgument, false),
         }
     }
 
@@ -278,7 +272,7 @@ impl DomainError {
             DomainError::InvalidArgument { what } | DomainError::Conflict { what } | DomainError::NotYours { what } => what,
             DomainError::NewerData => "newer_data",
             DomainError::CutoverHeld => "cutover_held",
-            DomainError::PageRefused { .. } => "page",
+            DomainError::Refused { .. } => "page",
             DomainError::AuthRequired
             | DomainError::ScopeDenied { .. }
             | DomainError::VersionIncompatible
@@ -585,7 +579,7 @@ mod tests {
             DomainError::NotYours { what: "not_lead" },
             DomainError::NewerData,
             DomainError::CutoverHeld,
-            DomainError::PageRefused { said: "blocks[0].type: there's no block called x.".into() },
+            DomainError::Refused { said: "The requested step was refused.".into() },
         ]
     }
 
@@ -618,10 +612,10 @@ mod tests {
         // `Conflict` is `ResourceConflict`'s code on purpose, naming which in
         // `what`; `a_named_conflict_keeps_the_conflict_code_and_says_which`.
         // `NewerData` is `VersionIncompatible`'s the same way, and
-        // `PageRefused` is `InvalidArgument`'s.
+        // `Refused` is `InvalidArgument`'s.
         for e in all_variants()
             .into_iter()
-            .filter(|e| !matches!(e, DomainError::Conflict { .. } | DomainError::NewerData | DomainError::CutoverHeld | DomainError::PageRefused { .. }))
+            .filter(|e| !matches!(e, DomainError::Conflict { .. } | DomainError::NewerData | DomainError::CutoverHeld | DomainError::Refused { .. }))
         {
             assert!(seen.insert(e.code() as i32), "{e:?} reuses a wire code");
         }
@@ -651,7 +645,7 @@ mod tests {
             assert_ne!(w, UNRECOGNIZED_WORD, "{e:?} has no word");
             // `Conflict` shares `resource-conflict` by design, and `NewerData`
             // `version-incompatible`; see above.
-            if matches!(e, DomainError::Conflict { .. } | DomainError::NewerData | DomainError::CutoverHeld | DomainError::PageRefused { .. }) {
+            if matches!(e, DomainError::Conflict { .. } | DomainError::NewerData | DomainError::CutoverHeld | DomainError::Refused { .. }) {
                 continue;
             }
             assert!(seen.insert(w), "{e:?} reuses the word {w}");
@@ -714,7 +708,7 @@ mod tests {
                     | DomainError::NotYours { .. }
                     | DomainError::NewerData
                     | DomainError::CutoverHeld
-                    | DomainError::PageRefused { .. }
+                    | DomainError::Refused { .. }
             ) {
                 continue;
             }

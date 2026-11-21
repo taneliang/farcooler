@@ -45,7 +45,6 @@ mod rekey;
 mod pr_actions;
 mod crash_report;
 mod notice_task;
-mod pages;
 mod plan;
 mod results;
 mod rows;
@@ -314,8 +313,6 @@ pub enum FleetEvent {
     /// written. A client showing that board's Plan re-reads `plan.get`. The
     /// board only, so two writes to one board are one notice.
     Plan { workspace: Uuid },
-    /// A page was written or removed (ov-282): re-read that slot if it's open.
-    Pages { workspace: Uuid, slot: String, removed: bool },
     /// The runner took this device's access away (ov-820): the last thing
     /// its connection says before the runner closes it. Kept by the app for
     /// that runner until a dial gets in again.
@@ -352,7 +349,6 @@ impl FleetEvent {
             // board's plan (ov-274). The actor isn't carried: the plan has one
             // writer, the orchestrator, and a phone never writes it.
             Payload::PlanChanged(p) => Some(FleetEvent::Plan { workspace: uuid_of(&p.workspace_id) }),
-            Payload::PagesChanged(p) => Some(FleetEvent::Pages { workspace: uuid_of(&p.workspace_id), slot: p.slot, removed: p.removed }),
             // Reserved arms no daemon emits yet. Named one by one rather than
             // swept up by `_` so that the day a NEW variant is added to this
             // oneof, this match stops compiling (E0004) and somebody decides

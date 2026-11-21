@@ -74,7 +74,7 @@ for a in "$@"; do
     if [ -n "${REAL_FARCOOLER:-}" ] && [ -x "$REAL_FARCOOLER" ]; then
       exec "$REAL_FARCOOLER" "$@"
     fi
-    echo "farcooler task {list,show,create,set,note,ask,block,search,dispatch,move}; worktree {create,list,assign,remove}; workspace {create,list,show,start-orchestrator}; plan {set,lane,theme,ruling,train}; page {set,list}; message <to> <text>; see the skill"
+    echo "farcooler task {list,show,create,set,note,ask,block,search,dispatch,move}; worktree {create,list,assign,remove}; workspace {create,list,show,start-orchestrator}; plan {set,lane,theme,ruling,train}; message <to> <text>; see the skill"
     exit 0
   fi
 done
@@ -267,7 +267,7 @@ create_workspace() {
   print_workspace "$(tail -n 1 "$FAKE_BOARD/workspaces.tsv")"
 }
 
-# The plan and pages (ov-217). Reads print $FAKE_BOARD/plan.txt; writes
+# The plan (ov-217). Reads print $FAKE_BOARD/plan.txt; writes
 # print one line and change nothing, like every other write here.
 if [ "${1:-}" = plan ]; then
   case "${2:-}" in
@@ -285,15 +285,6 @@ if [ "${1:-}" = plan ]; then
   esac
   exit 0
 fi
-if [ "${1:-}" = page ]; then
-  case "${2:-}" in
-    set) echo "page $(first_word "$@") published" ;;
-    rm) echo "page removed" ;;
-    *) echo "no pages" ;;
-  esac
-  exit 0
-fi
-
 case "${1:-} ${2:-}" in
   "task list")      show_file "$FAKE_BOARD/list.txt" "no tasks" ;;
   "task show")      if [ "$json" = 1 ]; then show_task_json "$(shown_key "$@")" "$@"

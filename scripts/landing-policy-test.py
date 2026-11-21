@@ -65,7 +65,6 @@ class LandingTests(unittest.TestCase):
         always = {"wire", "doc-comments"}
         expected = {
             "scripts/copy-lint.py": always,
-            "scripts/page-layer-lint.py": always,
             "scripts/proto-lint.py": always,
             "scripts/fresh-script-lint.py": always,
             "scripts/shared-core-baseline.json": always,

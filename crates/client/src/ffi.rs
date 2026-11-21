@@ -203,11 +203,6 @@ fn event_line(what: &crate::session::FleetEvent) -> String {
         FleetEvent::NeedsYou => json!({ "event": "needs_you" }),
         FleetEvent::Released => json!({ "event": "released" }),
         FleetEvent::Plan { workspace } => json!({ "event": "plan", "workspace": workspace.to_string() }),
-        // The slot and whether it went are on the line: a phone with that page
-        // open re-reads it, or closes it.
-        FleetEvent::Pages { workspace, slot, removed } => {
-            json!({ "event": "pages", "workspace": workspace.to_string(), "slot": slot, "removed": removed })
-        }
         FleetEvent::ChangeSet { worktree } => {
             json!({ "event": "change_set", "worktree": worktree.to_string() })
         }
@@ -2038,19 +2033,6 @@ async fn dispatch(
             Ok(crate::plan_json::events_json(&list))
         }
 
-        // Orchestrator pages, read-only (ov-282): `{workspace}` answers with
-        // every page and its document as `page_json` shapes it, `{workspace,
-        // slot}` with one. Refused on a runner without `board_pages`.
-        "page.list" => {
-            let pages = session.pages(id("workspace")?).await?;
-            Ok(crate::page_json::pages_json(&pages))
-        }
-        "page.get" => {
-            let slot = args.get("slot").and_then(|s| s.as_str()).ok_or_else(|| SessionError::Protocol("page.get takes a slot".into()))?;
-            let page = session.page(id("workspace")?, slot).await?;
-            Ok(crate::page_json::page_json(&page))
-        }
-
         // The owner's marks on a ruling (ov-333): `{ruling}` keeps one and
         // `{workspace}` keeps every open one on that board, both as `user`.
         // Reversing is not here: the owner asks the orchestrator in chat.
@@ -3172,8 +3154,6 @@ mod compose_upload_tests;
 mod bring_draft_tests;
 #[cfg(test)]
 mod plan_phone_tests;
-#[cfg(test)]
-mod page_phone_tests;
 #[cfg(test)]
 mod members_phone_tests;
 #[cfg(test)]

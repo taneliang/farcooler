@@ -67,12 +67,7 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     // their worktree by cascade, whichever build deletes it. An older build
     // never reads or writes which large files weren't downloaded.
     (crate::lfs_pointers::migration_0024_lfs_pointers, Older::Welcome),
-    // Two new tables (ov-269) only pages.rs touches, whose rows go with their
-    // workspace by cascade, whichever build deletes it. No column on a table
-    // old code writes, no trigger, and no key into the plan layer. An older
-    // build never reads them, so a rollback past the experiment keeps a
-    // working database.
-    (crate::pages::migration_0025_pages, Older::Welcome),
+    (migration_0025_pages, Older::Welcome), // ov-269: retired tables retained
     (crate::rulings::migration_0026_rulings, Older::Welcome), // ov-304: new tables only (rulings.rs says why)
     (crate::lane_migrations::migration_0027_trains, Older::Welcome), // ov-309: new tables only (lane_migrations.rs keeps it)
     (crate::plan_cost::migration_0028_plan_budgets, Older::Welcome), // ov-307: one new table (plan_cost.rs says why)
@@ -965,6 +960,49 @@ pub(crate) fn migrate_only_to(conn: &mut Connection, version: u32) {
     )
     .unwrap();
     tx.commit().unwrap();
+}
+
+// Preserve the retired tables and their original migration for existing databases.
+fn migration_0025_pages(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        r#"
+        CREATE TABLE board_pages (
+            id BLOB PRIMARY KEY NOT NULL,
+            workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+            slot TEXT NOT NULL,
+            -- Copied out of the document so the list doesn't parse every page.
+            title TEXT NOT NULL,
+            summary TEXT NOT NULL DEFAULT '',
+            -- '' or 'theme', and the theme's id as text. No foreign key: a
+            -- page must outlive the plan layer.
+            anchor_kind TEXT NOT NULL DEFAULT '',
+            anchor TEXT NOT NULL DEFAULT '',
+            doc_json TEXT NOT NULL,
+            schema_v INTEGER NOT NULL,
+            bytes INTEGER NOT NULL,
+            revision INTEGER NOT NULL,
+            ordinal INTEGER NOT NULL,
+            actor TEXT NOT NULL,
+            updated_at INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            resource_version INTEGER NOT NULL,
+            UNIQUE (workspace_id, slot)
+        );
+
+        CREATE TABLE page_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            at INTEGER NOT NULL,
+            workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+            slot TEXT NOT NULL,
+            actor TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            bytes INTEGER NOT NULL,
+            revision INTEGER NOT NULL,
+            shape TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX page_events_by_slot ON page_events (workspace_id, slot, at);
+        "#,
+    )
 }
 
 #[cfg(test)]

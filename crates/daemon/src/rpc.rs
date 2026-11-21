@@ -548,11 +548,6 @@ fn scope_of(method: Method) -> Scope {
         | Method::RulingAdd
         | Method::RulingSet
         | Method::RulingKeepAll => Scope::Control,
-        // Orchestrator pages (ov-269): free text the runner can't redact, so
-        // everyone who can read the board reads them, as with a task note. The
-        // orchestrator writes its own pages, and they touch no git data.
-        Method::PageList | Method::PageGet | Method::PageStats => Scope::Read,
-        Method::PageSet | Method::PageRemove => Scope::Control,
         // Workspaces: the list is the shape of the fleet, like
         // `worktree.list`; paths in it are redacted below `host_admin` by the
         // converter, as everywhere.
@@ -2057,10 +2052,6 @@ impl Rpc {
             "member.list" | "member.set" | "member.remove" | "member.set_own_login" | "member.set_role" | "member.events" | "rep.start" | "member.connectors" | "claude.sign_in" | "claude.sign_in_finish" | "claude.sign_in_cancel" | "claude.sign_out" | "member.set_access" | "client.set_cap" => crate::rpc_people::dispatch(svc, &self.watcher, &self.peer, self.caller_pid, self.stepped.get(), req).await, // ov-494, ov-584
             // Step-up (ov-856): `step_up_rpc`.
             "auth.challenge" | "client.set_step_up_key" | "client.approve_step_up" | "approval.ask" | "approval.list" | "approval.grant" | "approval.status" | "approval.deny" => crate::step_up_rpc::dispatch(svc, &self.peer, self.caller_pid, &self.session, self.stepped.get(), req).await,
-            // Orchestrator pages (ov-269); the arms live in `rpc_pages`.
-            "page.list" | "page.get" | "page.set" | "page.remove" | "page.stats" => {
-                crate::rpc_pages::dispatch(svc, &self.watcher, req).await
-            }
             "repository.landing" => crate::landing_read::handle(svc, req).await, // ov-313
             "pr.ready" | "pr.thread_reply" => crate::pr_actions::dispatch(svc, &self.watcher, self.caller_pid, req).await, // ov-317, ov-647
             "worktree.grep" => crate::repo_grep::handle(svc, self.caller_pid, req).await, // ov-555

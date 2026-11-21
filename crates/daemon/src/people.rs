@@ -248,8 +248,6 @@ macro_rules! actor_field {
             P::RulingSet(p) => &$($m)* p.actor,
             P::RulingKeepAll(p) => &$($m)* p.actor,
             P::MessageSend(p) => &$($m)* p.actor,
-            P::PageSet(p) => &$($m)* p.actor,
-            P::PageRemove(p) => &$($m)* p.actor,
             _ => return None,
         })
     }};

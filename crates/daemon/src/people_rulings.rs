@@ -124,9 +124,6 @@ pub fn member_ruling(method: M) -> Ruling {
         | M::TaskSearch
         | M::PlanGet
         | M::PlanEvents
-        | M::PageList
-        | M::PageGet
-        | M::PageStats
         | M::WorkspaceList
         | M::WorkspaceCheckInShow
         | M::ClientList
@@ -269,9 +266,7 @@ pub fn member_ruling(method: M) -> Ruling {
         | M::AgentEnd
         | M::RulingAdd
         | M::RulingSet
-        | M::RulingKeepAll
-        | M::PageSet
-        | M::PageRemove => Plan,
+        | M::RulingKeepAll => Plan,
 
         M::PrReady | M::PrThreadReply => Owners(Why::PostsAsTheOwner),
 

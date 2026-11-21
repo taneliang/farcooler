@@ -127,7 +127,7 @@ fn each_class_of_escape_is_refused() {
 /// or actor, not with a flag its verb doesn't take or a `--flag=value`, and
 /// not what starts work or records the orchestrator's: a landing started, a
 /// dispatch, an agent, a ticket's branch, commit or budget, a reversal's
-/// commit, a page. Nor
+/// commit. Nor
 /// keeping a ruling, its person's own mark.
 #[test]
 fn a_rep_changes_the_plan_for_its_member() {
@@ -188,8 +188,6 @@ fn a_rep_changes_the_plan_for_its_member() {
         "/opt/fc/farcooler plan ruling keep 0f3a",
         "/opt/fc/farcooler plan ruling keep --all",
         "/opt/fc/farcooler plan ruling set 0f3a --state confirmed",
-        "/opt/fc/farcooler page set exports --file x.json",
-        "/opt/fc/farcooler page rm exports",
         "/opt/fc/farcooler plan theme set Exports --next 'soon' ; rm -rf /",
     ] {
         assert!(matches!(bash(command), Verdict::Deny(_)), "{command:?} was allowed");

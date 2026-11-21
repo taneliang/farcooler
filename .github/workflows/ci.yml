@@ -281,15 +281,6 @@ jobs:
         run: |
           ./scripts/plan-layer-lint.py --self-test
           ./scripts/plan-layer-lint.py
-      # Orchestrator pages are removable too (ov-269): nothing the board or the
-      # plan layer runs on names them. Its rule against planted references
-      # first, then the tree. The drills that drop the pages' tables from a
-      # populated database are `pages_tests.rs` and
-      # `pages_over_the_socket.rs`, in the Rust job.
-      - name: Page layer references
-        run: |
-          ./scripts/page-layer-lint.py --self-test
-          ./scripts/page-layer-lint.py
       # No new swallowed call to the host (ov-167): a `try?` on core.call or
       # runCLI, or an ignored runCatching/attempt or empty catch in the Android
       # app's Kotlin. Existing ones are listed, each with its reason,
@@ -329,7 +320,7 @@ jobs:
       # The iOS targets compile a hand-kept subset of AgentKit
       # (apps/ios/generate-project.py). A shared file that names a type from a
       # file the phone or watch doesn't compile builds on the Mac and breaks only
-      # there (ov-339; PageLive and OneTreeFilter, Oct 5).
+      # there (ov-339).
       - run: ./scripts/ios-agentkit-subset-lint.py --self-test
       - run: ./scripts/ios-agentkit-subset-lint.py
       # Two lanes can't both take a migration number or a rate-limit namespace id

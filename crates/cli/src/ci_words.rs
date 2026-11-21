@@ -1,6 +1,4 @@
-//! CI as a person reads it (ov-309, ov-306, ov-872): one set of words for a
-//! landing's CI in `plan` and `landing`, and for a page's CI reference in
-//! `page show`, the same words the apps draw.
+//! CI as a person reads it in `landing`.
 
 use farcooler_protocol::v1 as pb;
 
@@ -16,11 +14,6 @@ pub(crate) fn status_word(status: i32) -> &'static str {
         Ok(pb::BoardCiStatus::None) => "No runs yet",
         _ => "CI unknown",
     }
-}
-
-/// Whether it needs the owner: a failed run does.
-pub(crate) fn needs_attention(read: &pb::BoardCiRead) -> bool {
-    read.status == pb::BoardCiStatus::Failed as i32
 }
 
 /// "Failed · 2 of 15 jobs failed", "Running · 9 of 15 jobs done", "Passed ·

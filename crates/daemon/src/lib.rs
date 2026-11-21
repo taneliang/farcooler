@@ -108,7 +108,6 @@ pub mod rpc_claude_sign_in;
 pub mod rpc_rows;
 pub(crate) mod rpc_rows_join;
 pub mod subagent_rows;
-pub(crate) mod rpc_pages;
 pub(crate) mod rpc_plan;
 pub(crate) mod rpc_agent_stop;
 pub(crate) mod rpc_rulings;

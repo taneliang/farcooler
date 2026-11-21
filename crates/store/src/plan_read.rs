@@ -182,7 +182,7 @@ pub struct Plan {
     /// (ov-958).
     pub landings: Vec<LandingView>,
     /// What the runner last read of CI for the subjects the board names: its
-    /// landings' pushed SHAs, and its pages' CI references (ov-306).
+    /// landing groups' pushed SHAs.
     pub ci: Vec<CiRead>,
     /// How many of the board's cards are in each status, every card counted.
     pub board_counts: StatusCounts,

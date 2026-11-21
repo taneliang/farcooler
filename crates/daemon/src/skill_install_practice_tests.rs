@@ -187,8 +187,7 @@ fn a_kept_ruling_is_precedent_and_a_reversed_one_is_a_lesson() {
 
 /// The engine lands (ov-960, ov-1012): it groups, gates, pushes and watches CI,
 /// so the orchestrator lands nothing by hand and watches no push of its own.
-/// It still checks the card closed, ticks what was verified and cleans up,
-/// and a page's figures are drawn live (ov-306), never a hand-kept page.
+/// It still checks the card closed, ticks what was verified and cleans up.
 #[test]
 fn the_engine_lands_and_the_orchestrator_cleans_up() {
     for h in ALL {
@@ -212,7 +211,7 @@ fn the_engine_lands_and_the_orchestrator_cleans_up() {
         }
         assert!(land.contains(r#"`{"ci":"main"}`"#) && land.contains(r#"`{"cards":"in_review"}`"#), "{h:?}: {land}");
         for gone in ["landing start", "landing set", "landing move", "--record-only", "lands by hand", "gh run watch",
-            "Rebase onto main", "page set trains", "plan ticket set", "landing-template <workspace>"] {
+            "Rebase onto main", "plan ticket set", "landing-template <workspace>"] {
             assert!(!land.contains(gone), "{h:?} still shows {gone:?}: {land}");
         }
         // A worktree step left Uncertain has a way out the orchestrator can take (ov-1220).
@@ -244,16 +243,16 @@ fn a_check_in_re_evaluates_and_shows_initiative() {
     }
 }
 
-/// The plan and page writes the skill shows name the manager, like the task
+/// The plan writes the skill shows name the manager, like the task
 /// writes `every_write_the_skill_shows_names_the_manager` checks.
 #[test]
-fn every_plan_and_page_write_names_the_manager() {
+fn every_plan_write_names_the_manager() {
     let text = render(Harness::Claude, "farcooler")
         .into_iter()
         .find(|f| f.relative.ends_with("SKILL.md"))
         .unwrap()
         .contents;
-    let writes = plan_and_page_writes(&text);
+    let writes = plan_writes(&text);
     // Two since the engine took dispatch and the line's stages (ov-1012): a message and a subagent's record.
     assert!(writes.len() >= 2, "too few plan writes to check: {writes:?}");
     assert!(!text.contains("plan lane") && !text.contains("plan train"), "a retired verb is still shown");
@@ -262,12 +261,12 @@ fn every_plan_and_page_write_names_the_manager() {
     }
 }
 
-fn plan_and_page_writes(text: &str) -> Vec<&str> {
+fn plan_writes(text: &str) -> Vec<&str> {
     text
         .lines()
         .filter(|l| {
             // `landing` only reads now (ov-960), so no landing command is a write.
-            ["farcooler plan ", "farcooler agent ", "farcooler message ", "farcooler page set "]
+            ["farcooler plan ", "farcooler agent ", "farcooler message "]
                 .iter()
                 .any(|w| l.starts_with(w))
                 // `plan --repo <repo>` reads the plan; it writes nothing.
@@ -283,10 +282,9 @@ fn landing_reads_are_exempt_but_untagged_writes_are_still_checked() {
         farcooler plan --repo overnight\n\
         farcooler plan ticket set ov-1 --stage landing\n\
         farcooler agent stop ov-1\n\
-        farcooler message ov-1 hello\n\
-        farcooler page set status --body hello";
-    let writes = plan_and_page_writes(commands);
-    assert_eq!(writes.len(), 4, "{writes:?}");
+        farcooler message ov-1 hello";
+    let writes = plan_writes(commands);
+    assert_eq!(writes.len(), 3, "{writes:?}");
     assert!(writes.iter().all(|line| !line.contains("--actor manager")));
     assert!(writes.iter().all(|line| !line.starts_with("farcooler landing ")));
 }

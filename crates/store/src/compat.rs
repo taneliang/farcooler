@@ -206,7 +206,7 @@ mod tests {
         // 0022's tables (ov-113) are ones no older build touches, so it
         // moves nothing, and nor do 0023's (ov-268), which only the plan
         // layer touches, 0024's (ov-199), which only the LFS record does, or
-        // 0025's (ov-269), which only the pages do, or 0026's (ov-304), which
+        // the retired tables from 0025 (ov-269), or 0026's (ov-304), which
         // only the plan layer's rulings do, or 0027's (ov-309), which only its
         // trains and CI reads do, or 0028's (ov-307), which only its budgets do, or 0029's (ov-313), which only a workspace's landing setting does, or 0030's (ov-333), which only adds a column to 0026's own table,
         // or 0038's (ov-385, the 31st), a nullable column on each wake queue that an older build never names,

@@ -569,19 +569,6 @@ pub mod capability {
     /// by an older daemon without a word, and the method refused as an unknown
     /// one. A client that reads it absent shows no notice and no button.
     pub const LFS_POINTERS: &str = "lfs_pointers";
-    /// Orchestrator pages (ov-269): `page.list`, `page.get`, `page.set`,
-    /// `page.remove`, `page.stats` and the `pages_changed` event.
-    ///
-    /// **Experimental, and it may be withdrawn.** A page is a document of typed
-    /// blocks an orchestrator publishes and the apps draw natively. Pages sit
-    /// beside the board, never in it: no task and nothing in the plan layer
-    /// refers to one, and a page names cards, lanes and themes by text, so it
-    /// needs `workstreams` (a board here is a workspace's) and nothing else. In
-    /// particular it doesn't need `board_plan`: with the plan layer removed a
-    /// page still draws, its lane and theme references as plain text. A client
-    /// that reads it absent hides pages, and a CLI refuses before sending,
-    /// saying the runner needs an update to show pages.
-    pub const BOARD_PAGES: &str = "board_pages";
     /// Decided for you (ov-304): `ruling.add`, `ruling.set`, and
     /// `Plan.rulings` on `plan.get`.
     ///
@@ -824,7 +811,7 @@ pub mod capability {
             NEEDS_YOU, WAKE_ON_ANSWER, STREAM_SIZE_MARKERS, TASK_NOTICES, REPORT, AGENT_USAGE,
             AGENTS_FOUND,
             TASK_WAITS, TASK_WORKERS, NOTICE_TASK, BOARD_READS, WORKTREE_FILES, TERMINAL_NAMES, TERMINAL_PORTS,
-            READ_ONLY_FOLDERS, BOARD_PLAN, LFS_POINTERS, BOARD_PAGES, BOARD_RULINGS,
+            READ_ONLY_FOLDERS, BOARD_PLAN, LFS_POINTERS, BOARD_RULINGS,
             BOARD_LINE, BOARD_COST, LANDING, BOARD_RULING_ACTIONS, AGENT_ROWS, DRAFT_HOLD,
             PROJECTOR_SETTING, AGENT_COMPOSE,
             COMPOSE, COMPOSE_UPLOAD, TERMINAL_INTERRUPT, CODEX_VIEW, BRING_DRAFT, WEB_PANE,
@@ -1123,11 +1110,6 @@ pub mod method {
         AgentWork = "agent.work" => BOARD_LINE,
         AgentEnd = "agent.end" => BOARD_LINE,
         AgentStop = "agent.stop" => AGENT_STOP,
-        PageList = "page.list" => BOARD_PAGES,
-        PageGet = "page.get" => BOARD_PAGES,
-        PageSet = "page.set" => BOARD_PAGES,
-        PageRemove = "page.remove" => BOARD_PAGES,
-        PageStats = "page.stats" => BOARD_PAGES,
         RulingAdd = "ruling.add" => BOARD_RULINGS,
         RulingSet = "ruling.set" => BOARD_RULINGS,
         RulingKeepAll = "ruling.keep_all" => BOARD_RULING_ACTIONS,
@@ -1238,8 +1220,6 @@ pub const MAX_ROWS: u32 = 200;
 #[cfg(test)]
 mod board_reads_tests;
 #[cfg(test)]
-mod page_wire_tests;
-#[cfg(test)]
 mod plan_layer_tests;
 #[cfg(test)]
 mod ruling_wire_tests;
@@ -1275,3 +1255,14 @@ pub fn step_up_statement(host_pin: &str, client_id: &str, action_digest: &[u8; 3
 }
 
 pub mod workflow_config;
+
+#[cfg(test)]
+#[test]
+fn a_new_client_decodes_an_old_pages_event_as_unknown() {
+    use prost::Message;
+
+    // Event field 28 (length-delimited), containing the old slot field "x".
+    let old_event = [0xe2, 0x01, 0x03, 0x12, 0x01, b'x'];
+    let event = v1::Event::decode(old_event.as_slice()).unwrap();
+    assert!(event.payload.is_none());
+}

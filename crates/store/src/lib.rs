@@ -34,7 +34,6 @@ mod line_migration;
 pub mod lfs_pointers;
 mod migrate;
 pub mod read_counts;
-pub mod pages;
 pub mod plan;
 pub mod plan_read;
 pub mod plan_agents;

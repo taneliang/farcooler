@@ -85,10 +85,6 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // The plan layer's two reads (ov-274), behind `board_plan`.
         | Method::PlanGet
         | Method::PlanEvents
-        // Orchestrator pages (ov-269) are read-only on a phone: the list and
-        // one page. The orchestrator is their one writer.
-        | Method::PageList
-        | Method::PageGet
         // A terminal's agent rows (ov-366), for the native views (ov-372).
         | Method::AgentRows
         | Method::AgentRowsFollow
@@ -224,10 +220,6 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         | Method::AgentEnd
         // Stopping is the orchestrator's (ov-872): no screen has a Stop button.
         | Method::AgentStop
-        // A phone neither writes a page nor reads how often one is published.
-        | Method::PageSet
-        | Method::PageRemove
-        | Method::PageStats
         // Rulings (ov-304) are read in `plan.get`'s answer. Only the
         // orchestrator records one: the owner asks it, citing the short id.
         | Method::RulingAdd

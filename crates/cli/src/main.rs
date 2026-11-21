@@ -56,8 +56,6 @@ mod draft_prompt;
 mod board_reads;
 mod event_lines;
 mod images;
-mod page;
-mod page_text;
 mod ci_words;
 mod plan;
 mod tracked;
@@ -248,13 +246,6 @@ enum Command {
     /// Start a person's rep: the agent that carries their asks to the
     /// orchestrator and its questions back, and never answers for them.
     Rep(people::RepArgs),
-    /// Pages (experimental): what the orchestrator draws for the apps, in blocks.
-    ///
-    /// A page is a small JSON document of typed blocks: a table of tickets, a
-    /// list of risks, a spend tally. Publish one with `page set`, learn the
-    /// blocks with `page schema`, and fix a document before publishing with
-    /// `page check`.
-    Page(page::PageArgs),
     /// Arrange terminals on screen: tile, zoom, focus, switch groups.
     ///
     /// Everything the Mac app's tiling does, because it is the same calls. An
@@ -1286,7 +1277,6 @@ async fn run() -> Fallible {
         Command::Member(c) => people::member(runner, c, cli.json).await,
         Command::Rep(a) => people::rep(runner, a, cli.json).await,
         Command::People { command } => people_access::people(runner, command, cli.json).await,
-        Command::Page(a) => page::page(runner, a, cli.json).await,
         Command::Attach { worktree } => attach(runner, &worktree).await,
         Command::Events => events(runner).await,
         Command::Push(c) => push(runner, c).await,
@@ -3426,7 +3416,6 @@ fn event_json(payload: farcooler_protocol::v1::event::Payload) -> Option<serde_j
         }),
         farcooler_protocol::v1::event::Payload::BoardReadsChanged(r) => event_lines::reads_event_json(&r),
         farcooler_protocol::v1::event::Payload::PlanChanged(p) => event_lines::plan_event_json(&p),
-        farcooler_protocol::v1::event::Payload::PagesChanged(p) => event_lines::pages_event_json(&p),
         // Other resources have no events yet. `None` is right: a client that
         // reacted to a line it cannot read would be worse. What is NOT right
         // is a resource that HAS a reader landing here by omission, which is

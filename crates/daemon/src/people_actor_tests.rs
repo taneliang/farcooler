@@ -90,8 +90,6 @@ fn every_write(actor: &str) -> Vec<Request> {
         call("ruling.set", P::RulingSet(pb::RulingSet { actor: a(), ..Default::default() })),
         call("ruling.keep_all", P::RulingKeepAll(pb::RulingKeepAll { actor: a(), ..Default::default() })),
         call("message.send", P::MessageSend(pb::MessageSend { actor: a(), ..Default::default() })),
-        call("page.set", P::PageSet(pb::PageSet { actor: a(), ..Default::default() })),
-        call("page.remove", P::PageRemove(pb::PageRemove { actor: a(), ..Default::default() })),
     ]
 }
 
@@ -309,26 +307,6 @@ async fn a_member_makes_a_card_only_as_himself() {
     assert_eq!(call(&factory(&r.svc, BOB), "task.create", card("user")).await, Ok(()));
     assert_eq!(call(&factory(&r.svc, LOCAL), "task.create", card("manager")).await, Ok(()), "the orchestrator");
     assert_eq!(call(&factory(&r.svc, OWNERS_PHONE), "task.create", card("user")).await, Ok(()));
-}
-
-/// A page write: Bob's phone can't set a page as the orchestrator, and as
-/// himself does, a page being the plan's, which is everyone's (ov-736).
-#[tokio::test]
-async fn a_member_sets_a_page_as_no_one() {
-    let r = runner().await;
-    let page = |actor: &str| {
-        request::Payload::PageSet(pb::PageSet {
-            workspace_id: id_bytes(r.workspace),
-            slot: "notes".into(),
-            doc_json: r#"{"v":1,"title":"Notes","summary":"s","blocks":[{"type":"heading","text":"Tickets"}]}"#.into(),
-            actor: actor.into(),
-            ..Default::default()
-        })
-    };
-    assert_eq!(call(&factory(&r.svc, BOB), "page.set", page("manager")).await, Err(ACTOR.into()));
-    assert_eq!(call(&factory(&r.svc, BOB), "page.set", page("user")).await, Ok(()), "the plan's, everyone's (ov-736)");
-    assert_eq!(call(&factory(&r.svc, LOCAL), "page.set", page("manager")).await, Ok(()), "the orchestrator");
-    assert_eq!(call(&factory(&r.svc, OWNERS_PHONE), "page.set", page("user")).await, Ok(()));
 }
 
 /// Nobody claims a member on the wire (ov-707): only the runner writes
