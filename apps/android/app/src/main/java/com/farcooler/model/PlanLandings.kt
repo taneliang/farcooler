@@ -1,5 +1,6 @@
 package com.farcooler.model
 
+import java.net.URI
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -121,6 +122,15 @@ data class PlanCiRead(
     /** When a read last worked: what's here is as of then. 0 if none has. */
     val fetchedAt: Long = 0,
 ) {
+    /** The HTTPS link a landing card may open. */
+    val runUrl: String? get() {
+        val uri = runCatching { URI(url) }.getOrNull() ?: return null
+        val host = uri.host ?: return null
+        if (!uri.scheme.equals("https", ignoreCase = true) || host.isEmpty() || uri.rawUserInfo != null) return null
+        if (!host.all { it.code < 128 && (it.isLetterOrDigit() || it == '.' || it == '-') }) return null
+        return url
+    }
+
     /** A failed run needs the owner: the one CI state drawn in color. */
     val needsAttention: Boolean get() = status == CiStatus.FAILED
 

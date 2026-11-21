@@ -33,7 +33,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.farcooler.model.GlancePalette
-import com.farcooler.model.PageLinks
 import com.farcooler.model.PlanCiRead
 import com.farcooler.model.PlanViewLanding
 import com.farcooler.model.PlanViewTicket
@@ -61,7 +60,7 @@ fun PlanLandingCard(
     val amber = glanceColor(GlancePalette.amber)
     val phaseAmber = card.attention || ci?.needsAttention == true
     val facts = landingFacts(card, ci, now)
-    val run = ci?.url?.takeIf { PageLinks.https(it) != null }
+    val run = ci?.runUrl
     val uri = LocalUriHandler.current
     val spoken = listOfNotNull(card.label, card.subtitle, card.carries, card.ladder.compact.replace(" · ", ", ")).joinToString(", ")
     // A long press says what a landing is, then each step of the ladder, the one it stands on in the phase's own words.
