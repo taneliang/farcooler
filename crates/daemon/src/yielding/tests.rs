@@ -26,16 +26,45 @@ fn end(mut child: std::process::Child) { unsafe { libc::killpg(child.id() as i32
 
 #[tokio::test]
 async fn a_landing_gate_runs_after_a_builder_releases_its_heavy_ticket() {
+    landing_after_heavy_builder(false).await;
+}
+
+#[tokio::test]
+async fn a_builder_holding_a_legacy_tmpdir_ticket_stays_runnable_during_landing() {
+    landing_after_heavy_builder(true).await;
+}
+
+async fn landing_after_heavy_builder(legacy: bool) {
     let dir = tempfile::tempdir().unwrap();
-    let heavy = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/heavy");
-    let command = || {
-        let mut cmd = Command::new(&heavy);
+    let scripts = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts");
+    let old_tmp = dir.path().join("old temp");
+    std::fs::create_dir(&old_tmp).unwrap();
+    let lock = dir.path().join("lane-gate.lock");
+    let driver = r#"
+import pathlib, runpy, sys
+sys.path.insert(0, sys.argv.pop(1))
+import heavy_lock as hl
+lock = pathlib.Path(sys.argv.pop(1))
+legacy = sys.argv.pop(1) == 'legacy'
+if legacy:
+    machine_lock = hl.machine_lock
+    hl.machine_lock = lambda *a, **kw: machine_lock(*a, path=lock, **kw)
+else:
+    hl.MACHINE_LOCK_PATH = lock
+    discover = hl.legacy_queues
+    hl.legacy_queues = lambda queue: [q for q in discover(queue) if lock.parent.resolve() in q.parents]
+runpy.run_path(sys.argv.pop(1), run_name='__main__')
+"#;
+    let command = |old| {
+        let mut cmd = Command::new("python3");
+        cmd.args(["-c", driver]).arg(&scripts).arg(if old { old_tmp.join("lane-gate.lock") } else { lock.clone() })
+            .arg(if old { "legacy" } else { "current" }).arg(scripts.join("heavy"));
         cmd.env_remove("CI").env_remove("HEAVY_LOCK_HELD").env_remove("FARCOOLER_OPERATION_BINDING")
-            .env("TMPDIR", dir.path()).env("HEAVY_LOAD_LIMIT", "100000").env("HEAVY_POLL", "0.02")
+            .env("TMPDIR", if old { &old_tmp } else { dir.path() }).env("HEAVY_LOAD_LIMIT", "100000").env("HEAVY_POLL", "0.02")
             .current_dir(dir.path()).process_group(0);
         cmd
     };
-    let holder = command().args(["--", "/bin/sh", "-c", "touch ready; while [ ! -f release ]; do sleep 0.02; done"])
+    let holder = command(legacy).args(["--", "/bin/sh", "-c", "touch ready; while [ ! -f release ]; do sleep 0.02; done"])
         .spawn().unwrap();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     while !dir.path().join("ready").exists() {
@@ -45,14 +74,18 @@ async fn a_landing_gate_runs_after_a_builder_releases_its_heavy_ticket() {
     let y = Yielding::new(None, dir.path().join(heavy_queue::NAME));
     let _builder = y.builder(group(&holder));
     let gate = y.admit_gate().await.unwrap();
-    let mut landing = command().args(["--", "touch", "landed"]).spawn().unwrap();
+    let mut landing = command(false).env("FARCOOLER_OPERATION_BINDING", "landing")
+        .args(["--", "touch", "landed"]).spawn().unwrap();
     let queue = dir.path().join("lane-gate.lock.queue");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-    while std::fs::read_dir(&queue).unwrap().flatten().filter(|e| e.path().extension().is_some_and(|e| e == "ticket")).count() < 2
+    let expected_tickets = if legacy { 1 } else { 2 };
+    while std::fs::read_dir(&queue).unwrap().flatten().filter(|e| e.path().extension().is_some_and(|e| e == "ticket")).count() < expected_tickets
+        && !dir.path().join("landed").exists()
         && tokio::time::Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    let was_waiting = !dir.path().join("landed").exists();
+    let was_waiting = !dir.path().join("landed").exists()
+        && !crate::proc_table::stopped_or_gone(holder.id() as i32);
     let holder_state = states(&holder);
     std::fs::write(dir.path().join("release"), "").unwrap();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(3);

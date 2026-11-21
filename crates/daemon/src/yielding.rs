@@ -186,18 +186,19 @@ fn stop_builders(state: &mut State, queue: &Path) -> bool {
         let Ok(enter) = heavy_queue::try_enter(queue) else { return false };
         state.queue_latch = Some(enter);
     }
-    let Ok(tickets) = heavy_queue::live_tickets(queue) else { return false };
-    let table = if !tickets.is_empty() && state.builders.values().any(|b| !matches!(b.target, Target::Group { .. })) {
-        let Some(raw) = crate::proc_table::snapshot() else { return false };
-        Some(crate::foreground::parse(&raw))
-    } else { None };
+    let Some(raw) = crate::proc_table::snapshot() else { return false };
+    let table = crate::foreground::parse(&raw);
+    let pids = state.builders.values().filter(|b| !b.manual).flat_map(|b| match &b.target {
+        Target::Group { pid, .. } => table.in_group(*pid as i32).collect(),
+        Target::Native { tty, .. } | Target::Tty(tty) => table.under_tty(tty.trim_start_matches("/dev/")),
+    });
+    let Ok((_legacy_latches, tickets)) = pause_tickets(queue, pids) else { return false };
     let mut settled = true;
     for b in state.builders.values_mut().filter(|b| !b.manual) {
         let has_ticket = match &b.target {
             Target::Group { pid, .. } => tickets.iter().any(|t| unsafe { libc::getpgid(t.pid) } == *pid as i32),
-            Target::Native { tty, supervisor, .. } => table.as_ref().is_some_and(|table|
-                tty_has_ticket(table, tty, *supervisor as i32, &tickets)),
-            Target::Tty(tty) => table.as_ref().is_some_and(|table| tty_has_ticket(table, tty, 0, &tickets)),
+            Target::Native { tty, supervisor, .. } => tty_has_ticket(&table, tty, *supervisor as i32, &tickets),
+            Target::Tty(tty) => tty_has_ticket(&table, tty, 0, &tickets),
         };
         if has_ticket {
             // Leave the whole builder runnable so the job's wrapper can reap its
@@ -213,6 +214,19 @@ fn stop_builders(state: &mut State, queue: &Path) -> bool {
     settled
 }
 
+/// The canonical latch is already held. Also hold admission in the old queues
+/// of processes we could stop, until their tickets have been checked and the
+/// pause requested.
+fn pause_tickets(queue: &Path, pids: impl IntoIterator<Item = i32>) -> std::io::Result<(Vec<File>, Vec<heavy_queue::Ticket>)> {
+    let mut latches = Vec::new();
+    let mut tickets = heavy_queue::live_tickets(queue)?;
+    for old in heavy_queue::legacy_queues(queue, pids) {
+        latches.push(heavy_queue::try_enter(&old)?);
+        tickets.extend(heavy_queue::live_tickets(&old)?);
+    }
+    Ok((latches, tickets))
+}
+
 fn tty_has_ticket(table: &crate::foreground::Foreground, tty: &str, supervisor: i32, tickets: &[heavy_queue::Ticket]) -> bool {
     let pids = table.under_tty(tty.trim_start_matches("/dev/"));
     (supervisor == 0 || pids.contains(&supervisor))
@@ -220,21 +234,21 @@ fn tty_has_ticket(table: &crate::foreground::Foreground, tty: &str, supervisor: 
 }
 
 /// Hand pauses must obey the same admission rule, including before a gate starts.
-pub(crate) fn manual_pause_latch(builder: Option<&BuilderGuard>, tty: &str, supervisor: i32) -> std::io::Result<File> {
+pub(crate) fn manual_pause_latch(builder: Option<&BuilderGuard>, tty: &str, supervisor: i32) -> std::io::Result<Vec<File>> {
     let machine;
     let queue = match builder {
         Some(builder) => &builder.0.0.queue,
         None => { machine = heavy_queue::machine(); &machine }
     };
     let enter = heavy_queue::try_enter(queue)?;
-    let tickets = heavy_queue::live_tickets(queue)?;
-    if !tickets.is_empty() {
-        let raw = crate::proc_table::snapshot().ok_or_else(|| std::io::Error::other("process table unavailable"))?;
-        if tty_has_ticket(&crate::foreground::parse(&raw), tty, supervisor, &tickets) {
-            return Err(std::io::Error::other("builder has a ticket in the machine-wide heavy-job queue"));
-        }
+    let raw = crate::proc_table::snapshot().ok_or_else(|| std::io::Error::other("process table unavailable"))?;
+    let table = crate::foreground::parse(&raw);
+    let (mut latches, tickets) = pause_tickets(queue, table.under_tty(tty.trim_start_matches("/dev/")))?;
+    if tty_has_ticket(&table, tty, supervisor, &tickets) {
+        return Err(std::io::Error::other("builder has a ticket in the machine-wide heavy-job queue"));
     }
-    Ok(enter)
+    latches.push(enter);
+    Ok(latches)
 }
 
 impl Yielding {
@@ -265,7 +279,7 @@ impl Yielding {
     pub(crate) fn heavy_lock_waits(&self, groups: &std::collections::HashSet<i32>) -> std::collections::HashMap<i32, String> {
         if groups.is_empty() { return Default::default(); }
         let Ok(tickets) = heavy_queue::live_tickets(&self.0.queue) else { return Default::default() };
-        heavy_queue::waiting(&tickets, groups)
+        heavy_queue::waiting(&self.0.queue, &tickets, groups)
     }
     /// A landing gate started. Builders without heavy tickets yield until every gate has ended.
     pub(crate) fn gate(&self) -> GateGuard {

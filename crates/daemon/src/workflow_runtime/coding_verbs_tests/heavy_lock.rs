@@ -2,10 +2,37 @@ use super::*;
 
 #[tokio::test]
 async fn workflow_get_names_the_paused_holder_after_five_minutes_in_the_heavy_queue() {
+    workflow_get_names_paused_heavy_holder(false).await;
+}
+
+#[tokio::test]
+async fn workflow_get_names_a_paused_legacy_holder_when_landing_is_first_in_the_new_queue() {
+    workflow_get_names_paused_heavy_holder(true).await;
+}
+
+async fn workflow_get_names_paused_heavy_holder(legacy: bool) {
     let (dir, mut runtime) = lander("gate-slow").await;
     let queue = runtime.root.join("lane-gate.lock.queue");
     std::fs::create_dir(&queue).unwrap();
-    let mut holder = tokio::process::Command::new("/bin/sleep").arg("60").kill_on_drop(true).spawn().unwrap();
+    let legacy_tmp = runtime.root.join("old temp");
+    let (holder_dir, mut holder) = if legacy {
+        let holder_dir = legacy_tmp.join("lane-gate.lock.queue");
+        std::fs::create_dir_all(&holder_dir).unwrap();
+        let ready = legacy_tmp.join("ready");
+        let child = tokio::process::Command::new("python3")
+            .args(["-c", "import pathlib, sys, time; pathlib.Path(sys.argv[1]).touch(); time.sleep(60)"])
+            .arg(&ready).env("TMPDIR", &legacy_tmp).kill_on_drop(true).spawn().unwrap();
+        // The system Python launcher can still be replacing itself after spawn returns.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+        while !ready.exists() {
+            assert!(tokio::time::Instant::now() < deadline, "legacy holder did not start");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        (holder_dir, child)
+    } else {
+        let child = tokio::process::Command::new("/bin/sleep").arg("60").kill_on_drop(true).spawn().unwrap();
+        (queue.clone(), child)
+    };
     let pid = holder.id().unwrap();
     unsafe { libc::kill(pid as i32, libc::SIGSTOP); }
     let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
@@ -13,7 +40,7 @@ async fn workflow_get_names_the_paused_holder_after_five_minutes_in_the_heavy_qu
         assert!(tokio::time::Instant::now() < deadline);
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    let holder_ticket = queue.join(format!("{:020}-{pid}.ticket", 1));
+    let holder_ticket = holder_dir.join(format!("{:020}-{pid}.ticket", 1));
     std::fs::write(&holder_ticket, format!("worktree /fixture/paused-builder, PID {pid}, started earlier, running tests\n")).unwrap();
     let definition = batched_push(&runtime, "any", 5000);
     at_join(&mut runtime, "one", &definition).await;

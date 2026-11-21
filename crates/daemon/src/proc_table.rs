@@ -307,10 +307,68 @@ fn procargs2(pid: i32) -> Option<Vec<u8>> {
     Some(buf)
 }
 
+/// Temp roots an older Python heavy taker could have selected. Read only the
+/// three tempfile settings and resolve relative paths against the taker's cwd.
+pub(crate) fn python_temp_roots(pid: i32) -> Vec<std::path::PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::Path;
+
+    let Some(exe) = path_of(pid) else { return Vec::new() };
+    if !Path::new(&exe).file_name().and_then(|s| s.to_str()).is_some_and(|s| s.to_ascii_lowercase().starts_with("python")) {
+        return Vec::new();
+    }
+    let Some(env) = process_environment(pid) else { return Vec::new() };
+    let mut cwd = None;
+    env.split(|&b| b == 0).filter_map(|entry| {
+        let (key, value) = entry.split_at(entry.iter().position(|&b| b == b'=')?);
+        let value = &value[1..];
+        if !matches!(key, b"TMPDIR" | b"TEMP" | b"TMP") || value.is_empty() { return None; }
+        let dir = Path::new(std::ffi::OsStr::from_bytes(value));
+        if dir.is_absolute() { return Some(dir.to_path_buf()); }
+        Some(cwd.get_or_insert_with(|| process_cwd(pid)).as_ref()?.join(dir))
+    }).collect()
+}
+
+#[cfg(target_os = "macos")]
+fn process_environment(pid: i32) -> Option<Vec<u8>> {
+    let buf = procargs2(pid)?;
+    let (argc, argv) = procargs_payload(&buf)?;
+    let env = argv.splitn(argc + 1, |&b| b == 0).nth(argc)?;
+    Some(env.to_vec())
+}
+
+#[cfg(target_os = "linux")]
+fn process_environment(pid: i32) -> Option<Vec<u8>> {
+    std::fs::read(format!("/proc/{pid}/environ")).ok()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn process_environment(_pid: i32) -> Option<Vec<u8>> { None }
+
+#[cfg(target_os = "macos")]
+fn process_cwd(pid: i32) -> Option<std::path::PathBuf> {
+    use std::os::unix::ffi::OsStringExt;
+    let mut info: libc::proc_vnodepathinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of_val(&info) as i32;
+    let got = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDVNODEPATHINFO, 0, (&raw mut info).cast(), size) };
+    if got != size { return None; }
+    let path: Vec<u8> = info.pvi_cdir.vip_path.as_flattened().iter().take_while(|&&c| c != 0)
+        .map(|&c| c as u8).collect();
+    (!path.is_empty()).then(|| std::ffi::OsString::from_vec(path).into())
+}
+
+#[cfg(target_os = "linux")]
+fn process_cwd(pid: i32) -> Option<std::path::PathBuf> {
+    std::fs::read_link(format!("/proc/{pid}/cwd")).ok()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn process_cwd(_pid: i32) -> Option<std::path::PathBuf> { None }
+
 /// `KERN_PROCARGS2`'s layout: an `i32` argc, the executable path, NUL
 /// padding, then argc NUL-terminated arguments, then the environment.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn parse_procargs2(buf: &[u8]) -> Option<String> {
+#[cfg(any(target_os = "macos", test))]
+fn procargs_payload(buf: &[u8]) -> Option<(usize, &[u8])> {
     let argc = i32::from_ne_bytes(buf.get(..4)?.try_into().ok()?);
     if argc <= 0 {
         return None;
@@ -319,10 +377,15 @@ fn parse_procargs2(buf: &[u8]) -> Option<String> {
     let end = rest.iter().position(|&b| b == 0)?;
     rest = &rest[end..];
     let start = rest.iter().position(|&b| b != 0)?;
-    rest = &rest[start..];
-    let args: Vec<String> = rest
+    Some((argc as usize, &rest[start..]))
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn parse_procargs2(buf: &[u8]) -> Option<String> {
+    let (argc, argv) = procargs_payload(buf)?;
+    let args: Vec<String> = argv
         .split(|&b| b == 0)
-        .take(argc as usize)
+        .take(argc)
         .map(|a| String::from_utf8_lossy(a).into_owned())
         .collect();
     let joined = args.join(" ");

@@ -1,6 +1,6 @@
 //! Read the ticket format shared by scripts/heavy and lane-gate.py.
 use crate::proc_table::{ProcessState, process_state};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read};
 use std::os::fd::AsRawFd;
@@ -12,6 +12,17 @@ pub(crate) const NAME: &str = "lane-gate.lock.queue";
 const REPORT_AFTER: Duration = Duration::from_secs(300);
 
 pub(super) fn machine() -> PathBuf { Path::new("/tmp").join(NAME) }
+
+pub(super) fn legacy_queues(queue: &Path, pids: impl IntoIterator<Item = i32>) -> BTreeSet<PathBuf> {
+    let Ok(canonical) = queue.canonicalize() else { return BTreeSet::new() };
+    let roots = [PathBuf::from("/var/tmp"), PathBuf::from("/usr/tmp")].into_iter()
+        .chain(pids.into_iter().flat_map(crate::proc_table::python_temp_roots));
+    roots.filter_map(|root| root.join(NAME).canonicalize().ok())
+        .filter(|path| path != &canonical && path.is_dir())
+        // Fixtures have private machine and legacy queues under the same test root.
+        .filter(|path| !cfg!(test) || canonical.parent().is_some_and(|root| path.starts_with(root)))
+        .collect()
+}
 
 /// Hold the same admission latch the Python queue takes before publishing a
 /// ticket. Keep it until the kernel confirms the stop, so a process cannot
@@ -52,17 +63,30 @@ pub(super) fn live_tickets(queue: &Path) -> io::Result<Vec<Ticket>> {
     Ok(tickets)
 }
 
-pub(super) fn waiting(tickets: &[Ticket], candidate_groups: &HashSet<i32>) -> HashMap<i32, String> {
+pub(super) fn waiting(queue: &Path, tickets: &[Ticket], candidate_groups: &HashSet<i32>) -> HashMap<i32, String> {
     let Some(cutoff) = SystemTime::now().duration_since(UNIX_EPOCH).ok()
         .and_then(|now| now.checked_sub(REPORT_AFTER)).map(|t| t.as_nanos()) else { return Default::default() };
-    let mut live = tickets.iter().filter_map(|t| {
+    let locate = |t: &Ticket| {
         let group = unsafe { libc::getpgid(t.pid) };
         let status = process_state(t.pid);
-        (group > 0 && status != ProcessState::Gone).then_some((t, group, status))
+        (group > 0 && status != ProcessState::Gone).then_some((group, status))
+    };
+    let waiters: Vec<_> = tickets.iter().filter_map(|t| locate(t).map(|(group, status)| (t, group, status))).collect();
+    if !waiters.iter().any(|(t, group, _)| t.arrived < cutoff && candidate_groups.contains(group)) {
+        return Default::default();
+    }
+    // An older queue can block the canonical head itself during the transition.
+    let legacy = crate::proc_table::snapshot().and_then(|raw| {
+        let pids = raw.lines().filter_map(|row| row.split_whitespace().next()?.parse().ok());
+        legacy_queues(queue, pids).into_iter()
+            .filter_map(|old| live_tickets(&old).ok()?.into_iter().next())
+            .min_by_key(|ticket| ticket.arrived)
     });
-    let Some((holder, holder_group, status)) = live.next() else { return Default::default() };
+    let holder = legacy.as_ref().and_then(|t| locate(t).map(|(group, status)| (t, group, status)))
+        .or_else(|| waiters.first().copied());
+    let Some((holder, holder_group, status)) = holder else { return Default::default() };
     let mut output = HashMap::new();
-    for (waiter, group, _) in live {
+    for (waiter, group, _) in waiters {
         if waiter.arrived >= cutoff || group == holder_group || !candidate_groups.contains(&group) { continue; }
         output.entry(group).or_insert_with(|| holder.diagnostic(status == ProcessState::Stopped));
     }

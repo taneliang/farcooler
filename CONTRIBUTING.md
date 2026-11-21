@@ -136,6 +136,8 @@ with a ticket in the machine-wide heavy queue keeps running until it releases
 its ticket. Paused builders continue when the last gate ends. A landing gate
 that has queued for more than five minutes reports the holder in `workflow get`
 and in the Plan's landing row, including whether the holder is paused.
+Heavy jobs use `/tmp/lane-gate.lock.queue` regardless of `TMPDIR`. During an
+upgrade, already queued jobs in older temp-directory queues run to completion.
 The pause is written to `yielding.json` in the engine root, so a
 daemon that restarts mid-gate continues what it had paused. Builders also start
 at niceness 10. The engine refuses
