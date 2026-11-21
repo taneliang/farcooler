@@ -62,7 +62,6 @@ struct MainCardsTests {
             // plane beside the orchestrator, and its agents' cards are the fills.
             ("plan-theme", AnyView(PlanPageView(plan: plan, page: .theme("t"), context: context))),
             ("plan-ticket", AnyView(PlanPageView(plan: plan, page: .ticket("t"), context: context))),
-            ("plan-page", AnyView(PlanPageView(plan: plan, page: .page("p"), context: context))),
             (
                 "worktree",
                 AnyView(

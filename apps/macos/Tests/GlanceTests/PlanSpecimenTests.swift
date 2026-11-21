@@ -21,6 +21,7 @@ struct PlanSpecimenTests {
     struct Source {
         var store: TaskBoardStore
         var old: TaskBoardStore
+        var defaults: UserDefaults
     }
 
     /// Run the CLI against the scratch daemon, as `DaemonClient.runRaw` would.
@@ -73,7 +74,6 @@ struct PlanSpecimenTests {
         func store(plan: Bool) async -> TaskBoardStore {
             let store = TaskBoardStore(
                 client: client(plan: plan), workspace: workspace, readStore: DefaultsBoardReads(defaults))
-            store.planDefaults = defaults
             await store.readIfNeverRead()
             // Everything read, so Unread doesn't list the whole board.
             for row in store.board.rows { store.markRead(row) }
@@ -81,7 +81,7 @@ struct PlanSpecimenTests {
         }
         let made = await store(plan: true)
         await made.plan.reload()
-        return Source(store: made, old: await store(plan: false))
+        return Source(store: made, old: await store(plan: false), defaults: defaults)
     }
 
     static var root: URL {
@@ -134,11 +134,12 @@ struct PlanSpecimenTests {
     /// The board in the navigator, on the window's plane.
     struct Board: View {
         let store: TaskBoardStore
+        let defaults: UserDefaults
         var page: PlanPage?
 
         var body: some View {
             TaskBoardView(
-                store: store, client: store.client, agents: .none, onGoTo: { _ in }, defaults: store.planDefaults,
+                store: store, client: store.client, agents: .none, onGoTo: { _ in }, defaults: defaults,
                 planPage: page)
             .background(WorkspaceStyle.canvas)
         }
@@ -154,11 +155,11 @@ struct PlanSpecimenTests {
         let wide = CGSize(width: 580, height: 1100)
 
         // On a runner without a plan, and the planned navigator (ov-298).
-        try await Self.write("board-old-runner-narrow", size: narrow) { Board(store: source.old) }
+        try await Self.write("board-old-runner-narrow", size: narrow) { Board(store: source.old, defaults: source.defaults) }
         let model = plan.plan
         let line = model.lines.first { $0.branch == "mac-rel" } ?? model.lines[0]
         let theme = model.shownThemes.first { $0.name == "Visual language" } ?? model.themes[0]
-        try await Self.write("plan-navigator-narrow", size: narrow) { Board(store: store, page: .theme(theme.id)) }
+        try await Self.write("plan-navigator-narrow", size: narrow) { Board(store: store, defaults: source.defaults, page: .theme(theme.id)) }
 
         // The overview, on its own.
         try await Self.write("plan-overview-narrow", size: narrow) {

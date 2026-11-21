@@ -2,7 +2,7 @@ import AgentKit
 import SwiftUI
 
 // The plan's overview (ov-268 design 6.1): the tickets working now, Next Up,
-// the themes as short briefs, the orchestrator's pages and what landed today. A ticket
+// the themes as short briefs and what landed today. A ticket
 // or a theme opens its page in the main area, where a task opens. Since
 // ov-298 there's no Tasks | Plan control to show it in the navigator's place;
 // the navigator lists the themes and the task index (`PlanNavigator`).

@@ -82,7 +82,6 @@ final class TaskBoardStore: ObservableObject {
 
     /// The board's plan (ov-273), read only once someone chooses Plan.
     lazy var plan = PlanStore(client: client, workspace: workspace, host: hostKey)
-    var planDefaults = UserDefaults.standard
 
     /// The card that is open, or nil for the board alone.
     @Published var opened: TaskRow?

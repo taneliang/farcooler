@@ -179,6 +179,23 @@ struct PlanViewTests {
         #expect(!calls.args.contains { $0.first == "plan" })
     }
 
+    @Test("A newer Mac opens a plan from an older runner that still advertises Pages")
+    func runnerWithRetiredPages() async throws {
+        let defaults = Self.defaults()
+        let calls = Calls()
+        let store = try await Self.store(plan: true, defaults: defaults, calls: calls)
+        store.client.daemonBuild = DaemonBuild(
+            version: "old", matches: false, platform: "macos",
+            capabilities: ["board_plan", "board_pages"])
+        await store.plan.reload()
+        let drawn = await Self.draw(store, defaults: defaults)
+        defer { drawn.window.close() }
+        #expect(store.plan.hasRead && store.plan.trouble == nil)
+        #expect(drawn.ids.contains("plan-themes"))
+        #expect(!drawn.ids.contains("plan-pages"))
+        #expect(!calls.args.contains { $0.first == "page" })
+    }
+
     @Test("A board with nothing planned is the board as it was: the same views, the same frames")
     func nothingPlanned() async throws {
         let old = Self.defaults()

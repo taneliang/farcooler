@@ -30,7 +30,7 @@ struct PlanLandingCard: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.openURL) private var openURL
 
-    private var run: URL? { ci.flatMap { PageLinks.https($0.url) } }
+    private var run: URL? { ci?.runURL }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.group) {
