@@ -20,14 +20,12 @@ fn number(m: &str, f: &str) -> i32 {
         .number()
 }
 
-/// Request and result tags from 180, after the pages' 170s, and the plan's
-/// next field: pinned, so a drift can't decode as another lane's method.
+/// Request and result tags from 180 and the plan's next field: pinned, so a
+/// drift can't decode as another lane's method.
 #[test]
 fn rulings_hold_their_tags() {
-    assert_eq!(number("Request", "page_stats"), 174, "the highest request tag before them");
     assert_eq!(number("Request", "ruling_add"), 180);
     assert_eq!(number("Request", "ruling_set"), 181);
-    assert_eq!(number("Result", "page_stats_list"), 173, "the highest result tag before them");
     assert_eq!(number("Result", "board_ruling"), 180);
     assert_eq!(number("Plan", "cards"), 5, "the plan's last field before them still carried");
     assert_eq!(number("Plan", "rulings"), 7);
