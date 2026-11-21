@@ -69,6 +69,76 @@ fn summarize(mut value:serde_json::Value) -> serde_json::Value {
     value
 }
 
+/// Plan's workflow read only needs renderable runs, stops and admission context.
+/// Keep headroom for the protobuf envelope around the JSON string.
+pub(crate) const PLAN_WORKFLOW_BYTES: usize = farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES - 1024;
+
+pub(crate) enum GetView {
+    Full,
+    Summary,
+    Plan,
+}
+
+fn retain_plan_items(state: &mut State) {
+    state.archive.clear();
+    state.seen.clear();
+    state.grouping = None;
+    state.items.retain(|_, item| !item.definition.is_ticket()
+        && !(item.group_of.is_some() && matches!(item.phase, Phase::Done | Phase::Cancelled)));
+}
+
+/// Shipped clients read the same state shape. Only fall back to this view
+/// when their original unmarked reply would otherwise fail at the frame cap.
+pub(crate) fn bound_legacy_get(mut value: serde_json::Value) -> String {
+    value.as_object_mut().expect("workflow get object")
+        .retain(|key, _| matches!(key.as_str(), "schema" | "state" | "context" | "stops" | "configuration"));
+    if let Some(state) = value["state"].as_object_mut() {
+        state.remove("archive");
+        state.remove("grouping");
+        state.insert("seen".into(), serde_json::json!([]));
+    }
+    let json = value.to_string();
+    if json.len() <= PLAN_WORKFLOW_BYTES {
+        return json;
+    }
+    value.as_object_mut().expect("workflow get object").remove("configuration");
+    encode_plan_get(value)
+}
+
+pub(crate) fn encode_plan_get(mut value: serde_json::Value) -> String {
+    let json = value.to_string();
+    if json.len() <= PLAN_WORKFLOW_BYTES {
+        return json;
+    }
+    // Keep the revision and authenticated context even if many large live
+    // runs contend for one frame. Active runs take priority over finished runs.
+    let Some(items) = value.pointer_mut("/state/items").and_then(|v| v.as_object_mut()) else { return json };
+    let mut items: Vec<_> = std::mem::take(items).into_iter().collect();
+    let mut stops = value.get_mut("stops").and_then(|v| v.as_object_mut()).map(std::mem::take).unwrap_or_default();
+    if value.to_string().len() > PLAN_WORKFLOW_BYTES {
+        value["state"]["source_sequences"] = serde_json::json!({});
+    }
+    let mut remaining = PLAN_WORKFLOW_BYTES.saturating_sub(value.to_string().len());
+    items.sort_by_key(|(_, item)| {
+        let tracker = item["definition"]["source"] == TICKET_SOURCE;
+        let closed = matches!(item["phase"].as_str(), Some("Done" | "Failed" | "Cancelled"));
+        (tracker, closed, std::cmp::Reverse(item["since_ms"].as_i64().unwrap_or_default()))
+    });
+    for (id, item) in items {
+        let stop = stops.remove(&id);
+        let key_bytes = serde_json::Value::String(id.clone()).to_string().len() + 2;
+        let bytes = key_bytes + item.to_string().len()
+            + stop.as_ref().map_or(0, |stop| key_bytes + stop.to_string().len());
+        let Some(next) = remaining.checked_sub(bytes) else { continue };
+        remaining = next;
+        if let Some(stop) = stop {
+            value["stops"][&id] = stop;
+        }
+        value["state"]["items"][id] = item;
+    }
+    value.to_string()
+}
+
 /// The newest this many `build_cleanup` records and process logs ride in a `workflow.get` reply (ov-1373). Both lists
 /// grow for as long as a workspace runs (766 records was 509 KB), and the daemon refuses any reply over 1 MiB. 50 keeps
 /// each list to roughly 35 KB at that record size, and a person reading a plan wants the latest, not the history.
@@ -83,6 +153,32 @@ pub(super) fn bound_recent<T>(reply: &mut serde_json::Map<String, serde_json::Va
 }
 
 impl Exec {
+    fn plan_stops(&self, workspace: &str, state: Option<&State>) -> serde_json::Map<String, serde_json::Value> {
+        // Why a run's named tree stopped it, for the run it stopped (ov-979).
+        let mut stops = serde_json::Map::new();
+        for (item, live) in state.into_iter().flat_map(|s| &s.items) {
+            let Ok(bytes) = std::fs::read(self.tree_stop_path(workspace, item)) else { continue };
+            if let Ok(stop) = serde_json::from_slice::<named_tree::TreeStop>(&bytes) {
+                if stop.run == live.run { stops.insert(item.clone(), serde_json::json!(stop)); }
+            }
+        }
+        stops
+    }
+
+    fn read_plan_get(&self, workspace: &str) -> Result<serde_json::Value> {
+        let mut state = self.execution_state(workspace)?;
+        if let Some(state) = &mut state {
+            retain_plan_items(state);
+            for item in state.items.values_mut() {
+                if let Some(reason) = item.failed_reason() {
+                    item.reason = Some(reason);
+                }
+            }
+        }
+        let stops = self.plan_stops(workspace, state.as_ref());
+        Ok(serde_json::json!({"schema": 1, "state": state, "stops": stops}))
+    }
+
     /// Reads committed records and local stop receipts only; never executes git or drives effects.
     pub(super) fn read_get(&self, workspace:&str) -> Result<serde_json::Value> {
         let deliveries=self.store.workflow_notice_deliveries(workspace)?;
@@ -90,14 +186,7 @@ impl Exec {
             id:d.notice.id.clone(),revision:d.notice.revision,body:format!("{}:{:?}",d.notice.item,d.notice.point)
         }).collect();
         let state = self.execution_state(workspace)?;
-        // Why a run's named tree stopped it, for the run it stopped (ov-979).
-        let mut stops = serde_json::Map::new();
-        for (item, live) in state.iter().flat_map(|s| &s.items) {
-            let Ok(bytes) = std::fs::read(self.tree_stop_path(workspace, item)) else { continue };
-            if let Ok(stop) = serde_json::from_slice::<named_tree::TreeStop>(&bytes) {
-                if stop.run == live.run { stops.insert(item.clone(), serde_json::json!(stop)); }
-            }
-        }
+        let stops = self.plan_stops(workspace, state.as_ref());
         let budgets: std::collections::BTreeMap<_, _> = state.iter().flat_map(|s| &s.items)
             .map(|(id, item)| (id.clone(), farcooler_workflow::back_edge_budgets(item))).collect();
         let mut view = serde_json::to_value(&state)?;
@@ -130,14 +219,17 @@ impl CommandHandle {
     /// A read has no receipt or reducer input, so it need not join the single writer's inbox.
     /// SQLite, file reads and JSON construction run on a blocking worker; authority is rechecked
     /// after the wait before any reply (including owner-only configuration values) is released.
-    pub(crate) async fn read_get(&self, admission:Admission, full:bool) -> Result<serde_json::Value> {
+    pub(crate) async fn read_get(&self, admission:Admission, view:GetView) -> Result<serde_json::Value> {
         if self.is_closed() { return Err(Error::Refused("runtime inbox closed")); }
         admission.recheck().and_then(|()| admission.permits(&Action::Get)).map_err(Error::Domain)?;
         let reader = self.reader.clone();
         let workspace = admission.workspace();
         let mut value = tokio::task::spawn_blocking(move || {
-            let value = reader.read_get(&workspace)?;
-            Ok::<_, Error>(if full { value } else { summarize(value) })
+            match view {
+                GetView::Plan => reader.read_plan_get(&workspace),
+                GetView::Full => reader.read_get(&workspace),
+                GetView::Summary => reader.read_get(&workspace).map(summarize),
+            }
         }).await.map_err(|_| Error::Refused("workflow read worker failed"))??;
         admission.recheck().and_then(|()| admission.permits(&Action::Get)).map_err(Error::Domain)?;
         if self.is_closed() { return Err(Error::Refused("runtime inbox closed")); }
@@ -484,6 +576,60 @@ mod tests {
         assert!(summary.pointer("/state/archive/old").is_none());
         assert_eq!(summary["state"]["revision"], input["state"]["revision"]);
     }
+    #[tokio::test]
+    async fn old_and_new_plan_workflow_reads_fit_with_a_large_archive() {
+        use super::super::admission_tests::{factory, request};
+        use farcooler_protocol::v1::{Scope, WireEnvelope, wire_envelope};
+        use farcooler_transport::{Handler, Peer};
+        use farcooler_workflow::{Archived, Phase, RunRecord, State};
+
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../client/src/testdata/workflow-presentation.json"
+        )).unwrap();
+        let mut snapshot = fixture[0]["request"]["snapshot"].clone();
+        snapshot["workspace"] = serde_json::json!(workspace);
+        let mut state: State = serde_json::from_value(snapshot).unwrap();
+        runtime.wire_command(&workspace.to_string(), "owner", Action::Track {
+            mutation: m("track", 0, 1), item: "tracked".into(), column: None,
+        }).unwrap();
+        state.items.extend(runtime.store.workflow_state(&workspace.to_string()).unwrap().unwrap().items);
+        let archived = Archived {
+            start_load: None, closed: None, phase: Phase::Done, group: None,
+            candidate: Some("a".repeat(40)), history: Vec::new(),
+            last_run: Some(RunRecord {
+                phase: Phase::Failed, run: "old-run".into(), stop_run: None, pin: "pin".into(),
+                fence: 1, candidate: None, tree: None, models: Default::default(),
+                reason: Some("build output ".repeat(100)), rework_history: Vec::new(),
+                sent_back: Vec::new(), back_edges: Default::default(),
+            }),
+        };
+        state.archive = (0..1450).map(|n| (format!("ov-{n}"), archived.clone())).collect();
+        runtime.store.workflow_state_for_tests(&state).unwrap();
+        let rpc = factory(&svc, &runtime, Peer { client_id: None, scope: Scope::Control }, None);
+        for accepts in [vec![], vec![farcooler_protocol::accepts::WORKFLOW_PLAN.into()]] {
+            let mut req = request(workspace, &Action::Get);
+            req.accepts = accepts;
+            let response = rpc.handle(req).await;
+            let value = super::super::admission_tests::receipt(&response);
+            let reduced: State = serde_json::from_value(value["state"].clone()).unwrap();
+            let auth = serde_json::from_value(value["context"]["capabilities"].clone()).unwrap();
+            let view = farcooler_client::workflow_presentation::project(
+                &reduced, &auth, farcooler_client::workflow_presentation::Style::Apple,
+            ).unwrap();
+            assert_eq!(view.runs[0].item, "item");
+            let envelope = WireEnvelope {
+                body: Some(wire_envelope::Body::Response(response)),
+                ..Default::default()
+            };
+            farcooler_protocol::framing::encode(&envelope).expect("workflow read for Plan must fit");
+            assert!(reduced.archive.is_empty(), "Plan history must not travel in the frame");
+        }
+    }
+
     // Opt-in measurement through the actual CLI and socket, with fifteen CPU-active build adapters.
     // Build target/debug/farcooler first. The scratch runner never reaches an installed daemon.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -231,6 +231,8 @@ pub mod accepts {
     /// `NeedsYouKind::Fyi` items in `needs_you.list`: a client that can place
     /// one, with no button, outside its counts.
     pub const NEEDS_YOU_FYI: &str = "needs_you_fyi";
+    /// Renderable state for Plan's workflow enrichment, without the full workflow history.
+    pub const WORKFLOW_PLAN: &str = "workflow_plan_v1";
 }
 
 pub mod workflow_commands;

@@ -21,6 +21,7 @@ pub fn workflow_request(workspace: uuid::Uuid) -> pb::Request {
     let mut request = farcooler_transport::request("workflow.get");
     request.target_resource_id = Some(bytes::Bytes::copy_from_slice(workspace.as_bytes()));
     request.required_capabilities = vec![capability::WORKFLOW_COMMANDS.into()];
+    request.accepts.push(farcooler_protocol::accepts::WORKFLOW_PLAN.into());
     request.payload = Some(pb::request::Payload::WorkflowCommand(pb::WorkflowCommand {
         schema: 1,
         json: serde_json::to_string(&farcooler_protocol::workflow_commands::Action::Get).expect("closed action"),

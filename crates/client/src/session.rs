@@ -1601,8 +1601,13 @@ impl Session {
         if let Some(p) = payload {
             request.payload = Some(p);
         }
-        let answer = self.client.send(request, crate::deadlines::for_method(method))?;
-        Ok(Pending { answer, method: method.to_string() })
+        self.start_request(request)
+    }
+
+    fn start_request(&self, request: farcooler_protocol::v1::Request) -> Result<Pending, SessionError> {
+        let method = request.method.clone();
+        let answer = self.client.send(request, crate::deadlines::for_method(&method))?;
+        Ok(Pending { answer, method })
     }
 }
 

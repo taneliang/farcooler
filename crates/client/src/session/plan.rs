@@ -24,8 +24,7 @@ impl Session {
     pub async fn plan_with_workflow(&self, workspace: Uuid) -> Result<serde_json::Value, SessionError> {
         let plan = self.plan(workspace).await?;
         let read = self.can(farcooler_protocol::capability::WORKFLOW_COMMANDS).then_some(async {
-            let r = crate::plan_json::workflow_request(workspace);
-            self.value_requiring(&r.method, Some(workspace), r.payload, r.required_capabilities).await
+            self.start_request(crate::plan_json::workflow_request(workspace))?.value().await
         });
         crate::plan_json::with_workflow(&plan, workspace, read).await
     }

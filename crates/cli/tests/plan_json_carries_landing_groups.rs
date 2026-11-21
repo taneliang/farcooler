@@ -49,6 +49,7 @@ impl Handler for Runner {
                 }], ..Default::default() })
             }
             "workflow.get" => {
+                assert_eq!(req.accepts, [farcooler_protocol::accepts::WORKFLOW_PLAN]);
                 assert_eq!(req.target_resource_id, Some(id(WORKSPACE)));
                 assert_eq!(
                     req.required_capabilities,
