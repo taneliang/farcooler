@@ -435,6 +435,14 @@ struct WordsRequest {
     words: WordsStyle,
 }
 
+/// `{"schema":1,"engine_words":{"style":"apple"}}`: Engine labels and messages before a runner read.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EngineWordsRequest {
+    schema: u32,
+    engine_words: WordsStyle,
+}
+
 /// `{"schema":1,"conversation":{"agent":"Claude"}}`: an agent conversation's words (`conversation_words`).
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -505,6 +513,11 @@ pub fn json(request: &str) -> String {
         let words = (asked.schema == SCHEMA).then(|| words::Words::new(asked.words.style));
         let error = words.is_none().then_some("invalid");
         return serde_json::to_string(&Response { schema: SCHEMA, view: None, words, error }).expect("plan view types serialize");
+    }
+    if let Ok(asked) = serde_json::from_str::<EngineWordsRequest>(request) {
+        let words = (asked.schema == SCHEMA).then(|| crate::engine_view::interface_words(asked.engine_words.style));
+        let error = words.is_none().then_some("invalid");
+        return serde_json::json!({ "schema": SCHEMA, "words": words, "error": error }).to_string();
     }
     let parsed = (request.len() <= 8 * 1024 * 1024)
         .then(|| serde_json::from_str::<serde_json::Value>(request).ok())

@@ -1,6 +1,61 @@
 import AgentKit
 import SwiftUI
 
+enum EngineCopy: String, CaseIterable {
+    case engine
+    case unavailableTitle
+    case tryAgain
+    case openEngine
+    case showInEngine
+    case showRunInEngine
+    case unavailable
+    case stations
+    case runDetails
+    case step
+    case selectedAgentModel
+    case agent
+    case reviewState
+    case currentReason
+    case failureDetails
+    case sendBacks
+    case openTicket
+    case closeDetails
+    case landingGroups
+    case agents
+    case selectedModel
+    case githubCI
+    case jobs
+    case reading
+    case invalidResponse
+    case openRunHint
+    case stale
+    case updated
+    case used
+    case queued
+    case noSteps
+    case noTickets
+    case openDetailsHint
+    case missingTicket
+    case noLandings
+    case missingLanding
+    case noAgents
+    case observed
+    case sendBackCount
+
+    private static let words: [String: String] = {
+        PlanViewBridge.install()
+        return SharedWords.engine() ?? [:]
+    }()
+
+    var text: String { Self.words[rawValue] ?? "" }
+
+    func formatted(_ values: (String, String)...) -> String {
+        values.reduce(text) { line, value in
+            line.replacingOccurrences(of: "{\(value.0)}", with: value.1)
+        }
+    }
+}
+
 enum EngineFocus: Hashable {
     case ticket(String)
     case landing(String)
@@ -34,14 +89,14 @@ struct EnginePage: View {
                            focus: focus, refresh: refresh, openTicket: openTicket)
             } else if let problem {
                 ContentUnavailableView {
-                    Label("Engine Unavailable", systemImage: "gearshape.2")
+                    Label(EngineCopy.unavailableTitle.text, systemImage: "gearshape.2")
                 } description: {
                     Text(problem)
                 } actions: {
-                    Button("Try Again", action: refresh)
+                    Button(EngineCopy.tryAgain.text, action: refresh)
                 }
             } else {
-                ProgressView("Reading Engine…")
+                ProgressView(EngineCopy.reading.text)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
@@ -66,7 +121,7 @@ struct EnginePage: View {
             background: true)
         guard !Task.isCancelled else { return }
         guard let data, let next = try? JSONDecoder().decode(EngineSnapshot.self, from: data) else {
-            problem = message ?? "The runner’s Engine response couldn’t be read."
+            problem = message ?? EngineCopy.invalidResponse.text
             return
         }
         if let snapshot, snapshot.workspace == next.workspace,

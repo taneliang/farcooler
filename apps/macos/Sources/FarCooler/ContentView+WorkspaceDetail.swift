@@ -422,7 +422,7 @@ extension ContentView {
                     openTask($0, host: host, workspace: id)
                 }
             } else {
-                ContentUnavailableView("Engine Unavailable", systemImage: "gearshape.2")
+                ContentUnavailableView(EngineCopy.unavailableTitle.text, systemImage: "gearshape.2")
             }
         case .workspace(let host, let id, .plan(let page)?):
             if let client = store.clients[host], let workspace = board(host: host, id: id) {

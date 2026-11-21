@@ -7,6 +7,8 @@
 //! body — and fails unless that function's WHOLE body is one call to a
 //! `guarded…` function. Not a guard somewhere inside it: a line before the
 //! guard runs unguarded, and so does one after it.
+//! The daemon's Unix signal handler is checked separately because it must
+//! stay async-signal-safe.
 //!
 //! A source scan rather than a symbol scan, because the symbols say a function
 //! exists and nothing about what it does, and because it runs on every
@@ -181,7 +183,11 @@ fn exports_in(file: &Path, source: &str) -> Vec<Export> {
         }
         let Some(end) = matching(&code, brace) else { continue };
         let body: String = code[brace + 1..end - 1].iter().collect();
-        found.push(Export { file: file.to_path_buf(), name, problem: problem_with(&body) });
+        // The private handler installed with libc::signal can only set this
+        // atomic flag. Check its entire body so new work in it is rejected.
+        let signal_store = file.ends_with("daemon/src/native_hold.rs") && name == "on_hangup"
+            && body.split_whitespace().eq(["HANGUP.store(true,", "Ordering::SeqCst);"]);
+        found.push(Export { file: file.to_path_buf(), name, problem: if signal_store { None } else { problem_with(&body) } });
     }
     found
 }
@@ -260,6 +266,18 @@ fn every_exported_function_is_one_guarded_call() {
         .filter_map(|e| e.problem.map(|p| format!("{} in {}: {p}", e.name, e.file.display())))
         .collect();
     assert!(unguarded.is_empty(), "unguarded exports:\n{}", unguarded.join("\n"));
+}
+
+#[test]
+fn the_daemon_signal_handler_may_only_set_its_flag() {
+    let file = Path::new("daemon/src/native_hold.rs");
+    let source = r#"extern "C" fn on_hangup(_: libc::c_int) { HANGUP.store(true, Ordering::SeqCst); }"#;
+    let allowed = exports_in(file, source);
+    assert_eq!(allowed.len(), 1);
+    assert_eq!(allowed[0].problem, None);
+    assert!(exports_in(Path::new("another.rs"), source)[0].problem.is_some());
+    let extra = source.replace("; }", "; log_signal(); }");
+    assert!(exports_in(file, &extra)[0].problem.is_some());
 }
 
 /// The scanner itself, against exports it must refuse and ones it must accept.

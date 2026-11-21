@@ -59,7 +59,7 @@ struct PlanColumnView: View {
             Button {
                 onOpen(.engine(nil))
             } label: {
-                Label("Engine", systemImage: "gearshape.2")
+                Label(EngineCopy.engine.text, systemImage: "gearshape.2")
             }
             .buttonStyle(.link)
             .padding(.bottom, Spacing.inset)
@@ -103,7 +103,7 @@ struct PlanColumnView: View {
                 ForEach(groups, id: \.id) { group in
                     VStack(alignment: .leading, spacing: Spacing.group) {
                         PlanLandingGroupView(group: group)
-                        Button("Show in Engine") { onOpen(.engine(.landing(group.id))) }
+                        Button(EngineCopy.showInEngine.text) { onOpen(.engine(.landing(group.id))) }
                             .buttonStyle(.link)
                     }
                     .padding(.vertical, Spacing.group)
@@ -535,8 +535,8 @@ struct PlanTicketRow: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .buttonStyle(.link)
-                .help("Show Run in Engine")
-                .accessibilityHint("Opens the run in Engine")
+                .help(EngineCopy.showRunInEngine.text)
+                .accessibilityHint(EngineCopy.openRunHint.text)
                 .padding(.leading, PlanColumnMetrics.ticketIndent + keyWidth + 10)
                 .identified("plan-open-run-\(ticket.key)")
             }

@@ -49,6 +49,12 @@ public enum SharedWords {
         return found
     }
 
+    public static func engine() -> [String: String]? {
+        struct EngineAnswer: Decodable { let words: [String: String]? }
+        guard let answer = PlanViewPresenter.ask(#"{"schema":1,"engine_words":{"style":"apple"}}"#) else { return nil }
+        return (try? JSONDecoder().decode(EngineAnswer.self, from: Data(answer.utf8)))?.words
+    }
+
     public static var gpt62Sol: String? { words?.gpt62Sol }
 
     /// The Agents card's title when nothing is running.

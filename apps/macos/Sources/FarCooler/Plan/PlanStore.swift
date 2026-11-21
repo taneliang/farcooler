@@ -37,7 +37,7 @@ enum PlanPage: Hashable {
         case .page: "Page"
         case .needsYou: "Needs You"
         case .stage: "Stage"
-        case .engine: "Engine"
+        case .engine: EngineCopy.engine.text
         }
     }
 

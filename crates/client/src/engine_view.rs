@@ -7,6 +7,51 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
+/// Engine copy is available locally, including before the first runner read.
+pub(crate) fn interface_words(style: crate::plan_view::Style) -> BTreeMap<&'static str, String> {
+    BTreeMap::from([
+        ("engine", style.label("engine")),
+        ("unavailableTitle", style.label("engine unavailable")),
+        ("tryAgain", style.label("try again")),
+        ("openEngine", style.label("open engine")),
+        ("showInEngine", style.label("show in engine")),
+        ("showRunInEngine", style.label("show run in engine")),
+        ("unavailable", style.label("unavailable")),
+        ("stations", style.label("stations")),
+        ("runDetails", style.label("run details")),
+        ("step", style.label("step")),
+        ("selectedAgentModel", style.label("selected agent model")),
+        ("agent", style.label("agent")),
+        ("reviewState", style.label("review state")),
+        ("currentReason", style.label("current reason")),
+        ("failureDetails", style.label("failure details")),
+        ("sendBacks", style.label("Send-Backs")),
+        ("openTicket", style.label("open ticket")),
+        ("closeDetails", style.label("close details")),
+        ("landingGroups", style.label("landing groups")),
+        ("agents", style.label("agents")),
+        ("selectedModel", style.label("selected model")),
+        ("githubCI", style.label("GitHub CI")),
+        ("jobs", style.label("jobs")),
+        ("reading", "Reading Engine…".into()),
+        ("invalidResponse", "The runner’s Engine response couldn’t be read.".into()),
+        ("openRunHint", "Opens the run in Engine".into()),
+        ("stale", "Last updated {time}. The runner couldn’t be reached.".into()),
+        ("updated", "Updated at {time}".into()),
+        ("used", "{used} of {limit} used".into()),
+        ("queued", "{count} queued here".into()),
+        ("noSteps", "No workflow steps are available.".into()),
+        ("noTickets", "No tickets".into()),
+        ("openDetailsHint", "Opens run details".into()),
+        ("missingTicket", "This ticket is no longer in the current workflow.".into()),
+        ("noLandings", "No landing groups".into()),
+        ("missingLanding", "This landing group is no longer available.".into()),
+        ("noAgents", "No agent activity reported".into()),
+        ("observed", "Observed {time}".into()),
+        ("sendBackCount", "{remaining} of {limit} send-backs left".into()),
+    ])
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EngineView {

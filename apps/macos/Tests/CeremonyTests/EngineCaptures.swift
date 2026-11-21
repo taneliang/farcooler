@@ -13,6 +13,11 @@ struct EngineCaptures {
 
     @Test("Plan opens Engine and selecting a station ticket shows the inspector")
     func stationsAndInspector() async throws {
+        for phrase in EngineCopy.allCases {
+            #expect(!phrase.text.isEmpty, "Missing Rust copy for \(phrase.rawValue)")
+        }
+        #expect(EngineCopy.showInEngine.text == "Show in Engine")
+        #expect(EngineCopy.sendBackCount.formatted(("remaining", "2"), ("limit", "3")) == "2 of 3 send-backs left")
         let out = ProcessInfo.processInfo.environment["FARCOOLER_ENGINE_CAPTURE_OUT"].map { URL(fileURLWithPath: $0) }
         if let out { try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true) }
         let variants: [Variant] = [

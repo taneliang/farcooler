@@ -88,13 +88,13 @@ struct EngineView: View {
 
     private var heading: some View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
-            Text("Engine").font(font(26, weight: .semibold)).accessibilityAddTraits(.isHeader)
+            Text(EngineCopy.engine.text).font(font(26, weight: .semibold)).accessibilityAddTraits(.isHeader)
             if stale {
-                Text("Last updated \(observedAt.formatted(date: .abbreviated, time: .shortened)). The runner couldn’t be reached.")
+                Text(EngineCopy.stale.formatted(("time", observedAt.formatted(date: .abbreviated, time: .shortened))))
                     .foregroundStyle(.quietInk)
-                Button("Try Again", action: refresh)
+                Button(EngineCopy.tryAgain.text, action: refresh)
             } else {
-                Text("Updated at \(observedAt.formatted(date: .omitted, time: .shortened))")
+                Text(EngineCopy.updated.formatted(("time", observedAt.formatted(date: .omitted, time: .shortened))))
                     .foregroundStyle(.quietInk)
             }
         }
@@ -110,13 +110,13 @@ struct EngineView: View {
                     VStack(alignment: .leading, spacing: Spacing.tight) {
                         Text(slot.label).font(font(10)).foregroundStyle(.quietInk)
                         if let used = slot.used, let limit = slot.limit {
-                            Text("\(used) of \(limit) used").monospacedDigit()
+                            Text(EngineCopy.used.formatted(("used", used.formatted()), ("limit", limit.formatted()))).monospacedDigit()
                             if let queued = slot.queued, queued > 0 {
-                                Text("\(queued) queued here")
+                                Text(EngineCopy.queued.formatted(("count", queued.formatted())))
                                     .foregroundStyle(Tint.attention(scheme)).monospacedDigit()
                             }
                         } else {
-                            Text("Unavailable").foregroundStyle(.quietInk)
+                            Text(EngineCopy.unavailable.text).foregroundStyle(.quietInk)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -127,16 +127,16 @@ struct EngineView: View {
 
     private func stations(select: @escaping (EngineFocus) -> Void) -> some View {
         card {
-            sectionTitle("Stations")
+            sectionTitle(EngineCopy.stations.text)
             if snapshot.stations.isEmpty {
-                quiet("No workflow steps are available.")
+                quiet(EngineCopy.noSteps.text)
             }
             ForEach(snapshot.stations) { station in
                 let id = "engine-station-\(station.id)"
                 disclosure(station.label, id: id, expanded: true, heading: true) {
                     VStack(alignment: .leading, spacing: Spacing.group) {
                         if station.tickets.isEmpty {
-                            quiet("No tickets").frame(maxWidth: .infinity, alignment: .leading)
+                            quiet(EngineCopy.noTickets.text).frame(maxWidth: .infinity, alignment: .leading)
                         }
                         ForEach(station.tickets) { ticket in
                             ticketRow(ticket) { select(.ticket(ticket.id)) }
@@ -181,7 +181,7 @@ struct EngineView: View {
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? .isSelected : [])
-        .accessibilityHint("Opens run details")
+        .accessibilityHint(EngineCopy.openDetailsHint.text)
         .id(ticket.id)
         .identified("engine-ticket-\(ticket.id)")
     }
@@ -191,12 +191,12 @@ struct EngineView: View {
             card {
                 ViewThatFits(in: .horizontal) {
                     HStack {
-                        sectionTitle("Run Details").fixedSize()
+                        sectionTitle(EngineCopy.runDetails.text).fixedSize()
                         Spacer()
                         closeButton(close).fixedSize()
                     }
                     VStack(alignment: .leading) {
-                        sectionTitle("Run Details")
+                        sectionTitle(EngineCopy.runDetails.text)
                         closeButton(close)
                     }
                 }
@@ -204,19 +204,19 @@ struct EngineView: View {
                     VStack(alignment: .leading, spacing: Spacing.group) {
                         ticketHeading(ticket)
                         status(ticket.status, tone: ticket.tone)
-                        fact("Step", ticket.step)
+                        fact(EngineCopy.step.text, ticket.step)
                         if let agent = ticket.agent {
-                            fact("Selected Agent Model", agent)
+                            fact(EngineCopy.selectedAgentModel.text, agent)
                         } else {
-                            fact("Agent", "Unavailable")
+                            fact(EngineCopy.agent.text, EngineCopy.unavailable.text)
                         }
-                        fact("Review State", ticket.review)
-                        if let reason = ticket.reason { fact("Current Reason", reason) }
+                        fact(EngineCopy.reviewState.text, ticket.review)
+                        if let reason = ticket.reason { fact(EngineCopy.currentReason.text, reason) }
                         if let failure = ticket.failure {
-                            Text("Failure Details").font(font(13, weight: .semibold))
+                            Text(EngineCopy.failureDetails.text).font(font(13, weight: .semibold))
                             output(failure)
                         }
-                        fact("Send-Backs", ticket.sendBacks.map(sendBackCount) ?? "Unavailable")
+                        fact(EngineCopy.sendBacks.text, ticket.sendBacks.map(sendBackCount) ?? EngineCopy.unavailable.text)
                         if let budget = ticket.sendBacks {
                             ForEach(budget.history) { back in
                                 VStack(alignment: .leading, spacing: Spacing.tight) {
@@ -227,12 +227,12 @@ struct EngineView: View {
                             }
                         }
                         if let task = ticket.taskId {
-                            Button("Open Ticket") { openTicket(task) }.buttonStyle(.link)
+                            Button(EngineCopy.openTicket.text) { openTicket(task) }.buttonStyle(.link)
                         }
                     }
                     .textSelection(.enabled)
                 } else {
-                    quiet("This ticket is no longer in the current workflow.")
+                    quiet(EngineCopy.missingTicket.text)
                 }
             }
             .id(EngineFocus.ticket("").scrollID)
@@ -241,9 +241,9 @@ struct EngineView: View {
     }
 
     private func closeButton(_ close: @escaping () -> Void) -> some View {
-        Button(action: close) { Label("Close Details", systemImage: "xmark") }
+        Button(action: close) { Label(EngineCopy.closeDetails.text, systemImage: "xmark") }
             .labelStyle(.iconOnly)
-            .help("Close Details")
+            .help(EngineCopy.closeDetails.text)
     }
 
     private func closeInspector(in scroll: ScrollViewProxy) {
@@ -255,8 +255,8 @@ struct EngineView: View {
     private var companions: some View {
         VStack(alignment: .leading, spacing: Spacing.inset) {
             card {
-                sectionTitle("Landing Groups")
-                if snapshot.landings.isEmpty { quiet("No landing groups") }
+                sectionTitle(EngineCopy.landingGroups.text)
+                if snapshot.landings.isEmpty { quiet(EngineCopy.noLandings.text) }
                 ForEach(snapshot.landings) { group in
                     VStack(alignment: .leading, spacing: Spacing.group) {
                         Text(group.label).font(font(13, weight: .semibold))
@@ -287,12 +287,12 @@ struct EngineView: View {
                     .id(EngineFocus.landing(group.id).scrollID)
                 }
                 if case .landing(let id) = selection, !snapshot.landings.contains(where: { $0.id == id }) {
-                    quiet("This landing group is no longer available.")
+                    quiet(EngineCopy.missingLanding.text)
                 }
             }
             card {
-                sectionTitle("Agents")
-                if snapshot.agents.isEmpty { quiet("No agent activity reported") }
+                sectionTitle(EngineCopy.agents.text)
+                if snapshot.agents.isEmpty { quiet(EngineCopy.noAgents.text) }
                 ForEach(snapshot.agents) { agent in
                     Button {
                         selection = .ticket(agent.ticket)
@@ -300,7 +300,7 @@ struct EngineView: View {
                         VStack(alignment: .leading, spacing: Spacing.tight) {
                             Text("\(agent.role) · \(agent.ticket)").font(font(13, weight: .medium))
                             status(agent.status, tone: agent.tone)
-                            if let model = agent.model { fact("Selected Model", model) }
+                            if let model = agent.model { fact(EngineCopy.selectedModel.text, model) }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(.rect)
@@ -314,14 +314,14 @@ struct EngineView: View {
 
     private func githubCI(_ ci: EngineSnapshot.CI?, group: String) -> some View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
-            fact("GitHub CI", ci?.status ?? "Unavailable")
+            fact(EngineCopy.githubCI.text, ci?.status ?? EngineCopy.unavailable.text)
             if let ci {
                 let date = Date(timeIntervalSince1970: Double(ci.fetchedMs) / 1_000)
                 Text(ci.sha).font(font(10, design: .monospaced)).foregroundStyle(.quietInk)
                     .textSelection(.enabled)
-                quiet("Observed \(date.formatted(date: .abbreviated, time: .shortened))")
+                quiet(EngineCopy.observed.formatted(("time", date.formatted(date: .abbreviated, time: .shortened))))
                 if !ci.jobs.isEmpty {
-                    disclosure("Jobs", id: "engine-jobs-\(group)", expanded: false, heading: false) {
+                    disclosure(EngineCopy.jobs.text, id: "engine-jobs-\(group)", expanded: false, heading: false) {
                         ForEach(Array(ci.jobs.enumerated()), id: \.offset) { _, job in
                             quiet("\(job.name) · \(job.status)")
                         }
@@ -341,7 +341,7 @@ struct EngineView: View {
     }
 
     private func sendBackCount(_ budget: EngineSnapshot.SendBacks) -> String {
-        "\(budget.remaining) of \(budget.limit) send-backs left"
+        EngineCopy.sendBackCount.formatted(("remaining", budget.remaining.formatted()), ("limit", budget.limit.formatted()))
     }
 
     private func fact(_ label: String, _ value: String) -> some View {

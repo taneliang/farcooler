@@ -46,7 +46,7 @@ extension ContentView {
     func treeMenu(_ node: OneTreeNode, host: String, workspace: WorkspaceSummary, client: DaemonClient) -> some View {
         switch node.target {
         case .plan?:
-            Button("Open Engine") { openPlan(.engine(nil), host: host, workspace: workspace.id) }
+            Button(EngineCopy.openEngine.text) { openPlan(.engine(nil), host: host, workspace: workspace.id) }
         case .task(let id)?:
             if let row = boardStore(for: workspace, client: client, host: host).board.rows.first(where: { $0.id == id }) {
                 let agents = boardAgents(host: host, client: client)
