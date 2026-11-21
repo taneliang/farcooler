@@ -389,12 +389,6 @@ class TaskBoardTest {
 
     // ---- the front door's rows ----
 
-    private val both = DaemonBuild("1", true, "", setOf("workspaces", "tasks", "terminal_task"))
-    private val repositories = listOf(
-        Repository("r-busy", displayName = "overnight"),
-        Repository("r-empty", displayName = "scratch"),
-        Repository("r-unread", displayName = "never-read"),
-    )
     private val busy = TaskBoard(
         TaskStatus.ORDER.map { status ->
             TaskBoardColumn(
@@ -407,14 +401,6 @@ class TaskBoardTest {
             )
         },
     )
-    private val boards = mapOf("r-busy" to busy, "r-empty" to TaskBoard.EMPTY)
-
-    /** Two agents on task 3 and one on task 4: two tasks moving, three panes. */
-    private val panes = listOf(
-        pane(taskId = "3", id = "x"), pane(taskId = "3", id = "y"), pane(taskId = "4", id = "z"),
-        pane(taskId = "1", state = "exited", id = "gone"),
-    )
-
     /**
      * What a sweep reads: every workspace's board, Main first, and the whole
      * repository where the runner names no workspace for it.

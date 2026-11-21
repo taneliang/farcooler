@@ -392,7 +392,13 @@ class NativePaneModelTest {
         model.answer(held, AgentConversation.DENY)
         eventually("the refusal is said") { model.answerIssues["hook-ask-1"] != null && model.answering == null }
         assertEquals("The answer wasn’t sent. Answer in the terminal.", model.answerIssues["hook-ask-1"])
-        assertTrue(AgentConversation.answerable(held))
+        refuse = null
+        model.answer(held, AgentConversation.DENY)
+        eventually("the same ask can be submitted again") {
+            model.answering == null && synchronized(answered) { answered.size == 2 }
+        }
+        assertEquals(listOf("t1 hook-ask-1 deny {}", "t1 hook-ask-1 deny {}"), answered)
+        assertTrue(model.answerIssues.isEmpty())
     }
 
     @Test

@@ -47,17 +47,7 @@ class TaskLinkTest {
     fun `a shell under a task is not its agent`() {
         val shell = Terminal(id = "s", preset = "zsh", state = "running")
         val wt = worktree(invoice, terminals = listOf(shell))
-        // The chip names the task over the shell...
         assertEquals(invoice, TaskLink.task(shell, wt))
-        // ...and the board still counts no agent on it.
-        val board = TaskBoard(
-            columns = listOf(
-                TaskBoardColumn(
-                    TaskStatus.IN_PROGRESS,
-                    listOf(TaskRow("t-9", "bil-9", "Invoice PDF export", TaskStatus.IN_PROGRESS, 0L, worktreeId = "w")),
-                )
-            ),
-        )
     }
 
     // Which task an agent's own notifications fold into (ov-107): the same
