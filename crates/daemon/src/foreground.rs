@@ -67,6 +67,10 @@ pub struct Foreground {
 }
 
 impl Foreground {
+    pub(crate) fn in_group(&self, pgid: i32) -> impl Iterator<Item = i32> + '_ {
+        self.groups.iter().filter_map(move |(&pid, &group)| (group == pgid).then_some(pid))
+    }
+
     /// What a tty is showing, if anything.
     pub fn pane(&self, tty: &str) -> Option<&Running> {
         self.panes.get(tty)

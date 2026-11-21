@@ -131,9 +131,12 @@ cd apps/android && ./gradlew installDebug
 ### Engine builders
 
 While a landing gate (a `Run` step of a landing group) is running, the workflow
-engine pauses every running builder and its compilers and tests with SIGSTOP, and
-continues them when the last gate ends. A builder that starts during a gate is
-paused at once. The pause is written to `yielding.json` in the engine root, so a
+engine pauses builders and their compilers and tests with SIGSTOP. A builder
+with a ticket in the machine-wide heavy queue keeps running until it releases
+its ticket. Paused builders continue when the last gate ends. A landing gate
+that has queued for more than five minutes reports the holder in `workflow get`
+and in the Plan's landing row, including whether the holder is paused.
+The pause is written to `yielding.json` in the engine root, so a
 daemon that restarts mid-gate continues what it had paused. Builders also start
 at niceness 10. The engine refuses
 a build when either the engine volume or its worktree has less than 25 GB free;

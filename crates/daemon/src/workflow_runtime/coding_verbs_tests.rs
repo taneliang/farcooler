@@ -6,6 +6,8 @@ use super::concurrency_tests::{enqueue_item, hold_builds, watch};
 use super::coding_verbs::{classify_push, PushVerdict};
 use std::collections::BTreeMap;
 
+mod heavy_lock;
+
 const GATE: &str = r#"elif stage == 'gate':
     if mode == 'resource-hold' and not pathlib.Path(os.environ['MARKER']).exists():
         print('lane-gate: resource hold: insufficient disk; retry later', flush=True)

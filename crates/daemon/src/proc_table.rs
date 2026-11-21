@@ -38,20 +38,40 @@ pub fn snapshot() -> Option<String> {
 
 // A successful signal only requests a stop. Confirm the kernel observed it before acknowledging a
 // pause: otherwise a shell handling its child's exit can still execute after the caller sees Paused.
-#[cfg(target_os = "macos")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProcessState { Running, Stopped, Gone, Unknown }
+
 pub(crate) fn stopped_or_gone(pid: i32) -> bool {
+    matches!(process_state(pid), ProcessState::Stopped | ProcessState::Gone)
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn process_state(pid: i32) -> ProcessState {
     let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
     let size = std::mem::size_of_val(&info) as i32;
     let got = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) };
-    (got == size && matches!(info.pbi_status, libc::SSTOP | libc::SZOMB))
-        || (got <= 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH))
+    if got == size {
+        return match info.pbi_status {
+            libc::SSTOP => ProcessState::Stopped,
+            libc::SZOMB => ProcessState::Gone,
+            _ => ProcessState::Running,
+        };
+    }
+    if got <= 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+        ProcessState::Gone
+    } else { ProcessState::Unknown }
 }
 #[cfg(not(target_os = "macos"))]
-pub(crate) fn stopped_or_gone(pid: i32) -> bool {
+pub(crate) fn process_state(pid: i32) -> ProcessState {
     match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
         Ok(stat) => stat.rsplit_once(')').and_then(|(_, s)| s.trim_start().chars().next())
-            .is_some_and(|state| matches!(state, 'T' | 't' | 'Z' | 'X')),
-        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+            .map_or(ProcessState::Unknown, |state| match state {
+                'T' | 't' => ProcessState::Stopped,
+                'Z' | 'X' => ProcessState::Gone,
+                _ => ProcessState::Running,
+            }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => ProcessState::Gone,
+        Err(_) => ProcessState::Unknown,
     }
 }
 

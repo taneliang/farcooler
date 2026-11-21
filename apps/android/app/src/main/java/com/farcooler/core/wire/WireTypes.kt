@@ -578,7 +578,8 @@ data class LandingGroup (
 	val since: Long,
 	val members: List<String>,
 	val failure: GroupFailure? = null,
-	val split: Boolean
+	val split: Boolean,
+	val heavyLockWait: String? = null
 )
 
 @Serializable

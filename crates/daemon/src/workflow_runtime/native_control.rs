@@ -96,18 +96,27 @@ pub(super) async fn controlled<T>(turn: impl std::future::Future<Output = Result
                         // Validate the tagged pane again; never signal a tty from a stale capability.
                         match tmux.pane_life(pane, id).await {
                             Ok(farcooler_tmux::PaneLife::Live) => {
-                                // Recorded first, so a gate that ends meanwhile cannot continue what is about to stop.
-                                if let Some(y) = yielded { y.manual(true); }
-                                match freeze(tty, supervisor).await {
-                                Ok(stopped) => {
-                                    remaining = remaining.saturating_sub(active_since.elapsed());
-                                    *frozen = Some(stopped); clock.pause(); engine_steering::paused(id, true); Ok(())
-                                },
-                                Err(error) => {
-                                    tracing::warn!(%error, "native pause refused");
-                                    if let Some(y) = yielded { y.manual(false); }
-                                    Err(farcooler_core::DomainError::OperationFailed)
-                                },
+                                match crate::yielding::manual_pause_latch(yielded, tty, supervisor) {
+                                    Ok(_enter) => {
+                                        // Keep the latch through freeze. Record the hand pause first so the end of a
+                                        // gate cannot continue the processes while we are stopping them ourselves.
+                                        if let Some(y) = yielded { y.manual(true); }
+                                        match freeze(tty, supervisor).await {
+                                            Ok(stopped) => {
+                                                remaining = remaining.saturating_sub(active_since.elapsed());
+                                                *frozen = Some(stopped); clock.pause(); engine_steering::paused(id, true); Ok(())
+                                            },
+                                            Err(error) => {
+                                                tracing::warn!(%error, "native pause refused");
+                                                if let Some(y) = yielded { y.manual(false); }
+                                                Err(farcooler_core::DomainError::OperationFailed)
+                                            },
+                                        }
+                                    },
+                                    Err(error) => {
+                                        tracing::warn!(%error, "native pause deferred by the heavy-job queue");
+                                        Err(farcooler_core::DomainError::OperationFailed)
+                                    },
                                 }
                             },
                             _ => Err(farcooler_core::DomainError::NotFound),

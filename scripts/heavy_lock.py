@@ -195,7 +195,10 @@ def prepare_lane_build(top, say=print):
 
 
 def lock_path():
-    return pathlib.Path(tempfile.gettempdir()) / "lane-gate.lock"
+    # The daemon takes the queue's admission latch before pausing a workflow
+    # process. Use that same queue even if an agent sets a scratch TMPDIR.
+    base = "/tmp" if os.environ.get("FARCOOLER_OPERATION_BINDING") else tempfile.gettempdir()
+    return pathlib.Path(base) / "lane-gate.lock"
 
 
 def lock_wanted(no_lock=False):
@@ -232,14 +235,12 @@ def pid_alive(pid):
     except ProcessLookupError:
         return False
     except PermissionError:
-        return True
+        pass  # a process whose signals are restricted can still be visible in the process table
     # kill(pid, 0) also succeeds for zombies. A stopped parent may never reap
     # one, so an unreaped wrapper must not keep its place in the heavy queue.
     if sys.platform.startswith("linux"):
         try:
             stat = pathlib.Path(f"/proc/{pid}/stat").read_text()
-        except FileNotFoundError:
-            return False
         except OSError:
             return True
         return not stat.rpartition(")")[2].lstrip().startswith(("Z", "X"))
@@ -503,6 +504,7 @@ def _self_test():
         lock = t / "lane-gate.lock"
         env = {**os.environ, "TMPDIR": str(t), "HEAVY_POLL": "0.05", "HEAVY_LOAD_LIMIT": "100000"}
         env.pop("CI", None)
+        env.pop("FARCOOLER_OPERATION_BINDING", None)
 
         # In-process: a second taker waits, names the first, and the note goes with the lock.
         said, order = [], []

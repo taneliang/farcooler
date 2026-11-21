@@ -18,6 +18,7 @@ pub(super) fn groups(plan: &input::Plan, context: &input::Context, workflow: Opt
             else if seconds < 3600 { format!("{} min in this step", seconds / 60) }
             else { format!("{} hr {} min in this step", seconds / 3600, seconds % 3600 / 60) };
         let mut lines = vec![g.step.clone(), elapsed];
+        if let Some(wait) = &g.heavy_lock_wait { lines.push(wait.clone()); }
         for key in &g.members {
             let line = plan.lines.iter().find(|l| &l.key == key);
             let title = line.map(|l| l.title.as_str()).filter(|t| !t.is_empty())
@@ -37,6 +38,14 @@ pub(super) fn groups(plan: &input::Plan, context: &input::Context, workflow: Opt
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn landing_row_shows_the_heavy_lock_holder() {
+        let mut fixture: serde_json::Value = serde_json::from_str(include_str!("../../../../test/fixtures/landing-queue.json")).unwrap();
+        let message = "Waiting for the machine-wide heavy-job lock. Holder PID 42 (/builder) is paused.";
+        fixture["request"]["plan"]["workflow"]["landingGroups"][0]["heavyLockWait"] = message.into();
+        let answer: serde_json::Value = serde_json::from_str(&super::super::json(&fixture["request"].to_string())).unwrap();
+        assert!(answer["view"]["landingGroups"][0]["lines"].as_array().unwrap().contains(&message.into()), "{answer}");
+    }
     #[test]
     fn queue_golden_covers_checking_waiting_split_failure_and_long_titles() {
         let fixture: serde_json::Value = serde_json::from_str(include_str!("../../../../test/fixtures/landing-queue.json")).unwrap();

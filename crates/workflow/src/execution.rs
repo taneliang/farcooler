@@ -16,6 +16,8 @@ pub struct ExecutionView {
     pub position: Option<usize>,
     pub holders: Vec<String>,
     pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heavy_lock_wait: Option<String>,
 }
 
 pub fn execution_view(dispatch: Dispatch<'_>, position: Option<usize>, holders: Vec<String>) -> ExecutionView {
@@ -31,7 +33,7 @@ pub fn execution_view(dispatch: Dispatch<'_>, position: Option<usize>, holders: 
         (Dispatch::UncertainBecause(reason), _) => (Phase::Uncertain, None, reason.into()),
         (Dispatch::Uncertain, _) => (Phase::Uncertain, None, "The effect lost its runtime session without a receipt. Check it before it continues.".into()),
     };
-    ExecutionView { phase, position, holders, text }
+    ExecutionView { phase, position, holders, text, heavy_lock_wait: None }
 }
 
 #[cfg(test)]

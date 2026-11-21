@@ -716,8 +716,9 @@ public struct WireLandingGroup: Codable, Equatable, Sendable {
 	public var members: [String]
 	public var failure: WireGroupFailure?
 	public var split: Bool
+	public var heavyLockWait: String?
 
-	public init(id: String, label: String, step: String, since: Int64, members: [String], failure: WireGroupFailure?, split: Bool) {
+	public init(id: String, label: String, step: String, since: Int64, members: [String], failure: WireGroupFailure?, split: Bool, heavyLockWait: String?) {
 		self.id = id
 		self.label = label
 		self.step = step
@@ -725,6 +726,7 @@ public struct WireLandingGroup: Codable, Equatable, Sendable {
 		self.members = members
 		self.failure = failure
 		self.split = split
+		self.heavyLockWait = heavyLockWait
 	}
 }
 

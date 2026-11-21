@@ -57,6 +57,8 @@ impl Exec {
         let mut queued = Vec::new();
         let mut holders = Vec::new();
         let mut effects = BTreeMap::new();
+        let mut landing_groups = std::collections::HashSet::new();
+        let mut landing_processes = Vec::new();
         for board in self.store.workflow_workspaces()? {
             let board_state = self.state(&board)?;
             for stored in self.store.workflow_outbox(&board)? {
@@ -75,7 +77,7 @@ impl Exec {
                 if stored.active && board == workspace { effects.insert(stored.effect.id.clone(), stored); }
             }
         }
-        for item in state.items.values_mut().filter(|i| matches!(i.phase, Phase::Running | Phase::WaitingSlot | Phase::Uncertain)) {
+        for (id, item) in state.items.iter_mut().filter(|(_, i)| matches!(i.phase, Phase::Running | Phase::WaitingSlot | Phase::Uncertain)) {
             let key = (workspace.to_owned(), item.pending.clone().unwrap_or_default());
             let activity = activities.get(&key);
             let stored = effects.get(&key.1);
@@ -106,8 +108,25 @@ impl Exec {
             let position = queued.iter().filter(|(_, p)| *p == pool).position(|(k, _)| k == &key).map(|i| i + 1);
             let holding = holders.iter().filter(|(p, _)| *p == pool).map(|(_, h)| h.clone()).collect();
             let view = execution_view(dispatch, position, holding);
+            if view.phase == Phase::Running && item.group_of.is_some()
+                && matches!(stored.map(|s| &s.effect.kind), Some(EffectKind::Execute(StageKind::Run)))
+                && let Some(activity) = activity
+            {
+                let group = activity.process.load(Ordering::SeqCst) as i32;
+                if group > 1 {
+                    landing_groups.insert(group);
+                    landing_processes.push((id.clone(), group));
+                }
+            }
             item.phase = view.phase.clone();
             item.execution = Some(view);
+        }
+        drop(activities);
+        let mut waits = self.yielding.heavy_lock_waits(&landing_groups);
+        for (id, group) in landing_processes {
+            if let Some(view) = state.items.get_mut(&id).and_then(|item| item.execution.as_mut()) {
+                view.heavy_lock_wait = waits.remove(&group);
+            }
         }
         Ok(Some(state))
     }

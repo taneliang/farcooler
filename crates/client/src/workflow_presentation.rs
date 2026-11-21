@@ -162,6 +162,8 @@ pub struct LandingGroup {
     pub members: Vec<String>,
     pub failure: Option<farcooler_workflow::GroupFailure>,
     pub split: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heavy_lock_wait: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Error { Invalid, Unauthorized, Missing, Stale, Unavailable, ReasonRequired }
@@ -316,6 +318,7 @@ pub fn project(state: &State, auth: &Capabilities, style: Style) -> Result<Prese
                     job: i.definition.stages.get(i.stage).map(|s| display::stage_label(&s.kind).to_owned()).unwrap_or_default(),
                     first_line: f.clone(), split: false,
                 })), split: i.group_failure.as_ref().is_some_and(|f| f.split),
+                heavy_lock_wait: i.execution.as_ref().and_then(|view| view.heavy_lock_wait.clone()),
             }).collect() })
 }
 

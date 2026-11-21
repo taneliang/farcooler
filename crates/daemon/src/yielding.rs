@@ -3,10 +3,13 @@
 //! A gate that shares ten cores with four builders and their compilers ran 40 minutes at load 40. Niceness can't
 //! be taken back without privilege, so a builder is paused with SIGSTOP and resumed with SIGCONT instead. The
 //! engine records each builder's process group (or its native PTY's tty) while it runs, and each landing gate
-//! while it runs. Whenever any gate is running every recorded builder is stopped, a builder that starts during a
-//! gate is stopped at once, and when the last gate ends every builder is continued. A pause is written to disk, so
+//! while it runs. Builders yield during a gate once they have no ticket in the machine-wide heavy queue.
+//! When the last gate ends every automatically paused builder is continued. A pause is written to disk, so
 //! a daemon that died mid-gate continues what it had stopped when it starts again.
+mod heavy_queue;
+
 use std::collections::BTreeMap;
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
@@ -23,11 +26,21 @@ pub(crate) enum Target {
     Native { tty: String, supervisor: u32, started: String },
 }
 
-/// A builder, and whether the orchestrator has paused it by hand (ov-1205). A builder is stopped while a gate
-/// runs, by hand, or both, and is continued only when neither remains.
+/// A builder, and whether the orchestrator has paused it by hand (ov-1205). A builder may be stopped by a gate,
+/// by hand, or by both. It is continued when neither pause remains.
 /// `held_for` and `held_since` count the time a gate has held it stopped and its hand pause has not (ov-1301), so its
 /// step's clocks can leave that time out: a hand pause already stops them itself.
 struct Builder { target: Target, manual: bool, held_for: Duration, held_since: Option<tokio::time::Instant> }
+
+impl Builder {
+    fn count_hold(&mut self, held: bool) {
+        match (held && !self.manual, self.held_since) {
+            (true, None) => self.held_since = Some(tokio::time::Instant::now()),
+            (false, Some(at)) => { self.held_for += at.elapsed(); self.held_since = None; }
+            _ => {}
+        }
+    }
+}
 
 #[derive(Default)]
 struct State {
@@ -36,13 +49,27 @@ struct State {
     next: u64,
     paused: bool,
     ticking: bool,
+    queue_latch: Option<File>,
 }
-pub(crate) struct Inner { state: Mutex<State>, record: Option<PathBuf> }
+pub(crate) struct Inner {
+    state: Mutex<State>,
+    record: Option<PathBuf>,
+    queue: PathBuf,
+    #[cfg(test)]
+    _scratch: Option<tempfile::TempDir>,
+}
 
 /// Shared by every copy of the engine's executor.
 #[derive(Clone)]
 pub(crate) struct Yielding(Arc<Inner>);
-impl Default for Yielding { fn default() -> Self { Self(Arc::new(Inner { state: Default::default(), record: None })) } }
+#[cfg(test)]
+impl Default for Yielding {
+    fn default() -> Self {
+        let scratch = tempfile::tempdir().expect("isolated heavy queue");
+        let queue = scratch.path().join(heavy_queue::NAME);
+        Self(Arc::new(Inner { state: Default::default(), record: None, queue, _scratch: Some(scratch) }))
+    }
+}
 
 /// Held while a gate runs.
 pub(crate) struct GateGuard(Yielding, u64);
@@ -61,7 +88,11 @@ impl BuilderGuard {
     /// The orchestrator paused (`true`) or resumed (`false`) this builder by hand. A hand pause survives the end of
     /// a gate, and a hand resume leaves the builder stopped while a gate still holds it.
     pub(crate) fn manual(&self, on: bool) {
-        self.0.change(|s| { if let Some(b) = s.builders.get_mut(&self.1) { b.manual = on; if !on && s.gates.is_empty() { signal(&b.target, libc::SIGCONT); } } });
+        self.0.change(|s| { if let Some(b) = s.builders.get_mut(&self.1) {
+            b.manual = on;
+            b.count_hold(!s.gates.is_empty());
+            if !on && s.gates.is_empty() { signal(&b.target, libc::SIGCONT); }
+        } });
     }
     /// How long gates have held this builder stopped so far, and whether one holds it now (ov-1301). A step's time
     /// limit and quiet periods leave this out: a builder stopped for a gate is waiting, not slow.
@@ -82,13 +113,21 @@ fn signal(target: &Target, sig: i32) -> bool {
             // The leader is the identity: a group whose leader started at another time is not ours.
             if !started.is_empty() && crate::effect_runner::Owner::started_at(*pid).is_ok_and(|actual| actual == *started) {
                 unsafe { libc::killpg(*pid as i32, sig); }
+                if sig == libc::SIGSTOP {
+                    // Wait for the pending stops before another process can enter the heavy queue.
+                    let settled = || crate::proc_table::snapshot().is_some_and(|raw|
+                        crate::foreground::parse(&raw).in_group(*pid as i32).all(crate::proc_table::stopped_or_gone));
+                    return settled() && settled();
+                }
             }
         }
         Target::Tty(tty) => {
             let Some(raw) = crate::proc_table::snapshot() else { return false };
-            for pid in crate::foreground::parse(&raw).under_tty(tty.trim_start_matches("/dev/")) {
+            let pids = crate::foreground::parse(&raw).under_tty(tty.trim_start_matches("/dev/"));
+            for &pid in &pids {
                 if pid > 1 && pid != std::process::id() as i32 { unsafe { libc::kill(pid, sig); } }
             }
+            if sig == libc::SIGSTOP { return pids.into_iter().all(crate::proc_table::stopped_or_gone); }
         }
         Target::Native { tty, supervisor, started } => {
             match crate::effect_runner::Owner::started_at(*supervisor) {
@@ -138,13 +177,71 @@ fn signal_native(table: &crate::foreground::Foreground, tty: &str, supervisor: i
     settled
 }
 
-fn stop_builders(state: &State) -> bool {
+fn stop_builders(state: &mut State, queue: &Path) -> bool {
+    if state.builders.values().all(|b| b.manual) {
+        state.queue_latch = None;
+        return true;
+    }
+    if state.queue_latch.is_none() {
+        let Ok(enter) = heavy_queue::try_enter(queue) else { return false };
+        state.queue_latch = Some(enter);
+    }
+    let Ok(tickets) = heavy_queue::live_tickets(queue) else { return false };
+    let table = if !tickets.is_empty() && state.builders.values().any(|b| !matches!(b.target, Target::Group { .. })) {
+        let Some(raw) = crate::proc_table::snapshot() else { return false };
+        Some(crate::foreground::parse(&raw))
+    } else { None };
     let mut settled = true;
-    for b in state.builders.values() { settled &= signal(&b.target, libc::SIGSTOP); }
+    for b in state.builders.values_mut().filter(|b| !b.manual) {
+        let has_ticket = match &b.target {
+            Target::Group { pid, .. } => tickets.iter().any(|t| unsafe { libc::getpgid(t.pid) } == *pid as i32),
+            Target::Native { tty, supervisor, .. } => table.as_ref().is_some_and(|table|
+                tty_has_ticket(table, tty, *supervisor as i32, &tickets)),
+            Target::Tty(tty) => table.as_ref().is_some_and(|table| tty_has_ticket(table, tty, 0, &tickets)),
+        };
+        if has_ticket {
+            // Leave the whole builder runnable so the job's wrapper can reap its
+            // children and remove its ticket. Any queued ticket may become head.
+            if b.held_since.is_some() { signal(&b.target, libc::SIGCONT); }
+            b.count_hold(false);
+            continue;
+        }
+        settled &= signal(&b.target, libc::SIGSTOP);
+        b.count_hold(true);
+    }
+    if settled { state.queue_latch = None; }
     settled
 }
 
+fn tty_has_ticket(table: &crate::foreground::Foreground, tty: &str, supervisor: i32, tickets: &[heavy_queue::Ticket]) -> bool {
+    let pids = table.under_tty(tty.trim_start_matches("/dev/"));
+    (supervisor == 0 || pids.contains(&supervisor))
+        && tickets.iter().any(|t| t.pid != supervisor && pids.contains(&t.pid))
+}
+
+/// Hand pauses must obey the same admission rule, including before a gate starts.
+pub(crate) fn manual_pause_latch(builder: Option<&BuilderGuard>, tty: &str, supervisor: i32) -> std::io::Result<File> {
+    let machine;
+    let queue = match builder {
+        Some(builder) => &builder.0.0.queue,
+        None => { machine = heavy_queue::machine(); &machine }
+    };
+    let enter = heavy_queue::try_enter(queue)?;
+    let tickets = heavy_queue::live_tickets(queue)?;
+    if !tickets.is_empty() {
+        let raw = crate::proc_table::snapshot().ok_or_else(|| std::io::Error::other("process table unavailable"))?;
+        if tty_has_ticket(&crate::foreground::parse(&raw), tty, supervisor, &tickets) {
+            return Err(std::io::Error::other("builder has a ticket in the machine-wide heavy-job queue"));
+        }
+    }
+    Ok(enter)
+}
+
 impl Yielding {
+    fn new(record: Option<PathBuf>, queue: PathBuf) -> Self {
+        Self(Arc::new(Inner { state: Default::default(), record, queue, #[cfg(test)] _scratch: None }))
+    }
+
     /// Persist pauses under `root`, and continue anything an earlier daemon left stopped.
     pub(crate) fn at(root: &Path) -> Self {
         let record = root.join("yielding.json");
@@ -158,9 +255,19 @@ impl Yielding {
                 Err(e) => tracing::error!(error = %e, path = %record.display(), "the pause record is unreadable; builders it names may still be stopped"),
             }
         }
-        Self(Arc::new(Inner { state: Default::default(), record: Some(record) }))
+        #[cfg(test)]
+        let queue = root.join(heavy_queue::NAME);
+        #[cfg(not(test))]
+        let queue = heavy_queue::machine();
+        Self::new(Some(record), queue)
     }
-    /// A landing gate started. The builders stop until every gate has ended.
+
+    pub(crate) fn heavy_lock_waits(&self, groups: &std::collections::HashSet<i32>) -> std::collections::HashMap<i32, String> {
+        if groups.is_empty() { return Default::default(); }
+        let Ok(tickets) = heavy_queue::live_tickets(&self.0.queue) else { return Default::default() };
+        heavy_queue::waiting(&tickets, groups)
+    }
+    /// A landing gate started. Builders without heavy tickets yield until every gate has ended.
     pub(crate) fn gate(&self) -> GateGuard {
         let mut id = 0;
         self.change(|s| { s.next += 1; id = s.next; s.gates.insert(id, ()); });
@@ -172,17 +279,17 @@ impl Yielding {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
         loop {
             {
-                let state = self.0.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let mut state = self.0.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 if !state.paused { return Err(std::io::Error::other("could not record the builder pause")); }
-                if stop_builders(&state) { return Ok(gate); }
+                if stop_builders(&mut state, &self.0.queue) { return Ok(gate); }
             }
             if tokio::time::Instant::now() >= deadline {
-                return Err(std::io::Error::other("native builders did not stop before the landing gate"));
+                return Err(std::io::Error::other("builder pauses did not settle before the landing gate"));
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     }
-    /// A builder started. It stops at once if a gate is running.
+    /// A builder started. It yields if a gate is running and it has no heavy ticket.
     pub(crate) fn builder(&self, target: Target) -> BuilderGuard {
         let mut id = 0;
         self.change(|s| { s.next += 1; id = s.next; s.builders.insert(id, Builder { target, manual: false, held_for: Duration::ZERO, held_since: None }); });
@@ -201,23 +308,18 @@ impl Yielding {
         let mut state = self.0.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         edit(&mut state);
         self.stop_or_continue(&mut state);
-        // Whatever was decided, each builder's held time follows it.
-        let paused = state.paused;
-        for b in state.builders.values_mut() {
-            match (paused && !b.manual, b.held_since) {
-                (true, None) => b.held_since = Some(tokio::time::Instant::now()),
-                (false, Some(at)) => { b.held_for += at.elapsed(); b.held_since = None; }
-                _ => {}
-            }
-        }
     }
     fn stop_or_continue(&self, state: &mut State) {
         if state.gates.is_empty() {
             if state.paused {
-                for b in state.builders.values().filter(|b| !b.manual) { signal(&b.target, libc::SIGCONT); }
+                for b in state.builders.values_mut().filter(|b| !b.manual) {
+                    if b.held_since.is_some() { signal(&b.target, libc::SIGCONT); }
+                    b.count_hold(false);
+                }
                 if let Some(record) = &self.0.record { let _ = std::fs::remove_file(record); }
             }
             state.paused = false;
+            state.queue_latch = None;
             return;
         }
         // The full set that is about to be stopped is on disk, atomically, before any of it stops. If it can't be
@@ -225,14 +327,18 @@ impl Yielding {
         // no record that a restarted daemon could resume it from.
         if let Err(e) = self.write(state) {
             tracing::warn!(error = %e, "could not record the builders to pause");
-            for b in state.builders.values().filter(|b| !b.manual) { signal(&b.target, libc::SIGCONT); }
+            for b in state.builders.values_mut().filter(|b| !b.manual) {
+                if b.held_since.is_some() { signal(&b.target, libc::SIGCONT); }
+                b.count_hold(false);
+            }
             state.paused = false;
+            state.queue_latch = None;
             return;
         }
         // Also covers a builder that is new, and children a native agent forked before it stopped.
-        stop_builders(state);
+        stop_builders(state, &self.0.queue);
         state.paused = true;
-        if !state.ticking { state.ticking = true; self.tick(); }
+        if !state.ticking { state.ticking = self.tick(); }
     }
     /// Replace the record in one step: a reader sees the whole old set or the whole new set, never a part.
     fn write(&self, state: &State) -> std::io::Result<()> {
@@ -250,8 +356,8 @@ impl Yielding {
         Ok(())
     }
     /// While a gate runs, a native PTY may fork descendants before they are stopped: sweep again.
-    fn tick(&self) {
-        let Ok(handle) = tokio::runtime::Handle::try_current() else { self.0.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner).ticking = false; return };
+    fn tick(&self) -> bool {
+        let Ok(handle) = tokio::runtime::Handle::try_current() else { return false };
         let weak: Weak<Inner> = Arc::downgrade(&self.0);
         handle.spawn(async move {
             loop {
@@ -259,9 +365,10 @@ impl Yielding {
                 let Some(inner) = weak.upgrade() else { return };
                 let mut state = inner.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 if state.gates.is_empty() || !state.paused { state.ticking = false; return; }
-                stop_builders(&state);
+                stop_builders(&mut state, &inner.queue);
             }
         });
+        true
     }
 }
 

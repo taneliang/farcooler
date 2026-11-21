@@ -487,6 +487,7 @@ export interface LandingGroup {
 	members: string[];
 	failure?: GroupFailure | null;
 	split: boolean;
+	heavyLockWait?: string | null;
 }
 
 export interface LandingGroupView {

@@ -84,7 +84,7 @@ pub(super) fn bound_recent<T>(reply: &mut serde_json::Map<String, serde_json::Va
 
 impl Exec {
     /// Reads committed records and local stop receipts only; never executes git or drives effects.
-    fn read_get(&self, workspace:&str) -> Result<serde_json::Value> {
+    pub(super) fn read_get(&self, workspace:&str) -> Result<serde_json::Value> {
         let deliveries=self.store.workflow_notice_deliveries(workspace)?;
         let notices:Vec<_>=deliveries.iter().map(|d|farcooler_store::workflow::WorkflowNotice {
             id:d.notice.id.clone(),revision:d.notice.revision,body:format!("{}:{:?}",d.notice.item,d.notice.point)
