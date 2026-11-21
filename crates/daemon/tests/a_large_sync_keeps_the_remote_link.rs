@@ -17,10 +17,9 @@ async fn a_large_first_sync_does_not_disconnect_the_control_session() {
     exercise(750 * 1024).await;
 }
 
-/// Workflow history can cross the same limit too. Its failed read must remain
-/// a failed read, including on clients that predate any smaller Get schema.
+/// Older Plan clients use the unmarked workflow read, even with many live items.
 #[tokio::test]
-async fn an_oversized_workflow_read_does_not_disconnect_the_control_session() {
+async fn an_oversized_live_workflow_read_loads_on_the_control_session() {
     exercise(1200 * 1024).await;
 }
 
@@ -57,13 +56,20 @@ async fn exercise(state_bytes: usize) {
         schema: 1, json: serde_json::to_string(&Action::Get).unwrap(),
     }));
     let read = tokio::time::timeout(Duration::from_secs(5), client.call(get)).await.unwrap();
+    let result::Value::WorkflowReply(reply) = read.expect("legacy workflow sync").value.unwrap() else { panic!("wrong reply") };
+    let value: serde_json::Value = serde_json::from_str(&reply.json).unwrap();
     if state_bytes < farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES {
-        let result::Value::WorkflowReply(reply) = read.expect("today-sized workflow sync").value.unwrap() else { panic!("wrong reply") };
-        let value: serde_json::Value = serde_json::from_str(&reply.json).unwrap();
         assert_eq!(value["state"], serde_json::to_value(&state).unwrap(), "no truncated state");
         eprintln!("workflow reply: {} bytes", reply.json.len());
     } else {
-        oversized(read);
+        let projected: State = serde_json::from_value(value["state"].clone()).unwrap();
+        assert_eq!(projected.revision, state.revision);
+        assert!(projected.items.len() < state.items.len());
+        let auth = serde_json::from_value(value["context"]["capabilities"].clone()).unwrap();
+        let view = farcooler_client::workflow_presentation::project(
+            &projected, &auth, farcooler_client::workflow_presentation::Style::Apple,
+        ).unwrap();
+        assert!(view.runs.len() > 100, "the legacy app still has live runs to render");
     }
     let mut board = rpc("task.list");
     board.payload = Some(request::Payload::TaskList(pb::TaskListRequest {
@@ -81,7 +87,7 @@ async fn exercise(state_bytes: usize) {
     assert!(began.elapsed() < Duration::from_secs(5));
     let log = std::fs::read_to_string(dir.path().join("logs/farcoolerd.log")).unwrap();
     let warnings: Vec<_> = log.lines().filter(|line| line.contains("response exceeds frame cap")).collect();
-    assert_eq!(warnings.len(), if state_bytes < farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES { 1 } else { 2 });
+    assert_eq!(warnings.len(), 1);
     for warning in warnings { eprintln!("{warning}"); }
 }
 
