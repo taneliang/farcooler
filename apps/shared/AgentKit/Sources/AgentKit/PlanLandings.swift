@@ -166,6 +166,9 @@ public struct PlanCIRead: Decodable, Equatable, Sendable {
     }
 
     /// The HTTPS link a landing card may open.
+    /// The host uses plain ASCII (letters, digits, dots and hyphens) to avoid
+    /// look-alike characters from other scripts. User names and passwords are
+    /// refused because text before the @ can be mistaken for the destination.
     public var runURL: URL? {
         guard let url = URL(string: url), url.scheme?.lowercased() == "https", let host = url.host(), !host.isEmpty,
             url.user() == nil, url.password() == nil,

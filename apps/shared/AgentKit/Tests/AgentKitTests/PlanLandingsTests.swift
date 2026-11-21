@@ -27,6 +27,25 @@ struct PlanLandingsTests {
         #expect(plan.landings.isEmpty && plan.ci.isEmpty && plan.boardCounts == nil && plan.cardCount("open") == nil)
     }
 
+    @Test("a CI run link opens only over HTTPS with a plain domain and no credentials")
+    func ciRunURL() {
+        let run = "https://github.com/o/r/actions/runs/1"
+        #expect(PlanCIRead(subject: "main", status: .passed, url: run).runURL?.absoluteString == run)
+
+        for url in [
+            "http://github.com/",
+            "javascript:alert(1)",
+            "https://user@github.com/",
+            "https://user:pw@github.com/",
+            "file:///etc/passwd",
+            "https://gіthub.com/",  // Cyrillic і
+            "/relative",
+            "https://",
+        ] {
+            #expect(PlanCIRead(subject: "main", status: .passed, url: url).runURL == nil, "Rejected URL: \(url)")
+        }
+    }
+
     @Test("A landing lists its tickets and their status")
     func landingTickets() throws {
         let plan = try PlanModelTests.plan(
