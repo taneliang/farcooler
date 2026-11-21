@@ -23,7 +23,6 @@ use std::time::Duration;
 
 use farcooler_core::Result;
 use serde::Deserialize;
-use uuid::Uuid;
 
 use crate::git::git;
 
@@ -751,9 +750,6 @@ pub async fn fetch_repo_facts(worktree: &Path) -> RepoFacts {
         url: repo.url.and_then(non_empty),
     }
 }
-
-/// Which repository a worktree belongs to, for cache keying.
-pub type RepoId = Uuid;
 
 #[cfg(test)]
 mod tests {

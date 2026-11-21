@@ -20,6 +20,10 @@ use crate::store::Store;
 use crate::tasks::now_millis;
 use crate::ticket_lines::{LineSubject, line_event};
 
+#[cfg(test)]
+#[path = "plan_rank_tests.rs"]
+mod plan_rank_tests;
+
 /// How long a name or a line may be. Generous for a person, and a ceiling for
 /// a script that has lost its mind.
 const NAME_MAX: usize = 60;

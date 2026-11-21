@@ -431,14 +431,6 @@ impl ReviewCache {
     }
 }
 
-/// How much of one worktree's snapshots the daemon will hold.
-///
-/// A per-entry cap alone is not a budget: sixty anchored comments in a heavy
-/// review is fifteen megabytes of file copies, on top of the attachments and on
-/// top of the replay buffers `TODOS.md` already names as the dominant term in
-/// daemon memory.
-pub const MAX_SNAPSHOT_BYTES_PER_WORKTREE: usize = 8 * 1024 * 1024;
-
 #[cfg(test)]
 mod tests {
     use super::*;

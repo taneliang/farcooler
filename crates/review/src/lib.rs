@@ -46,7 +46,4 @@ pub mod limits {
     pub const MAX_HUNKS: usize = 400;
     /// Bytes of patch text accepted for one file.
     pub const MAX_BYTES: usize = 2 * 1024 * 1024;
-    /// Bytes of a file kept as a capture snapshot, so a comment written against
-    /// a dirty working tree can still say what changed under it later.
-    pub const MAX_SNAPSHOT_BYTES: usize = 256 * 1024;
 }
