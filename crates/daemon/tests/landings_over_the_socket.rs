@@ -49,3 +49,74 @@ async fn a_landing_left_waiting_for_ci_reads_as_landed() {
     assert_eq!((l.state, l.pushed_sha.as_deref()), (pb::LandingState::Pushed as i32, Some("abcdef1")), "stored as it was left");
     assert_eq!(l.summary, "Bring the CI chip back");
 }
+
+#[tokio::test]
+async fn a_large_board_loads_through_the_released_plan_request() {
+    use farcooler_store::models::TaskStatus;
+    use farcooler_store::plan::{NewTheme, ThemeUpdate};
+    use farcooler_store::ticket_lines::{LineUpdate, NewTicketLine, Stage};
+
+    let h = start_legacy(Scope::Control).await;
+    let repo = a_repository(&h);
+    let store = &h.service.store;
+    let now = farcooler_store::testing::now_millis();
+    let mut tasks = Vec::new();
+    for n in 0..1500 {
+        let title = format!("Ticket {n}. {}", "Keep the current board usable while the completed work accumulates. ".repeat(3));
+        let task = store.create_task(repo.workspace, title.trim_end(), Actor::Manager).unwrap();
+        store.put_on_line(task.id, &NewTicketLine {
+            reason: "Keep the evidence for the completed ticket available when reading its details. ".repeat(3),
+            branch: format!("ticket-{n}/{}", "implementation-and-verification-".repeat(6)),
+            ..Default::default()
+        }, Actor::Manager).unwrap();
+        if n >= 50 {
+            store.update_line(task.id, &LineUpdate {
+                stage: Some(Stage::Dropped), ..Default::default()
+            }, Actor::Manager).unwrap();
+            store.set_task_status(task.id, TaskStatus::Cancelled, Actor::Manager).unwrap();
+        }
+        tasks.push(task.id);
+    }
+    for n in 0..25 {
+        let cards = if n == 0 { &tasks[..300] } else { &tasks[250 + n * 50..300 + n * 50] };
+        let theme = store.create_theme(repo.workspace, &NewTheme {
+            name: format!("Theme {n}"), outcome: "Keep the board readable".into(),
+        }, cards, Actor::Manager).unwrap();
+        store.update_theme(theme.id, &ThemeUpdate {
+            story: Some("Now on the board".into()), next: Some("Next on the board".into()),
+            ..Default::default()
+        }, Actor::Manager).unwrap();
+    }
+    for (n, cards) in tasks.chunks(15).enumerate() {
+        old_landing(store, repo.workspace, n as u32 + 1, "landed", None, cards, now + n as i64);
+    }
+
+    let mut link = connect(&h).await;
+    let request = payload::Payload::PlanGet(pb::PlanGetRequest {
+        workspace_id: id(repo.workspace), include_closed: false,
+    });
+    let result::Value::Plan(read) = call(&mut link, "plan.get", BOARD_PLAN, request).await.expect("large board plan.get") else {
+        panic!("wrong result");
+    };
+    assert_eq!(read.themes.len(), 25);
+    let first = read.themes[0].theme.as_ref().unwrap();
+    assert_eq!((&*first.story, &*first.next), ("Now on the board", "Next on the board"));
+    assert_eq!(read.themes[0].counts.unwrap().cancelled, 250);
+    assert_eq!(read.board_counts.unwrap().cancelled, 1450);
+    assert!(read.lines.iter().any(|line| line.task_id == id(tasks[0])));
+    assert_eq!(read.landings[0].number, 100);
+    assert!(read.landings.len() < 100, "landing history must be bounded");
+    assert!(read.cards.len() < 1500, "closed cards must be summarized");
+
+    let session = farcooler_client::session::Session::connect_local(&h.socket).await.unwrap();
+    let json = session.plan_with_workflow(repo.workspace).await.unwrap();
+    assert_eq!(json["themes"][0]["counts"]["cancelled"], 250);
+    for style in ["apple", "material"] {
+        let request = serde_json::json!({"schema": 1, "plan": json, "context": {"style": style}});
+        let rendered = farcooler_client::plan_view::json(&request.to_string());
+        let rendered: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+        assert!(rendered["error"].is_null(), "{rendered}");
+        assert_eq!(rendered["view"]["themes"]["tiles"].as_array().unwrap().len(), 25);
+    }
+
+}

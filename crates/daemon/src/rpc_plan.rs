@@ -28,6 +28,8 @@ use crate::task_ops::{actor_from_wire, required_id};
 use crate::watch::Watcher;
 use crate::wire::id_bytes;
 
+mod overview;
+
 /// Finished tickets and landings the plan read keeps showing, unless the
 /// request asks for all.
 const CLOSED_FOR_MS: i64 = 7 * 24 * 60 * 60 * 1000;
@@ -68,7 +70,11 @@ pub(crate) async fn dispatch(svc: &Arc<Service>, watcher: &Arc<Watcher>, scope: 
             let Some(request::Payload::PlanGet(p)) = req.payload else { return Err(payload_missing()) };
             let workspace = required_id(&p.workspace_id)?;
             let closed_since = if p.include_closed { i64::MIN } else { now() - CLOSED_FOR_MS };
-            Ok(result::Value::Plan(read_plan(svc, watcher, workspace, closed_since, admin, control).await?))
+            let mut plan = read_plan(svc, watcher, workspace, closed_since, admin, control).await?;
+            if !p.include_closed {
+                overview::summarize(&mut plan);
+            }
+            Ok(result::Value::Plan(plan))
         }
         "plan.events" => {
             let Some(request::Payload::PlanEvents(p)) = req.payload else { return Err(payload_missing()) };
@@ -99,7 +105,9 @@ pub(crate) async fn dispatch(svc: &Arc<Service>, watcher: &Arc<Watcher>, scope: 
             let actor = actor_from_wire(&p.actor)?;
             svc.store.set_line_order(workspace, &ids(&p.task_ids)?, actor)?;
             watcher.announce_plan_changed(workspace, actor);
-            Ok(result::Value::Plan(read_plan(svc, watcher, workspace, now() - CLOSED_FOR_MS, admin, control).await?))
+            let mut plan = read_plan(svc, watcher, workspace, now() - CLOSED_FOR_MS, admin, control).await?;
+            overview::summarize(&mut plan);
+            Ok(result::Value::Plan(plan))
         }
         "line.set" => {
             let Some(request::Payload::LineSet(p)) = req.payload else { return Err(payload_missing()) };
