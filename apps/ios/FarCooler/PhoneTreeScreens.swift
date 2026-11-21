@@ -17,11 +17,11 @@ import SwiftUI
 
 extension Connection {
     /// What `summary`'s tree is built from, as this connection holds its
-    /// board, plan, pages and worktrees, narrowed by `filter`.
+    /// board, plan and worktrees, narrowed by `filter`.
     func treeInput(_ summary: WorkspaceSummary, filter: OneTreeFilter, narrow: PlanFilter? = nil) -> OneTreeInput {
         PhoneTree.input(
             summary: summary, board: boards[summary.id], plan: plans.state(summary.id)?.plan ?? .empty,
-            worktrees: fleet.worktrees, pages: keepsPages ? pages.pages(summary.id) : [], items: needsYou,
+            worktrees: fleet.worktrees, items: needsYou,
             filter: filter, narrow: narrow, needsYouCount: workspaceNeedsYou(summary))
     }
 
@@ -58,7 +58,6 @@ extension Connection {
     func readTree(_ summary: WorkspaceSummary) async {
         if boards[summary.id] == nil { _ = await readBoard(summary) }
         if keepsPlan, plans.state(summary.id) == nil { await readPlan(summary) }
-        if keepsPages, pages.state(summary.id) == nil { await readPages(summary) }
     }
 }
 

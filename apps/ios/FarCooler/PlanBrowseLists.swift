@@ -125,7 +125,6 @@ struct PlanBrowseList: View {
         switch target {
         case .theme(let id): hook.onOpen(.theme(id))
         case .ticket(let id): hook.onOpen(.ticket(id))
-        case .page(let slot): hook.onOpen(.page(slot))
         default:
             if let route = PhoneTree.route(target, in: hook.place) { hook.onRoute(route) }
         }

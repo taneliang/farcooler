@@ -22,7 +22,6 @@ struct PhonePlanColumn<Top: View>: View {
     @ViewBuilder let top: () -> Top
 
     @ObservedObject private var reads: PlanReads
-    @ObservedObject private var pageReads: PageReads
     @Environment(\.phoneNavigator) private var navigator
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var making = false
@@ -46,7 +45,6 @@ struct PhonePlanColumn<Top: View>: View {
         self.inSheet = inSheet
         self.top = top
         reads = connection.plans
-        pageReads = connection.pages
     }
 
     var body: some View {
@@ -59,13 +57,11 @@ struct PhonePlanColumn<Top: View>: View {
         .environment(\.defaultMinListRowHeight, PlanRowHeight.minimum)
         .task {
             await connection.readTree(summary)
-            if connection.keepsPages { await connection.readPages(summary) }
         }
         .onReceive(navigator?.objectWillChange.eraseToAnyPublisher() ?? Empty<Void, Never>().eraseToAnyPublisher()) { _ in moves &+= 1 }
         .refreshable {
             _ = await connection.readBoard(summary)
             await connection.readPlan(summary)
-            if connection.keepsPages { await connection.readPages(summary) }
         }
         .actionFailureAlert($moveFailure)
         .newWorktreeSheets(making: $making, connection: connection, summary: summary)
@@ -158,7 +154,6 @@ struct PhonePlanColumn<Top: View>: View {
             }
         }
         rulings(plan)
-        pages(plan)
         worktrees
     }
 
@@ -175,15 +170,6 @@ struct PhonePlanColumn<Top: View>: View {
                     if inSheet { navigator?.plan = nil } else { navigator?.open(route) }
                 }),
             pastOpen: $pastRulingsOpen)
-    }
-
-    /// The orchestrator's pages, which the plan's list has always led to.
-    @ViewBuilder private func pages(_ plan: PlanModel) -> some View {
-        if connection.keepsPages {
-            PlanPagesSection(
-                state: pageReads.state(summary.id), plan: plan, read: read,
-                onOpen: { navigator?.open(.plan(place, page: $0)) })
-        }
     }
 
     /// The main checkout and the loose worktrees, and New Worktree: where a

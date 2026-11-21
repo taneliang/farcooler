@@ -145,10 +145,6 @@ SOURCES = [
     # Mark Ready and Reply on a ticket's pull request and a review thread (ov-317).
     "ConnectionPrActions.swift",
     "PrActionViews.swift",
-    # Orchestrator pages in the Plan view (ov-285): the Pages section, a page
-    # pushed, a theme's anchored pages, and what the connection reads of them.
-    "PlanOrchestratorPages.swift",
-    "ConnectionPages.swift",
     "ConnectionNews.swift",
     "PhonePlanHarness.swift",
     "PhonePrHarness.swift",
@@ -788,7 +784,7 @@ AGENTKIT_SOURCES = [
     "PlanColumn.swift",
     "PlanRulings.swift",
     "PlanRulingActions.swift",
-    # Landings and the CI the runner reads for them and for pages (ov-309).
+    # Landings and the CI the runner reads for them (ov-309).
     "PlanLandings.swift",
     # The Plan as sections, its glance band, themes grid and two-list sidebar,
     # a landing's phase and the agents list (ov-503), from the Rust core's
@@ -831,14 +827,6 @@ AGENTKIT_SOURCES = [
     "PadLayout.swift",
     # Where each workspace was left, for opening it again (ov-442).
     "WorkspacePlaceMemory.swift",
-    # Orchestrator pages (ov-269): the document, its live references, the
-    # layout rules and the renderer, one SwiftUI implementation the Mac and
-    # the phone share (ov-284, ov-285). Experimental, and removable with pages.
-    "PageModel.swift",
-    "PageLive.swift",
-    "PageLayout.swift",
-    "PageView.swift",
-    "PageTable.swift",
     # The board: its model, which agent is on which card, and which
     # repositories get a Board row in the overview. The Mac has drawn the first
     # two since card -19; the phone draws the same cards off the same rules, so
@@ -1209,9 +1197,6 @@ UI_TEST_SOURCES = [
     "PhonePlanColumnUITests.swift",
     "PlanRulingsUITests.swift",
     "PlanSectionsCapturesUITests.swift",
-    # Orchestrator pages in the Plan view (ov-285), over the canned runner with
-    # a seeded board's plan, pages and cards (`-phone-pages`).
-    "PagesUITests.swift",
     # Decided For You in the Plan view (ov-304), over the canned runner with a
     # seeded board's rulings (`-phone-rulings`).
     # The plan strip, its sheet and the One tree on the phone (ov-300).

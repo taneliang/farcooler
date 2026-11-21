@@ -35,7 +35,6 @@ extension Connection {
         // The plan layer moved on a board (ov-274).
         case "plan": await hearPlan(notice)
         // A board's orchestrator page was written or removed (ov-285).
-        case "pages": await hearPages(notice)
         // The rollup moved: an ask held or settled, a decision asked or
         // answered, a review in or out. See `loadNeedsYou`.
         case "needs_you": await loadNeedsYou()

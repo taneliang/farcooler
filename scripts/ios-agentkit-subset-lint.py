@@ -5,9 +5,7 @@
 iOS has no SwiftPM project: `apps/ios/generate-project.py` names, target by
 target, the AgentKit files each one compiles. A shared change that names a type
 from a file a target does not compile builds on the Mac, in `swift test`, and
-fails only on the phone. It happened twice on Oct 5: `PageLive.swift` named
-`OneTreeFilter` (declared in `OneTree.swift`, not listed; fixed in 28829613),
-and a lane added AgentKit files the iOS code used without listing them.
+fails only on the phone.
 
 For each target (the phone, its Live Activity and widgets, the notification
 service, the watch app, the watch complication) this reads the generator's
@@ -299,7 +297,7 @@ def scan(generator=GENERATOR, ios=IOS, agentkit=AGENTKIT, quiet=False):
 GEN = '''
 SOURCES = ["App.swift"]
 CEREMONY_SOURCES = []
-AGENTKIT_SOURCES = ["PageLive.swift", "Listed.swift"]
+AGENTKIT_SOURCES = ["Listed.swift"]
 ACTIVITY_SOURCES = ["Widget.swift"]
 activity_build_ids = {n: n for n in ACTIVITY_SOURCES + ["Listed.swift"]}
 NOTIFY_SOURCES = []
@@ -310,27 +308,6 @@ WATCH_WIDGET_SOURCES = []
 WATCH_WIDGET_AGENTKIT_SOURCES = ["Listed.swift"]
 '''
 
-# What 28829613 fixed, in the shape it had: a listed file naming a type that
-# lives in an unlisted one.
-PAGE_LIVE_BROKEN = '''
-extension PageWorld {
-    /// A card-count reference's status, as the board says it.
-    static func statusName(_ word: String) -> String {
-        if word == "open" { return OneTreeFilter.open.title }
-        return TaskStatus(rawValue: word)?.title ?? word
-    }
-}
-'''
-PAGE_LIVE_FIXED = '''
-extension PageWorld {
-    static func statusName(_ word: String) -> String {
-        // The phones compile this file without OneTree.swift, so it can't
-        // name OneTreeFilter.
-        if word == "open" { return "Not Done" }
-        return TaskStatus(rawValue: word)?.title ?? word
-    }
-}
-'''
 ONE_TREE = '''
 enum OneTreeFilter: String { case open; var title: String { "Not Done" } }
 struct OneTreeRow {}
@@ -355,8 +332,7 @@ def self_test() -> int:
             kit.mkdir()
             base = {"kit/Listed.swift": LISTED, "kit/OneTree.swift": ONE_TREE,
                     "ios/FarCooler/App.swift": "struct App {}\n",
-                    "ios/FarCoolerActivity/Widget.swift": "struct Widget {}\n",
-                    "kit/PageLive.swift": PAGE_LIVE_FIXED}
+                    "ios/FarCoolerActivity/Widget.swift": "struct Widget {}\n"}
             base.update(files)
             for rel, body in base.items():
                 (tmp / rel).write_text(body)
@@ -367,9 +343,6 @@ def self_test() -> int:
                                 f"{' naming ' + mentions if mentions else ''}, got {got}")
 
     expect("clean tree", {}, 0)
-    expect("PageLive names OneTreeFilter (28829613^)", {"kit/PageLive.swift": PAGE_LIVE_BROKEN},
-           1, "OneTreeFilter")
-    expect("the fix of 28829613 passes", {"kit/PageLive.swift": PAGE_LIVE_FIXED}, 0)
     expect("a listed file extends an unlisted type",
            {"kit/Listed.swift": LISTED + "extension OneTreeRow { var x: Int { 1 } }\n"},
            1, "OneTreeRow")
@@ -392,8 +365,8 @@ def self_test() -> int:
     expect("the same file, listed, is fine",
            {"kit/Fresh.swift": "struct FreshThing {}\n",
             "kit/Listed.swift": LISTED,
-            "gen.py": GEN.replace('["PageLive.swift", "Listed.swift"]',
-                                  '["PageLive.swift", "Listed.swift", "Fresh.swift"]'),
+            "gen.py": GEN.replace('AGENTKIT_SOURCES = ["Listed.swift"]',
+                                  'AGENTKIT_SOURCES = ["Listed.swift", "Fresh.swift"]', 1),
             "ios/FarCooler/App.swift": "struct App { let t = FreshThing() }\n"},
            0)
     # Things that must NOT be hits.

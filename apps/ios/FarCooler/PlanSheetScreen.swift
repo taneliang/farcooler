@@ -15,7 +15,7 @@ import SwiftUI
 // The list: the band, the orchestrator and what needs you (in the sheet);
 // the status filters; Unread with Mark All as Read; the One tree's work
 // (theme › card › ticket › terminal); the board's history; the plan's tickets by
-// where they stand, its pages, cost and rulings; the main checkout and loose
+// where they stand, its cost and rulings; the main checkout and loose
 // worktrees; and New Worktree.
 
 /// The Plan sheet over a workspace.
@@ -91,7 +91,6 @@ struct PhonePlanList<Top: View>: View {
     @ViewBuilder let top: () -> Top
 
     @ObservedObject private var reads: PlanReads
-    @ObservedObject private var pageReads: PageReads
     @State private var narrow: PlanFilter?
     @State private var making = false
     @State private var moveFailure: ActionFailure?
@@ -115,7 +114,6 @@ struct PhonePlanList<Top: View>: View {
         self.compactBand = compactBand
         self.top = top
         reads = connection.plans
-        pageReads = connection.pages
         _narrow = State(initialValue: PlanFilter.remembered(runner: place.runner, workspace: place.workspace))
     }
 
@@ -226,7 +224,6 @@ private struct PhonePlanTreeList<Top: View>: View, Equatable {
         .task { await connection.readTree(summary) }
         .refreshable {
             _ = await connection.readBoard(summary)
-            if connection.keepsPages { await connection.readPages(summary) }
         }
         .actionFailureAlert($moveFailure)
         .newWorktreeSheets(making: $making, connection: connection, summary: summary)

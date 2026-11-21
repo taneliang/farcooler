@@ -290,14 +290,6 @@ struct PhoneHarness: View {
             .onReceive(NotificationCenter.default.publisher(for: HarnessTaps.planNews)) { _ in
                 Task { await runner.deliver(["event": "plan", "workspace": HarnessRunner.billing]) }
             }
-            // A page written (ov-285), as the client core's `pages` line says it.
-            .onReceive(NotificationCenter.default.publisher(for: HarnessTaps.pagesNews)) { _ in
-                Task {
-                    await runner.deliver([
-                        "event": "pages", "workspace": HarnessRunner.billing, "slot": "train", "removed": false,
-                    ])
-                }
-            }
             .onReceive(NotificationCenter.default.publisher(for: HarnessTaps.boardGrows)) { _ in
                 HarnessRunner.grown = true
                 Task {
@@ -404,7 +396,6 @@ enum HarnessTaps {
     static let taskNews = Notification.Name("com.farcooler.harness.task-news")
     /// A task added to Billing's board, bil-77, and its notice (ov-791).
     static let boardGrows = Notification.Name("com.farcooler.harness.board-grows")
-    static let pagesNews = Notification.Name("com.farcooler.harness.pages-news")
     /// `PadCompactWindow` on or off.
     static let padCompact = Notification.Name("com.farcooler.harness.pad-compact")
     /// A small photo, a 10 MB one, and an image pasted, into the conversation
@@ -419,7 +410,7 @@ enum HarnessTaps {
 
     /// Listen, once per process.
     static let listening: Void = {
-        for name in [agent, decision, linkLost, planNews, taskNews, boardGrows, pagesNews, padCompact, nativePhoto, nativeBigPhoto, nativePaste, orchestratorPhoto, nativeOlder] {
+        for name in [agent, decision, linkLost, planNews, taskNews, boardGrows, padCompact, nativePhoto, nativeBigPhoto, nativePaste, orchestratorPhoto, nativeOlder] {
             CFNotificationCenterAddObserver(
                 CFNotificationCenterGetDarwinNotifyCenter(), nil,
                 { _, _, name, _, _ in
@@ -597,7 +588,6 @@ final class HarnessRunner {
                         + (Self.keepsReads ? ["board_reads"] : [])
                         + (CommandLine.arguments.contains("-phone-files-old") ? [] : ["worktree_files", "read_only_folders"])
                         + (HarnessPlan.advertised ? ["board_plan"] : [])
-                        + (HarnessPlan.pagesAdvertised ? ["board_pages"] : [])
                         + (HarnessPlan.rulingsAdvertised ? ["board_rulings", "board_ruling_actions"] : [])
                         + (HarnessPlan.agentsAdvertised ? ["board_line"] : [])
                         + (PhonePrHarness.advertised ? ["pr_actions"] : [])
@@ -1114,7 +1104,7 @@ final class HarnessRunner {
             sent.append("claude.sign_out \(args["handle"] as? String ?? "")")
             claudeState = "none"
             return try json(["state": "none", "email": ""])
-        case "plan.get", "plan.events", "page.list", "ruling.keep", "ruling.keep_all":
+        case "plan.get", "plan.events", "ruling.keep", "ruling.keep_all":
             guard let plan = HarnessPlan(),
                 let data = try await plan.answer(method, args, boards: [Self.main, Self.billing])
             else { throw ClientCore.CoreError.rejected("not in the harness", word: "unimplemented") }
@@ -1442,7 +1432,7 @@ final class HarnessRunner {
                 "status": "in_progress", "status_since": now, "workspace": Self.billing,
             ])
         }
-        return many + startStates() + HarnessPlan.boardTasks(on: Self.billing) + [
+        return many + startStates() + [
             [
                 "id": Self.decisionTask, "key": "bil-7", "title": "Pick a PDF library",
                 "status": "needs_decision", "status_since": now - 600_000,

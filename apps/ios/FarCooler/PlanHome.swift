@@ -188,13 +188,11 @@ extension Connection {
             summary: summary, place: place, reads: plans, keeps: keepsPlan,
             read: {
                 await connection.readPlan(summary)
-                if connection.keepsPages { await connection.readPages(summary) }
             },
             onOpen: onOpen,
             statuses: Dictionary(
                 (boards[summary.id]?.rows ?? []).map { ($0.id, $0.status) },
                 uniquingKeysWith: { first, _ in first }),
-            pages: keepsPages ? pages : nil,
             keepsRulings: keepsRulings,
             rulingActions: rulingActions(summary, place: place, open: onRuling),
             facts: planFacts(summary), outline: wide ? nil : { connection.sidebarOutline(summary, filter: $0) },

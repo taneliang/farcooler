@@ -29,12 +29,6 @@ import Foundation
 //                         how many lines an outcome gets from the rows' heights
 //   -phone-agents         the runner also advertises `board_line` (ov-503), so the Plan draws its
 //                         Agents section from the plan's `agents`
-//   -phone-pages          the runner also advertises `board_pages` and answers `page.list`
-//                         from the file's `pages`, and Billing's board also holds the file's
-//                         `tasks`, so a page's references to them draw live (ov-285). With
-//                         `-phone-plan-file test/fixtures/pages-seeded.json`, read from a
-//                         scratch daemon seeded by `.claude/agent/reports/ov-284/seed-pages.sh`
-//   -phone-pages-fails    it advertises `board_pages` and refuses `page.list`
 //   -phone-rulings        the runner also advertises `board_rulings` (ov-304), so the plan's
 //                         `rulings` draw as Decided For You. With `-phone-plan-file
 //                         test/fixtures/plan-rulings-seeded.json`: `farcooler plan --json` from a
@@ -84,24 +78,6 @@ struct HarnessPlan {
         return plan
     }
 
-    /// Whether the runner keeps orchestrator pages (`-phone-pages`).
-    static var pagesAdvertised: Bool {
-        CommandLine.arguments.contains("-phone-pages") || CommandLine.arguments.contains("-phone-pages-fails")
-    }
-
-    /// The file's cards, on `board`: what a page's task and ask references
-    /// name. None without `-phone-pages`.
-    static func boardTasks(on board: String) -> [[String: Any]] {
-        guard CommandLine.arguments.contains("-phone-pages"), let plan = HarnessPlan(),
-            let tasks = plan.capture["tasks"] as? [[String: Any]]
-        else { return [] }
-        return tasks.map { task in
-            var task = task
-            task["workspace"] = board
-            return task
-        }
-    }
-
     init?() {
         guard Self.advertised,
             let path = UserDefaults.standard.string(forKey: "phone-plan-file"),
@@ -120,33 +96,6 @@ struct HarnessPlan {
         lines[at]["key"] = "\((lines[at]["key"] as? String) ?? "")-v\(version + 1)"
         plan["lines"] = lines
         return plan
-    }
-
-    /// After a notice, the first page's title ends " v2".
-    private static func versioned(pages: Any) -> Any {
-        guard version > 0, var list = pages as? [String: Any], var rows = list["pages"] as? [[String: Any]], !rows.isEmpty
-        else { return pages }
-        rows[0]["title"] = "\((rows[0]["title"] as? String) ?? "") v\(version + 1)"
-        list["pages"] = rows
-        return list
-    }
-
-    /// The pages as old as they were when the file was captured, not as old
-    /// as the file: each `updated_at_ms` moves by the time since the plan's
-    /// `now_ms`. Read as written, a page with `stale_after_min` went stale
-    /// two hours after the capture, and "Updated" turned into "Not updated
-    /// for 2 hours" on every run after that.
-    static func current(_ pages: Any, plan: Any?, now: Date = Date()) -> Any {
-        guard var list = pages as? [String: Any], var rows = list["pages"] as? [[String: Any]],
-            let captured = ((plan as? [String: Any])?["now_ms"] as? NSNumber)?.int64Value
-        else { return pages }
-        let shift = Int64(now.timeIntervalSince1970 * 1000) - captured
-        for index in rows.indices {
-            guard let updated = (rows[index]["updated_at_ms"] as? NSNumber)?.int64Value else { continue }
-            rows[index]["updated_at_ms"] = updated + shift
-        }
-        list["pages"] = rows
-        return list
     }
 
     /// `-phone-plan-outcomes`: three themes alike but for the length of their
@@ -190,14 +139,6 @@ struct HarnessPlan {
             guard let board = args["workspace"] as? String, boards.contains(board), let plan = capture["plan"]
             else { throw ClientCore.CoreError.rejected("bad workspace", word: "invalid-argument") }
             return try JSONSerialization.data(withJSONObject: PhonePrHarness.marking(Self.keeping(Self.versioned(Self.measuring(plan)))))
-        case "page.list":
-            guard Self.pagesAdvertised else { return nil }
-            if CommandLine.arguments.contains("-phone-pages-fails") {
-                throw ClientCore.CoreError.rejected("unavailable", word: "unavailable")
-            }
-            guard let board = args["workspace"] as? String, boards.contains(board), let pages = capture["pages"]
-            else { throw ClientCore.CoreError.rejected("bad workspace", word: "invalid-argument") }
-            return try JSONSerialization.data(withJSONObject: Self.versioned(pages: Self.current(pages, plan: capture["plan"])))
         case "ruling.keep", "ruling.keep_all":
             guard Self.rulingsAdvertised, let plan = capture["plan"] as? [String: Any],
                 let rulings = plan["rulings"] as? [[String: Any]]

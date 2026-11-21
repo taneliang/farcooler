@@ -28,9 +28,6 @@ struct PlanBoardHook {
     /// The board's statuses by task id: a ticket waits on you when its
     /// card needs a decision.
     let statuses: [String: TaskStatus]
-    /// The board's orchestrator pages (ov-285), read with the plan. Nil on a
-    /// runner without `board_pages`, which shows no Pages section.
-    var pages: PageReads?
     /// Whether this runner advertises `board_rulings` (ov-304): without it,
     /// no Decided For You.
     var keepsRulings = false
@@ -137,14 +134,12 @@ struct PlanSwitch: View {
 struct PlanBoardSections: View {
     let hook: PlanBoardHook
     @ObservedObject var reads: PlanReads
-    @ObservedObject private var pages: PageReads
     @State private var landedOpen = false
     @State private var pastRulingsOpen = false
 
     init(hook: PlanBoardHook) {
         self.hook = hook
         reads = hook.reads
-        pages = hook.pages ?? PageReads()
     }
 
     var body: some View {
@@ -195,7 +190,6 @@ struct PlanBoardSections: View {
                         .accessibilityIdentifier("plan-empty")
                 }
             }
-            pagesSection(plan)
             PlanRulingsSection(plan: plan, keeps: hook.keepsRulings, actions: hook.rulingActions, pastOpen: $pastRulingsOpen)
         } else {
             // The Rust core's view decides the sections and their words
@@ -220,7 +214,6 @@ struct PlanBoardSections: View {
                     PlanHeader(title: "Cost", count: nil).accessibilityIdentifier("plan-cost-header")
                 }
             }
-            pagesSection(plan)
             if let view, let landed = view.section(.landedToday) {
                 Section {
                     if landedOpen {
@@ -240,17 +233,6 @@ struct PlanBoardSections: View {
             // Last, as on the Mac: rulings ask nothing, and stand until the
             // owner says otherwise.
             PlanRulingsSection(plan: plan, keeps: hook.keepsRulings, actions: hook.rulingActions, pastOpen: $pastRulingsOpen)
-        }
-    }
-}
-
-extension PlanBoardSections {
-    /// After Themes, as on the Mac (design 6.1): pages of their own, and
-    /// anchored ones whose theme is gone. Nothing on a runner without pages.
-    @ViewBuilder
-    fileprivate func pagesSection(_ plan: PlanModel) -> some View {
-        if hook.pages != nil {
-            PlanPagesSection(state: pages.state(hook.summary.id), plan: plan, read: hook.read, onOpen: hook.onOpen)
         }
     }
 }

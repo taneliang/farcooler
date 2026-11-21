@@ -127,9 +127,6 @@ extension Connection {
         switch page {
         case .theme(let id): subject = ["theme": id]
         case .ticket(let id): subject = ["task": id]
-        // An orchestrator's page has no record: it's read whole with the
-        // board's pages (ConnectionPages.swift).
-        case .page: return
         }
         guard keepsPlan else { return }
         do {

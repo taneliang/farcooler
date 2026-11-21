@@ -8,7 +8,6 @@ import SwiftUI
 struct PlanPageScreen: View {
     @ObservedObject var connection: Connection
     @ObservedObject private var reads: PlanReads
-    @ObservedObject private var pageReads: PageReads
     /// Who this phone is on the runner, which the buttons a member isn't
     /// offered wait on (ov-712). Watched, and asked for below, because a page
     /// reached by a link opens without the workspace's screen having asked.
@@ -24,7 +23,6 @@ struct PlanPageScreen: View {
     init(connection: Connection, place: PhoneWorkspace, page: PhonePlanPage, titled: Bool = true) {
         self.connection = connection
         reads = connection.plans
-        pageReads = connection.pages
         talk = connection.talk
         self.place = place
         self.page = page
@@ -78,15 +76,14 @@ struct PlanPageScreen: View {
         .onDisappear { if reads.openPage == page { reads.openPage = nil } }
     }
 
-    private var title: String { Self.title(page, plan: reads.state(place.workspace)?.plan, pages: pageReads.pages(place.workspace)) }
+    private var title: String { Self.title(page, plan: reads.state(place.workspace)?.plan) }
 
     /// A page's name: its theme's, its ticket's or its own, else what it is.
-    static func title(_ page: PhonePlanPage, plan: PlanModel?, pages: [BoardPage]) -> String {
+    static func title(_ page: PhonePlanPage, plan: PlanModel?) -> String {
         guard let plan else { return page.word }
         switch page {
         case .theme(let id): return plan.themes.first { $0.id == id }?.name ?? page.word
         case .ticket(let id): return plan.line(ofTask: id)?.heading ?? page.word
-        case .page(let slot): return pages.first { $0.slot == slot }?.title ?? page.word
         }
     }
 
@@ -99,9 +96,6 @@ struct PlanPageScreen: View {
     private func load() async {
         guard let summary else { return }
         if reads.state(place.workspace)?.plan == nil { await connection.readPlan(summary) }
-        // A page, and a theme's page that may draw pages inside it, read the
-        // board's pages when nothing has yet.
-        if connection.keepsPages, pageReads.state(place.workspace) == nil { await connection.readPages(summary) }
         await connection.readPlanRecord(page)
     }
 
@@ -112,15 +106,6 @@ struct PlanPageScreen: View {
                 (connection.boards[place.workspace]?.rows ?? []).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
             onTask: { row in open(.task(place, task: row.id)) },
             onOpen: { page in open(.plan(place, page: page)) },
-            pages: pageReads.pages(place.workspace),
-            world: summary.map { connection.pageWorld($0) } ?? PageWorld(),
-            onDestination: { destination in
-                switch connection.route(destination, from: place) {
-                case .push(let route)?: open(route)
-                case .needsYou?: navigator?.go([])
-                case nil: break
-                }
-            },
             markReady: connection.mayActOnPullRequests
                 ? { ticket, stage in
                     guard let summary else { return nil }
@@ -138,23 +123,6 @@ struct PlanPageScreen: View {
                 PlanTicketPage(line: line, plan: plan, record: reads.records[page], context: context)
             } else {
                 ContentUnavailableView("Ticket Not Found", systemImage: "map")
-            }
-        case .page(let slot):
-            if let found = context.pages.first(where: { $0.slot == slot }) {
-                PlanOrchestratorPage(page: found, world: context.world, onDestination: context.onDestination)
-            } else if pageReads.state(place.workspace) == .unavailable {
-                ContentUnavailableView {
-                    Label(PageWords.couldntRead, systemImage: "exclamationmark.triangle")
-                } actions: {
-                    Button(PlanWords.tryAgain) { Task { await load() } }
-                        .accessibilityIdentifier("plan-pages-retry")
-                }
-            } else if pageReads.state(place.workspace) == nil {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                // Removed while it was open.
-                ContentUnavailableView("Page Not Found", systemImage: "doc.richtext")
-                    .accessibilityIdentifier("plan-page-gone")
             }
         }
     }
@@ -182,13 +150,6 @@ struct PlanPageContext {
     let rows: [String: TaskRow]
     let onTask: (TaskRow) -> Void
     let onOpen: (PhonePlanPage) -> Void
-    /// The board's orchestrator pages (ov-285): a page pushed, and those a
-    /// theme's page draws inside it.
-    var pages: [BoardPage] = []
-    /// What a page's references are drawn from.
-    var world = PageWorld()
-    /// Where a page's reference goes.
-    var onDestination: (PageDestination) -> Void = { _ in }
     /// Marks a ticket's draft pull request ready for review (ov-317), answering
     /// the sentence for a refusal. Nil where this phone can't: a runner without
     /// `pr_actions`, or a Read grant.
@@ -239,11 +200,6 @@ struct PlanThemePage: View {
                     if !theme.ownerAsk.isEmpty { PlanAsk(text: theme.ownerAsk).font(.body) }
                 }
             }
-            // The orchestrator's pages anchored here, after Needs You and
-            // before Tickets (design 6.1).
-            PlanAnchoredPages(
-                pages: PageShelf.anchored(context.pages, to: theme.id, plan: plan), world: context.world,
-                onOpen: context.onOpen, onDestination: context.onDestination)
             if PlanThemeSpend.hasSomething(theme) {
                 Section("Spend") {
                     PlanThemeSpend(theme: theme, bodyFont: .body, secondaryFont: .footnote)

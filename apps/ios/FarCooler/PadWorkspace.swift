@@ -44,7 +44,6 @@ struct PadTreeColumn: View {
     let onPick: (PadPick) -> Void
 
     @ObservedObject private var reads: PlanReads
-    @ObservedObject private var pageReads: PageReads
     @State private var filter: OneTreeFilter
     @State private var expansion: OneTreeExpansion
     @State private var making = false
@@ -62,7 +61,6 @@ struct PadTreeColumn: View {
         self.takesFocus = takesFocus
         self.onPick = onPick
         reads = connection.plans
-        pageReads = connection.pages
         _filter = State(initialValue: PhoneTreeFilter.remembered(place))
         _expansion = State(initialValue: PadTreeExpansion.remembered(place))
     }
@@ -286,7 +284,6 @@ struct PadCanvasColumn<Board: View>: View {
     @ViewBuilder let board: () -> Board
 
     @ObservedObject private var reads: PlanReads
-    @ObservedObject private var pageReads: PageReads
     @Environment(\.phoneNavigator) private var navigator
 
     init(
@@ -299,7 +296,6 @@ struct PadCanvasColumn<Board: View>: View {
         _canvas = canvas
         self.board = board
         reads = connection.plans
-        pageReads = connection.pages
     }
 
     var body: some View {
@@ -364,7 +360,7 @@ struct PadCanvasColumn<Board: View>: View {
         case .board: return WorkspaceSegment.board.title
         case .needsYou: return OneTreeWords.needsYou
         case .page(let page):
-            return PlanPageScreen.title(page, plan: reads.state(place.workspace)?.plan, pages: pageReads.pages(place.workspace))
+            return PlanPageScreen.title(page, plan: reads.state(place.workspace)?.plan)
         case .task(let id):
             guard let row = connection.boards[place.workspace]?.rows.first(where: { $0.id == id }) else { return "Task" }
             return "\(row.key) \(row.title)"

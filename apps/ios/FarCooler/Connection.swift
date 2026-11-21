@@ -1411,8 +1411,6 @@ final class Connection: ObservableObject {
 
     /// The plan layer, read on request (ov-274); see ConnectionPlan.swift.
     let plans = PlanReads()
-    /// Orchestrator pages, read with the plan (ov-285); see ConnectionPages.swift.
-    let pages = PageReads()
     /// Each task key's card, built once per read of the boards and plans (ov-299).
     let taskKeyCards = TaskKeyCardCache()
     /// The key index the linker links by (ov-791): see `TaskKeyIndexCache`.
