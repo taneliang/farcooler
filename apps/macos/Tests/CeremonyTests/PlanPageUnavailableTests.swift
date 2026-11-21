@@ -52,9 +52,7 @@ struct PlanPageUnavailableTests {
             calls.args.append(args)
             return (nil, "ssh: connect to host mini port 22: Operation timed out")
         }
-        let plan = PlanStore(
-            client: client, workspace: .implicit(repository: "r"), host: "mini",
-            defaults: ScratchDefaults.suite("p6-\(UUID().uuidString)")!)
+        let plan = PlanStore(client: client, workspace: .implicit(repository: "r"), host: "mini")
         // Keep the first failed read in view while the window lays out under load.
         // PlanReconnectingTests covers the later retries and give-up state.
         plan.retryDelay = .seconds(600)
@@ -78,9 +76,7 @@ struct PlanPageUnavailableTests {
         let held = HeldRead()
         let client = DaemonClient(target: "", notifications: NotificationCenter())
         client.commandRunnerForTesting = { _ in await held.answer() }
-        let plan = PlanStore(
-            client: client, workspace: .implicit(repository: "r"), host: "mini",
-            defaults: ScratchDefaults.suite("p6-\(UUID().uuidString)")!)
+        let plan = PlanStore(client: client, workspace: .implicit(repository: "r"), host: "mini")
         let ids = await Self.drawn(
             plan, page: .ticket("00000000-0000-0000-0000-000000001001"), until: "plan-page-reading")
         #expect(ids.contains("plan-page-reading"), "drew \(ids)")

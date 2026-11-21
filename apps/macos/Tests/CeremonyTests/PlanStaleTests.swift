@@ -17,9 +17,7 @@ struct PlanStaleTests {
         client.startEvents()
         #expect(client.isCLIMissing)
         client.commandRunnerForTesting = { _ in (nil, "no tool") }
-        let plan = PlanStore(
-            client: client, workspace: .implicit(repository: "r"), host: "mini",
-            defaults: ScratchDefaults.suite("stale-\(UUID().uuidString)")!)
+        let plan = PlanStore(client: client, workspace: .implicit(repository: "r"), host: "mini")
         plan.retryDelay = .seconds(600)
         plan.retryCeiling = .seconds(600)
         await plan.reload()

@@ -27,9 +27,7 @@ struct PlanReconnectingTests {
             }
             return (Data(), nil)
         }
-        let plan = PlanStore(
-            client: client, workspace: .implicit(repository: "r"), host: "mini",
-            defaults: ScratchDefaults.suite("reconnecting-\(UUID().uuidString)")!)
+        let plan = PlanStore(client: client, workspace: .implicit(repository: "r"), host: "mini")
         plan.retryDelay = .milliseconds(10)
         plan.retryCeiling = .milliseconds(40)
         plan.linkIsDown = { true }

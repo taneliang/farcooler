@@ -67,9 +67,7 @@ struct PlanReconnectingCaptures {
     static func neverRead() async throws -> PlanStore {
         let client = DaemonClient(target: "", notifications: NotificationCenter())
         client.commandRunnerForTesting = { _ in (nil, "connection refused") }
-        let plan = PlanStore(
-            client: client, workspace: .implicit(repository: "r"), host: "mini",
-            defaults: PlanViewTests.defaults())
+        let plan = PlanStore(client: client, workspace: .implicit(repository: "r"), host: "mini")
         plan.retryDelay = .seconds(600)
         plan.retryCeiling = .seconds(600)
         await plan.reload()
