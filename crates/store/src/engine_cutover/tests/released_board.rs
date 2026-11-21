@@ -325,20 +325,15 @@ fn a_tracked_ticket_keeps_its_wait_and_blocks_after_release() {
 }
 
 /// ov-987, ov-960: Landing 373 pushed, its tickets were closed, and then the
-/// board was cut over, so it sat on the plan saying "Checking on CI" with
-/// nothing left to check. It reads as history now: landed, since its push,
-/// and kept as it was left.
+/// board was cut over. It stays in storage without appearing on the plan.
 #[test]
-fn the_landing_pushed_before_release_reads_as_settled_history() {
-    use crate::landing_phase::LandingPhase;
+fn the_landing_pushed_before_release_stays_out_of_the_plan() {
     use crate::landings::LandingState;
     let r = released();
     let s = &r.store;
     let pushed = uuid::Uuid::from_bytes([2; 16]);
     let plan = s.plan(r.ws, 0).unwrap();
-    let view = plan.landings.iter().find(|v| v.landing.id == pushed).expect("on the plan while it is recent");
-    assert_eq!((view.phase, view.phase_since), (LandingPhase::Landed, 2), "settled, not waiting for CI");
+    assert!(plan.landings.iter().all(|v| v.landing.id != pushed));
     let after = s.landing(pushed).unwrap();
     assert_eq!((after.state, after.pushed_sha.as_deref()), (LandingState::Pushed, Some("exact-sha")), "and the landing is kept as it was");
-    assert!(s.plan(r.ws, 3).unwrap().landings.iter().all(|v| v.landing.id != pushed), "and leaves the plan with the settled ones");
 }

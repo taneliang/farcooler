@@ -1,6 +1,6 @@
 //! The old landings (ov-309, ov-872) as a client meets them since the engine
 //! took over landing (ov-960): over a real socket, through the real dispatch
-//! table and scope check. `plan.get` reads each old landing as history.
+//! table and scope check. `plan.get` excludes old landings.
 
 #[path = "support/in_process.rs"]
 mod in_process;
@@ -33,10 +33,9 @@ async fn plan(link: &mut Link, workspace: Uuid) -> pb::Plan {
 }
 
 /// Landing 373, left pushed and waiting on CI when the engine took over,
-/// reads as landed history over `plan.get`, and a read client sees it and
-/// still can't write.
+/// remains stored but does not appear in `plan.get`.
 #[tokio::test]
-async fn a_landing_left_waiting_for_ci_reads_as_landed() {
+async fn a_landing_left_waiting_for_ci_stays_out_of_the_plan() {
     let h = start_legacy(Scope::Read).await;
     let repo = a_repository(&h);
     let task = h.service.store.create_task(repo.workspace, "Bring the CI chip back", Actor::Manager).unwrap();
@@ -44,8 +43,8 @@ async fn a_landing_left_waiting_for_ci_reads_as_landed() {
     old_landing(&h.service.store, repo.workspace, 373, "pushed", Some("abcdef1"), &[task.id], now - 60_000);
     let mut link = connect(&h).await;
     let read = plan(&mut link, repo.workspace).await;
-    let [l] = read.landings.as_slice() else { panic!("{:?}", read.landings) };
-    assert_eq!((l.number, l.phase, l.phase_since), (373, pb::LandingPhase::Landed as i32, now - 60_000));
-    assert_eq!((l.state, l.pushed_sha.as_deref()), (pb::LandingState::Pushed as i32, Some("abcdef1")), "stored as it was left");
-    assert_eq!(l.summary, "Bring the CI chip back");
+    assert!(read.landings.is_empty());
+    let stored = h.service.store.landings(repo.workspace).unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!((stored[0].number, stored[0].pushed_sha.as_deref()), (373, Some("abcdef1")));
 }

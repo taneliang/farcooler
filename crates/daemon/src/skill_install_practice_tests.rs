@@ -200,7 +200,7 @@ fn the_engine_lands_and_the_orchestrator_cleans_up() {
             "needs a person, as does all of it once the owner reserves publishing",
             "farcooler workspace workflow-draft <ws> batched-push --reason",
             "`--orchestrator-gate`",
-            "- Route `services/site/**`: ask",
+            "`--route 'site/**=ask'`",
             "check that its card closed and tick each verified `--met` line",
             "delete its build output, and `worktree remove` its worktree once nothing works in it",
             "The workflow's gates mirror CI",
