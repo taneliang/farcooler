@@ -11,6 +11,35 @@ fn open() -> Connection {
     conn
 }
 
+#[test]
+fn upgrading_keeps_retired_pages_and_their_history() {
+    let mut conn = open();
+    migrate_only_to(&mut conn, 25);
+    conn.execute_batch(
+        "INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
+         INSERT INTO repositories VALUES (x'03', x'02', x'01', 'r', '/r/.git', '', 1, 'r');
+         INSERT INTO workspaces (id, repository_id, name, task_prefix, is_main, ordinal, created_at)
+             VALUES (x'04', x'03', 'Main', 'r', 1, 0, 0);
+         INSERT INTO board_pages (id, workspace_id, slot, title, doc_json, schema_v, bytes,
+             revision, ordinal, actor, updated_at, created_at, resource_version)
+             VALUES (x'05', x'04', 'status', 'Status', '{\"version\":1}', 1, 13, 1, 0, 'owner', 1, 1, 1);
+         INSERT INTO page_events (at, workspace_id, slot, actor, kind, bytes, revision)
+             VALUES (1, x'04', 'status', 'owner', 'set', 13, 1);",
+    )
+    .unwrap();
+
+    migrate(&mut conn, 25).unwrap();
+
+    let document: String = conn
+        .query_row("SELECT doc_json FROM board_pages WHERE id = x'05'", [], |row| row.get(0))
+        .unwrap();
+    let revision: i64 = conn
+        .query_row("SELECT revision FROM page_events WHERE workspace_id = x'04' AND slot = 'status'", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(document, r#"{"version":1}"#);
+    assert_eq!(revision, 1);
+}
+
 /// One Main per repository, held by the schema.
 #[test]
 fn a_repository_has_one_main() {
