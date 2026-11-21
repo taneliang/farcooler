@@ -3,8 +3,8 @@
 
 Several lanes share one Mac. Two builds or test suites at once push the load past
 100 and make timing tests fail for no reason, so anything heavy takes the lock on
-lane-gate.lock in the temp dir first: a first-come, first-served queue of ticket files in
-lane-gate.lock.queue/. The oldest live ticket runs; a waiter says who holds it (worktree,
+/tmp/lane-gate.lock first: a first-come, first-served queue of ticket files in
+/tmp/lane-gate.lock.queue/. The oldest live ticket runs; a waiter says who holds it (worktree,
 PID, start time, what it runs) and how many are ahead. A holder that dies loses its place.
 
     scripts/heavy_lock.py --self-test
@@ -25,6 +25,7 @@ import time
 LOCK_POLL = 5  # seconds between a waiter's tries
 LOAD_LIMIT = 20.0
 HELD_ENV = "HEAVY_LOCK_HELD"  # set in the child of scripts/heavy: nested takers do not queue behind their own parent
+MACHINE_LOCK_PATH = pathlib.Path("/tmp/lane-gate.lock")
 
 
 class _Survivor:
@@ -195,10 +196,7 @@ def prepare_lane_build(top, say=print):
 
 
 def lock_path():
-    # The daemon takes the queue's admission latch before pausing a workflow
-    # process. Use that same queue even if an agent sets a scratch TMPDIR.
-    base = "/tmp" if os.environ.get("FARCOOLER_OPERATION_BINDING") else tempfile.gettempdir()
-    return pathlib.Path(base) / "lane-gate.lock"
+    return MACHINE_LOCK_PATH
 
 
 def lock_wanted(no_lock=False):
@@ -227,6 +225,78 @@ def wait_for_load(limit=LOAD_LIMIT, poll=30, load=load1, say=print):
 
 def queue_dir(path):
     return path.with_name(path.name + ".queue")
+
+
+def _python_processes():
+    """Legacy takers are Python processes, including wrappers waiting in the queue."""
+    if sys.platform.startswith("linux"):
+        for proc in pathlib.Path("/proc").iterdir():
+            try:
+                if proc.name.isdecimal() and (proc / "exe").readlink().name.lower().startswith("python"):
+                    yield int(proc.name)
+            except OSError:
+                continue
+    elif sys.platform == "darwin":
+        rows = subprocess.check_output(["/bin/ps", "-axo", "pid=,comm="], text=True, errors="replace")
+        for row in rows.splitlines():
+            fields = row.split(maxsplit=1)
+            if len(fields) == 2 and pathlib.Path(fields[1]).name.lower().startswith("python"):
+                yield int(fields[0])
+
+
+def _process_environment(pid):
+    if sys.platform.startswith("linux"):
+        return pathlib.Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
+    # Darwin's KERN_PROCARGS2 returns argc, the executable, padding, argv,
+    # then the environment. Keep the NUL separators so paths with spaces work.
+    import ctypes
+    import struct
+
+    sysctl = ctypes.CDLL(None, use_errno=True).sysctl
+    mib = (ctypes.c_int * 3)(1, 49, pid)  # CTL_KERN, KERN_PROCARGS2
+    size = ctypes.c_size_t()
+    if sysctl(mib, len(mib), None, ctypes.byref(size), None, 0):
+        return ()
+    buf = ctypes.create_string_buffer(size.value)
+    if sysctl(mib, len(mib), buf, ctypes.byref(size), None, 0) or size.value < 4:
+        return ()
+    argc = struct.unpack_from("=i", buf)[0]
+    if argc <= 0:
+        return ()
+    _, _, rest = buf.raw[4:size.value].partition(b"\0")
+    return rest.lstrip(b"\0").split(b"\0")[argc:]
+
+
+def _process_cwd(pid):
+    if sys.platform.startswith("linux"):
+        return pathlib.Path(f"/proc/{pid}/cwd").readlink()
+    rows = subprocess.check_output(["/usr/sbin/lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
+                                   stderr=subprocess.DEVNULL, text=True, errors="surrogateescape")
+    return pathlib.Path(next(line[1:] for line in rows.splitlines() if line.startswith("n")))
+
+
+def legacy_queues(canonical):
+    """Discover the temp roots of jobs still running code from before ov-1416."""
+    roots = {pathlib.Path("/var/tmp"), pathlib.Path("/usr/tmp")}
+    for pid in _python_processes():
+        try:
+            for entry in _process_environment(pid):
+                key, _, value = entry.partition(b"=")
+                if key in (b"TMPDIR", b"TEMP", b"TMP") and value:
+                    root = pathlib.Path(os.fsdecode(value))
+                    roots.add(root if root.is_absolute() else _process_cwd(pid) / root)
+        except (OSError, subprocess.CalledProcessError, StopIteration):
+            continue  # The process can exit while we inspect it.
+    canonical = canonical.resolve()
+    queues = set()
+    for root in roots:
+        try:
+            qd = (root / canonical.name).resolve(strict=True)
+            if qd != canonical and qd.is_dir():
+                queues.add(qd)
+        except (OSError, RuntimeError):
+            continue
+    return sorted(queues)
 
 
 def pid_alive(pid):
@@ -285,6 +355,7 @@ def machine_lock(worktree, job, path=None, poll=LOCK_POLL, announce=60, say=prin
     if os.environ.get(HELD_ENV):  # an ancestor (scripts/heavy) already holds the place; waiting on ourselves would deadlock
         yield
         return
+    machine = path is None
     path = path or lock_path()
     qd = queue_dir(path)
     qd.mkdir(parents=True, exist_ok=True)
@@ -301,7 +372,13 @@ def machine_lock(worktree, job, path=None, poll=LOCK_POLL, announce=60, say=prin
         while True:
             queue = live_tickets(qd)
             if not queue or queue[0][0] == ticket:
-                break
+                # Old wrappers already in flight hold tickets in their own
+                # temp roots. Let those queues drain before admitting this head.
+                legacy = min((pair for old in legacy_queues(qd) for pair in live_tickets(old)),
+                             key=lambda pair: pair[0].name, default=None) if machine else None
+                if not legacy:
+                    break
+                queue.insert(0, legacy)
             if time.time() - started >= (announced + 1) * announce:
                 announced += 1
                 ahead = [i for i, (t, _) in enumerate(queue) if t == ticket]
@@ -498,10 +575,22 @@ def _self_test():
             fails.append(f"{what}: got {got!r}, want {want!r}")
 
     here = pathlib.Path(__file__).resolve().parent
-    heavy = str(here / "heavy")
     with tempfile.TemporaryDirectory() as t:
         t = pathlib.Path(t)
         lock = t / "lane-gate.lock"
+        heavy = str(t / "heavy")
+        pathlib.Path(heavy).write_text(
+            f"#!{sys.executable}\n"
+            "import runpy, sys\n"
+            f"sys.path.insert(0, {str(here)!r})\n"
+            "import heavy_lock as hl\n"
+            f"hl.MACHINE_LOCK_PATH = hl.pathlib.Path({str(lock)!r})\n"
+            "from pathlib import Path\n"
+            "discover = hl.legacy_queues\n"
+            f"hl.legacy_queues = lambda queue: [q for q in discover(queue) if Path({str(t.resolve())!r}) in q.parents]\n"
+            f"runpy.run_path({str(here / 'heavy')!r}, run_name='__main__')\n"
+        )
+        pathlib.Path(heavy).chmod(0o700)
         env = {**os.environ, "TMPDIR": str(t), "HEAVY_POLL": "0.05", "HEAVY_LOAD_LIMIT": "100000"}
         env.pop("CI", None)
         env.pop("FARCOOLER_OPERATION_BINDING", None)
@@ -631,7 +720,10 @@ def _self_test():
             while not marks.read_text().strip() and time.monotonic() < deadline:
                 time.sleep(0.02)
             with output.open("w") as waiter_output:
-                p2 = subprocess.Popen([heavy, "--", "sh", "-c", waiter_cmd], env=env2, stdout=waiter_output, stderr=subprocess.STDOUT, text=True)
+                other_tmp = t / "other temp"
+                other_tmp.mkdir()
+                p2 = subprocess.Popen([heavy, "--", "sh", "-c", waiter_cmd], env={**env2, "TMPDIR": str(other_tmp)},
+                                      stdout=waiter_output, stderr=subprocess.STDOUT, text=True)
                 deadline = time.monotonic() + 10
                 while "held by worktree" not in output.read_text() and time.monotonic() < deadline and p2.poll() is None:
                     time.sleep(0.02)
@@ -645,9 +737,44 @@ def _self_test():
                 if proc is not None and proc.poll() is None:
                     proc.kill()
                     proc.wait()
-        expect("two wrappers do not overlap", marks.read_text().split(), ["one-in", "one-out", "two-in", "two-out"])
+        expect("unbound wrappers with different TMPDIRs do not overlap", marks.read_text().split(), ["one-in", "one-out", "two-in", "two-out"])
         expect("the waiting wrapper names the holder", "held by worktree" in o2 and f"PID {p1.pid}" in o2, True)
         expect("the holder says nothing of waiting", "waiting" in o1, False)
+
+        # A wrapper already running the old code has published only a legacy
+        # ticket. A new bound landing taker must drain it even with another TMPDIR.
+        marks.write_text("")
+        release.unlink()
+        output.write_text("")
+        legacy_lock = other_tmp / lock.name
+        legacy_driver = (
+            "import sys; sys.path.insert(0, sys.argv[1]); import heavy_lock as hl\n"
+            "with hl.machine_lock('/wt/legacy', 'tests', path=hl.pathlib.Path(sys.argv[2])):\n"
+            "    hl.subprocess.run(['sh', '-c', sys.argv[3]], check=True)\n"
+        )
+        with subprocess.Popen([sys.executable, "-c", legacy_driver, str(here), str(legacy_lock), holder_cmd],
+                              env={**env, "TMPDIR": str(other_tmp)}) as legacy:
+            try:
+                deadline = time.monotonic() + 5
+                while not marks.read_text() and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                with output.open("w") as log, subprocess.Popen(
+                    [heavy, "--", "sh", "-c", waiter_cmd],
+                    env={**env2, "FARCOOLER_OPERATION_BINDING": "landing"}, stdout=log, stderr=log,
+                ) as landing:
+                    try:
+                        deadline = time.monotonic() + 5
+                        while "held by worktree" not in output.read_text() and landing.poll() is None and time.monotonic() < deadline:
+                            time.sleep(0.02)
+                    finally:
+                        release.touch()
+                    landing.wait(timeout=10)
+            finally:
+                release.touch()
+        expect("landing waits for the old TMPDIR holder to release",
+               marks.read_text().split(), ["one-in", "one-out", "two-in", "two-out"])
+        expect("the landing waiter names the old holder",
+               f"PID {legacy.pid}" in output.read_text(), True)
 
         # --no-lock and CI let them overlap.
         for how, e, extra in (("--no-lock", env2, ["--no-lock"]), ("CI", {**env2, "CI": "true"}, [])):
@@ -675,8 +802,8 @@ def _self_test():
         for protected in (True, False):
             marks.write_text("")
             driver = ("import sys; sys.path.insert(0, %r); import heavy_lock as hl\n%s"
-                      "with hl.machine_lock('/wt/gate', 'gate: x', poll=0.05, announce=0.05):\n"
-                      "    open(%r, 'a').write('gate-in\\n')\n") % (str(here), "hl.survive_dead_output()\n" if protected else "", str(marks))
+                      "with hl.machine_lock('/wt/gate', 'gate: x', path=hl.pathlib.Path(%r), poll=0.05, announce=0.05):\n"
+                      "    open(%r, 'a').write('gate-in\\n')\n") % (str(here), "hl.survive_dead_output()\n" if protected else "", str(lock), str(marks))
             holder = subprocess.Popen([heavy, "--", "sh", "-c", f'echo wrapper-in >> "{marks}"; sleep 1.5; echo wrapper-out >> "{marks}"'],
                                       env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             deadline = time.time() + 5
