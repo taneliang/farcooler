@@ -360,7 +360,6 @@ internal fun AppearanceSettings(
     onFont: (TerminalFontChoice) -> Unit,
     fontSize: Float,
     onFontSize: (Float) -> Unit,
-    beforeThemes: @Composable () -> Unit = {},
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Separator()
@@ -388,7 +387,6 @@ internal fun AppearanceSettings(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        beforeThemes()
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for (theme in themes) {
                 TextButton(onClick = { onTheme(theme.name) }) {
@@ -701,17 +699,6 @@ fun SettingsScreen(
                 onFont = { model.settings.setFont(it) },
                 fontSize = fontSize,
                 onFontSize = { model.settings.setFontSize(it) },
-                beforeThemes = {
-                // Editing the runner's own file, rather than telling someone to go
-                // and edit it. That instruction used to be this section's help text —
-                // reasonable advice, and not something anybody does from a phone.
-                val live = connections.firstOrNull { it.phase.value is Connection.Phase.Connected }
-                if (live != null) {
-                    OutlinedButton(onClick = { onOpenRunnerSettings(live) }) {
-                        Text("Settings on ${live.host.displayLabel}")
-                    }
-                }
-                },
             )
 
             Separator()

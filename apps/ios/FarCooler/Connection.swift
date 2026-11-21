@@ -1829,25 +1829,6 @@ final class Connection: ObservableObject {
     // echoed from the request, so a value the writer normalized is what this
     // phone ends up holding.
 
-    /// Only the themes this runner's file defines.
-    ///
-    /// Not the merged list `Themes.shared.available` holds: that one includes
-    /// this phone's built-ins, and a built-in shown in an editor as if the file
-    /// defined it would offer a delete that does nothing.
-    ///
-    /// Nil when the read didn't come back, which the settings screen says; an
-    /// empty list is a runner whose file defines none.
-    func hostThemes() async -> [Theme]? {
-        do {
-            let data = try await core.call("themes")
-            guard let body = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-            else { return nil }
-            return Self.themes(from: body)
-        } catch {
-            return nil
-        }
-    }
-
     /// The branches in a repository, newest first as the daemon orders them.
     ///
     /// What makes "resume onto a branch" possible from a phone: work arrives on
@@ -1966,35 +1947,6 @@ final class Connection: ObservableObject {
         let stored = body["branchPrefix"] as? String ?? prefix
         branchPrefix = stored
         return stored
-    }
-
-    func upsertTheme(_ theme: Theme) async -> [Theme]? {
-        guard let data = try? await core.call("theme.upsert", theme.arguments),
-            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return nil }
-        return Self.themes(from: body)
-    }
-
-    func deleteTheme(_ name: String) async -> [Theme]? {
-        guard let data = try? await core.call("theme.delete", ["name": name]),
-            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return nil }
-        return Self.themes(from: body)
-    }
-
-    /// Put the runner's themes back into the picker every screen reads.
-    ///
-    /// Without this, a theme you just made is missing from the one place you
-    /// would go to choose it.
-    func reloadThemes() async {
-        guard let host else { return }
-        // A read that didn't come back leaves the picker as it was.
-        guard let themes = await hostThemes() else { return }
-        Themes.shared.merge(hostThemes: themes, from: host.id)
-    }
-
-    private static func themes(from body: [String: Any]) -> [Theme] {
-        (body["themes"] as? [[String: Any]] ?? []).compactMap(Theme.init(bridge:))
     }
 
     /// `name` names the worktree's directory. The wire key is still `task`,

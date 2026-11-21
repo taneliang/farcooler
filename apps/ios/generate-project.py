@@ -241,7 +241,6 @@ SOURCES = [
     # MetricKit's crashes and hangs, sent as signatures to the owner's own
     # runner on the launch after (ov-797). The reading is `CrashSignature`.
     "CrashReports.swift",
-    "ThemeEditorView.swift",
     "Changes.swift",
     "ChangesView.swift",
     # Where the reader was, and this app's half of getting what they want to

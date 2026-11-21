@@ -1,8 +1,6 @@
 package com.farcooler.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -40,14 +38,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.farcooler.data.Theme
-import com.farcooler.data.Themes
 import com.farcooler.model.AgentConversation
 import com.farcooler.model.Capability
 import com.farcooler.model.ClaudeSignIn
@@ -93,23 +88,10 @@ fun RunnerSettingsScreen(
 
     var prefix by remember { mutableStateOf("") }
     var storedPrefix by remember { mutableStateOf("") }
-    var themes by remember { mutableStateOf<List<Theme>>(emptyList()) }
     var health by remember { mutableStateOf<HostHealth?>(null) }
     var roots by remember { mutableStateOf<List<RepositoryRoot>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var failure by remember { mutableStateOf<String?>(null) }
-    // A theme or agent write the runner refused comes back null, and the list
-    // on screen stays what it was. Said on the screen's failure line, as the
-    // branch prefix already was, rather than looking like a save that did
-    // nothing (ov-167).
-    fun <T> written(result: T?, apply: (T) -> Unit) {
-        if (result == null) {
-            failure = "That runner didn’t accept the change."
-        } else {
-            apply(result)
-            failure = null
-        }
-    }
     var addingRepository by remember { mutableStateOf(false) }
     // The switches for members' own logins, with who this phone is (ov-652).
     var ownLogins by remember { mutableStateOf<Pair<MemberOwnLogins, String>?>(null) }
@@ -145,7 +127,7 @@ fun RunnerSettingsScreen(
     val repositories by connection.repositories.collectAsStateWithLifecycle()
 
     // Whether this connection may ask for the calls that change the runner —
-    // its branch prefix and its themes. Learned in the handshake, so
+    // its branch prefix. Learned in the handshake, so
     // it is known before anything on this screen is pressed, which is the whole
     // difference between this and the trouble boxes below: those report a call
     // that already failed, this dims a call that would.
@@ -159,7 +141,6 @@ fun RunnerSettingsScreen(
     val daemon by connection.daemon.collectAsStateWithLifecycle()
     val mayAdminister = daemon?.mayAdministerRunner() ?: true
 
-    var editingTheme by remember { mutableStateOf<Theme?>(null) }
 
     // Its own function because two things ask for it: the first load, and a
     // repository having just been added under a folder that may or may not have
@@ -192,32 +173,11 @@ fun RunnerSettingsScreen(
         // empty ones, which is a truer picture than a screen that fails
         // whole.
         health = connection.health()
-        themes = connection.hostThemes()
         reloadRoots()
         loading = false
     }
 
     LaunchedEffect(connection) { reload() }
-
-    // The editors take the whole screen rather than a bottom sheet: nineteen
-    // color rows and seven fields do not fit one, and a sheet that scrolls
-    // behind the keyboard is worse than a screen that does not have to.
-    editingTheme?.let { theme ->
-        ThemeEditorScreen(
-            theme = theme,
-            onCancel = { editingTheme = null },
-            onSave = { edited ->
-                editingTheme = null
-                scope.launch {
-                    written(connection.upsertTheme(edited)) { themes = it }
-                    // Every picker reads the merged list, so a saved theme has
-                    // to reach it — otherwise the thing you just made is
-                    // missing from the one place you would choose it.
-                    connection.reloadThemes()
-                }
-            })
-        return
-    }
 
     Scaffold(
         topBar = {
@@ -389,50 +349,6 @@ fun RunnerSettingsScreen(
                     }
                 }
             }
-
-            Separator()
-            SectionTitle("Themes on this runner")
-            Text(
-                "Only themes this runner defines are listed. Shipped themes have nothing to " +
-                    "delete; saving one under a shipped name overrides it here.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            // The list still loads: `theme.list` is `Scope::Read` and only the
-            // writes underneath it are not. So this section reads normally and
-            // dims its three buttons, rather than emptying.
-            if (!mayAdminister) RestrictedNote()
-            for (theme in themes) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    ThemeStrip(theme)
-                    Text(theme.name, Modifier.weight(1f))
-                    TextButton(
-                        onClick = { editingTheme = theme },
-                        enabled = mayAdminister,
-                    ) { Text("Edit") }
-                    TextButton(
-                        onClick = {
-                            scope.launch { written(connection.deleteTheme(theme.name)) { themes = it }
-                                connection.reloadThemes() }
-                        },
-                        enabled = mayAdminister,
-                    ) { Text("Delete") }
-                }
-            }
-            OutlinedButton(enabled = mayAdminister, onClick = {
-                val taken = themes.map { it.name }.toSet()
-                var name = "${Themes.current.name} copy"
-                var n = 2
-                while (taken.contains(name)) {
-                    name = "${Themes.current.name} copy $n"
-                    n += 1
-                }
-                editingTheme = Themes.current.copy(name = name)
-            }) { Text("Duplicate the current theme") }
 
             failure?.let {
                 Separator()
@@ -755,23 +671,5 @@ private fun HealthFact(label: String, value: String) {
         )
         Spacer(Modifier.weight(1f))
         Text(value, style = MaterialTheme.typography.bodySmall)
-    }
-}
-
-/** A theme's colors as one strip, for a list row. */
-@Composable
-fun ThemeStrip(theme: Theme) {
-    Row(horizontalArrangement = Arrangement.spacedBy(1.dp)) {
-        // The ground, the text, and the eight normal colors. Enough to tell two
-        // themes apart at a glance, which is all a row has to do.
-        val preview = listOf(theme.background, theme.foreground) + theme.ansi.take(8)
-        for (packed in preview) {
-            Box(
-                Modifier
-                    .width(5.dp)
-                    .height(18.dp)
-                    // Opaque alpha, since the grid's colors carry none.
-                    .background(Color(0xFF000000.toInt() or packed)))
-        }
     }
 }

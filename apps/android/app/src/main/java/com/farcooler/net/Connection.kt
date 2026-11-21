@@ -14,7 +14,6 @@ import com.farcooler.data.Identity
 import com.farcooler.data.NodeIdentity
 import com.farcooler.data.Reach
 import com.farcooler.data.Runner
-import com.farcooler.data.Theme
 import com.farcooler.model.BoardNotice
 import com.farcooler.model.NeedsYou
 import com.farcooler.model.NeedsYouPresenter
@@ -41,7 +40,6 @@ import com.farcooler.model.TaskBoard
 import com.farcooler.model.Terminal
 import com.farcooler.model.WorkspaceSummary
 import com.farcooler.model.Worktree
-import com.farcooler.model.toJson
 import com.farcooler.core.refusalWord
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -1748,20 +1746,6 @@ class Connection(
     // Built with `buildJsonObject` rather than the `args` helper below: these
     // carry arrays and a map, and that helper handles scalars only.
 
-    /**
-     * Only the themes this runner's file defines.
-     *
-     * Not the merged list [com.farcooler.data.Themes.available], which includes
-     * this phone's built-ins — a built-in shown in an editor as though the file
-     * defined it would offer a delete that does nothing.
-     */
-    suspend fun hostThemes(): List<Theme> {
-        val data = attempt { core.call("themes") }.getOrNull() ?: return emptyList()
-        return runCatching {
-            json.decodeFromJsonElement(HostThemes.serializer(), data).themes
-        }.getOrDefault(emptyList())
-    }
-
     /** This connection's panes for the conversation view (ov-374). */
     val nativePanes = NativePanes(scope, ClientCall { method, args -> core.call(method, args) })
 
@@ -1772,28 +1756,6 @@ class Connection(
         val stored = data["branchPrefix"]?.jsonPrimitive?.contentOrNull ?: prefix
         _branchPrefix.value = stored
         return stored
-    }
-
-    suspend fun upsertTheme(theme: Theme): List<Theme>? {
-        val data = attempt { core.call("theme.upsert", theme.toJson()) }.getOrNull() ?: return null
-        return themesFrom(data)
-    }
-
-    suspend fun deleteTheme(name: String): List<Theme>? {
-        val data = attempt {
-            core.call("theme.delete", args("name" to name))
-        }.getOrNull() ?: return null
-        return themesFrom(data)
-    }
-
-    /**
-     * Put the runner's themes back into the picker every screen reads.
-     *
-     * Without this, a theme you just made is missing from the one place you
-     * would go to choose it.
-     */
-    suspend fun reloadThemes() {
-        com.farcooler.data.Themes.merge(hostThemes(), runner = host.id)
     }
 
     // ---- repositories, and the folders they are found in ----
@@ -1857,10 +1819,6 @@ class Connection(
         val data = core.call("repository.register", args("path" to path))
         return data["displayName"]?.jsonPrimitive?.contentOrNull.orEmpty()
     }
-
-    private fun themesFrom(data: JsonObject): List<Theme> = runCatching {
-        json.decodeFromJsonElement(HostThemes.serializer(), data).themes
-    }.getOrDefault(emptyList())
 
     /**
      * Hide or unhide a worktree.

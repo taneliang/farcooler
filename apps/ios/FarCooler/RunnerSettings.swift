@@ -12,7 +12,6 @@ import SwiftUI
 @MainActor
 final class RunnerSettingsModel: ObservableObject {
     @Published private(set) var branchPrefix = ""
-    @Published private(set) var themes: [Theme] = []
     /// What the runner says about itself, once it has been asked. Optional
     /// rather than a blank default, so a daemon too old to answer shows nothing
     /// instead of showing zeroes that look like real readings.
@@ -23,7 +22,7 @@ final class RunnerSettingsModel: ObservableObject {
     @Published private(set) var loading = false
 
     /// Whether this connection may ask for the calls that change the runner —
-    /// its branch prefix, its themes, its agents.
+    /// its branch prefix and other settings.
     ///
     /// Learned in the handshake, so it is known before anything on this screen
     /// is pressed. That is the whole difference between this and `failure`:
@@ -72,18 +71,16 @@ final class RunnerSettingsModel: ObservableObject {
         // Beside the reads below, not before them: who's here is extra.
         async let peopleRead: Void = loadPeople()
         async let enrolledRead: Void = loadEnrolled()
-        let readThemes = await connection.hostThemes()
         health = await connection.health()
         repositories = connection.repositories
         let readRoots = await connection.repositoryRoots()
-        themes = readThemes ?? themes
         await peopleRead
         await enrolledRead
         roots = readRoots ?? roots
         // A connection below the admin grant is refused these reads by design,
         // and the screen already says why; saying "couldn't read" as well
         // would blame a link that is fine (ov-179).
-        if mayAdminister, readThemes == nil || readRoots == nil {
+        if mayAdminister, readRoots == nil {
             failure = "Couldn’t read all of this runner’s settings. Leave and reopen this screen to try again."
         }
     }
@@ -273,26 +270,6 @@ final class RunnerSettingsModel: ObservableObject {
     /// and nothing on the screen changed.
     private static let notSaved = "That runner didn’t accept the change."
 
-    func save(theme: Theme) async {
-        guard let saved = await connection.upsertTheme(theme) else {
-            failure = Self.notSaved
-            return
-        }
-        themes = saved
-        // Every client's picker reads the merged list, so a saved theme has to
-        // reach it — otherwise the thing you just made is missing from the one
-        // place you would go to choose it.
-        await connection.reloadThemes()
-    }
-
-    func delete(themeNamed name: String) async {
-        guard let left = await connection.deleteTheme(name) else {
-            failure = Self.notSaved
-            return
-        }
-        themes = left
-        await connection.reloadThemes()
-    }
 }
 
 /// Why a section's own controls are dimmed rather than live.
@@ -328,7 +305,6 @@ struct RunnerSettingsView: View {
     let name: String
     @StateObject private var model: RunnerSettingsModel
     @State private var prefixDraft = ""
-    @State private var editingTheme: Theme?
     /// The folder a swipe asked to stop watching, waiting for its name to be
     /// typed. The runner demands that every time; see `RemoveRootConfirmSheet`.
     @State private var removingRoot: RepositoryRoot?
@@ -423,60 +399,6 @@ struct RunnerSettingsView: View {
                     + (model.mayAdminister ? "" : "\n\n" + restrictedSentence))
             }
 
-            Section {
-                ForEach(model.themes) { theme in
-                    Button {
-                        editingTheme = theme
-                    } label: {
-                        HStack {
-                            ThemeStrip(theme: theme)
-                            Text(theme.name).foregroundStyle(.primary)
-                            Spacer()
-                            Image(systemName: "chevron.forward")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                        }
-                        // A plain label hit-tests where its content is, and the
-                        // run between the name and the chevron is most of the
-                        // row.
-                        .contentShape(Rectangle())
-                    }
-                    // A disclosure row, not an action: without this the name and
-                    // the chevron inherit the button's accent tint. See
-                    // `CommitHistorySheet` in `ChangesView`.
-                    .buttonStyle(.plain)
-                    // The row leads to an editor whose only button is Save, and
-                    // `theme.upsert` is a call this connection may not make.
-                    // Opening it anyway would spend somebody's whole edit before
-                    // telling them.
-                    .disabled(!model.mayAdminister)
-                }
-                // Only where the delete can actually land. A swipe that opens a
-                // row and then reports a failure is the version of this that
-                // teaches somebody the app is broken; `theme.delete` is one of
-                // the calls this connection may not make, and it is known now
-                // rather than after the fact.
-                .onDelete(perform: model.mayAdminister ? deleteThemes : nil)
-                Button {
-                    var copy = Themes.shared.current
-                    copy.name = unusedThemeName(like: copy.name)
-                    editingTheme = copy
-                } label: {
-                    Label("Duplicate the Current Theme", systemImage: "plus")
-                }
-                .disabled(!model.mayAdminister)
-            } header: {
-                Text("Themes on This Runner")
-            } footer: {
-                // The list is still real: `theme.list` is `Scope::Read` and only
-                // the writes over it are not. So this section reads normally and
-                // dims what it cannot do, rather than emptying.
-                Text(
-                    "This list includes themes saved on this runner. Saving a theme with a "
-                    + "built-in name overrides it."
-                    + (model.mayAdminister ? "" : "\n\n" + restrictedSentence))
-            }
-
             if let failure = model.failure {
                 Section {
                     Label(failure, systemImage: "exclamationmark.triangle.fill")
@@ -497,13 +419,6 @@ struct RunnerSettingsView: View {
         .sheet(item: $removingRoot) { root in
             RemoveRootConfirmSheet(root: root) { typed in
                 await model.removeRoot(root, confirm: typed)
-            }
-        }
-        .sheet(item: $editingTheme) { theme in
-            NavigationStack {
-                ThemeEditorView(theme: theme) { edited in
-                    Task { await model.save(theme: edited) }
-                }
             }
         }
     }
@@ -630,89 +545,6 @@ struct RunnerSettingsView: View {
         Task { await model.setBranchPrefix(prefixDraft) }
     }
 
-    /// The swipe-to-delete on the theme list, as a named function so the list
-    /// can be handed `nil` instead of it. `onDelete(perform: nil)` is how
-    /// SwiftUI is told there is no swipe at all, which is what a connection
-    /// that may not call `theme.delete` should get.
-    private func deleteThemes(_ offsets: IndexSet) {
-        let names = offsets.map { model.themes[$0].name }
-        Task { for name in names { await model.delete(themeNamed: name) } }
-    }
-
-    private func unusedThemeName(like base: String) -> String {
-        let taken = Set(model.themes.map(\.name))
-        let first = "\(base) Copy"
-        if !taken.contains(first) { return first }
-        for n in 2... where !taken.contains("\(first) \(n)") { return "\(first) \(n)" }
-        return first
-    }
-}
-
-/// A theme's colors as one strip, for a list row.
-struct ThemeStrip: View {
-    let theme: Theme
-
-    var body: some View {
-        HStack(spacing: 1) {
-            ForEach(Array(preview.enumerated()), id: \.offset) { _, packed in
-                Rectangle().fill(Color(packed: packed)).frame(width: 5, height: 18)
-            }
-        }
-        .clipShape(.control)
-        .overlay(RoundedRectangle.control.strokeBorder(Color.primary.opacity(0.12)))  // style-exempt: the hairline around the theme preview strip, whose swatches can match any background
-    }
-
-    private var preview: [UInt32] {
-        [theme.background, theme.foreground] + theme.ansi.prefix(8)
-    }
-}
-
-extension Color {
-    // `Color(packed:)` already exists, in TerminalSession.swift, where the
-    // renderer needed it first. Only the reverse direction is new — a color
-    // well hands back a `Color` and the config file wants an integer.
-
-    /// This color as `0x00RRGGBB`.
-    var packed: UInt32 {
-        let resolved = UIColor(self)
-        var r: CGFloat = 0
-        var g: CGFloat = 0
-        var b: CGFloat = 0
-        var a: CGFloat = 0
-        resolved.getRed(&r, green: &g, blue: &b, alpha: &a)
-        return (UInt32((r * 255).rounded()) << 16)
-            | (UInt32((g * 255).rounded()) << 8)
-            | UInt32((b * 255).rounded())
-    }
-}
-
-extension Theme {
-    /// A theme out of the JSON bridge.
-    ///
-    /// Separate from the synthesized `Decodable` because the bridge hands back
-    /// `[String: Any]` rather than `Data`, and going through a second
-    /// serialization round trip to reuse `Decodable` would be work with nothing
-    /// to show for it.
-    init?(bridge json: [String: Any]) {
-        guard let name = json["name"] as? String,
-            let ansi = json["ansi"] as? [NSNumber], ansi.count == 16
-        else { return nil }
-        self.init(
-            name: name,
-            dark: json["dark"] as? Bool ?? true,
-            background: (json["background"] as? NSNumber)?.uint32Value ?? 0,
-            foreground: (json["foreground"] as? NSNumber)?.uint32Value ?? 0,
-            cursor: (json["cursor"] as? NSNumber)?.uint32Value ?? 0,
-            ansi: ansi.map(\.uint32Value))
-    }
-
-    /// This theme as the bridge's `theme.upsert` arguments.
-    var arguments: [String: Any] {
-        [
-            "name": name, "dark": dark, "background": background,
-            "foreground": foreground, "cursor": cursor, "ansi": ansi,
-        ]
-    }
 }
 
 /// Typing a folder's name to stop watching it.
