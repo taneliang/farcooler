@@ -34,7 +34,6 @@ use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -87,8 +86,10 @@ fn signal_group(held: &Held, signal: i32) -> bool {
     unsafe { libc::killpg(held.leader.0, signal) == 0 }
 }
 
-static HANGUP: AtomicBool = AtomicBool::new(false);
-extern "C" fn on_hangup(_: libc::c_int) { HANGUP.store(true, Ordering::SeqCst); }
+unsafe extern "C" {
+    fn farcooler_native_hold_install_signals();
+    fn farcooler_native_hold_hangup_pending(clear: bool) -> bool;
+}
 
 /// Set in the environment of a hold that a relay started (macOS), and removed before the agent starts.
 #[cfg(target_os = "macos")]
@@ -122,10 +123,8 @@ pub fn serve(socket: &Path, argv: &[String]) -> i32 {
     #[cfg(target_os = "linux")]
     // SAFETY: `prctl` with integer arguments only.
     unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0); }
-    for signal in [libc::SIGHUP, libc::SIGTERM] {
-        // SAFETY: the handler only stores to an atomic, which is async-signal-safe.
-        unsafe { libc::signal(signal, on_hangup as *const () as libc::sighandler_t); }
-    }
+    // SAFETY: this dedicated hold process owns its signal dispositions. The callback only stores to a lock-free atomic.
+    unsafe { farcooler_native_hold_install_signals(); }
     let Some(mut lineage) = Lineage::new() else {
         eprintln!("{FLAG}: cannot read this process's own identity");
         let _ = std::fs::remove_file(socket);
@@ -152,7 +151,8 @@ pub fn serve(socket: &Path, argv: &[String]) -> i32 {
     }
     let mut learned = Instant::now();
     loop {
-        if HANGUP.load(Ordering::SeqCst) || exited(leader) {
+        // SAFETY: reads the C shim's lock-free flag without clearing it, so an unsettled hold retries cleanup.
+        if unsafe { farcooler_native_hold_hangup_pending(false) } || exited(leader) {
             if let Ended::Settled(code) = end(&mut lock(&held), Duration::ZERO) { finish(&socket, code); }
             // Something that left the group is still alive. Keep the socket, so nobody takes its absence for an
             // ended agent, and look again.
@@ -188,10 +188,8 @@ fn relay() -> i32 {
     env.extend(cstr(format!("{RELAYED}=1").as_bytes()));
     let argv: Vec<*mut libc::c_char> = args.iter().map(|a| a.as_ptr().cast_mut()).chain([std::ptr::null_mut()]).collect();
     let envp: Vec<*mut libc::c_char> = env.iter().map(|e| e.as_ptr().cast_mut()).chain([std::ptr::null_mut()]).collect();
-    for signal in [libc::SIGHUP, libc::SIGTERM] {
-        // SAFETY: the handler only stores to an atomic, which is async-signal-safe.
-        unsafe { libc::signal(signal, on_hangup as *const () as libc::sighandler_t); }
-    }
+    // SAFETY: this dedicated relay process owns its signal dispositions. The callback only stores to a lock-free atomic.
+    unsafe { farcooler_native_hold_install_signals(); }
     let mut hold: libc::pid_t = 0;
     // SAFETY: `attr` is initialised before use and destroyed after; every pointer outlives the call.
     let spawned = unsafe {
@@ -209,7 +207,8 @@ fn relay() -> i32 {
         if unsafe { libc::waitpid(hold, &mut status, libc::WNOHANG) } == hold {
             return if libc::WIFEXITED(status) { libc::WEXITSTATUS(status) } else { 128 + libc::WTERMSIG(status) };
         }
-        if HANGUP.swap(false, Ordering::SeqCst) {
+        // SAFETY: reads and clears the C shim's lock-free flag in one atomic operation.
+        if unsafe { farcooler_native_hold_hangup_pending(true) } {
             // SAFETY: `kill` takes no pointers. `hold` is our unreaped child (above), so the pid is still it.
             unsafe { libc::kill(hold, libc::SIGHUP); }
         }

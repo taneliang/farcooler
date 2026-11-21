@@ -64,6 +64,27 @@ fn an_agent_that_exits_takes_its_group_with_it() {
     assert!(!h.socket.exists());
 }
 
+#[test]
+fn a_hangup_ends_the_agent_and_exits_the_hold() {
+    let mut h = hold("echo $$ > agent; exec /bin/sleep 30");
+    let agent = pid_in(h.dir.path(), "agent");
+    assert!(alive(agent));
+    // SAFETY: the hold (the relay on macOS) is our own unreaped child.
+    assert_eq!(unsafe { libc::kill(h.child.id() as i32, libc::SIGHUP) }, 0);
+    for _ in 0..500 {
+        if let Some(status) = h.child.try_wait().unwrap() {
+            assert_eq!(status.code(), Some(128 + libc::SIGTERM));
+            assert!(!alive(agent), "the hold reaped its agent");
+            assert!(!h.socket.exists(), "the hold removed its socket");
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let _ = ask_blocking(&h.socket, "end", Duration::from_secs(5));
+    h.child.wait().unwrap();
+    panic!("the hold did not exit on SIGHUP");
+}
+
 /// One reply line from a raw client.
 fn reply(stream: &UnixStream) -> String {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
