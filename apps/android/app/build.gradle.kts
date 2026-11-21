@@ -1,4 +1,5 @@
 import java.util.Base64
+import org.gradle.api.tasks.PathSensitivity
 
 plugins {
     alias(libs.plugins.android.application)
@@ -152,6 +153,20 @@ val stageFonts by tasks.registering(Copy::class) {
     into(file("src/main/res/font"))
 }
 
+val rustWorkspace = rootProject.file("../..")
+val rustTargetDir = rustWorkspace.resolve("target")
+val hostJniBuildDir = rustTargetDir.resolve("debug")
+val hostJniLibName = System.mapLibraryName("farcooler_jni")
+val nativeLibOverride = providers.gradleProperty("farcooler.nativeLibDir").orNull
+val hostJniLibDir = nativeLibOverride?.let { file(it) } ?: hostJniBuildDir
+val buildHostJni = tasks.register<Exec>("buildHostJni") {
+    workingDir(rustWorkspace)
+    commandLine("cargo", "build", "--locked", "-p", "farcooler-jni", "--target-dir", rustTargetDir)
+    outputs.file(hostJniBuildDir.resolve(hostJniLibName))
+    // Cargo checks source, dependency and toolchain fingerprints on each invocation.
+    outputs.upToDateWhen { false }
+}
+
 android {
     namespace = "com.farcooler"
     compileSdk = 37
@@ -288,7 +303,7 @@ android {
     // `testDebugUnitTest`. That is a fair price: what it buys is that a
     // connected run installs and uninstalls `…android.test` and never touches
     // the `…android.debug` someone is actually using. Which build type the JVM
-    // unit tests compile against is immaterial — they are pure logic, and
+    // unit tests compile against is immaterial — they run on the host JVM, and
     // `instrumented` is `initWith(debug)`.
     testBuildType = "instrumented"
 
@@ -300,8 +315,7 @@ android {
     // only tests that run: Robolectric 4.17 runs SDK 37 (this app's `minSdk`)
     // only on Java 21 and the build and CI run Java 17, so the captures need
     // `-Pfarcooler.captureJdk=<a JDK 21 home>`. Without the flag the package is
-    // excluded, nothing here is loaded, and `testInstrumentedUnitTest` costs what
-    // it did.
+    // excluded from `testInstrumentedUnitTest`.
     //
     //     ./gradlew testInstrumentedUnitTest -Pfarcooler.captures \
     //         -Pfarcooler.captureJdk=/path/to/jdk-21 -Pfarcooler.captureDir=/path/to/out
@@ -312,12 +326,11 @@ android {
             isIncludeAndroidResources = project.hasProperty("farcooler.captures")
             all { test ->
                 val capturing = project.hasProperty("farcooler.captures")
-                // The host build of the JNI core (`cargo build -p farcooler-jni`), so a capture can draw real terminal
-                // bytes through the real emulator (ov-976), and the plain tests can ask the shared core for the Plan's
-                // view (ov-1016: `PlanSectionsCasesTest`, `PlanLandingTest`, `PlanViewTest`'s glance tests).
-                (project.findProperty("farcooler.nativeLibDir") as String?)?.let {
-                    test.jvmArgs("-Djava.library.path=$it")
-                }
+                if (nativeLibOverride == null) test.dependsOn(buildHostJni)
+                test.systemProperty("java.library.path", hostJniLibDir.absolutePath)
+                test.inputs.file(hostJniLibDir.resolve(hostJniLibName))
+                    .withPropertyName("hostJniLib")
+                    .withPathSensitivity(PathSensitivity.NONE)
                 if (capturing) {
                     test.maxParallelForks = 2
                     // The two CI shards partition every class by its initial. The

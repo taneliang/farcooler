@@ -2,6 +2,16 @@ Move **Needs You aggregation** first: the bounded merge/count/group slice occupi
 
 # ov-1336 — what is still written separately
 
+## Native twin selected for ov-1386
+
+After Needs You aggregation, the task-board presenter ranked first for native
+consolidation. Android and AgentKit both projected the same runner task records
+into status columns, card labels, and queue and history views. The shared
+presenter in `crates/client/src/task_board_view.rs` now owns those rules. Kotlin
+and Swift supply platform inputs and render the result. The migration removed
+`TaskBoard.kt` and reduced Android and AgentKit production sources by 389 net
+lines against the pinned main commit for ov-1392.
+
 ## Evidence and counting
 
 Surveyed the checked-out main snapshot `3643128bb44ad59fdbe80ea5b9d8785ca56fa91a` (HEAD equals `origin/main` at survey time, 2026-11-18). Local `main` is older (`3f78754f`); no fetch or checkout was performed. Research only: no builds, tests, lint execution, baseline regeneration or product edits.

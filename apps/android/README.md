@@ -25,9 +25,7 @@ apps/android/app
 
 ## Build
 
-The native cores first — Gradle does not build them, because cross-compiling
-Rust from Gradle means a build that fails differently depending on which of two
-toolchains is missing:
+Cross-compile the native cores for Android before building the APK:
 
 ```sh
 rustup target add aarch64-linux-android
@@ -59,11 +57,12 @@ an `UnsatisfiedLinkError` on the first screen.
 ./gradlew assembleAndroidTest                # compiles that suite, no device
 ```
 
-The third is what CI runs. The device suite was compiled by nothing at all
-until it was added — not by `testInstrumentedUnitTest`, which builds
-`src/test/` only, and not by `assembleDebug` — so it could stop compiling with
-every check still green. CI still does not RUN it; that needs an emulator, and
-`.github/workflows/ci.yml` says why the two halves are worth keeping apart.
+The JVM task builds and loads the host JNI core automatically. It needs Cargo
+on `PATH`. To use a prebuilt host library, pass
+`-Pfarcooler.nativeLibDir=/absolute/path/to/library-directory`.
+
+CI runs the JVM suite and compiles the device suite with `assembleAndroidTest`.
+Running the device suite requires a connected phone or emulator.
 
 The first two say `Instrumented` because both build against that build type,
 which has its own application id. AGP uninstalls the app under test when a connected run

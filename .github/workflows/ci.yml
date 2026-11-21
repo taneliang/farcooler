@@ -1643,14 +1643,10 @@ jobs:
         if: matrix.part == 'release build'
         run: ./scripts/build-android-libs.sh
 
-      - name: Build the Rust core for the host
-        if: matrix.part == 'unit tests'
-        run: cargo build -p farcooler-jni
-
       - name: Test
         if: matrix.part == 'unit tests'
         working-directory: apps/android
-        run: ./gradlew testInstrumentedUnitTest "-Pfarcooler.nativeLibDir=$GITHUB_WORKSPACE/target/debug" --configuration-cache
+        run: ./gradlew testInstrumentedUnitTest --configuration-cache
 
       - name: Build, including the instrumented test bundle
         if: matrix.part == 'release build'
