@@ -127,7 +127,11 @@ pub(super) async fn ticket<L: DispatchLink>(
     json: bool,
     now: i64,
 ) -> Result<String, Failed> {
-    let plan = super::get_plan(link, &ws, true).await?;
+    let keys = match &cmd {
+        TicketCmd::Show { key } | TicketCmd::Set { key, .. } => vec![key.clone()],
+        TicketCmd::PrBody(args) => vec![args.key.clone()],
+    };
+    let plan = super::get_ticket_plan(link, &ws, keys).await?;
     match cmd {
         TicketCmd::Show { key } => {
             let (_, line) = find_line(&plan, &key)?;

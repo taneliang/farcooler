@@ -57,6 +57,8 @@ tempfile = "3"
 ssh-key = { version = "0.7.0-rc.11", default-features = false, features = ["alloc", "ed25519"] }
 
 [dev-dependencies]
+# The real Plan socket fixture reaps its private tmux server.
+farcooler-tmux.workspace = true
 farcooler-workflow.workspace = true
 # Test-only: leaving a database the way a newer build would, for
 # `ensure_local`'s downgrade check. The store has no method that writes a

@@ -218,8 +218,7 @@ fn the_plan() -> pb::Plan {
             input_tokens: 2_900_000, output_tokens: 100_000, cost_micros: Some(20_000_000), runs: 9, ..Default::default()
         }),
         review_waits: vec![],
-        suggested_reviewers: vec![],
-        unthemed_open: None,
+        ..Default::default()
     }
 }
 

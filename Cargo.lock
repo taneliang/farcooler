@@ -921,6 +921,7 @@ dependencies = [
  "farcooler-protocol",
  "farcooler-store",
  "farcooler-tailcat",
+ "farcooler-tmux",
  "farcooler-transport",
  "farcooler-workflow",
  "libc",

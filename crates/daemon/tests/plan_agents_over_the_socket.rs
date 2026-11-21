@@ -77,6 +77,7 @@ async fn the_agents_are_read_back_over_the_wire() {
     r.payload = Some(payload::Payload::PlanGet(pb::PlanGetRequest {
         workspace_id: bytes::Bytes::copy_from_slice(repo.workspace.as_bytes()),
         include_closed: false,
+        ..Default::default()
     }));
     let result::Value::Plan(plan) = link.call(r).await.unwrap().value.unwrap() else { panic!("wrong result") };
 
@@ -111,6 +112,7 @@ async fn the_agents_are_read_back_over_the_wire() {
     again.payload = Some(payload::Payload::PlanGet(pb::PlanGetRequest {
         workspace_id: bytes::Bytes::copy_from_slice(repo.workspace.as_bytes()),
         include_closed: false,
+        ..Default::default()
     }));
     let result::Value::Plan(after) = link.call(again).await.unwrap().value.unwrap() else { panic!("wrong result") };
     assert!(after.agents.iter().all(|a| a.id != g.id.as_bytes().as_slice()), "{:?}", after.agents);

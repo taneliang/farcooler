@@ -54,7 +54,7 @@ async fn a_runner_waiting_on_alice(scope: Scope) -> (Harness, Repo) {
 
 async fn waits(h: &Harness, repo: &Repo) -> Vec<pb::ReviewerWait> {
     let mut link = connect(h).await;
-    let p = pb::request::Payload::PlanGet(pb::PlanGetRequest { workspace_id: repo.workspace.as_bytes().to_vec().into(), include_closed: false });
+    let p = pb::request::Payload::PlanGet(pb::PlanGetRequest { workspace_id: repo.workspace.as_bytes().to_vec().into(), include_closed: false, ..Default::default() });
     let mut req = farcooler_transport::request("plan.get");
     req.payload = Some(p);
     req.required_capabilities = vec![farcooler_protocol::capability::BOARD_PLAN.into()];

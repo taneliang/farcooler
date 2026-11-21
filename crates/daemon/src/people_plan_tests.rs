@@ -249,7 +249,7 @@ fn a_plan_write_under_a_new_name_is_caught() {
 
 /// The plan as `device` reads it at `scope`, the runner's clock left out.
 async fn plan_as(r: &Runner, device: Option<&str>, scope: Scope) -> pb::Plan {
-    let get = request::Payload::PlanGet(pb::PlanGetRequest { workspace_id: id_bytes(r.workspace), include_closed: true });
+    let get = request::Payload::PlanGet(pb::PlanGetRequest { workspace_id: id_bytes(r.workspace), include_closed: true, ..Default::default() });
     match call(&factory(&r.svc, device, scope), "plan.get", get).await {
         Ok(Some(result::Value::Plan(plan))) => pb::Plan { now_ms: 0, ..plan },
         other => panic!("{device:?} at {scope:?}: {other:?}"),

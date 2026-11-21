@@ -4974,6 +4974,8 @@ message Plan {
   repeated TicketReviewers suggested_reviewers = 20;
   // Open cards with no theme, including cards outside the plan.
   optional uint64 unthemed_open = 21;
+  // Present only when a paged detail read has more records.
+  optional uint32 next_offset = 22;
 }
 
 // One reviewer pull requests of a board are waiting on (ov-579).
@@ -5062,6 +5064,28 @@ message PlanGetRequest {
   bytes workspace_id = 1;
   // Include every finished ticket and landing, not only the last week's.
   bool include_closed = 2;
+  // Opt in to byte-bounded detail pages. Older callers omit this.
+  PlanDetailRead detail = 3;
+}
+
+// A page of Plan rows. An unset subject reads across all sections.
+message PlanDetailRead {
+  uint32 offset = 1;
+  oneof subject {
+    // Exact name, short ID or name prefix. Empty matches all themes.
+    string theme_name = 2;
+    // A single landing, or every landing when the number is absent.
+    PlanLandingQuery landings = 3;
+    PlanTicketQuery tickets = 4;
+  }
+}
+
+message PlanLandingQuery {
+  optional uint32 number = 1;
+}
+
+message PlanTicketQuery {
+  repeated string keys = 1;
 }
 
 // `board_theme.create`, at `control`. A card already in another theme moves.

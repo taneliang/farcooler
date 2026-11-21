@@ -127,6 +127,7 @@ fn builds_before_the_layer_ignore_it() {
         payload: Some(v1::request::Payload::PlanGet(v1::PlanGetRequest {
             workspace_id: bytes::Bytes::from_static(&[2; 16]),
             include_closed: false,
+            ..Default::default()
         })),
         ..Default::default()
     };

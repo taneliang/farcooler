@@ -20,7 +20,7 @@ use farcooler_protocol::v1 as pb;
 use serde_json::json;
 
 use super::overview_text::{agent_name, key_of};
-use super::{Common, Failed, age, ago, events_json, events_of, get_plan, needs_the_line, on_a_board, spend_words};
+use super::{Common, Failed, age, ago, events_json, events_of, get_plan_detail, needs_the_line, on_a_board, spend_words};
 use crate::ci_words::{landing_phase_word, landing_state_word, read_for, stale, summary};
 use crate::tasks::{Board, DispatchLink};
 
@@ -56,16 +56,13 @@ pub(super) fn landing_label(l: &pb::Landing) -> String {
 }
 
 /// A landing by its number: "12", "#12", "Landing 12" or "landing-12".
-fn find_landing<'a>(plan: &'a pb::Plan, given: &str) -> Result<&'a pb::Landing, Failed> {
+fn landing_number(given: &str) -> Result<u32, Failed> {
     let text = given.trim().to_lowercase();
     let text = text.strip_prefix("landing").unwrap_or(&text).trim_start_matches(['#', '-', ' ']);
     let Ok(number) = text.parse::<u32>() else {
         return Err(format!("Name a landing by its number, like 12. {given:?} isn't one.").into());
     };
-    plan.landings
-        .iter()
-        .find(|l| l.number == number)
-        .ok_or_else(|| format!("No landing here is number {number}. `farcooler landing list` shows them.").into())
+    Ok(number)
 }
 
 /// A landing's CI read, once the runner has one.
@@ -177,7 +174,12 @@ pub(super) async fn run_on<L: DispatchLink>(
     needs_the_line(&link.capabilities())?;
     let (board, ws) = on_a_board(link, board).await?;
     let board = &board;
-    let plan = get_plan(link, &ws, true).await?;
+    let number = match &cmd {
+        LandingCmd::List => None,
+        LandingCmd::Show { number } => Some(landing_number(number)?),
+    };
+    let subject = pb::plan_detail_read::Subject::Landings(pb::PlanLandingQuery { number });
+    let plan = get_plan_detail(link, &ws, Some(subject)).await?;
     match cmd {
         LandingCmd::List => Ok(if json {
             let all: Vec<_> = plan.landings.iter().map(|l| farcooler_client::plan_json::landing_json(&plan, l)).collect();
@@ -187,8 +189,10 @@ pub(super) async fn run_on<L: DispatchLink>(
         } else {
             plan.landings.iter().flat_map(|l| landing_text(&plan, l, now)).collect::<Vec<_>>().join("\n")
         }),
-        LandingCmd::Show { number } => {
-            let found = find_landing(&plan, &number)?;
+        LandingCmd::Show { .. } => {
+            let number = number.expect("show parsed a landing number");
+            let found = plan.landings.iter().find(|l| l.number == number)
+                .ok_or_else(|| format!("No landing here is number {number}. `farcooler landing list` shows them."))?;
             let events = events_of(link, board, pb::plan_events_request::Subject::LandingId(found.id.clone())).await?;
             Ok(if json {
                 let mut out = farcooler_client::plan_json::landing_json(&plan, found);

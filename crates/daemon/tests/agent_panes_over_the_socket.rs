@@ -100,7 +100,7 @@ async fn a_pane_opened_as_a_builder_is_recorded_as_that_agent() {
 
     let mut get = request("plan.get");
     get.required_capabilities = vec![BOARD_PLAN.into(), BOARD_LINE.into()];
-    get.payload = Some(payload::Payload::PlanGet(pb::PlanGetRequest { workspace_id: id(workspace), include_closed: false }));
+    get.payload = Some(payload::Payload::PlanGet(pb::PlanGetRequest { workspace_id: id(workspace), include_closed: false, ..Default::default() }));
     let Some(result::Value::Plan(plan)) = link.call(get).await.expect("plan.get").value else { panic!("wrong result") };
     let row = plan.agents.iter().find(|a| a.id == id(agent.id)).unwrap_or_else(|| panic!("not listed: {:?}", plan.agents));
     assert_eq!(row.terminal_id, Some(id(terminal)));

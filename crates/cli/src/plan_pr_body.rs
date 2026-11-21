@@ -42,7 +42,7 @@ use crate::{req_for, with};
 #[derive(Debug, Clone, Args)]
 pub(super) struct PrBodyArgs {
     /// The ticket: its card's key.
-    key: String,
+    pub(super) key: String,
     /// Write it into this pull request's description: a number, a branch or a
     /// URL. Only the text between the Far Cooler markers changes.
     #[arg(long, value_name = "PR")]

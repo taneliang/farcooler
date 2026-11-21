@@ -278,7 +278,7 @@ pub async fn a_fix(client: &mut SocketClient, workspace: &pb::Workspace, card: &
 
 pub async fn plan(client: &mut SocketClient, workspace: &pb::Workspace) -> pb::Plan {
     let mut get = request_for("plan.get");
-    get.payload = Some(request::Payload::PlanGet(pb::PlanGetRequest { workspace_id: workspace.id.clone(), include_closed: true }));
+    get.payload = Some(request::Payload::PlanGet(pb::PlanGetRequest { workspace_id: workspace.id.clone(), include_closed: true, ..Default::default() }));
     let result::Value::Plan(plan) = call(client, get, BOARD_PLAN).await else { panic!("wrong result") };
     plan
 }

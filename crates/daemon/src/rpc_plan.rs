@@ -28,6 +28,7 @@ use crate::task_ops::{actor_from_wire, required_id};
 use crate::watch::Watcher;
 use crate::wire::id_bytes;
 
+mod detail;
 mod overview;
 
 /// Finished tickets and landings the plan read keeps showing, unless the
@@ -71,7 +72,9 @@ pub(crate) async fn dispatch(svc: &Arc<Service>, watcher: &Arc<Watcher>, scope: 
             let workspace = required_id(&p.workspace_id)?;
             let closed_since = if p.include_closed { i64::MIN } else { now() - CLOSED_FOR_MS };
             let mut plan = read_plan(svc, watcher, workspace, closed_since, admin, control).await?;
-            if !p.include_closed {
+            if let Some(query) = p.detail {
+                plan = detail::page(plan, query)?;
+            } else if !p.include_closed {
                 overview::summarize(&mut plan);
             }
             Ok(result::Value::Plan(plan))
@@ -642,6 +645,7 @@ fn pb_plan(svc: &Service, p: &Plan, admin: bool) -> Result<pb::Plan> {
         agents: p.agents.iter().map(pb_agent).collect(),
         agents_spend: Some(pb_spend(&p.agents_spend)),
         suggested_reviewers: Vec::new(),
+        next_offset: None,
     })
 }
 

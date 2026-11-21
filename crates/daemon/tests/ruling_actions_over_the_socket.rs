@@ -47,7 +47,7 @@ fn keep_all(workspace: Uuid, actor: &str) -> payload::Payload {
 }
 
 async fn plan(link: &mut Link, workspace: Uuid) -> pb::Plan {
-    let p = payload::Payload::PlanGet(pb::PlanGetRequest { workspace_id: id(workspace), include_closed: false });
+    let p = payload::Payload::PlanGet(pb::PlanGetRequest { workspace_id: id(workspace), include_closed: false, ..Default::default() });
     match call(link, "plan.get", BOARD_PLAN, p).await.expect("plan.get") {
         result::Value::Plan(p) => p,
         other => panic!("wrong result: {other:?}"),
@@ -230,7 +230,7 @@ async fn a_read_for_all_sees_more_than_a_hundred_settled_rulings() {
         h.service.store.set_ruling(id, farcooler_store::rulings::RulingState::Confirmed, None, Actor::User).unwrap();
     }
     let mut a = connect(&h).await;
-    let all = payload::Payload::PlanGet(pb::PlanGetRequest { workspace_id: id(repo.workspace), include_closed: true });
+    let all = payload::Payload::PlanGet(pb::PlanGetRequest { workspace_id: id(repo.workspace), include_closed: true, ..Default::default() });
     let read = match call(&mut a, "plan.get", BOARD_PLAN, all).await.unwrap() {
         result::Value::Plan(p) => p,
         other => panic!("wrong result: {other:?}"),

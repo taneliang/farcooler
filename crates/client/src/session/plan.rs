@@ -12,6 +12,7 @@ impl Session {
         let payload = request::Payload::PlanGet(farcooler_protocol::v1::PlanGetRequest {
             workspace_id: bytes::Bytes::copy_from_slice(workspace.as_bytes()),
             include_closed: false,
+            ..Default::default()
         });
         match self.value("plan.get", None, Some(payload)).await? {
             result::Value::Plan(plan) => Ok(plan),

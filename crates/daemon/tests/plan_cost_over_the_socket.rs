@@ -27,7 +27,7 @@ async fn call(link: &mut Link, method: &str, p: payload::Payload) -> Result<resu
 }
 
 async fn plan(link: &mut Link, workspace: Uuid) -> pb::Plan {
-    let p = payload::Payload::PlanGet(pb::PlanGetRequest { workspace_id: id(workspace), include_closed: false });
+    let p = payload::Payload::PlanGet(pb::PlanGetRequest { workspace_id: id(workspace), include_closed: false, ..Default::default() });
     match call(link, "plan.get", p).await.expect("plan.get") {
         result::Value::Plan(p) => p,
         other => panic!("wrong result: {other:?}"),

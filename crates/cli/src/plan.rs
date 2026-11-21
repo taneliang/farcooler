@@ -318,7 +318,7 @@ async fn run_on<L: DispatchLink>(
             Ok(value.to_string())
         }
         Some(PlanCmd::Set { tickets }) => {
-            let plan = get_plan(link, &ws, true).await?;
+            let plan = get_ticket_plan(link, &ws, tickets.clone()).await?;
             let ids = ranked(&plan, &tickets)?;
             let set = request::Payload::LineOrder(pb::LineOrder { workspace_id: ws, task_ids: ids, actor: actor.into() });
             let result::Value::Plan(plan) = send(link, board, "line.order", set).await? else { return Err(unreadable()) };
@@ -390,10 +390,49 @@ async fn send_saying<L: DispatchLink>(
     expect_value(answer.value)
 }
 
-async fn get_plan<L: DispatchLink>(link: &mut L, workspace: &bytes::Bytes, all: bool) -> Result<pb::Plan, Failed> {
+pub(crate) async fn get_plan<L: DispatchLink>(link: &mut L, workspace: &bytes::Bytes, all: bool) -> Result<pb::Plan, Failed> {
+    if all {
+        get_plan_detail(link, workspace, None).await
+    } else {
+        read_plan_page(link, workspace, None).await
+    }
+}
+
+async fn get_ticket_plan<L: DispatchLink>(link: &mut L, workspace: &bytes::Bytes, keys: Vec<String>) -> Result<pb::Plan, Failed> {
+    get_plan_detail(link, workspace, Some(pb::plan_detail_read::Subject::Tickets(pb::PlanTicketQuery { keys }))).await
+}
+
+async fn get_plan_detail<L: DispatchLink>(
+    link: &mut L,
+    workspace: &bytes::Bytes,
+    subject: Option<pb::plan_detail_read::Subject>,
+) -> Result<pb::Plan, Failed> {
+    let mut query = pb::PlanDetailRead { offset: 0, subject };
+    let mut plan = read_plan_page(link, workspace, Some(query.clone())).await?;
+    while let Some(offset) = plan.next_offset {
+        if offset <= query.offset {
+            return Err(unreadable());
+        }
+        query.offset = offset;
+        let next = read_plan_page(link, workspace, Some(query.clone())).await?;
+        plan.themes.extend(next.themes);
+        plan.cards.extend(next.cards);
+        plan.rulings.extend(next.rulings);
+        plan.ci.extend(next.ci);
+        plan.lines.extend(next.lines);
+        plan.landings.extend(next.landings);
+        plan.agents.extend(next.agents);
+        plan.next_offset = next.next_offset;
+    }
+    Ok(plan)
+}
+
+async fn read_plan_page<L: DispatchLink>(
+    link: &mut L, workspace: &bytes::Bytes, detail: Option<pb::PlanDetailRead>,
+) -> Result<pb::Plan, Failed> {
     let mut r = with(
         req_for("plan.get", crate::uuid_of(workspace)),
-        request::Payload::PlanGet(pb::PlanGetRequest { workspace_id: workspace.clone(), include_closed: all }),
+        request::Payload::PlanGet(pb::PlanGetRequest { workspace_id: workspace.clone(), include_closed: detail.is_some(), detail }),
     );
     r.required_capabilities.push(capability::BOARD_PLAN.to_string());
     let answer = link.call(r).await.map_err(|e| refused_here(e, "The runner couldn't read the plan."))?;
@@ -648,7 +687,11 @@ async fn theme<L: DispatchLink>(
     json: bool,
     now: i64,
 ) -> Result<String, Failed> {
-    let plan = get_plan(link, &ws, true).await?;
+    let name = match &cmd {
+        ThemeCmd::Show { name } | ThemeCmd::Set { name, .. } | ThemeCmd::Cards { name, .. } => name.clone(),
+        _ => String::new(),
+    };
+    let plan = get_plan_detail(link, &ws, Some(pb::plan_detail_read::Subject::ThemeName(name))).await?;
     match cmd {
         ThemeCmd::List { card: wanted } => {
             let mut views: Vec<&pb::BoardThemeView> = plan.themes.iter().collect();

@@ -1,6 +1,5 @@
 //! The default Plan is an overview. Keep complete counters and a recent
-//! sample of history, while the explicit include_closed read serves detail
-//! commands such as theme show and landing show.
+//! sample of history. Detail commands request their own pages.
 
 use std::cmp::Reverse;
 use std::collections::HashSet;

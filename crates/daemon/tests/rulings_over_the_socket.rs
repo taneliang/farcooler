@@ -55,7 +55,7 @@ async fn ruling(link: &mut Link, p: payload::Payload, method: &str) -> pb::Board
 }
 
 async fn plan(link: &mut Link, workspace: Uuid, all: bool) -> pb::Plan {
-    let p = payload::Payload::PlanGet(pb::PlanGetRequest { workspace_id: id(workspace), include_closed: all });
+    let p = payload::Payload::PlanGet(pb::PlanGetRequest { workspace_id: id(workspace), include_closed: all, ..Default::default() });
     match call(link, "plan.get", BOARD_PLAN, p).await.expect("plan.get") {
         result::Value::Plan(p) => p,
         other => panic!("wrong result: {other:?}"),
