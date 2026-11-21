@@ -20,7 +20,7 @@ use farcooler_protocol::v1 as pb;
 use serde_json::json;
 
 use super::overview_text::{agent_name, key_of};
-use super::{Common, Failed, age, ago, events_json, events_of, get_plan_detail, needs_the_line, on_a_board, spend_words};
+use super::{Common, Failed, age, ago, events_json, events_of, get_plan, needs_the_line, on_a_board, send, spend_words, unreadable};
 use crate::ci_words::{landing_phase_word, landing_state_word, read_for, stale, summary};
 use crate::tasks::{Board, DispatchLink};
 
@@ -62,7 +62,10 @@ fn landing_number(given: &str) -> Result<u32, Failed> {
     let Ok(number) = text.parse::<u32>() else {
         return Err(format!("Name a landing by its number, like 12. {given:?} isn't one.").into());
     };
-    Ok(number)
+    plan.landings
+        .iter()
+        .find(|l| l.number != 0 && l.number == number)
+        .ok_or_else(|| format!("No landing here is number {number}. `farcooler landing list` shows them.").into())
 }
 
 /// A landing's CI read, once the runner has one.
@@ -174,12 +177,13 @@ pub(super) async fn run_on<L: DispatchLink>(
     needs_the_line(&link.capabilities())?;
     let (board, ws) = on_a_board(link, board).await?;
     let board = &board;
-    let number = match &cmd {
-        LandingCmd::List => None,
-        LandingCmd::Show { number } => Some(landing_number(number)?),
+    let mut plan = get_plan(link, &ws, true).await?;
+    let payload = pb::request::Payload::PlanGet(pb::PlanGetRequest { workspace_id: ws, include_closed: true });
+    let history = match send(link, board, "landing.history", payload).await? {
+        pb::result::Value::Plan(history) => history,
+        _ => return Err(unreadable()),
     };
-    let subject = pb::plan_detail_read::Subject::Landings(pb::PlanLandingQuery { number });
-    let plan = get_plan_detail(link, &ws, Some(subject)).await?;
+    plan.landings.extend(history.landings);
     match cmd {
         LandingCmd::List => Ok(if json {
             let all: Vec<_> = plan.landings.iter().map(|l| farcooler_client::plan_json::landing_json(&plan, l)).collect();

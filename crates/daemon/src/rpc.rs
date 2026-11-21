@@ -538,7 +538,8 @@ fn scope_of(method: Method) -> Scope {
         // `host_admin` (`rpc_plan::pb_line`). Its writes sit with the board
         // writes, for the same reason: an orchestrator has to be able to write
         // its own plan, and they touch no git data.
-        Method::PlanGet | Method::PlanEvents | Method::BoardThemeList => Scope::Read,
+        Method::PlanGet | Method::PlanEvents | Method::BoardThemeList
+        | Method::LandingHistory => Scope::Read,
         Method::LineOrder
         | Method::BoardThemeCreate
         | Method::BoardThemeUpdate
@@ -2019,7 +2020,8 @@ impl Rpc {
             // A note is a board route; a person's answer on a workflow draft's card is also its approval (ov-971).
             "task.note" => crate::workflow_drafts::note(self, crate::rpc_board::dispatch(svc, &self.watcher, &self.peer, (self.caller_pid, &self.caller_pane, self.stepped.get()), req).await?).await,
             // The plan layer (ov-268); the arms live in `rpc_plan`.
-            "plan.get" | "plan.events" | "board_theme.list" | "board_theme.create" | "board_theme.update" | "board_theme.move"
+            "plan.get" | "plan.events" | "landing.history" | "board_theme.list"
+            | "board_theme.create" | "board_theme.update" | "board_theme.move"
             | "board_theme.cards" | "line.set" | "line.order" | "agent.record" | "agent.work" | "agent.end"
             | "ruling.add" | "ruling.set" | "ruling.keep_all" => {
                 crate::rpc_plan::dispatch(svc, &self.watcher, self.peer.scope, req).await

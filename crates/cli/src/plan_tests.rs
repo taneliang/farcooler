@@ -351,6 +351,7 @@ impl DispatchLink for Runner {
                         "workspace": WORKSPACE, "epoch": 1, "inspect": true, "controller": false
                     }}, "places": {"agent": {"cap": 4, "used": 0}}}).to_string(),
                 }),
+                ("landing.history", _) => result::Value::Plan(pb::Plan::default()),
                 ("task.list", _) => result::Value::TaskList(pb::TaskList { next_page_after: None, items: items(), reads: None }),
                 ("plan.events", _) => result::Value::PlanEventList(pb::PlanEventList { events: self.events.clone() }),
                 ("line.order", Some(request::Payload::LineOrder(p))) => {

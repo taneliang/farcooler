@@ -86,6 +86,13 @@ pub(crate) async fn dispatch(svc: &Arc<Service>, watcher: &Arc<Watcher>, scope: 
             }
             Ok(result::Value::Plan(plan))
         }
+        "landing.history" => {
+            let Some(request::Payload::PlanGet(p)) = req.payload else { return Err(payload_missing()) };
+            let workspace = required_id(&p.workspace_id)?;
+            svc.store.get_workspace(workspace)?;
+            let landings = svc.store.landings(workspace)?.iter().map(crate::rpc_landings::pb_landing).collect();
+            Ok(result::Value::Plan(pb::Plan { landings, ..Default::default() }))
+        }
         "plan.events" => {
             let Some(request::Payload::PlanEvents(p)) = req.payload else { return Err(payload_missing()) };
             let subject = match p.subject {
