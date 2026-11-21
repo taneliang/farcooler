@@ -26,7 +26,7 @@ struct PlanLandingRow: View {
     @ScaledMetric(relativeTo: .body) private var glyphWidth: CGFloat = 22
 
     private var attention: Bool { card.needsAttention(ci: ci) }
-    private var run: URL? { ci.flatMap { PageLinks.https($0.url) } }
+    private var run: URL? { ci?.runURL }
     private var facts: String { card.facts(ci: ci, now: now) }
     /// The same words with each span held together: a line breaks between
     /// spans, never inside "12 min" (ov-515).

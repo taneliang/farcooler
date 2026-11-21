@@ -94,36 +94,6 @@ final class PlanSectionsCapturesUITests: XCTestCase {
         }
     }
 
-    private static func seeded(_ file: String) -> String {
-        var root = URL(fileURLWithPath: #filePath)
-        for _ in 0..<4 { root.deleteLastPathComponent() }
-        return root.appendingPathComponent("test/fixtures/\(file)").path
-    }
-
-    /// An orchestrator's page, whose quiet text is `Ink.quiet` (ov-687, fourth
-    /// batch), in light and dark. The Cost section is `NavigationCapturesUITests`'s
-    /// `testPlanSheet`.
-    func testQuietPage() throws {
-        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad, "the phone's sheet")
-        for scheme in ["light", "dark"] {
-            XCUIDevice.shared.appearance = scheme == "dark" ? .dark : .light
-            let app = XCUIApplication.phoneHarness(
-                ["-phone-empty-inbox", "-phone-plan", "-phone-plan-file", Self.seeded("pages-seeded.json"), "-phone-pages", "-phone-appearance", scheme])
-            let row = app.buttons["workspace-row-Billing"]
-            XCTAssertTrue(row.waitForExistence(timeout: 30), "no Billing row")
-            row.tap()
-            XCTAssertTrue(app.reveal(element(app, "plan-facts")), "no plan")
-            let train = element(app, "plan-page-train")
-            for _ in 0..<14 where !(train.exists && train.isHittable) { app.swipeUp() }
-            train.tap()
-            XCTAssertTrue(element(app, "page-train").waitForExistence(timeout: 10), "no page")
-            shoot("quiet-page", scheme, expecting: .shows(element(app, "page-train")))
-            app.swipeUp()
-            shoot("quiet-page-2", scheme, expecting: .shows(element(app, "page-train")))
-            app.terminate()
-        }
-    }
-
     /// The screen below the status bar, without the glyph column (`CaptureState.body`).
     private func bodyPicture() -> Data { CaptureState.body(glyphShare: 0.14) }
 

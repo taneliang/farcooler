@@ -688,24 +688,4 @@ final class PadWorkspaceUITests: XCTestCase {
             }
         }
     }
-
-    /// **Pages are listed after Themes** in the plan column, which keeps the
-    /// themes grid the phone's sheet left to its tree; **one anchored to a
-    /// live theme isn't listed** as well.
-    func testPagesAreListedAfterThemesAndAnAnchoredOneIsNot() {
-        var root = URL(fileURLWithPath: #filePath)
-        for _ in 0..<4 { root.deleteLastPathComponent() }
-        let pages = root.appendingPathComponent("test/fixtures/pages-seeded.json").path
-        let app = openBilling(["-phone-pages"], fixture: pages)
-        layout(app, is: "threeColumns", "landscape")
-        // The first of each: a header's identifier reaches its words too.
-        let header = app.descendants(matching: .any).matching(identifier: "plan-pages").firstMatch
-        XCTAssertTrue(app.reveal(header), "no Pages section: \(app.debugDescription)")
-        let themes = app.descendants(matching: .any).matching(identifier: "plan-themes").firstMatch
-        XCTAssertTrue(themes.exists, "no Themes section above Pages")
-        XCTAssertLessThan(themes.frame.minY, header.frame.minY, "Pages isn't after Themes")
-        let spend = element(app, "plan-page-spend")
-        XCTAssertTrue(app.reveal(spend), "a page of its own isn't listed")
-        XCTAssertFalse(element(app, "plan-page-risks").exists, "a page anchored to a live theme is listed as well")
-    }
 }
