@@ -10,7 +10,6 @@ import SwiftUI
 //   the orchestrator's row, one line;
 //   Themes, a row each with its progress, opening the theme's page, where
 //   its tickets and cards are;
-//   Pages, the orchestrator's own, when it has published any;
 //   Tasks, the status groups as an index, collapsed until opened;
 //   Terminals and Worktrees, as before.
 //
@@ -42,11 +41,6 @@ enum PlanNavigator {
         model.shownThemes.filter { BoardFilter.isEmpty(filter) || BoardFilter.matches(key: "", title: $0.name, filter) }
     }
 
-    /// The orchestrator's pages listed, narrowed by the filter.
-    static func pages(_ listed: [BoardPage], filter: String) -> [BoardPage] {
-        listed.filter { BoardFilter.isEmpty(filter) || BoardFilter.matches(key: "", title: $0.title, filter) }
-    }
-
     /// A theme's progress, as its row says it: "3/10", the cards done of
     /// those counted.
     static func progress(_ counts: PlanCounts) -> String { "\(counts.done)/\(PlanWords.total(counts))" }
@@ -55,20 +49,14 @@ enum PlanNavigator {
     /// isn't planned, so it's the task list as it always was.
     struct Shown {
         var themes: [PlanTheme] = []
-        var pages: [BoardPage] = []
-        /// Show Hidden Pages, under no pages at all: unfiltered only.
-        var offersHidden = false
 
         @MainActor
         init(_ plan: PlanStore, filter: String) {
             guard plan.planned else { return }
             themes = PlanNavigator.themes(plan.plan, filter: filter)
-            pages = PlanNavigator.pages(plan.listedPages, filter: filter)
-            offersHidden = BoardFilter.isEmpty(filter) && plan.hiddenCount > 0
         }
 
-        var showsPages: Bool { !pages.isEmpty || offersHidden }
-        var isEmpty: Bool { themes.isEmpty && !showsPages }
+        var isEmpty: Bool { themes.isEmpty }
     }
 }
 
@@ -116,36 +104,6 @@ struct PlanNavigatorThemes: View {
         }
         .listChanges(PlanChanges.themes(themes))
         .identified("plan-themes")
-    }
-}
-
-/// The navigator's Pages: the orchestrator's own pages, and Show Hidden
-/// Pages when some are hidden here.
-struct PlanNavigatorPages: View {
-    @ObservedObject var plan: PlanStore
-    let pages: [BoardPage]
-    let selected: PlanPage?
-    let keyed: Bool
-    let onOpen: (PlanPage) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(pages) { page in
-                PlanPageRow(
-                    page: page, now: PlanOverviewView.nowMs(), selected: selected == .page(page.slot), keyed: keyed,
-                    onHide: { plan.hide(page.slot) }
-                ) { onOpen(.page(page.slot)) }
-            }
-            if plan.hiddenCount > 0 {
-                Button("Show Hidden Pages") { plan.showHiddenPages() }
-                    .buttonStyle(.link)
-                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .padding(.leading, NavigatorGrid.textInset)
-                    .padding(.vertical, NavigatorRhythm.air)
-                    .identified("plan-show-hidden-pages")
-            }
-        }
-        .identified("plan-pages")
     }
 }
 

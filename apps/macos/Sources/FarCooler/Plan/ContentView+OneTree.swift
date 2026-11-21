@@ -102,7 +102,6 @@ extension ContentView {
                     isMainCheckout: true,
                     terminals: ProjectTerminals.terminals(in: checkout, fleet: store.fleet).map(Self.treeTerminal))
             },
-            pages: board.plan.listedPages.map(OneTreePage.init),
             unreadable: board.board.unreadable.map {
                 OneTreeUnreadable(id: $0.id, key: $0.key, title: $0.title, status: $0.status)
             },
@@ -156,7 +155,6 @@ extension ContentView {
             switch page {
             case .theme(let id): return .theme(id)
             case .ticket(let id): return .ticket(id)
-            case .page(let slot): return .page(slot)
             case .needsYou: return .needsYou
             case .stage, .engine: return .plan
             }
@@ -186,7 +184,6 @@ extension ContentView {
         case .needsYou: return .workspace(host: host, workspace: workspace, focus: .plan(.needsYou))
         case .theme(let id): return .workspace(host: host, workspace: workspace, focus: .plan(.theme(id)))
         case .ticket(let id): return .workspace(host: host, workspace: workspace, focus: .plan(.ticket(id)))
-        case .page(let slot): return .workspace(host: host, workspace: workspace, focus: .plan(.page(slot)))
         case .task(let id): return .workspace(host: host, workspace: workspace, focus: .task(id))
         case .worktree(let id):
             return worktree(host: host, id: id).map { Self.opening($0, terminal: nil, in: store.fleet) }
@@ -210,7 +207,6 @@ extension ContentView {
         case .needsYou: openPlan(.needsYou, host: host, workspace: workspace.id)
         case .theme(let id): openPlan(.theme(id), host: host, workspace: workspace.id)
         case .ticket(let id): openPlan(.ticket(id), host: host, workspace: workspace.id)
-        case .page(let slot): openPlan(.page(slot), host: host, workspace: workspace.id)
         case .task(let id): chooseTask(id, host: host, workspace: workspace.id, glance: true)
         case .worktree(let id):
             if let found = worktree(host: host, id: id) { glance(at: found) }

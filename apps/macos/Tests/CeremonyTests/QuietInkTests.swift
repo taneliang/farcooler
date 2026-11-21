@@ -147,7 +147,7 @@ struct QuietInkTests {
     }
 
     private func themes() async throws -> [Theme] {
-        let cli = try #require(RealCLIPagesTests.cli, "no farcooler CLI in target/: build it first (apps/macos/test.sh does)")
+        let cli = try #require(ScratchDaemon.cli, "no farcooler CLI in target/: build it first (apps/macos/test.sh does)")
         // `theme list` starts a daemon if none is running: give it a scratch
         // home and stop it after, so the run leaves no daemon behind.
         let home = "/tmp/fcq-\(UUID().uuidString.prefix(6))"
@@ -216,7 +216,7 @@ struct QuietInkTests {
     /// is drawn on: every one is a content card on `WorkspaceStyle.paper`
     /// (`contentCard()`), and a decision's note sits on the inset wash over it.
     static let surfaces: [(name: String, ground: Int)] = [
-        ("Plan home and peek", 0), ("Plan theme page", 0), ("Plan ticket page", 0), ("Plan orchestrator page", 0),
+        ("Plan home and peek", 0), ("Plan theme page", 0), ("Plan ticket page", 0),
         ("Plan landing card", 0), ("Plan Needs You page", 0), ("Plan rulings", 0),
         ("Task card: intent, acceptance, constraints", 0), ("Task card: usage and subagents", 0),
         ("Task card: record, a decision note", 1), ("Board history", 0), ("Unread summary", 0),
@@ -228,9 +228,8 @@ struct QuietInkTests {
         // The third batch: setup, panes and the changes notice.
         ("Welcome: page text", 0), ("Welcome: checks box", 1), ("Charter: page text", 9), ("Charter: answers box", 10),
         ("Charter: action bar", 11), ("Rep column", 0), ("Pane header", 0), ("Changes: LFS notice", 0),
-        // The fourth batch: AgentKit's shared Plan cost and page views, drawn on the paper here.
-        ("Plan cost: week, cost per card, a theme's spend", 0), ("Orchestrator page: text, stats, tables, lists, timeline", 0),
-        ("Orchestrator page: a list's state words and details", 1),
+        // The fourth batch: AgentKit's shared Plan cost views, drawn on the paper here.
+        ("Plan cost: week, cost per card, a theme's spend", 0),
         // The fifth batch: the cards' own grounds. The plane's text (the navigator's row, the
         // tab strip, the jump bar, the empty main area) is `SidebarInk`, measured on the plane
         // in `UnifiedChromeTests`; what is here is quiet ink on a card or a window.
@@ -276,7 +275,7 @@ struct QuietInkTests {
         let sources = root.appendingPathComponent("Sources/FarCooler")
         let files = [
             "Plan/PlanPages", "Plan/PlanOverview", "Plan/PlanCardRow", "Plan/PlanRulings", "Plan/PlanLandingCard", "Plan/PlanThemeGridView",
-            "Plan/PlanOrchestratorPages", "Plan/PlanAgentsView", "Plan/PlanHome", "Plan/PlanColumnView", "Plan/PlanOutsideRow",
+            "Plan/PlanAgentsView", "Plan/PlanHome", "Plan/PlanColumnView", "Plan/PlanOutsideRow",
             "Plan/ContentView+OneTree", "TaskColumn", "TaskUsageView", "BoardHistoryView", "Components/TaskWorkers",
             "BoardSummaryStrip", "TaskNoteStyle", "TaskBoard",
             "ChangesPane", "ChangesLfsNotice", "RepColumn", "WelcomeView", "CharterSetupView", "TileView", "Files/FilesPane", "Files/CodeLineRow", "DiffView", "DiffReadFailureRow",

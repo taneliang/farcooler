@@ -43,7 +43,6 @@ enum SelectionMemory {
             case .history(let status): third = "history:\(status.rawValue)"
             case .plan(.theme(let theme)): third = "plan:theme:\(theme)"
             case .plan(.ticket(let ticket)): third = "plan:ticket:\(ticket)"
-            case .plan(.page(let slot)): third = "plan:page:\(slot)"
             case .plan(.needsYou): third = "plan:needs-you"
             case .plan(.engine): third = "plan:engine"
             // A stage list is a view of the column, not kept.
@@ -78,8 +77,9 @@ enum SelectionMemory {
             focus = .plan(.needsYou)
         } else if third == "plan:engine" {
             focus = .plan(.engine(nil))
-        } else if third.hasPrefix("plan:page:"), third.count > "plan:page:".count {
-            focus = .plan(.page(String(third.dropFirst("plan:page:".count))))
+        } else if third.hasPrefix("plan:page:") {
+            // Restore the workspace when the saved selection was a retired page.
+            focus = nil
         } else if !third.isEmpty {
             return nil
         }

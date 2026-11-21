@@ -63,13 +63,13 @@ struct PlanOverviewView: View {
                 ProgressView().controlSize(.small)
                     .frame(maxWidth: .infinity, minHeight: NavigatorRhythm.placeholder)
             }
-        } else if model.isEmpty && plan.pages.isEmpty && !(plan.keepsRulings && !model.rulings.isEmpty) {
+        } else if model.isEmpty && !(plan.keepsRulings && !model.rulings.isEmpty) {
             PlanEmptyNotice().identified("plan-empty")
         } else {
             // The sections, in the owner's order (ov-503, decision 7): Needs You
             // is the home's, above; Landing, In Review, Building, Waiting,
             // Agents and Themes are `PlanSectionsView`'s; then what is
-            // unchanged: Cost, Pages and Landed Today.
+            // unchanged: Cost and Landed Today.
             let view = plan.view(needsYou: needsYou, statuses: statuses, activity: activity)
             if let view {
                 PlanSectionsView(
@@ -81,8 +81,6 @@ struct PlanOverviewView: View {
             }
             // Behind `board_cost`: a runner without it sends no cost (ov-307).
             if let cost = model.cost, cost.isWorthShowing { costSection(cost) }
-            // After Themes (ov-269 design 6.1): only on a runner with pages.
-            if !plan.listedPages.isEmpty || plan.hiddenCount > 0 { pages() }
             if let view, let landed = view.section(.landedToday) { landedToday(landed, view) }
         }
     }
@@ -103,35 +101,6 @@ struct PlanOverviewView: View {
         }
         .identified("plan-cost-section")
     }
-
-    private func pages() -> some View {
-        let listed = plan.listedPages
-        return CollapsibleSection("Pages", id: "plan.pages", style: .navigator, key: key("pages"), defaults: defaults,
-            count: listed.count
-        ) {
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(listed) { page in
-                    PlanPageRow(
-                        page: page, now: Self.nowMs(), selected: selected == .page(page.slot), keyed: keyed,
-                        onHide: { plan.hide(page.slot) }
-                    ) { onOpen(.page(page.slot)) }
-                }
-                if plan.hiddenCount > 0 {
-                    Button("Show Hidden Pages") { plan.showHiddenPages() }
-                        .buttonStyle(.link)
-                        .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                        .padding(.leading, NavigatorGrid.textInset)
-                        .padding(.top, NavigatorRhythm.air)
-                        .identified("plan-show-hidden-pages")
-                }
-            }
-        }
-        .identified("plan-pages")
-    }
-
-    /// Now, for "Updated 12 min ago": a page's own clock is the runner's
-    /// stamp, and the Mac's is close enough for minutes.
-    static func nowMs() -> Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
 
     /// Landed on the viewer's day: the view's cards, under the view's title.
     private func landedToday(_ section: WireSection, _ view: WirePlanView) -> some View {

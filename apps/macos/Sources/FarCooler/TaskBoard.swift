@@ -80,9 +80,8 @@ final class TaskBoardStore: ObservableObject {
     /// `id`'s Usage section: what was read for it, or loading until then.
     func usage(for id: String) -> TaskUsageState { usage[id] ?? .loading }
 
-    /// The board's plan (ov-273), read only once someone chooses Plan; its
-    /// choice kept in `planDefaults`, which a test replaces before reading.
-    lazy var plan = PlanStore(client: client, workspace: workspace, host: hostKey, defaults: planDefaults)
+    /// The board's plan (ov-273), read only once someone chooses Plan.
+    lazy var plan = PlanStore(client: client, workspace: workspace, host: hostKey)
     var planDefaults = UserDefaults.standard
 
     /// The card that is open, or nil for the board alone.
@@ -1076,7 +1075,7 @@ struct TaskBoardView: View {
 
     /// The navigator's collapsible sections. Not the orchestrator's row
     /// (ov-177), whose closed state, kept from before, is no longer read.
-    static let navigatorSections = ["themes", "pages", "tasks", "terminals", "worktrees"]
+    static let navigatorSections = ["themes", "tasks", "terminals", "worktrees"]
 
     /// A navigator section's header (ov-92): the one collapsible section,
     /// in the navigator's style, its open state kept per board on this Mac.
@@ -1095,7 +1094,7 @@ struct TaskBoardView: View {
     }
 
     /// The navigator's panes, those shown: a planned board's Themes and
-    /// Pages (`PlanNavigator`), then Tasks, Terminals and Worktrees.
+    /// then Tasks, Terminals and Worktrees.
     private func panes(
         showsTasks: Bool, plan: NavigatorFiltering, shown: TaskBoardModel, worktrees: BoardWorktrees,
         terminals: ProjectTerminals, planned: PlanNavigator.Shown
@@ -1109,10 +1108,6 @@ struct TaskBoardView: View {
         if !planned.themes.isEmpty {
             pane("themes", header: sectionHeader("Themes", id: "themes", count: planned.themes.count),
                 content: PlanNavigatorThemes(themes: planned.themes, selected: planPage, keyed: hasKeyboard, onOpen: onPlan))
-        }
-        if planned.showsPages {
-            pane("pages", header: sectionHeader("Pages", id: "pages", count: planned.pages.count),
-                content: PlanNavigatorPages(plan: planStore, pages: planned.pages, selected: planPage, keyed: hasKeyboard, onOpen: onPlan))
         }
         if showsTasks {
             pane("tasks", fills: true, header: sectionHeader("Tasks", id: "tasks"),

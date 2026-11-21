@@ -7,6 +7,16 @@ import Foundation
 /// shell for as long as the Mac is up; `test.sh` runs every test under
 /// `scripts/tmux-leak-check.py`, which fails the run on one.
 enum ScratchDaemon {
+    nonisolated static var cli: String? {
+        if let bin = ProcessInfo.processInfo.environment["FARCOOLER_BIN"] { return bin }
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        return ["debug", "release"].map { root.appendingPathComponent("target/\($0)/farcooler").path }
+            .first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    nonisolated static var onCI: Bool { ProcessInfo.processInfo.environment["CI"] != nil }
+
     /// The one place a test names `FARCOOLER_HOME`: a scratch home and its
     /// own config.toml together (`config`, beside the home unless a test
     /// keeps it elsewhere), so no launch can read or write this Mac's shared

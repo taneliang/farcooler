@@ -13,11 +13,7 @@ struct PlanPageContext {
     var rows: [String: TaskRow]
     var onTask: (TaskRow) -> Void
     var onOpen: (PlanPage) -> Void
-    /// The board's worktrees, with their terminals: what an orchestrator's
-    /// page names by `worktree` and `terminal` (ov-284).
-    var worktrees: [Worktree] = []
-    /// Where a reference on an orchestrator's page opens.
-    var onDestination: (PageDestination) -> Void = { _ in }
+
 }
 
 /// The page for `page`, or why there's none.
@@ -32,8 +28,7 @@ struct PlanPageView: View {
             case .theme(let id):
                 if let theme = plan.theme(id) {
                     PlanThemePage(
-                        theme: theme, plan: plan.plan, record: plan.records[page], context: context,
-                        anchored: plan.anchoredPages(to: id), world: context.world(plan), onHide: { plan.hide($0) })
+                        theme: theme, plan: plan.plan, record: plan.records[page], context: context)
                 } else {
                     missing("Theme Not Found")
                 }
@@ -42,23 +37,6 @@ struct PlanPageView: View {
                     PlanTicketRecordPage(line: line, plan: plan.plan, record: plan.records[page], context: context)
                 } else {
                     missing("Ticket Not Found")
-                }
-            case .page(let slot):
-                if let found = plan.page(slot) {
-                    PlanOrchestratorPage(page: found, world: context.world(plan), context: context)
-                } else if let trouble = plan.pagesTrouble, !plan.reading {
-                    ContentUnavailableView {
-                        Label(trouble, systemImage: "doc.text")
-                    } actions: {
-                        Button("Try Again") { Task { await plan.reload() } }
-                    }
-                    .identified("plan-pages-unavailable")
-                } else if plan.pagesRead || !plan.pagesAvailable {
-                    // Removed, or never published: said once, never a spinner.
-                    ContentUnavailableView("Page Not Found", systemImage: "doc.text")
-                        .identified("plan-page-not-found")
-                } else {
-                    missing("Page Not Found")
                 }
             case .stage(let raw):
                 PlanStageListPage(plan: plan, stage: raw, context: context)
@@ -191,23 +169,15 @@ struct PlanThemePage: View {
     let plan: PlanModel
     let record: PlanRecord?
     let context: PlanPageContext
-    /// The orchestrator's pages anchored to this theme (ov-284).
-    var anchored: [BoardPage]
-    var world: PageWorld
-    var onHide: (String) -> Void
     @State private var showingChange: Bool
 
     init(
-        theme: PlanTheme, plan: PlanModel, record: PlanRecord?, context: PlanPageContext, showingChange: Bool = false,
-        anchored: [BoardPage] = [], world: PageWorld = PageWorld(), onHide: @escaping (String) -> Void = { _ in }
+        theme: PlanTheme, plan: PlanModel, record: PlanRecord?, context: PlanPageContext, showingChange: Bool = false
     ) {
         self.theme = theme
         self.plan = plan
         self.record = record
         self.context = context
-        self.anchored = anchored
-        self.world = world
-        self.onHide = onHide
         _showingChange = State(initialValue: showingChange)
     }
 
@@ -236,8 +206,6 @@ struct PlanThemePage: View {
                     }
                 }
             }
-            // After Needs You and before Tickets (ov-269 design 6.1).
-            PlanAnchoredPages(pages: anchored, world: world, context: context, onHide: onHide)
             decided
             if PlanThemeSpend.hasSomething(theme) {
                 PlanSection(title: "Spend") {

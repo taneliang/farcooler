@@ -20,8 +20,7 @@ struct MainCardsTests {
         let client = DaemonClient(target: "", notifications: NotificationCenter())
         client.commandRunnerForTesting = { _ in (nil, "unreachable") }
         let workspace = WorkspaceSummary.implicit(repository: "r")
-        let defaults = ScratchDefaults.suite("cards-\(UUID().uuidString)")!
-        let plan = PlanStore(client: client, workspace: workspace, host: "mini", defaults: defaults)
+        let plan = PlanStore(client: client, workspace: workspace, host: "mini")
         let context = PlanPageContext(rows: [:], onTask: { _ in }, onOpen: { _ in })
         let worktree = Worktree(
             id: "w", short: "w", task: "overnight", branch: "main", repository: "r", host: "", path: "/tmp/w",

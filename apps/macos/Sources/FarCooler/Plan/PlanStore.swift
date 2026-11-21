@@ -7,7 +7,7 @@ import Foundation
 //
 // The primary way of working since ov-298 (the owner, Oct 4: "Let's make that
 // the primary way of working"): there's no Tasks | Plan control. A board whose
-// runner keeps a plan, once it has one, lists its themes and pages beside the
+// runner keeps a plan, once it has one, lists its themes beside the
 // task index (`planned`); a runner without `board_plan`, or a board with no
 // plan yet, draws the board as it always did.
 //
@@ -19,8 +19,6 @@ enum PlanPage: Hashable {
     case theme(String)
     /// A ticket, by task id.
     case ticket(String)
-    /// An orchestrator's page, by slot (ov-284).
-    case page(String)
     /// The workspace's Needs You, answered in place (ov-321): where the one
     /// tree's Needs You row opens.
     case needsYou
@@ -34,7 +32,6 @@ enum PlanPage: Hashable {
         switch self {
         case .theme: "Theme"
         case .ticket: "Ticket"
-        case .page: "Page"
         case .needsYou: "Needs You"
         case .stage: "Stage"
         case .engine: EngineCopy.engine.text
@@ -46,7 +43,6 @@ enum PlanPage: Hashable {
         switch self {
         case .theme: "map"
         case .ticket: "arrow.triangle.branch"
-        case .page: "doc.text"
         case .needsYou: "flag"
         case .stage: "list.bullet"
         case .engine: "gearshape.2"
@@ -110,26 +106,9 @@ final class PlanStore: ObservableObject {
         outlines[input.filter] = (input, outline)
         return outline
     }
-    /// The board's orchestrator pages, with their documents, once read
-    /// (ov-284). Empty on a runner without `board_pages`.
-    @Published var pages: [BoardPage] = []
-    /// Whether the pages have been read at least once.
-    @Published var pagesRead = false
-    /// This app's sentence for a pages read that didn't come back.
-    @Published var pagesTrouble: String?
-    /// The slots hidden on this Mac with Hide Page: the owner's own filter,
-    /// never sent to the runner. Kept per board, as `shown` is.
-    @Published var hiddenPages: Set<String> {
-        didSet {
-            guard hiddenPages != oldValue else { return }
-            defaults.set(hiddenPages.sorted(), forKey: Self.hiddenKey(host: host, workspace: workspace.id))
-        }
-    }
-
     let client: DaemonClient
     let workspace: WorkspaceSummary
     let host: String
-    private let defaults: UserDefaults
     private var seenGeneration = -1
     private var readAgain = false
     private var retry: Task<Void, Never>?
@@ -166,12 +145,10 @@ final class PlanStore: ObservableObject {
     /// a value). A test listens.
     var onDecodeFailure: (String) -> Void = PlanDecodeLog.log
 
-    init(client: DaemonClient, workspace: WorkspaceSummary, host: String, defaults: UserDefaults = .standard) {
+    init(client: DaemonClient, workspace: WorkspaceSummary, host: String) {
         self.client = client
         self.workspace = workspace
         self.host = host
-        self.defaults = defaults
-        hiddenPages = Set(defaults.stringArray(forKey: Self.hiddenKey(host: host, workspace: workspace.id)) ?? [])
     }
 
     /// Whether this runner keeps a plan. A runner not read yet, or too old,
@@ -182,7 +159,7 @@ final class PlanStore: ObservableObject {
     /// keeps one, a plan read, and something in it, a theme, a ticket or a
     /// page. Until then, and on a board with nothing planned, the navigator
     /// is the task list it always was.
-    var planned: Bool { available && hasRead && (!plan.isEmpty || !pages.isEmpty) }
+    var planned: Bool { available && hasRead && !plan.isEmpty }
 
     var repositoryID: String { workspace.repository ?? workspace.id }
 
@@ -274,10 +251,6 @@ final class PlanStore: ObservableObject {
         }
         trouble = nil
         if read != plan { plan = read }
-        await readPages()
-        // A view that went away mid-read cancels it: not read, so the next
-        // view to ask reads again rather than drawing no pages until the
-        // runner says something moved.
         if Task.isCancelled { return }
         hasRead = true
     }
@@ -328,8 +301,7 @@ final class PlanStore: ObservableObject {
     func readRecord(_ page: PlanPage) async {
         let data: Data?
         switch page {
-        case .page, .needsYou, .stage, .engine:
-            // A page has no record: it's replaced whole.
+        case .needsYou, .stage, .engine:
             return
         case .theme(let id):
             guard let theme = plan.themes.first(where: { $0.id == id }) else { return }
@@ -350,7 +322,6 @@ final class PlanStore: ObservableObject {
         switch page {
         case .theme(let id): theme(id)?.name
         case .ticket(let id): ticket(id)?.heading
-        case .page(let slot): self.page(slot)?.title
         case .needsYou: OneTreeWords.needsYou
         case .stage(let raw): WirePipeStage(rawValue: raw)?.title
         case .engine: page.word

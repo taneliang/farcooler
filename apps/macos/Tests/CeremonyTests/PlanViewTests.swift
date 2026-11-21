@@ -69,7 +69,6 @@ struct PlanViewTests {
             capabilities: Set(Capability.allCases.map(\.rawValue).filter { plan || $0 != "board_plan" }))
         let store = TaskBoardStore(
             client: client, workspace: .implicit(repository: "r"), readStore: DefaultsBoardReads(defaults))
-        store.planDefaults = defaults
         await store.readIfNeverRead()
         return store
     }

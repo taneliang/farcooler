@@ -470,9 +470,8 @@ final class EventStream {
             } else {
                 miss("a board's reads")
             }
-        // A board's plan moved (ov-273), or one of its pages (ov-284): its
-        // Plan view re-reads both.
-        case "plan", "pages":
+        // A board's plan moved (ov-273).
+        case "plan":
             if let event = try? decoder.decode(PlanEventLine.self, from: line) {
                 onPlan(event.workspace)
             } else {

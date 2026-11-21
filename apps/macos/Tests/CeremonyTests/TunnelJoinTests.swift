@@ -18,7 +18,7 @@ import Testing
 /// it dials, so the answer is "no tunnel key yet" whether or not the CLI under
 /// test has the tunnel linked, and nothing here waits on a network.
 struct TunnelJoinTests {
-    private static var cli: String? { RealCLIPagesTests.cli }
+    private static var cli: String? { ScratchDaemon.cli }
 
     private static func home() -> String { "/tmp/fc-t/j-\(UUID().uuidString.prefix(6))" }
 
@@ -92,7 +92,7 @@ struct TunnelJoinTests {
     }
 
     /// The runner the join stored is the runner the `ProxyCommand` finds.
-    @Test(.enabled(if: RealCLIPagesTests.cli != nil || RealCLIPagesTests.onCI))
+    @Test(.enabled(if: ScratchDaemon.cli != nil || ScratchDaemon.onCI))
     func theBlockTheJoinWritesIsOneRealSshRunsAndTheCLIFindsTheRunnerItStored() async throws {
         let home = Self.home()
         defer { try? FileManager.default.removeItem(atPath: home) }
@@ -112,7 +112,7 @@ struct TunnelJoinTests {
 
     /// The same run with the store step skipped must say the opposite, or the
     /// test above cannot tell a stored runner from a missing one.
-    @Test(.enabled(if: RealCLIPagesTests.cli != nil || RealCLIPagesTests.onCI))
+    @Test(.enabled(if: ScratchDaemon.cli != nil || ScratchDaemon.onCI))
     func aRunnerThatWasNeverStoredIsNamedAsUnknownByTheSamePath() async throws {
         let home = Self.home()
         defer { try? FileManager.default.removeItem(atPath: home) }

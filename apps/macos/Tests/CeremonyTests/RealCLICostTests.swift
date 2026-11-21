@@ -17,24 +17,24 @@ struct RealCLICostTests {
         var environment = ProcessInfo.processInfo.environment
         ScratchDaemon.isolate(&environment, home: home + "/h")
         for key in ["FARCOOLER_WORKSPACE", "FARCOOLER_ACTOR", "FARCOOLER_TASK"] { environment.removeValue(forKey: key) }
-        let ran = await ProcessRunner.run(RealCLIPagesTests.cli!, args, environment: environment, deadline: 60)
+        let ran = await ProcessRunner.run(ScratchDaemon.cli!, args, environment: environment, deadline: 60)
         return (ran.succeeded, ran.stdout, String(decoding: ran.stderr, as: UTF8.self))
     }
 
-    @Test("plan --json from the real CLI carries the budgets set through it, and the cost a board_cost runner sends", .enabled(if: RealCLIPagesTests.runnable))
+    @Test("plan --json from the real CLI carries the budgets set through it, and the cost a board_cost runner sends", .enabled(if: ScratchDaemon.runnable))
     func theRealCLIsBudgetsDecode() async throws {
-        try #require(RealCLIPagesTests.cli.map { FileManager.default.isExecutableFile(atPath: $0) } == true, "no farcooler CLI in target/: build it first (CI's swift job does, in build-app.sh)")
-        try #require(RealCLIPagesTests.daemon, "no farcoolerd beside the CLI")
-        try #require(RealCLIPagesTests.tmux, "no tmux: CI's swift job installs it before the Mac tests")
+        try #require(ScratchDaemon.cli.map { FileManager.default.isExecutableFile(atPath: $0) } == true, "no farcooler CLI in target/: build it first (CI's swift job does, in build-app.sh)")
+        try #require(ScratchDaemon.daemon, "no farcoolerd beside the CLI")
+        try #require(ScratchDaemon.tmux, "no tmux: CI's swift job installs it before the Mac tests")
         let home = "/tmp/fcc-\(UUID().uuidString.prefix(6))"
         do {
             try await scenario(home: home)
         } catch {
-            await ScratchDaemon.stop(cli: RealCLIPagesTests.cli!, farcoolerHome: home + "/h")
+            await ScratchDaemon.stop(cli: ScratchDaemon.cli!, farcoolerHome: home + "/h")
             try? FileManager.default.removeItem(atPath: home)
             throw error
         }
-        await ScratchDaemon.stop(cli: RealCLIPagesTests.cli!, farcoolerHome: home + "/h")
+        await ScratchDaemon.stop(cli: ScratchDaemon.cli!, farcoolerHome: home + "/h")
         try? FileManager.default.removeItem(atPath: home)
     }
 

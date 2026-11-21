@@ -24,7 +24,7 @@ struct JumpBarGlyphTests {
 
     /// A tree over the seeded plan: every theme, the tickets that have a
     /// worktree with an agent and a shell open, a task of every status, a loose
-    /// worktree, the main checkout and a page. The filter is All, as the jump
+    /// worktree and the main checkout. The filter is All, as the jump
     /// bar's outline is (`pathTree`), the sidebar's own two lists (ov-512).
     static func tree() throws -> (tree: SidebarOutline, tasks: [OneTreeTask]) {
         // Through `PlanModel.decode`, which keeps the wire the Rust view is built from (ov-1016):
@@ -56,7 +56,7 @@ struct JumpBarGlyphTests {
                 mainCheckout: OneTreeWorktree(
                     id: "main", name: "repo", isMainCheckout: true,
                     terminals: [OneTreeTerminal(id: "main-shell", title: "zsh", isAgent: false)]),
-                pages: [OneTreePage(slot: "train", title: "Train")], filter: .all, needsYouCount: 1))
+                filter: .all, needsYouCount: 1))
         return (tree, tasks)
     }
 
@@ -73,7 +73,7 @@ struct JumpBarGlyphTests {
         let reached = tree.allNodes.filter { $0.target != nil && $0.kind != .place && $0.kind != .doneFold }
         // The tree is rich enough to mean it: each kind the bar can name.
         let kinds = Set(reached.map(\.kind))
-        for kind: OneTreeNode.Kind in [.theme, .task, .ticket, .terminal, .page, .group, .worktree] {
+        for kind: OneTreeNode.Kind in [.theme, .task, .ticket, .terminal, .group, .worktree] {
             #expect(kinds.contains(kind), "\(kind) missing from the fixture")
         }
         for node in reached {
