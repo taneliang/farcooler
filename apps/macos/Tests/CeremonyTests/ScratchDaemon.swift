@@ -15,7 +15,22 @@ enum ScratchDaemon {
             .first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
+    nonisolated static var tmux: Bool {
+        ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"]
+            .contains { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    /// The daemon the CLI starts: the one beside it, or it starts whichever
+    /// is installed, which is a different build.
+    nonisolated static var daemon: Bool {
+        cli.map { FileManager.default.isExecutableFile(atPath: URL(fileURLWithPath: $0).deletingLastPathComponent().appendingPathComponent("farcoolerd").path) } ?? false
+    }
+
     nonisolated static var onCI: Bool { ProcessInfo.processInfo.environment["CI"] != nil }
+
+    nonisolated static var runnable: Bool {
+        (cli.map { FileManager.default.isExecutableFile(atPath: $0) } == true && tmux && daemon) || onCI
+    }
 
     /// The one place a test names `FARCOOLER_HOME`: a scratch home and its
     /// own config.toml together (`config`, beside the home unless a test
