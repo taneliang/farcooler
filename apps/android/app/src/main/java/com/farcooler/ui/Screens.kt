@@ -643,6 +643,12 @@ fun SettingsScreen(
 
             Separator()
             SectionTitle("Runners")
+            val live = connections.firstOrNull { it.phase.value is Connection.Phase.Connected }
+            if (live != null) {
+                OutlinedButton(onClick = { onOpenRunnerSettings(live) }) {
+                    Text("Settings on ${live.host.displayLabel}")
+                }
+            }
             SettingRow("Connect every runner at once", allRunners) {
                 model.settings.setAllRunnersAtOnce(it)
             }
