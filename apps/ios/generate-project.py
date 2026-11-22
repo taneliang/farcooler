@@ -609,8 +609,6 @@ AGENTKIT_SOURCES = [
     # and a first-parent merge owe the reader, and the 600-line budget (ov-149).
     # In AgentKit so `swift test` can decode a fixture of the wire's bytes.
     "ChangesFileDiff.swift",
-    # The banners beside an agent pane's composer: an unsent message's and a
-    # refused control's, kept apart (ov-179).
     # Which changed files a tool wrote. Only in THIS list: the watch and the
     # two extensions show a count and a status, never a file list, so nothing
     # there has a reading order to put a lockfile at the end of. It is here
@@ -648,7 +646,6 @@ AGENTKIT_SOURCES = [
     # a streaming reply redraw only its last paragraph (ov-382).
     # `MarkdownView.swift` draws through it.
     "MarkdownPiece.swift",
-    # The Working… sweep's layer animation, shared with the Mac (ov-382).
     # A long message or report folded under Show More in one layout pass, so
     # a row built just above the screen never changes height on its second
     # (ov-675, ov-691). Shared with the Mac.
