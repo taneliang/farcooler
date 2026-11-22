@@ -831,8 +831,9 @@ pub mod capability {
     /// configuration and `agent_queue` chat mode's queue, both retired with
     /// chat mode (ov-377); `board_trains`, `board_train_phase`, `board_agents`
     /// and `terminal_lane` were lanes and trains, retired by the line (ov-872).
+    /// Older apps still use `board_pages` to decide whether to show Pages (ov-1409).
     pub const RETIRED: &[&str] =
-        &["adapters", "agent_queue", "board_trains", "board_train_phase", "board_agents", "terminal_lane"];
+        &["adapters", "agent_queue", "board_trains", "board_train_phase", "board_agents", "terminal_lane", "board_pages"];
 
     /// Methods retired with chat mode (ov-377), lanes and trains (ov-872), and
     /// landing writes, worktree discovery and stack parents (ov-1023).
