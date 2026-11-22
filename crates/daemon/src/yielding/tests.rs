@@ -388,7 +388,7 @@ async fn a_native_gate_pauses_only_the_builder_and_preserves_a_manual_pause() {
     impl Drop for Reap<'_> { fn drop(&mut self) { farcooler_tmux::reap_server(self.0.socket()); } }
     let _reap = Reap(&tmux);
     let mut panes = Vec::new();
-    let binary = crate::runtime::fanout_binary().unwrap();
+    let binary = crate::native_hold::test_binary::daemon_binary().unwrap();
     let socket = dir.join("first.sock");
     for file in ["first", "other"] {
         let terminal = uuid::Uuid::now_v7();
@@ -403,9 +403,20 @@ async fn a_native_gate_pauses_only_the_builder_and_preserves_a_manual_pause() {
         }
     }).await.unwrap();
     let y = Yielding::at(&dir);
-    let blocker = std::os::unix::net::UnixStream::connect(&socket).unwrap();
-    let target = Target::Hold(socket);
+    let group = crate::native_hold::group(&socket).unwrap().unwrap();
+    std::fs::create_dir_all(&y.0.queue).unwrap();
+    let ticket = y.0.queue.join(format!("1-{group}.ticket"));
+    std::fs::write(&ticket, "").unwrap();
+    let target = Target::Hold(socket.clone());
     let builder = y.builder(target.clone());
+    assert!(manual_pause_latch(Some(&builder), &socket).is_err());
+    let gate = y.admit_gate().await.unwrap();
+    assert!(matches!(crate::proc_table::process_state(group), crate::proc_table::ProcessState::Running),
+        "the native builder must be able to release its heavy ticket");
+    drop(gate);
+    std::fs::remove_file(ticket).unwrap();
+
+    let blocker = std::os::unix::net::UnixStream::connect(&socket).unwrap();
     let admission = y.admit_gate();
     tokio::pin!(admission);
     tokio::select! {

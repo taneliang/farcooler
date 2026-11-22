@@ -120,20 +120,28 @@ fn signal(target: &Target, sig: i32) -> bool {
                 unsafe { libc::killpg(*pid as i32, sig); }
                 if sig == libc::SIGSTOP {
                     // Wait for the pending stops before another process can enter the heavy queue.
-                    let settled = || crate::proc_table::snapshot().is_some_and(|raw|
-                        crate::foreground::parse(&raw).in_group(*pid as i32).all(crate::proc_table::stopped_or_gone));
-                    return settled() && settled();
+                    return heavy_queue::group_stopped(*pid as i32) && heavy_queue::group_stopped(*pid as i32);
                 }
             }
         }
-        Target::Hold(hold) => crate::native_hold::tell(hold, if sig == libc::SIGSTOP { "stop" } else { "cont" }),
+        Target::Hold(hold) => {
+            if sig == libc::SIGSTOP {
+                use crate::native_hold::{self, Answer};
+                return match native_hold::ask_blocking(hold, "stop", Duration::from_millis(100)) {
+                    Answer::Gone => true,
+                    Answer::Said(word) => matches!(word.as_str(), "stopped" | "ended"),
+                    Answer::Silent => false,
+                };
+            }
+            crate::native_hold::tell(hold, "cont");
+        }
         Target::Tty(_) | Target::Native { .. } => {}
     }
     true
 }
 
 fn stop_builders(state: &mut State, queue: &Path) -> bool {
-    stop_builders_with_snapshot(state, queue, crate::proc_table::snapshot)
+    stop_builders_with_snapshot(state, queue, heavy_queue::snapshot)
 }
 
 fn stop_builders_with_snapshot(state: &mut State, queue: &Path, snapshot: impl FnOnce() -> Option<String>) -> bool {
@@ -145,14 +153,13 @@ fn stop_builders_with_snapshot(state: &mut State, queue: &Path, snapshot: impl F
         let Ok(enter) = heavy_queue::try_enter(queue) else { return false };
         state.queue_latch = Some(enter);
     }
-    let Some(raw) = snapshot() else { return false };
-    let table = crate::foreground::parse(&raw);
-    let mut legacy_latches = LegacyLatches::default();
-    let pids = state.builders.values().filter(|b| !b.manual).flat_map(|b| target_pids(&table, &b.target));
-    let Ok(tickets) = legacy_latches.tickets(queue, pids) else { return false };
+    let mut legacy_latches = heavy_queue::LegacyLatches::default();
+    let Ok(ticketed) = ticketed_builders(&mut legacy_latches, queue, snapshot,
+        state.builders.iter().filter(|(_, b)| !b.manual))
+        else { return false };
     let mut settled = true;
-    for b in state.builders.values_mut().filter(|b| !b.manual) {
-        if target_has_ticket(&table, &b.target, &tickets) {
+    for (id, b) in state.builders.iter_mut().filter(|(_, b)| !b.manual) {
+        if ticketed.contains(id) {
             // Leave the whole builder runnable so the job's wrapper can reap its
             // children and remove its ticket. Any queued ticket may become head.
             b.continue_from_gate();
@@ -165,17 +172,12 @@ fn stop_builders_with_snapshot(state: &mut State, queue: &Path, snapshot: impl F
     // snapshot. Check again while the canonical and known legacy latches are
     // still held. Audit partial stops too: a gate may already be running.
     if state.builders.values().any(|b| !b.manual && b.held_since.is_some()) {
-        let checked = (|| {
-            let table = pause_snapshot()?;
-            let pids = state.builders.values().filter(|b| !b.manual && b.held_since.is_some())
-                .flat_map(|b| target_pids(&table, &b.target));
-            let tickets = legacy_latches.tickets(queue, pids)?;
-            Ok::<_, std::io::Error>((table, tickets))
-        })();
+        let checked = ticketed_builders(&mut legacy_latches, queue, heavy_queue::snapshot,
+            state.builders.iter().filter(|(_, b)| !b.manual && b.held_since.is_some()));
         // If a late latch is busy, a stopped wrapper may own it. Let it run
         // before retrying, even if it hasn't published a ticket yet.
-        for b in state.builders.values_mut().filter(|b| !b.manual && b.held_since.is_some()) {
-            let keep_paused = checked.as_ref().is_ok_and(|(table, tickets)| !target_has_ticket(table, &b.target, tickets));
+        for (id, b) in state.builders.iter_mut().filter(|(_, b)| !b.manual && b.held_since.is_some()) {
+            let keep_paused = checked.as_ref().is_ok_and(|ticketed| !ticketed.contains(id));
             if !keep_paused {
                 b.continue_from_gate();
             }
@@ -186,75 +188,43 @@ fn stop_builders_with_snapshot(state: &mut State, queue: &Path, snapshot: impl F
     settled
 }
 
-fn pause_snapshot() -> std::io::Result<crate::foreground::Foreground> {
-    crate::proc_table::snapshot().map(|raw| crate::foreground::parse(&raw))
-        .ok_or_else(|| std::io::Error::other("process table unavailable"))
-}
-
-/// Hold each discovered legacy latch alongside the canonical one until the
-/// pause has been checked. The second read can discover more queues.
-#[derive(Default)]
-struct LegacyLatches(BTreeMap<PathBuf, File>);
-impl LegacyLatches {
-    fn tickets(&mut self, queue: &Path, pids: impl IntoIterator<Item = i32>) -> std::io::Result<Vec<heavy_queue::Ticket>> {
-        for old in heavy_queue::legacy_queues(queue, pids) {
-            if let std::collections::btree_map::Entry::Vacant(slot) = self.0.entry(old) {
-                let latch = heavy_queue::try_enter(slot.key())?;
-                slot.insert(latch);
-            }
-        }
-        let mut tickets = heavy_queue::live_tickets(queue)?;
-        for old in self.0.keys() {
-            tickets.extend(heavy_queue::live_tickets(old)?);
-        }
-        Ok(tickets)
+fn ticketed_builders<'a>(latches: &mut heavy_queue::LegacyLatches, queue: &Path, snapshot: impl FnOnce() -> Option<String>,
+    builders: impl Iterator<Item = (&'a u64, &'a Builder)>) -> std::io::Result<std::collections::HashSet<u64>> {
+    let mut groups = Vec::new();
+    for (&id, builder) in builders {
+        let group = match &builder.target {
+            Target::Group { pid, .. } => Some(*pid as i32),
+            Target::Hold(hold) => crate::native_hold::group(hold)?,
+            Target::Tty(_) | Target::Native { .. } => None,
+        };
+        if let Some(group) = group { groups.push((id, group)); }
     }
-}
-
-fn target_pids(table: &crate::foreground::Foreground, target: &Target) -> Vec<i32> {
-    match target {
-        Target::Group { pid, .. } => table.in_group(*pid as i32).collect(),
-        Target::Native { tty, .. } | Target::Tty(tty) => table.under_tty(tty.trim_start_matches("/dev/")),
-    }
-}
-
-fn target_has_ticket(table: &crate::foreground::Foreground, target: &Target, tickets: &[heavy_queue::Ticket]) -> bool {
-    match target {
-        Target::Group { pid, .. } => tickets.iter().any(|t| unsafe { libc::getpgid(t.pid) } == *pid as i32),
-        Target::Native { tty, supervisor, .. } => tty_has_ticket(table, tty, *supervisor as i32, tickets),
-        Target::Tty(tty) => tty_has_ticket(table, tty, 0, tickets),
-    }
-}
-
-fn tty_has_ticket(table: &crate::foreground::Foreground, tty: &str, supervisor: i32, tickets: &[heavy_queue::Ticket]) -> bool {
-    let pids = table.under_tty(tty.trim_start_matches("/dev/"));
-    (supervisor == 0 || pids.contains(&supervisor))
-        && tickets.iter().any(|t| t.pid != supervisor && pids.contains(&t.pid))
+    let ticket_groups = latches.ticket_groups(queue, snapshot, groups.iter().map(|&(_, group)| group))?;
+    Ok(groups.into_iter().filter_map(|(id, group)| ticket_groups.contains(&group).then_some(id)).collect())
 }
 
 /// Hand pauses must obey the same admission rule, including before a gate starts.
 pub(crate) struct ManualPauseLatch {
     queue: PathBuf,
     _enter: File,
-    legacy_latches: LegacyLatches,
+    legacy_latches: heavy_queue::LegacyLatches,
 }
 
 impl ManualPauseLatch {
-    pub(crate) fn check(&mut self, tty: &str, supervisor: i32) -> std::io::Result<()> {
-        let table = pause_snapshot()?;
-        let tickets = self.legacy_latches.tickets(&self.queue, table.under_tty(tty.trim_start_matches("/dev/")))?;
-        if tty_has_ticket(&table, tty, supervisor, &tickets) {
+    pub(crate) fn check(&mut self, hold: &Path) -> std::io::Result<()> {
+        let group = crate::native_hold::group(hold)?.ok_or_else(|| std::io::Error::other("native hold ended"))?;
+        if self.legacy_latches.ticket_groups(&self.queue, heavy_queue::snapshot, std::iter::once(group))?.contains(&group) {
             return Err(std::io::Error::other("builder has a ticket in the machine-wide heavy-job queue"));
         }
         Ok(())
     }
 }
 
-pub(crate) fn manual_pause_latch(builder: Option<&BuilderGuard>, tty: &str, supervisor: i32) -> std::io::Result<ManualPauseLatch> {
+pub(crate) fn manual_pause_latch(builder: Option<&BuilderGuard>, hold: &Path) -> std::io::Result<ManualPauseLatch> {
     let queue = builder.map_or_else(heavy_queue::machine, |builder| builder.0.0.queue.clone());
     let enter = heavy_queue::try_enter(&queue)?;
-    let mut latch = ManualPauseLatch { queue, _enter: enter, legacy_latches: LegacyLatches::default() };
-    latch.check(tty, supervisor)?;
+    let mut latch = ManualPauseLatch { queue, _enter: enter, legacy_latches: heavy_queue::LegacyLatches::default() };
+    latch.check(hold)?;
     Ok(latch)
 }
 

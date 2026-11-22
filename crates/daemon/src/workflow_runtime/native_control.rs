@@ -86,9 +86,17 @@ pub(super) async fn controlled<T>(turn: impl std::future::Future<Output = Result
             Some((op, mut reply)) = orders.recv() => {
                 let result = match op {
                     Control::Pause if frozen.is_none() => {
-                        // Validate the tagged pane again; never signal a tty from a stale capability.
+                        // Validate the tagged pane again before asking its hold to pause.
                         match tmux.pane_life(pane, id).await {
                             Ok(farcooler_tmux::PaneLife::Live) => {
+                                let mut latch = match crate::yielding::manual_pause_latch(yielded, hold) {
+                                    Ok(latch) => latch,
+                                    Err(error) => {
+                                        tracing::warn!(%error, "native pause deferred by the heavy-job queue");
+                                        let _ = reply.send(Err(farcooler_core::DomainError::OperationFailed));
+                                        continue;
+                                    }
+                                };
                                 // Recorded first, so a gate that ends meanwhile cannot continue what is about to stop.
                                 if let Some(y) = yielded { y.manual(true); }
                                 let attempt = tokio::select! {
@@ -97,6 +105,12 @@ pub(super) async fn controlled<T>(turn: impl std::future::Future<Output = Result
                                     _ = cancel.wait_for(|&cancelled| cancelled) => None,
                                     result = freeze(hold, Duration::from_secs(5)) => Some(result),
                                 };
+                                // A wrapper may have opened a legacy queue while the group was stopping.
+                                let attempt = attempt.map(|result| result.and_then(|stopped| {
+                                    latch.check(hold)?;
+                                    Ok(stopped)
+                                }));
+                                drop(latch);
                                 match attempt {
                                     Some(Ok(stopped)) => {
                                         clock.pause();
@@ -149,7 +163,7 @@ mod tests {
         impl Drop for Reap<'_> { fn drop(&mut self) { farcooler_tmux::reap_server(self.0.socket()); } }
         let _reap = Reap(&tmux);
         let hold = dir.join("p.hold.sock");
-        let program = crate::native_hold::pane_command(&crate::runtime::fanout_binary().unwrap(), &hold,
+        let program = crate::native_hold::pane_command(&crate::native_hold::test_binary::daemon_binary().unwrap(), &hold,
             "sh -c 'while :; do echo tick >> ticks; sleep 0.02; done'");
         let window = tmux.create_terminal_window(id, id, "pause", dir.to_str().unwrap(), &program).await.unwrap();
         let pane = tmux.list_tagged_panes().await.unwrap().into_iter().find(|p| p.pane_id == window.pane_id).unwrap();
@@ -190,7 +204,7 @@ mod tests {
 
         let dir = farcooler_core::scratch::dir("native-pause-timeout");
         let hold = dir.join("review.sock");
-        let mut reviewer = std::process::Command::new(crate::runtime::fanout_binary().unwrap())
+        let mut reviewer = std::process::Command::new(crate::native_hold::test_binary::daemon_binary().unwrap())
             .args([crate::native_hold::FLAG, hold.to_str().unwrap(), "--", "/bin/sh", "-c",
                 "while [ ! -f proceed ]; do sleep 0.02; done; echo running > result"])
             .current_dir(&dir).spawn().unwrap();

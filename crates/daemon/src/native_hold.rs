@@ -275,6 +275,10 @@ fn answer(stream: UnixStream, held: &Mutex<Held>, socket: &Path) {
     let mut reader = BufReader::new(&stream);
     if reader.read_line(&mut line).is_err() { return; }
     let mut held = lock(held);
+    if line.trim() == "group" && held.reaped.is_none() {
+        let _ = writeln!(&stream, "{}", held.leader.0);
+        return;
+    }
     let reply = match line.trim() {
         "ready" if held.reaped.is_none() => "ready",
         "stopped" if held.reaped.is_none() => if group_stopped(&held) { "stopped" } else { "unsettled" },
@@ -297,7 +301,7 @@ fn answer(stream: UnixStream, held: &Mutex<Held>, socket: &Path) {
             }
             Ended::Unsettled => "unsettled",
         },
-        "ready" | "pause" | "stop" | "stopped" | "cont" => "ended",
+        "ready" | "pause" | "stop" | "stopped" | "cont" | "group" => "ended",
         _ => "unknown",
     };
     let _ = (&stream).write_all(format!("{reply}\n").as_bytes());
@@ -568,6 +572,17 @@ pub(crate) enum Answer {
     Silent,
 }
 
+/// The pinned group ID is used to observe heavy-queue membership. Only the hold signals the group.
+pub(crate) fn group(socket: &Path) -> std::io::Result<Option<i32>> {
+    match ask_blocking(socket, "group", Duration::from_millis(100)) {
+        Answer::Gone => Ok(None),
+        Answer::Said(word) if word == "ended" => Ok(None),
+        Answer::Said(word) => word.parse::<i32>().ok().filter(|&pid| pid > 1).map(Some)
+            .ok_or_else(|| std::io::Error::other("invalid native hold group")),
+        Answer::Silent => Err(std::io::Error::other("native hold did not report its group")),
+    }
+}
+
 /// Ask the hold at `socket` to do `op`, waiting up to `wait` for its answer. Blocking; see [`ask`].
 pub(crate) fn ask_blocking(socket: &Path, op: &str, wait: Duration) -> Answer {
     let gone = || if socket.exists() { Answer::Silent } else { Answer::Gone };
@@ -622,3 +637,7 @@ pub(crate) async fn ask(socket: &Path, op: &'static str, wait: Duration) -> Answ
 #[cfg(test)]
 #[path = "native_hold_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../../../test/daemon_binary.rs"]
+pub(crate) mod test_binary;

@@ -1,6 +1,7 @@
 //! Read the ticket format shared by scripts/heavy and lane-gate.py.
-use crate::proc_table::{ProcessState, process_state};
-use std::collections::{BTreeSet, HashMap, HashSet};
+pub(super) use crate::proc_table::snapshot;
+use crate::proc_table::{ProcessState, process_state, stopped_or_gone};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read};
 use std::os::fd::AsRawFd;
@@ -12,6 +13,34 @@ pub(crate) const NAME: &str = "lane-gate.lock.queue";
 const REPORT_AFTER: Duration = Duration::from_secs(300);
 
 pub(super) fn machine() -> PathBuf { Path::new("/tmp").join(NAME) }
+
+pub(super) fn group_stopped(group: i32) -> bool {
+    snapshot().is_some_and(|raw| crate::foreground::parse(&raw).in_group(group).all(stopped_or_gone))
+}
+
+/// Hold each discovered legacy latch alongside the canonical one until the
+/// pause has been checked. The second read can discover more queues.
+#[derive(Default)]
+pub(super) struct LegacyLatches(BTreeMap<PathBuf, File>);
+
+impl LegacyLatches {
+    pub(super) fn ticket_groups(&mut self, queue: &Path, snapshot: impl FnOnce() -> Option<String>,
+        groups: impl Iterator<Item = i32>) -> io::Result<HashSet<i32>> {
+        let raw = snapshot().ok_or_else(|| io::Error::other("process table unavailable"))?;
+        let table = crate::foreground::parse(&raw);
+        for old in legacy_queues(queue, groups.flat_map(|group| table.in_group(group))) {
+            if let std::collections::btree_map::Entry::Vacant(slot) = self.0.entry(old) {
+                let latch = try_enter(slot.key())?;
+                slot.insert(latch);
+            }
+        }
+        let mut tickets = live_tickets(queue)?;
+        for old in self.0.keys() {
+            tickets.extend(live_tickets(old)?);
+        }
+        Ok(tickets.iter().map(|t| unsafe { libc::getpgid(t.pid) }).collect())
+    }
+}
 
 pub(super) fn legacy_queues(queue: &Path, pids: impl IntoIterator<Item = i32>) -> BTreeSet<PathBuf> {
     let Ok(canonical) = queue.canonicalize() else { return BTreeSet::new() };
