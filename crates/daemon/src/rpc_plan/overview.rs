@@ -89,7 +89,12 @@ pub(super) fn bound_legacy(plan: &mut pb::Plan) {
     }
     plan.suggested_reviewers.retain(|reviewers| cards.contains(&reviewers.task_id));
     retain_card_refs(plan);
-    bound_rows(&mut plan.themes, 4 * share);
+
+    // Give themes the space left by the other sections, which often use only
+    // a fraction of their allowance.
+    let mut themes = std::mem::take(&mut plan.themes);
+    bound_rows(&mut themes, PLAN_BUDGET.saturating_sub(plan.encoded_len()));
+    plan.themes = themes;
 }
 
 // Include a conservative allowance for the repeated field's tag and length.

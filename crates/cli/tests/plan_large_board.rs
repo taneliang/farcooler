@@ -188,6 +188,14 @@ async fn a_large_live_board_keeps_its_lines_cards_and_active_landings() {
         panic!("wrong result for a released app's request");
     };
     assert!(legacy.overview_truncated);
+    assert_eq!(legacy.themes.len(), 25);
+    assert_eq!(legacy.board_counts.unwrap().backlog, 1500);
+    for (n, view) in legacy.themes.iter().enumerate() {
+        let theme = view.theme.as_ref().unwrap();
+        assert_eq!(theme.story, live_story(n));
+        assert_eq!(theme.next, format!("Next {n}"));
+        assert_eq!(view.counts.unwrap().backlog, 60);
+    }
     assert!(!legacy.lines.is_empty());
     assert!(!legacy.landings.is_empty());
     let legacy_cards: std::collections::HashSet<_> = legacy.cards.iter().map(|card| &card.task_id).collect();
