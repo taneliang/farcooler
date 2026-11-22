@@ -17,8 +17,6 @@ public enum LandingState: String, Decodable, Sendable, CaseIterable {
         self = LandingState(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
     }
 
-    /// Landed or dropped: out of Now, and its CI no longer read.
-    public var isSettled: Bool { self == .landed || self == .dropped }
 }
 
 /// How a landing gets into the product.
@@ -172,14 +170,6 @@ public struct PlanCIRead: Decodable, Equatable, Sendable {
     public var needsAttention: Bool { status == .failed }
 }
 
-/// One group of Now: a landing not yet landed and its tickets working now, or
-/// the tickets on no such landing.
-public struct PlanNowGroup: Equatable, Identifiable, Sendable {
-    public var landing: PlanLanding?
-    public var lines: [PlanTicketLine]
-    public var id: String { landing?.id ?? "tickets" }
-}
-
 extension PlanModel {
     /// The read a subject names: `sha:<sha>` matches a read of the same commit
     /// however short either was written; `main` and `run:<id>` match exactly.
@@ -199,9 +189,6 @@ extension PlanModel {
         landing.ciSubject.isEmpty ? nil : ci(landing.ciSubject)
     }
 
-    /// Landings not yet landed or dropped, oldest first.
-    public var liveLandings: [PlanLanding] { landings.filter { !$0.state.isSettled } }
-
     /// The tickets on a landing: those it lists, plus any that name its
     /// number, in the line's order.
     public func lines(on landing: PlanLanding) -> [PlanTicketLine] {
@@ -214,27 +201,6 @@ extension PlanModel {
 
     /// The agent landing it, if the runner lists one.
     public func lander(of landing: PlanLanding) -> PlanAgent? { landing.lander.flatMap(agent) }
-
-    /// Now as row groups (ov-309): each live landing heading the tickets on
-    /// it, then the tickets on none. A landing with no ticket working now
-    /// still heads its group, so a pushed landing waiting on CI is never out
-    /// of sight.
-    public var nowGroups: [PlanNowGroup] {
-        let lines = working
-        var grouped = Set<String>()
-        var groups: [PlanNowGroup] = []
-        for landing in liveLandings {
-            let mine = self.lines(on: landing).filter { $0.stage.isPastWaiting }
-            grouped.formUnion(mine.map(\.task))
-            groups.append(PlanNowGroup(landing: landing, lines: mine))
-        }
-        let rest = (lines + unranked).filter { !grouped.contains($0.task) }
-        if !rest.isEmpty { groups.append(PlanNowGroup(landing: nil, lines: rest)) }
-        return groups
-    }
-
-    /// Whether Now has anything to draw.
-    public var hasNow: Bool { !nowGroups.isEmpty }
 
     /// How many of the board's cards are in `status` (a board status's word,
     /// or `open`: every card not done or canceled); nil without the counts.

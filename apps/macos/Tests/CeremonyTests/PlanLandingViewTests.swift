@@ -56,7 +56,6 @@ struct PlanLandingViewTests {
         // A frame this test sets, at any scale: the indent is the navigator's
         // mark column, many points, so a point either way doesn't decide it.
         #expect(ticket.minX > landing.minX + 4, "the ticket sits inside the card, inset: \(landing) \(ticket)")
-        #expect(store.plan.plan.nowGroups.first?.landing?.number == 9)
 
         heard.events = []
         calls.plan = try Self.plan(movingLanding: "green")
@@ -75,7 +74,5 @@ struct PlanLandingViewTests {
         // Its title, "Landing 9", says no more than its label: it is not said again.
         #expect(seen.views["plan-landing-9-subtitle"] == nil, "\(seen.views.keys.sorted())")
         #expect(seen.views["plan-ticket-ov-4"] == nil, "the landing stands for the ticket: \(seen.views.keys.sorted())")
-        let group = try #require(store.plan.plan.nowGroups.first)
-        #expect((group.landing?.label, group.lines.map(\.heading)) == ("Landing 9", ["Title of ov-4"]))
     }
 }

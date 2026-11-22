@@ -92,15 +92,4 @@ struct PlanThemeTrackTests {
         #expect(PlanWords.storyAge(try Self.plan(storyAt: Self.now - Self.hour).themes[0], now: Self.now) == nil)
     }
 
-    @Test("Themes split into active ones in the board's order and one closed fold of paused and done; dropped are in neither")
-    func themeGroups() throws {
-        let themes = [
-            ("Zed", "active", 2), ("Beta", "paused", 0), ("Alpha", "active", 1), ("Gone", "dropped", 3), ("Fin", "done", 4),
-        ].map { name, state, ordinal in PlanModelTests.theme(name, cards: [], ordinal: ordinal, state: state) }
-        let plan = try PlanModelTests.plan(themes: themes, lines: [])
-        let groups = plan.themeGroups
-        #expect(groups.active.map(\.name) == ["Alpha", "Zed"], "the board's order, not alphabetical")
-        #expect(groups.closed.map(\.name) == ["Beta", "Fin"], "paused, then done")
-        #expect(!(groups.active + groups.closed).contains { $0.name == "Gone" })
-    }
 }

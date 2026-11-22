@@ -10,11 +10,6 @@ package com.farcooler.model
  * check that way — the finger is moving, the list is re-laying out, and a drop
  * that lands one card short looks exactly like a drop that lands right.
  *
- * The Swift half of this is `apps/shared/AgentKit/Sources/AgentKit/WorktreeOrder.swift`
- * and the two must agree: they drag the same cards, into the same order, on the
- * same runner. `moved` and `edge` here are that file line for line, and the test
- * cases are the same cases.
- *
  * It knows nothing about activity, attention or recency, and it must never
  * learn: the whole point of a stored order is that a card stays where it was put.
  */

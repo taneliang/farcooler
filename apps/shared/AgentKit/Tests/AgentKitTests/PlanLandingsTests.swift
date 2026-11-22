@@ -5,7 +5,7 @@ import Testing
 
 /// Landings (ov-309, ov-872) and the runner's CI reads (ov-306) as the Mac and
 /// the iPhone read them: `test/fixtures/plan.json`, which the CLI's and the
-/// client's tests write from the wire, and Now drawn as row groups.
+/// client's tests write from the wire.
 struct PlanLandingsTests {
     static let now = PlanModelTests.now
 
@@ -27,8 +27,8 @@ struct PlanLandingsTests {
         #expect(plan.landings.isEmpty && plan.ci.isEmpty && plan.boardCounts == nil && plan.cardCount("open") == nil)
     }
 
-    @Test("Now heads each landing's tickets with the landing, then the tickets on none; a pushed landing with no ticket working still shows")
-    func nowGroupsByLanding() throws {
+    @Test("A landing lists its tickets and their status")
+    func landingTickets() throws {
         let plan = try PlanModelTests.plan(
             themes: [],
             lines: [
@@ -42,11 +42,7 @@ struct PlanLandingsTests {
                 PlanModelTests.landing(15, "pushed", sha: "1a1b3275"),
                 PlanModelTests.landing(13, "landed", tickets: ["t9"]),
             ])
-        let groups = plan.nowGroups
-        #expect(groups.map { $0.landing?.number } == [14, 15, nil], "the landed one is out of Now")
-        #expect(groups.map { $0.lines.map(\.task) } == [["t1", "t2"], [], ["t3"]])
         #expect(plan.status(of: plan.lines[0]) == "In Review \u{00B7} in Landing 14")
-        #expect(plan.liveLandings.map(\.number) == [14, 15])
         #expect(plan.lines(on: plan.landings[2]).map(\.task) == ["t9"], "a landed landing still lists its tickets")
     }
 

@@ -34,22 +34,6 @@ extension PlanModel {
     }
 }
 
-/// The themes as a list draws them: the active ones in the board's order, and
-/// paused and done ones folded into one closed row after them. Dropped themes
-/// are in neither.
-public struct PlanThemeGroups: Equatable, Sendable {
-    public var active: [PlanTheme]
-    public var closed: [PlanTheme]
-}
-
-extension PlanModel {
-    /// The Mac's Themes, the iPhone's and Android's all split on this one rule.
-    public var themeGroups: PlanThemeGroups {
-        let shown = shownThemes
-        return PlanThemeGroups(active: shown.filter { $0.state == "active" }, closed: shown.filter { $0.state != "active" })
-    }
-}
-
 /// The work outside every theme.
 public struct PlanOutside: Equatable, Sendable {
     /// The tickets' headings, in the line's order.

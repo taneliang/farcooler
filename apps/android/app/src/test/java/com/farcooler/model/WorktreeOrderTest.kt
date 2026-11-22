@@ -7,11 +7,6 @@ import org.junit.Test
 /**
  * The arithmetic behind dragging a worktree card.
  *
- * The same cases as `WorktreeOrderTests.swift` in AgentKit, deliberately: the
- * two apps drag the same cards into the same order on the same runner, and a
- * disagreement between them shows up as a card that lands in one place on a
- * phone and another on a Mac.
- *
  * Here rather than in a UI test because there is no UI test that could catch any
  * of it — this app has no Compose test dependency, and a drop that lands one
  * card short looks exactly like a drop that lands right.
