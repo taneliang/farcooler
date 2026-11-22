@@ -791,7 +791,9 @@ impl Rpc {
                 admission.permits(&action)?;
                 if matches!(action, Action::Propose { .. } | Action::Drafts { .. }) { return crate::workflow_drafts::handle(svc, &self.watcher, workspace, &action); }  // filed and asked of a person here, never the engine (ov-971)
                 // Every read bypasses the effect inbox and its per-message git/tree cleanup.
-                use crate::workflow_runtime::{GetView, PLAN_WORKFLOW_BYTES, bound_legacy_get, encode_plan_get};
+                use crate::workflow_runtime::{GetView, encode_plan_get};
+                // Older Plan and workflow clients send the same unmarked Get. A projection
+                // requires an explicit opt-in so a workflow reader always gets the full view.
                 let plan_view = req.accepts.iter().any(|v| v == farcooler_protocol::accepts::WORKFLOW_PLAN);
                 let summary = req.accepts.iter().any(|v| v == "workflow_summary_v1");
                 let full = req.accepts.iter().any(|v| v == "workflow_full_v1");
@@ -829,11 +831,7 @@ impl Rpc {
                     return Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema:1, json:value.to_string() }));
                 }
                 let value = crate::workflow_starter::add_to_get(svc, workspace, value).await;
-                let mut json = value.to_string();
-                if action_is_get && req.accepts.is_empty() && json.len() > PLAN_WORKFLOW_BYTES {
-                    json = bound_legacy_get(value);
-                }
-                Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema: 1, json }))
+                Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema: 1, json: value.to_string() }))
             }
             // Watch a running engine agent's terminal, read-only (ov-972). Addressed by workspace and
             // item, never by terminal id: the engine's pane is in a tmux server the daemon's inventory

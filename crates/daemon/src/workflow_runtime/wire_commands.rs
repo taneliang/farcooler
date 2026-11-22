@@ -71,7 +71,7 @@ fn summarize(mut value:serde_json::Value) -> serde_json::Value {
 
 /// Plan's workflow read only needs renderable runs, stops and admission context.
 /// Keep headroom for the protobuf envelope around the JSON string.
-pub(crate) const PLAN_WORKFLOW_BYTES: usize = farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES - 1024;
+const PLAN_WORKFLOW_BYTES: usize = farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES - 1024;
 
 pub(crate) enum GetView {
     Full,
@@ -87,20 +87,6 @@ fn retain_plan_items(state: &mut State) {
         && !(item.group_of.is_some() && matches!(item.phase, Phase::Done | Phase::Cancelled)));
 }
 
-/// Shipped Plan clients use the same unmarked read as workflow snapshots.
-/// Preserve that shape, dropping history first and bounding live rows when
-/// necessary. Explicit workflow snapshots use their own request marker.
-pub(crate) fn bound_legacy_get(mut value: serde_json::Value) -> String {
-    value.as_object_mut().expect("workflow get object")
-        .retain(|key, _| matches!(key.as_str(), "schema" | "state" | "context" | "stops" | "configuration"));
-    if let Some(state) = value["state"].as_object_mut() {
-        state.remove("archive");
-        state.remove("grouping");
-        state.insert("seen".into(), serde_json::json!([]));
-    }
-    encode_plan_get(value)
-}
-
 pub(crate) fn encode_plan_get(mut value: serde_json::Value) -> String {
     let json = value.to_string();
     if json.len() <= PLAN_WORKFLOW_BYTES {
@@ -111,19 +97,13 @@ pub(crate) fn encode_plan_get(mut value: serde_json::Value) -> String {
     let mut items: Vec<_> = value.pointer_mut("/state/items").and_then(|v| v.as_object_mut())
         .map(std::mem::take).unwrap_or_default().into_iter().collect();
     let mut stops = value.get_mut("stops").and_then(|v| v.as_object_mut()).map(std::mem::take).unwrap_or_default();
-    if value.to_string().len() > PLAN_WORKFLOW_BYTES {
-        if let Some(state) = value["state"].as_object_mut() {
-            state.insert("source_sequences".into(), serde_json::json!({}));
-        }
-        if value.to_string().len() > PLAN_WORKFLOW_BYTES {
-            value.as_object_mut().expect("workflow get object").remove("configuration");
-        }
+    if value.to_string().len() > PLAN_WORKFLOW_BYTES && let Some(state) = value["state"].as_object_mut() {
+        state.insert("source_sequences".into(), serde_json::json!({}));
     }
     let mut remaining = PLAN_WORKFLOW_BYTES.saturating_sub(value.to_string().len());
     items.sort_by_key(|(_, item)| {
         let closed = matches!(item["phase"].as_str(), Some("Done" | "Failed" | "Cancelled"));
-        let tracker = item["definition"]["source"].as_str() == Some(farcooler_workflow::TICKET_SOURCE);
-        (tracker, closed, std::cmp::Reverse(item["since_ms"].as_i64().unwrap_or_default()))
+        (closed, std::cmp::Reverse(item["since_ms"].as_i64().unwrap_or_default()))
     });
     for (id, item) in items {
         let stop = stops.remove(&id);

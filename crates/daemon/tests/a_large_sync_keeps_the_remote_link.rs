@@ -4,7 +4,7 @@ use farcooler_daemon::service::Service;
 use farcooler_protocol::{v1::{self as pb, request, result, Scope}, workflow_commands::Action};
 use farcooler_store::models::Actor;
 use farcooler_transport::{ClientError, request as rpc};
-use farcooler_workflow::{Command, Definition, Grant, Input, Progression, State, step};
+use farcooler_workflow::{Archived, Command, Definition, Grant, Grouping, Input, Phase, Progression, State, step};
 use uuid::Uuid;
 
 mod common;
@@ -17,9 +17,9 @@ async fn a_large_first_sync_does_not_disconnect_the_control_session() {
     exercise(750 * 1024).await;
 }
 
-/// Older Plan clients use the unmarked workflow read, even with many live items.
+/// Released workflow clients ask for the full snapshot with an empty accepts list.
 #[tokio::test]
-async fn an_oversized_live_workflow_read_loads_on_the_control_session() {
+async fn an_oversized_unmarked_workflow_snapshot_is_refused_without_disconnect() {
     exercise(1200 * 1024).await;
 }
 
@@ -52,25 +52,35 @@ async fn exercise(state_bytes: usize) {
     assert_eq!(client.server_hello().granted_scope, Scope::Control as i32);
     let mut get = rpc("workflow.get");
     get.target_resource_id = Some(workspace.as_bytes().to_vec().into());
+    get.required_capabilities.push(farcooler_protocol::capability::WORKFLOW_COMMANDS.into());
     get.payload = Some(request::Payload::WorkflowCommand(pb::WorkflowCommand {
         schema: 1, json: serde_json::to_string(&Action::Get).unwrap(),
     }));
-    let read = tokio::time::timeout(Duration::from_secs(5), client.call(get)).await.unwrap();
-    let result::Value::WorkflowReply(reply) = read.expect("legacy workflow sync").value.unwrap() else { panic!("wrong reply") };
-    let value: serde_json::Value = serde_json::from_str(&reply.json).unwrap();
-    if state_bytes < farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES {
-        assert_eq!(value["state"], serde_json::to_value(&state).unwrap(), "no truncated state");
-        eprintln!("workflow reply: {} bytes", reply.json.len());
+    let read = tokio::time::timeout(Duration::from_secs(5), client.call(get.clone())).await.unwrap();
+    let workflow_oversized = state_bytes >= farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES;
+    if workflow_oversized {
+        oversized(read);
     } else {
-        let projected: State = serde_json::from_value(value["state"].clone()).unwrap();
-        assert_eq!(projected.revision, state.revision);
-        assert!(projected.items.len() < state.items.len());
-        let auth = serde_json::from_value(value["context"]["capabilities"].clone()).unwrap();
-        let view = farcooler_client::workflow_presentation::project(
-            &projected, &auth, farcooler_client::workflow_presentation::Style::Apple,
-        ).unwrap();
-        assert!(view.runs.len() > 100, "the legacy app still has live runs to render");
+        let result::Value::WorkflowReply(reply) = read.expect("legacy workflow sync").value.unwrap() else {
+            panic!("wrong reply");
+        };
+        let value: serde_json::Value = serde_json::from_str(&reply.json).unwrap();
+        assert_eq!(value["state"], serde_json::to_value(&state).unwrap(), "complete workflow state");
+        assert!(value["publication_history"].is_array());
+        eprintln!("workflow reply: {} bytes", reply.json.len());
     }
+    get.accepts.push(farcooler_protocol::accepts::WORKFLOW_PLAN.into());
+    let result::Value::WorkflowReply(reply) = client.call(get).await.expect("marked Plan workflow read").value.unwrap() else {
+        panic!("wrong Plan workflow reply");
+    };
+    let value: serde_json::Value = serde_json::from_str(&reply.json).unwrap();
+    let plan_state: State = serde_json::from_value(value["state"].clone()).unwrap();
+    assert_eq!(plan_state.revision, state.revision);
+    assert!(!plan_state.items.is_empty());
+    assert!(plan_state.archive.is_empty());
+    assert!(plan_state.grouping.is_none());
+    assert!(value["context"]["binding"].is_string());
+
     let mut board = rpc("task.list");
     board.payload = Some(request::Payload::TaskList(pb::TaskListRequest {
         repository_id: repo.id.as_bytes().to_vec().into(), workspace_id: Some(workspace.as_bytes().to_vec().into()),
@@ -87,7 +97,7 @@ async fn exercise(state_bytes: usize) {
     assert!(began.elapsed() < Duration::from_secs(5));
     let log = std::fs::read_to_string(dir.path().join("logs/farcoolerd.log")).unwrap();
     let warnings: Vec<_> = log.lines().filter(|line| line.contains("response exceeds frame cap")).collect();
-    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings.len(), 1 + usize::from(workflow_oversized));
     for warning in warnings { eprintln!("{warning}"); }
 }
 
@@ -98,7 +108,8 @@ fn oversized(answer: Result<pb::Result, ClientError>) {
             assert!(!retryable);
             assert_eq!(what, "response_too_large");
         }
-        other => panic!("oversized sync must refuse only its read, keeping the link: {other:?}"),
+        Ok(_) => panic!("oversized sync succeeded with an incomplete reply"),
+        Err(error) => panic!("oversized sync must refuse only its read, keeping the link: {error}"),
     }
 }
 
@@ -112,6 +123,10 @@ fn large_state(workspace: Uuid, bytes: usize) -> State {
             policy_pin: "policy".into(), resource: "seed".into(), dependencies: Default::default(), initial_candidate: None } };
     let mut state = step(&empty, &input).unwrap().state;
     let template = state.items["seed"].clone();
+    state.grouping = Some(Grouping { definition: template.definition.clone(), policy_pin: "policy".into() });
+    state.archive.insert("finished".into(), Archived {
+        start_load: None, closed: None, phase: Phase::Done, candidate: None, group: None, last_run: None, history: vec![],
+    });
     let mut encoded = serde_json::to_vec(&state).unwrap().len();
     while encoded < bytes {
         let name = format!("item-{}", state.items.len());

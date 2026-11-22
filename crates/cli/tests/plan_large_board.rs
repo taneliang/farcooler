@@ -54,12 +54,13 @@ async fn a_large_board_loads_in_plan_overview_and_detail_commands() {
         old_landing(store, repo.workspace, n as u32 + 1, "landed", None, cards, now + n as i64);
     }
 
+    h.service.start_workflows().unwrap();
     let mut link = connect(&h).await;
     let request = payload::Payload::PlanGet(pb::PlanGetRequest {
         workspace_id: id(repo.workspace), include_closed: false, ..Default::default()
     });
     let mut get = farcooler_transport::request("plan.get");
-    get.required_capabilities = vec![BOARD_PLAN.into()];
+    assert!(link.server_hello().capabilities.iter().any(|cap| cap == BOARD_PLAN));
     get.payload = Some(request);
     let result::Value::Plan(read) = link.call(get).await.expect("large board plan.get").value.unwrap() else {
         panic!("wrong result");
@@ -74,9 +75,22 @@ async fn a_large_board_loads_in_plan_overview_and_detail_commands() {
     assert!(read.landings.len() < 100, "landing history must be bounded");
     assert!(read.cards.len() < 1500, "closed cards must be summarized");
 
+    // The released app reads the unpaged board, then requests a full workflow snapshot.
+    let mut get_workflow = farcooler_client::plan_json::workflow_request(repo.workspace);
+    get_workflow.accepts.clear();
+    let legacy = farcooler_client::plan_json::with_workflow(&read, repo.workspace, Some(async {
+        Ok(link.call(get_workflow).await.expect("released app workflow.get").value.unwrap())
+    })).await.unwrap();
+    assert_eq!(legacy["themes"][0]["counts"]["cancelled"], 250);
+    assert_eq!(legacy["themes"][0]["story"], "Now on the board");
+    assert_eq!(legacy["themes"][0]["next"], "Next on the board");
+    assert!(legacy["landings"].as_array().is_some_and(|rows| !rows.is_empty()));
+    assert!(legacy["workflow"].is_object());
+
     let session = farcooler_client::session::Session::connect_local(&h.socket).await.unwrap();
     let json = session.plan_with_workflow(repo.workspace).await.unwrap();
     assert_eq!(json["themes"][0]["counts"]["cancelled"], 250);
+    assert!(json["workflow"].is_object());
     for style in ["apple", "material"] {
         let request = serde_json::json!({"schema": 1, "plan": json, "context": {"style": style}});
         let rendered = farcooler_client::plan_view::json(&request.to_string());
@@ -84,6 +98,7 @@ async fn a_large_board_loads_in_plan_overview_and_detail_commands() {
         assert!(rendered["error"].is_null(), "{rendered}");
         assert_eq!(rendered["view"]["themes"]["tiles"].as_array().unwrap().len(), 25);
     }
+    h.service.stop_workflows().await.unwrap();
 
     let waiting = store.get_task(tasks[0]).unwrap().key;
     let closed = store.get_task(tasks[300]).unwrap().key;
