@@ -141,7 +141,10 @@ impl Store {
              AND EXISTS (SELECT 1 FROM workflow_states s WHERE s.workspace = ?1 AND s.revision = ?7 AND s.epoch = ?8)
              AND (?9 = 0 OR json_type(workflow_outbox.payload, '$.kind.Execute') IS NULL
                 OR NOT EXISTS (SELECT 1 FROM workflow_bundle_selections s WHERE s.workspace = ?1
-                    AND s.pin != json_extract(workflow_outbox.payload, '$.policy_pin')))
+                    AND s.pin != json_extract(workflow_outbox.payload, '$.policy_pin'))
+                OR EXISTS (SELECT 1 FROM workflow_states s, json_each(s.state, '$.items') item
+                    WHERE s.workspace = ?1 AND item.key = json_extract(workflow_outbox.payload, '$.item')
+                    AND json_type(item.value, '$.group_of') = 'object' AND json_type(item.value, '$.pushed') = 'text'))
              AND ((?6 = 0 AND json_type(workflow_outbox.payload, '$.kind.Decide') = 'object')
                 OR EXISTS (SELECT 1 FROM workflow_resources r WHERE r.workspace = ?1 AND r.generation = ?6
                  AND r.resource = json_extract(workflow_outbox.payload, '$.resource')

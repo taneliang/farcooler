@@ -30,4 +30,20 @@ impl Rpc {
             _ => Err(DomainError::ScopeDenied { needed: "owner" }),
         }
     }
+
+    pub(super) async fn workflow_publication_preview(
+        handle: &crate::workflow_runtime::CommandHandle,
+        admission: crate::workflow_runtime::Admission,
+        publication: farcooler_protocol::workflow_commands::Action,
+    ) -> Result<result::Value> {
+        admission.permits(&publication)?;
+        let restarts = handle.preview_publication(admission, publication).await.map_err(|error| match error {
+            crate::workflow_runtime::Error::Domain(said) => said,
+            _ => DomainError::NotFound,
+        })?;
+        Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply {
+            schema: 1,
+            json: serde_json::json!({"schema":1,"restarts":restarts}).to_string(),
+        }))
+    }
 }

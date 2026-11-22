@@ -805,8 +805,11 @@ impl Rpc {
                 let admission = self.admit(workspace).await?;
                 // A Maintainer may publish a draft they approved through workflow_drafts. The direct
                 // command is still the owner's or, with a grant, this workspace's orchestrator's.
-                if matches!(action, Action::Publish { .. }) && !admission.is_owner() && admission.orchestrator().is_none() {
+                if matches!(action, Action::Publish { .. } | Action::PreviewPublication { .. }) && !admission.is_owner() && admission.orchestrator().is_none() {
                     return Err(DomainError::ScopeDenied { needed: "owner" });
+                }
+                if let Action::PreviewPublication { publication } = action {
+                    return Self::workflow_publication_preview(handle, admission, *publication).await;
                 }
                 admission.permits(&action)?;
                 if matches!(action, Action::Propose { .. } | Action::Drafts { .. }) { return crate::workflow_drafts::handle(svc, &self.watcher, workspace, &action); }  // filed and asked of a person here, never the engine (ov-971)

@@ -159,6 +159,12 @@ impl CommandHandle {
         if self.is_closed() { return Err(Error::Refused("runtime inbox closed")); }
         Ok(value)
     }
+    pub(crate) async fn preview_publication(&self, admission: Admission, action: Action) -> Result<usize> {
+        let (send, receive) = oneshot::channel();
+        self.send.send(Inbox::PublicationPreview(Box::new(admission), Box::new(action), send)).await
+            .map_err(|_| Error::Refused("runtime inbox closed"))?;
+        receive.await.map_err(|_| Error::Refused("runtime reply closed"))?
+    }
     pub(crate) async fn wire_command(&self, admission: Admission, action: Action) -> Result<serde_json::Value> {
         let (send, receive) = oneshot::channel();
         self.send.send(Inbox::Wire(Box::new(admission), Box::new(action), send)).await
@@ -182,7 +188,7 @@ impl Runtime {
         let payload = serde_json::to_string(&(principal, &action))?;
         if payload.len() > MAX_BYTES { return Err(Error::Refused("oversized command")); }
         // A proposal is filed and answered by the daemon before the engine is involved (`workflow_drafts`).
-        if matches!(action, Action::Propose { .. } | Action::Drafts { .. }) { return Err(Error::Refused("a proposal is not an engine command")); }
+        if matches!(action, Action::Propose { .. } | Action::Drafts { .. } | Action::PreviewPublication { .. }) { return Err(Error::Refused("a proposal is not an engine command")); }
         if matches!(action, Action::Get) {
             return self.exec.read_get(workspace);
         }
@@ -193,7 +199,7 @@ impl Runtime {
             | Action::ResolveCancellation { mutation, .. } | Action::Queue { mutation, .. } | Action::Leave { mutation, .. } | Action::Settle { mutation, .. } | Action::Resolve { mutation, .. }
             | Action::Track { mutation, .. } | Action::Move { mutation, .. } | Action::Start { mutation, .. }
             | Action::SendBack { mutation, .. } | Action::Close { mutation, .. } | Action::Reopen { mutation, .. } | Action::Landed { mutation, .. } => mutation,
-            Action::Get | Action::Logs { .. } | Action::Propose { .. } | Action::Drafts { .. } => unreachable!(),
+            Action::Get | Action::Logs { .. } | Action::Propose { .. } | Action::Drafts { .. } | Action::PreviewPublication { .. } => unreachable!(),
         };
         if !valid_id(&mutation.id) || mutation.id.len() > 100 { return Err(Error::Refused("invalid command id")); }
         let id = format!("wire:{principal}:{}", mutation.id);
@@ -410,7 +416,7 @@ impl Runtime {
                     let input = input(Command::Reopen { item:item.clone(),definition,policy_pin,resource:Exec::item_resource(workspace, item) },Grant::Controller);
                     self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
                 }
-                Action::Get | Action::Logs { .. } | Action::Propose { .. } | Action::Drafts { .. } => unreachable!(),
+                Action::Get | Action::Logs { .. } | Action::Propose { .. } | Action::Drafts { .. } | Action::PreviewPublication { .. } => unreachable!(),
             }
         };
         // A board tracks its cards once it has a published workflow, so the cards already on it come under the engine now (ov-962).

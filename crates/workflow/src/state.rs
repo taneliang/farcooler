@@ -45,6 +45,13 @@ pub struct Item {
     /// Identifies the private checkout of a replacement run across its steps.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restart: Option<String>,
+    /// A publication restarted this run with an already provisioned checkout.
+    /// Cleared after the replacement's first successful build.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub reuse_checkout: bool,
+    /// An in-place publication retained this run’s original evidence and budget usage.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub carried_progress: bool,
     /// Earlier runs stopped under this ticket key, oldest first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub history: Vec<RunRecord>,
@@ -347,9 +354,11 @@ pub enum Command {
     Advance,
     /// Refresh waiting landing groups from the owner's published definition. Build evidence keeps its original pin.
     RefreshGroups { definition: Definition, policy_pin: String },
-    /// The runtime classified a publication while this effect was still unstarted.
-    /// An engine-only re-pin supplies the new definition. Any other re-pin stops the run for carry.
+    /// Legacy publication event, retained for replay.
     RepinPending { item: String, effect: String, policy_pin: String, definition: Option<Box<Definition>> },
+    /// Move quiescent runs to a selected publication. A true entry restarts the ticket
+    /// from the first step (or releases an unpushed landing group for its tickets).
+    AdoptPublication { definition: Definition, policy_pin: String, items: BTreeMap<String, bool> },
     Enqueue { item: String, definition: Definition, policy_pin: String,
         resource: String, dependencies: BTreeSet<String>, initial_candidate: Option<String> },
     Approve { item: String, run: String, pin: String, candidate: Option<String> },
@@ -432,6 +441,9 @@ pub enum EffectKind { Decide { policy: crate::ScriptPolicy, input: Box<crate::Ho
 pub struct Effect {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restart: Option<String>,
+    /// A replacement Provision or first Build works with the existing checkout.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub reuse_checkout: bool,
     pub id: String,
     pub item: String,
     pub run: String,

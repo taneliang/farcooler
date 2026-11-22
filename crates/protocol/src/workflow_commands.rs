@@ -24,6 +24,8 @@ pub enum Action {
     /// Restore the last publication's previous immutable bundle. Owner in person only.
     Rollback { mutation: Mutation, expected_pin: String, reason: String },
     Publish { #[serde(default, skip_serializing_if = "Option::is_none")] reason: Option<String>, mutation: Mutation, expected_pin: Option<String>, definition: Definition, #[serde(default, skip_serializing_if = "Option::is_none")] adapter: Option<Box<crate::workflow_config::AdapterConfiguration>>, #[serde(default, skip_serializing_if = "Option::is_none")] notifications: Option<crate::workflow_config::NotificationPolicy> },
+    /// Read-only preview. Older readers reject the action rather than publishing it.
+    PreviewPublication { publication: Box<Action> },
     Enqueue { mutation: Mutation, item: String, pin: String },
     Approve { mutation: Mutation, item: String, run: String, pin: String, candidate: Option<String> },
     Review { mutation: Mutation, item: String, run: String, pin: String, evidence: farcooler_workflow::Evidence, passed: bool,
@@ -89,7 +91,7 @@ impl Action {
     pub fn method(&self) -> &'static str {
         match self {
             Self::Get | Self::Logs { .. } => "workflow.get",
-            Self::PublicationGrant { .. } | Self::Rollback { .. } | Self::Publish { .. } => "workspace.set_workflow",
+            Self::PublicationGrant { .. } | Self::Rollback { .. } | Self::Publish { .. } | Self::PreviewPublication { .. } => "workspace.set_workflow",
             Self::Enqueue { .. } => "workflow.enqueue",
             Self::Approve { .. } => "workflow.approve",
             Self::Review { .. } => "workflow.review",
@@ -118,6 +120,8 @@ pub fn parse(raw: &str) -> Result<Action, &'static str> {
     if raw.len() > MAX_BYTES { return Err("oversized workflow command"); }
     let value: serde_json::Value = serde_json::from_str(raw).map_err(|_| "invalid JSON")?;
     let action: Action = serde_json::from_value(value.clone()).map_err(|_| "invalid action")?;
+    if let Action::PreviewPublication { publication } = &action
+        && !matches!(publication.as_ref(), Action::Publish { .. }) { return Err("invalid publication preview"); }
     if serde_json::to_value(&action).map_err(|_| "invalid encoding")? != value { return Err("unknown workflow fields"); }
     Ok(action)
 }
@@ -159,6 +163,17 @@ mod tests {
         definition.stages[2].limit = 2;
         let publish = Action::Publish { reason:None, notifications:None, adapter:None, mutation:Mutation { id:"p".into(),revision:0,epoch:1,sequence:1 },expected_pin:None,definition };
         assert_eq!(parse(&serde_json::to_string(&publish).unwrap()).unwrap(),publish);
+    }
+    #[test]
+    fn publication_preview_is_a_separate_read_only_wire_action() {
+        let publication = Action::Publish { reason: None, notifications: None, adapter: None,
+            mutation: Mutation { id: "publish".into(), revision: 0, epoch: 1, sequence: 1 },
+            expected_pin: None, definition: Definition::tracker("owner") };
+        let preview = Action::PreviewPublication { publication: Box::new(publication) };
+        let raw = serde_json::to_string(&preview).unwrap();
+        assert_eq!(parse(&raw).unwrap(), preview);
+        assert_eq!(preview.method(), "workspace.set_workflow");
+        assert!(parse(r#"{"action":"PreviewPublication","publication":{"action":"Get"}}"#).is_err());
     }
     #[test]
     fn workflow_wire_parser_rejects_authority_result_and_unknown_nested_fields() {

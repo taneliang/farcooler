@@ -2,6 +2,37 @@
 use super::*;
 use super::coding::PinnedDefinition;
 use farcooler_protocol::workflow_config::AdapterConfiguration;
+use farcooler_store::workflow_publication::{Configuration, notification_configuration_pin, runs_the_same};
+
+fn carries_progress(previous: &Configuration, current: &Configuration) -> bool {
+    if previous.adapter != current.adapter || previous.notifications != current.notifications {
+        return false;
+    }
+    let mut definition = previous.definition.clone();
+    definition.start_policy = current.definition.start_policy.clone();
+    definition.limits = current.definition.limits.clone();
+    definition.send_backs = current.definition.send_backs;
+    definition.max_reworks = current.definition.max_reworks;
+    for (old, new) in definition.stages.iter_mut().zip(&current.definition.stages) {
+        old.limit = new.limit;
+        old.max_attempts = new.max_attempts;
+    }
+    for (name, old) in &mut definition.groups {
+        if let Some(new) = current.definition.groups.get(name) {
+            old.limit = new.limit;
+            for (old, new) in old.steps.iter_mut().zip(&new.steps) {
+                old.limit = new.limit;
+                old.max_attempts = new.max_attempts;
+            }
+        }
+    }
+    // A model change must not activate another agent's commands or hooks in a
+    // run that already passed approval. Publication admission is separate.
+    let models_changed = definition.models != current.definition.models;
+    definition.models = current.definition.models.clone();
+    definition == current.definition
+        && (!models_changed || runs_the_same(Some(previous), &current.definition, current.adapter.as_ref()))
+}
 
 /// The base a publication names is where its tickets start, so it has to be a commit the landing refs
 /// still contain: the same commit or an older one. A landing since the base was set moves the refs on,
@@ -156,23 +187,88 @@ impl Runtime {
         }
         Ok(bundle.adapter.map(|AdapterConfiguration::Coding(config)| config))
     }
-    pub(super) fn pending_repin(&self, workspace: &str, item: &Item, effect: &Effect, binding_valid: bool) -> Result<Option<Command>> {
-        use crate::workflow_starter::engine_repinned;
-
-        if !self.service_mode || !matches!(effect.kind, EffectKind::Execute(_)) { return Ok(None); }
-        let Some(current) = self.store.workflow_configuration(workspace)? else { return Ok(None) };
-        if current.pin == item.policy_pin { return Ok(None); }
-        // Use the same app-owned files as publication admission, but require exact
-        // equality for every other setting, including routes, approvals and notifications.
-        let compatible = if binding_valid {
-            let previous = self.store.workflow_bundle(&item.policy_pin)?.ok_or(Error::Refused("missing item bundle"))?;
-            self.root.parent().and_then(|root| engine_repinned(root, &previous)).is_some_and(|engine| {
-                engine.adapter == current.adapter && engine.definition == current.definition && engine.notifications == current.notifications
-            })
-        } else { false };
-        Ok(Some(Command::RepinPending { item: effect.item.clone(), effect: effect.id.clone(),
-            policy_pin: current.pin, definition: compatible.then(|| Box::new(current.definition)) }))
+    /// Plan against each item's retained bundle, including runs spanning multiple publications.
+    fn publication_plan(&self, state: &State, current: &Configuration) -> Result<std::collections::BTreeMap<String, bool>> {
+        let mut compatible = std::collections::BTreeMap::new();
+        let mut plan = std::collections::BTreeMap::new();
+        for (id, item) in &state.items {
+            if item.policy_pin == current.pin || item.definition.is_ticket()
+                || matches!(item.phase, Phase::Done | Phase::Failed | Phase::Cancelled | Phase::Cancelling | Phase::Uncertain) {
+                continue;
+            }
+            let same = match compatible.entry(&item.policy_pin) {
+                std::collections::btree_map::Entry::Occupied(entry) => *entry.get(),
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    let previous = self.store.workflow_bundle(&item.policy_pin)?;
+                    *entry.insert(previous.is_some_and(|previous| {
+                        carries_progress(&previous, current)
+                            || self.root.parent().and_then(|root| crate::workflow_starter::engine_repinned(root, &previous))
+                                .is_some_and(|engine| carries_progress(&engine, current))
+                    }))
+                }
+            };
+            // A group that has pushed must finish accounting for that push.
+            if !same && item.group_of.is_some() && item.pushed.is_some() { continue; }
+            plan.insert(id.clone(), !same);
+        }
+        for (id, item) in &state.items {
+            if let Some(group) = &item.grouped_in {
+                match plan.get(group) {
+                    Some(true) => { plan.insert(id.clone(), true); }
+                    None if state.items[group].policy_pin != current.pin || plan.get(id) == Some(&true) => {
+                        // A group still accounting for its landing keeps its tickets until it settles.
+                        plan.remove(id);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Ok(plan)
     }
+
+    pub(super) fn publication_preview(&self, workspace: &str, principal: &str,
+        action: &farcooler_protocol::workflow_commands::Action) -> Result<usize> {
+        use farcooler_protocol::workflow_commands::Action;
+        let Action::Publish { mutation, expected_pin, definition, adapter, notifications, .. } = action
+            else { return Err(Error::Refused("publication preview requires Publish")); };
+        let payload = serde_json::to_string(&(principal, action))?;
+        if self.store.workflow_wire_receipt(workspace, &format!("wire:{principal}:{}", mutation.id), &payload)?.is_some() {
+            return Ok(0);
+        }
+        let current = self.store.workflow_configuration(workspace)?;
+        let state = self.state(workspace)?.unwrap_or_else(|| State::empty(workspace.into(), 1));
+        if state.revision != mutation.revision || state.epoch != mutation.epoch
+            || current.as_ref().map(|c| &c.pin) != expected_pin.as_ref() {
+            return Err(Error::Refused("publication preview is stale"));
+        }
+        let proposed = Configuration {
+            pin: notification_configuration_pin(definition, adapter.as_deref(), notifications.as_ref()),
+            definition: definition.clone(), adapter: adapter.as_deref().cloned(), notifications: notifications.clone(),
+        };
+        Ok(self.publication_plan(&state, &proposed)?.into_iter()
+            .filter(|(id, restart)| *restart && state.items[id].group_of.is_none()).count())
+    }
+
+    pub(super) fn adopt_publication(&self, workspace: &str, now_ms: i64) -> Result<bool> {
+        if !self.service_mode { return Ok(false); }
+        let Some(current) = self.store.workflow_configuration(workspace)? else { return Ok(false) };
+        let Some(state) = self.state(workspace)? else { return Ok(false) };
+        let mut items = self.publication_plan(&state, &current)?;
+        if items.is_empty() { return Ok(false); }
+        let unsettled: BTreeSet<_> = self.store.workflow_outbox(workspace)?.into_iter()
+            .filter(|effect| effect.active && matches!(effect.dispatch_state.as_str(), "admitted" | "uncertain"))
+            .map(|effect| effect.effect.item).collect();
+        let busy = |id: &String| unsettled.contains(id) || state.items[id].deciding.is_some();
+        // Restart together so a publication produces one notice. In-place moves
+        // can proceed independently as soon as their effect is quiescent.
+        let restart_busy = items.iter().any(|(id, restart)| *restart && busy(id));
+        items.retain(|id, restart| !busy(id) && !(*restart && restart_busy));
+        if items.is_empty() { return Ok(false); }
+        Ok(self.internal(workspace, Command::AdoptPublication {
+            definition: current.definition, policy_pin: current.pin, items,
+        }, Grant::Controller, now_ms)?.result.is_ok())
+    }
+
     pub(super) fn validate_item_launch(&mut self, workspace: &str, item: &Item) -> Result<()> {
         if !self.service_mode { return Ok(()); }
         if let Some(config) = &self.coding { self.validate_workspace_repository(workspace, config)?; }

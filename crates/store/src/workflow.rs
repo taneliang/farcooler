@@ -106,9 +106,9 @@ impl Store {
     }
     fn workflow_apply_snapshot_by(&self, input: &Input, by: Option<&crate::models::Actor>) -> Result<(Receipt, Option<State>)> {
         let payload = serde_json::to_string(input)?;
-        let mut request = input.clone();
-        if let Command::Start { start_load, .. } = &mut request.command { *start_load = None; }
-        if serde_json::to_vec(&request)?.len() > 65536 { return Err(WorkflowError::Oversized); }
+        if farcooler_workflow::request_size(input, true).map_err(|_| WorkflowError::Oversized)? > 65536 {
+            return Err(WorkflowError::Oversized);
+        }
 
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -348,7 +348,7 @@ fn apply_in_snapshot(tx: &Transaction<'_>, input: &Input, payload: &str, by: Opt
             Command::Approve {item,..}|Command::Review {item,..}|Command::Observe {item,..}|Command::Cancel {item,..}|Command::Retry {item}|Command::Queue {item}|Command::Leave {item}|Command::Move {item,..}|Command::Resolve {item,..}
                 |Command::Decide {item,..}|Command::SendBack {item,..}|Command::Close {item,..}|Command::Land {item,..}
                 |Command::RefreshJoin {item,..}|Command::RepinPending {item,..} => state.items.get(item).map(|i|i.resource.as_str()),
-            Command::Advance | Command::RefreshGroups { .. } => None,
+            Command::Advance | Command::RefreshGroups { .. } | Command::AdoptPublication { .. } => None,
         };
         // A Start takes its followers with it (ov-970), so their quarantine holds it back as the lead's does.
         let followers:Vec<&str>=match &input.command { Command::Start {with,..} => with.iter().filter_map(|f|state.items.get(f)).map(|i|i.resource.as_str()).collect(), _ => Vec::new() };
@@ -399,6 +399,35 @@ fn apply_in_snapshot(tx: &Transaction<'_>, input: &Input, payload: &str, by: Opt
                 )?;
                 if !unstarted || !crate::workflow_effects::executable_payload(tx, &input.workspace, effect)? {
                     result = Err(Refusal::Phase);
+                }
+            }
+        }
+        if result.is_ok() && let Command::AdoptPublication { definition, policy_pin, items } = &input.command {
+            let selected: Option<String> = tx.query_row(
+                "SELECT b.definition_pin FROM workflow_bundle_selections s JOIN workflow_bundles b ON b.pin=s.pin
+                 WHERE s.workspace=?1 AND s.pin=?2", params![input.workspace, policy_pin], |r| r.get(0),
+            ).optional()?;
+            if selected.as_deref() != Some(&definition.pin()) {
+                result = Err(Refusal::Stale);
+            } else {
+                for id in items.keys() {
+                    let item = &state.items[id];
+                    if blocked.contains(&item.resource) {
+                        result = Err(Refusal::Resource);
+                        break;
+                    }
+                    // Admission and publication migration race under this same writer lock.
+                    if let Some(effect) = &item.pending {
+                        let status: Option<String> = tx.query_row(
+                            "SELECT dispatch_state FROM workflow_outbox WHERE workspace=?1 AND id=?2 AND active=1",
+                            params![input.workspace, effect], |r| r.get(0),
+                        ).optional()?;
+                        if !matches!(status.as_deref(), Some("pending" | "claimed"))
+                            || !crate::workflow_effects::executable_payload(tx, &input.workspace, effect)? {
+                            result = Err(Refusal::Phase);
+                            break;
+                        }
+                    }
                 }
             }
         }

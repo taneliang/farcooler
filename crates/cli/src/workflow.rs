@@ -325,6 +325,16 @@ pub async fn send(link:&mut crate::Link, workspace:Uuid, action:Action, json:boo
     if value.pointer("/receipt/result/Err").is_some() { return Err("workflow command refused; receipt shown above".into()); }
     Ok(())
 }
+/// Preview the exact publication before the CLI sends its write.
+pub(crate) async fn publication_restart_count(link: &mut crate::Link, workspace: Uuid, action: &Action)
+    -> Result<u64, Box<dyn std::error::Error>>
+{
+    let req = request(workspace, &Action::PreviewPublication { publication: Box::new(action.clone()) })?;
+    let reply = read_deadline(link.call(req)).await??;
+    let result::Value::WorkflowReply(reply) = expect_value(reply.value)? else { return Err("unexpected workflow preview".into()) };
+    let value: serde_json::Value = serde_json::from_str(&reply.json)?;
+    value["restarts"].as_u64().ok_or_else(|| "runner returned no publication restart count".into())
+}
 /// Any workflow command's reply, unprinted.
 pub async fn ask(link:&mut crate::Link, workspace:Uuid, action:&Action) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     if !link.daemon_capabilities().iter().any(|c| c == capability::WORKFLOW_COMMANDS) { return Err("runner lacks workflow commands".into()); }

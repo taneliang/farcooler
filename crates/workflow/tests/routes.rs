@@ -213,6 +213,21 @@ fn a_back_edge_to_a_build_needs_no_candidate_but_one_to_a_check_keeps_it() {
     assert_eq!(state.items["item"].candidate, candidate);
 }
 #[test]
+fn a_publication_can_lower_a_limit_below_what_a_run_has_already_spent() {
+    let mut state = to_check(start(routed()));
+    for _ in 0..2 { state = to_check(go(state.clone(), reject(&state))); }
+    let mut definition = state.items["item"].definition.clone();
+    definition.stages[2].limit = 1;
+    let change = input(&state, Command::AdoptPublication { policy_pin: definition.pin(), definition,
+        items: [("item".into(), false)].into() }, Grant::Controller);
+    let state = go(state, change);
+    assert_eq!(state.items["item"].back_edges["stage-2"], 2);
+    let state = go(state.clone(), reject(&state));
+    assert_eq!(state.items["item"].phase, Phase::Failed);
+    assert_eq!(state.items["item"].back_edges["stage-2"], 2);
+}
+
+#[test]
 fn the_state_validator_refuses_forged_back_edge_counts() {
     let state = to_check(start(routed()));
     // A count above the step's limit, even with a matching iteration.

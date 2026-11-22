@@ -235,7 +235,7 @@ fn workflow_atomic_reopen_duplicate_payload_and_replay() {
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
 #[test]
-fn ov1379_repin_and_admission_cannot_both_consume_an_effect() {
+fn ov1425_publication_and_admission_cannot_both_consume_an_effect() {
     use crate::workflow_publication::Write;
 
     for admitted in [false, true] {
@@ -269,8 +269,8 @@ fn ov1379_repin_and_admission_cannot_both_consume_an_effect() {
 
         let receipt = store.workflow_apply(&Input {
             id: "repin".into(), source: "runtime".into(), source_sequence: 1, expected_revision: state.revision,
-            command: Command::RepinPending { item: "item".into(), effect, policy_pin: definition.pin(),
-                definition: Some(Box::new(definition)) },
+            command: Command::AdoptPublication { definition: definition.clone(), policy_pin: definition.pin(),
+                items: [("item".into(), false)].into() },
             ..enqueue("workspace", "resource")
         }).unwrap();
         let mut replay = State::empty("workspace".into(), 1);

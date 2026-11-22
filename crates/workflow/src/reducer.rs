@@ -10,7 +10,7 @@ fn new_item(definition: &Definition, policy_pin: &str, resource: &str,
         start_load: None, execution: None, definition: definition.clone(), pin: definition.pin(), policy_pin: policy_pin.into(),
         dependencies: dependencies.clone(), resource: resource.into(), stage: 0, iteration: 0, attempt: 1, fence: 1,
         phase: Phase::Blocked, run: String::new(), pending: None, candidate: initial_candidate.clone(),
-        restart: None, history: Vec::new(), reason: None, last_evidence: None, stopping: None, stopped_from: None,
+        restart: None, reuse_checkout: false, carried_progress: false, history: Vec::new(), reason: None, last_evidence: None, stopping: None, stopped_from: None,
         cancel_reason: None, closed: None, failure: None, group_failure: None, deciding: None,
         hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, landed: None,
         rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
@@ -26,7 +26,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
         || !valid_id(&input.source) || !valid_id(&input.workspace)
         || input.source_sequence == 0 || state.items.len() > MAX_ITEMS
         || input.busy_resources.len() > 1024 || input.busy_resources.iter().any(|r| !valid_id(r))
-        || request_size(input)? > 65536
+        || request_size(input, false)? > 65536
     { return Err(Refusal::Invalid); }
     if state.seen.contains(&input.id) { return Err(Refusal::Duplicate); }
     if input.workspace != state.workspace || input.epoch != state.epoch
@@ -46,6 +46,82 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
             definition.validate()?;
             if !valid_id(policy_pin) { return Err(Refusal::Invalid); }
             next.grouping = Some(Grouping { definition: definition.clone(), policy_pin: policy_pin.clone() });
+        }
+        Command::AdoptPublication { definition, policy_pin, items } => {
+            controller(input)?;
+            definition.validate()?;
+            if !valid_id(policy_pin) || items.is_empty() || items.len() > MAX_ITEMS { return Err(Refusal::Invalid); }
+            // An unpushed group belongs to the old landing plan. Release the members
+            // without taking any of that plan's result routes.
+            for (id, restart) in items {
+                if !restart { continue; }
+                let group = next.items.get_mut(id).ok_or(Refusal::Missing)?;
+                if group.group_of.is_none() { continue; }
+                if group.policy_pin == *policy_pin || group.pushed.is_some() || group.stopping.is_some() || group.deciding.is_some()
+                    || matches!(group.phase, Phase::Done | Phase::Cancelled | Phase::Failed | Phase::Cancelling | Phase::Uncertain)
+                    || group.members.iter().any(|member| items.get(&member.item) != Some(&true))
+                { return Err(Refusal::Phase); }
+                group.phase = Phase::Cancelled;
+                group.pending = None;
+                group.handed = group.members.iter().map(|m| m.item.clone()).collect();
+                for member in std::mem::take(&mut group.members) {
+                    let ticket = next.items.get_mut(&member.item).ok_or(Refusal::Missing)?;
+                    ticket.phase = Phase::WaitingJoin;
+                    ticket.grouped_in = None;
+                }
+            }
+            for (id, restart) in items {
+                let mut item = next.items.remove(id).ok_or(Refusal::Missing)?;
+                if *restart && item.group_of.is_some() {
+                    next.items.insert(id.clone(), item);
+                    continue;
+                }
+                if (!restart && item.policy_pin == *policy_pin) || item.stopping.is_some() || item.deciding.is_some()
+                    || matches!(item.phase, Phase::Done | Phase::Cancelled | Phase::Failed | Phase::Cancelling | Phase::Uncertain)
+                { return Err(Refusal::Phase); }
+                if *restart {
+                    if item.grouped_in.is_some() { return Err(Refusal::Phase); }
+                    let initial = matches!(definition.stages[0].kind, StageKind::Tracker).then(|| definition.pin());
+                    let mut replacement = new_item(definition, policy_pin, &item.resource, &item.dependencies, &initial);
+                    replacement.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
+                    let mut prior = item.last_run();
+                    prior.phase = Phase::Cancelled;
+                    prior.reason = Some("A workflow publication restarted this run.".into());
+                    replacement.history = std::mem::take(&mut item.history);
+                    replacement.history.push(prior);
+                    // The checkout identity is independent of the new run's fence and receipts.
+                    replacement.tree = item.tree;
+                    replacement.reuse_checkout = definition.stages.iter().any(|stage| stage.kind == StageKind::Build)
+                        && (item.reuse_checkout || item.definition.stages[..item.stage].iter()
+                            .any(|stage| stage.kind == StageKind::Provision));
+                    replacement.restart = item.restart;
+                    replacement.followers = item.followers;
+                    replacement.start_load = item.start_load;
+                    if replacement.reuse_checkout {
+                        replacement.brief = Some("The workflow changed. Continue from the work already on this branch.".into());
+                    }
+                    replacement.models = definition.picked_models(&BTreeMap::new())?;
+                    item = replacement;
+                } else {
+                    item.definition = if let Some(group) = &mut item.group_of {
+                        group.pin = definition.pin();
+                        definition.group_definition(&group.name).ok_or(Refusal::Definition)?
+                    } else { definition.clone() };
+                    item.pin = item.definition.pin();
+                    item.policy_pin = policy_pin.clone();
+                    let picks = item.models.into_iter().filter(|(stage, model)|
+                        item.definition.models.get(stage).is_some_and(|list| list.contains(model))).collect();
+                    item.models = item.definition.picked_models(&picks)?;
+                    item.carried_progress = true;
+                    item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
+                    if item.pending.is_some() {
+                        let kind = if item.ci_retry.as_ref().is_some_and(|retry| retry.pending) { StageKind::RerunCi }
+                            else { item.definition.stages.get(item.stage).ok_or(Refusal::Definition)?.kind.clone() };
+                        emit(&mut item, id, input, EffectKind::Execute(kind), &mut effects);
+                    }
+                }
+                next.items.insert(id.clone(), item);
+            }
         }
         Command::Enqueue { item, definition, policy_pin, resource, dependencies, initial_candidate } => {
             controller(input)?;
@@ -171,7 +247,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                 | Command::Move { item, .. }
                 | Command::Resolve { item, .. } | Command::SendBack { item, .. } | Command::Close { item, .. }
                 | Command::Land { item, .. } | Command::RepinPending { item, .. } => item,
-                Command::Decide { .. } | Command::Enqueue { .. } | Command::Advance | Command::RefreshGroups { .. } | Command::Reopen { .. } | Command::Start { .. } => unreachable!(),
+                Command::Decide { .. } | Command::Enqueue { .. } | Command::Advance | Command::RefreshGroups { .. } | Command::AdoptPublication { .. } | Command::Reopen { .. } | Command::Start { .. } => unreachable!(),
             };
             let mut item = next.items.remove(id).ok_or(Refusal::Missing)?;
             // Manual moves supersede a read-only decision without needing to stop an operation.
@@ -229,7 +305,12 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     let StageKind::Review(Reviewer::Person(p) | Reviewer::Orchestrator(p)) =
                         &item.definition.stages[item.stage].kind else { return Err(Refusal::Phase); };
                     decision(input, p)?;
-                    evidence_matches(&item, evidence)?;
+                    // An in-place publication preserves the accepted evidence (including
+                    // its original pin). Only that exact evidence can cross a pin change.
+                    if !item.carried_progress || item.last_evidence.as_ref() != Some(evidence)
+                        || item.candidate.as_ref() != Some(&evidence.candidate) {
+                        evidence_matches(&item, evidence)?;
+                    }
                     if let Some(reason) = reason {
                         if *passed || !valid_rework_reason(reason) { return Err(Refusal::Invalid); }
                         if item.last_evidence.as_ref() != Some(evidence) { return Err(Refusal::Evidence); }
@@ -619,7 +700,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                             let gid = group_id(state, name);
                             let resource = definition.groups[name].exclusive.clone();
                             let definition = definition.group_definition(name).ok_or(Refusal::Definition)?;
-                            next.items.insert(gid.clone(), Item { start_load: None, execution: None, restart: None, history: Vec::new(), reason: None, pin: definition.pin(), definition,
+                            next.items.insert(gid.clone(), Item { start_load: None, execution: None, restart: None, reuse_checkout: false, carried_progress: false, history: Vec::new(), reason: None, pin: definition.pin(), definition,
                                 policy_pin: policy_pin.clone(), dependencies: BTreeSet::new(), resource,
                                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked,
                                 run: String::new(), pending: None, candidate: None, last_evidence: None,
@@ -747,7 +828,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     item.phase = Phase::Done;
                     item.failure = None; item.reason = None; item.brief = None; item.stopping = None;
                 }
-                Command::Decide { .. } | Command::Enqueue { .. } | Command::Advance | Command::RefreshGroups { .. } | Command::Reopen { .. } | Command::Start { .. } => unreachable!(),
+                Command::Decide { .. } | Command::Enqueue { .. } | Command::Advance | Command::RefreshGroups { .. } | Command::AdoptPublication { .. } | Command::Reopen { .. } | Command::Start { .. } => unreachable!(),
             }
             next.items.insert(id.clone(), item);
             for (from, members) in spawn.drain(..) {
@@ -852,7 +933,9 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
         ticket.fence = ticket.fence.checked_add(1).ok_or(Refusal::Limit)?;
         ticket.follows = None;
     }
-    consolidate_groups(&mut next)?;
+    // The runtime refreshes group rules after migration. The old rules must
+    // not bind a just-migrated idle group back to its previous publication.
+    if !matches!(input.command, Command::AdoptPublication { .. }) { consolidate_groups(&mut next)?; }
     // Completion of a prerequisite can release blocked work without another controller command.
     let ready_ids: Vec<_> = next.items.iter().filter(|(_, i)| i.phase == Phase::Blocked && ready(&next, i, input))
         .map(|(id, _)| id.clone()).collect();
@@ -1053,7 +1136,8 @@ pub(crate) fn emit(item: &mut Item, id: &str, input: &Input, kind: EffectKind, e
             || item.definition.stages[item.stage].kind == StageKind::Push) {
         *item.wait_since.get_or_insert(input.now_ms)
     } else { input.now_ms };
-    effects.push(Effect { restart: item.restart.clone(), id: effect_id, item: id.into(), run: item.run.clone(),
+    let reuse_checkout = item.reuse_checkout && matches!(kind, EffectKind::Execute(StageKind::Provision | StageKind::Build));
+    effects.push(Effect { restart: item.restart.clone(), reuse_checkout, id: effect_id, item: id.into(), run: item.run.clone(),
         epoch: input.epoch, fence: item.fence, resource: item.resource.clone(),
         definition_pin: item.pin.clone(), policy_pin: item.policy_pin.clone(),
         candidate: item.candidate.clone(), members: item.members.clone(), kind,
@@ -1086,7 +1170,10 @@ fn finish(item: &mut Item, id: &str, input: &Input, passed: bool, evidence: &Evi
     item.pending = None;
     item.last_evidence = Some(evidence.clone());
     // A build that passed has answered why it was sent back.
-    if passed && item.definition.stages[item.stage].kind == StageKind::Build { item.brief = None; }
+    if passed && item.definition.stages[item.stage].kind == StageKind::Build {
+        item.brief = None;
+        item.reuse_checkout = false;
+    }
     if !passed {
         if matches!(item.definition.stages[item.stage].kind, StageKind::Review(_) | StageKind::Evaluate(_))
             && item.iteration < item.definition.max_reworks
@@ -1165,7 +1252,10 @@ fn take_route(item: &mut Item, id: &str, input: &Input, answer: (&str, Option<&E
         item.last_evidence = Some(evidence.clone());
         if label != "rejected" && makes_candidate(&stage.kind) { item.candidate = Some(evidence.candidate.clone()); }
     }
-    if label == "passed" && stage.kind == StageKind::Build { item.brief = None; }
+    if label == "passed" && stage.kind == StageKind::Build {
+        item.brief = None;
+        item.reuse_checkout = false;
+    }
     if label == "passed" && matches!(stage.kind, StageKind::Push) {
         item.pushed = evidence.map(|e| e.candidate.clone());
     }
@@ -1265,6 +1355,17 @@ fn finish_close(item: &mut Item) {
     }
 }
 
+fn usage_within_limits(item: &Item) -> bool {
+    let limits = item.definition.execution_limits();
+    (if item.definition.schema == 2 {
+        item.back_edges.iter().all(|(stage, taken)| item.definition.stages.iter()
+            .any(|s| &s.id == stage && s.limit >= *taken))
+    } else { item.iteration <= item.definition.max_reworks })
+        && item.retries <= limits.retries
+        && item.sent_back.len() <= usize::from(limits.send_backs)
+        && item.followers.len() <= usize::from(limits.group_members)
+}
+
 fn valid_state(state: &State) -> bool {
     state.grouping.as_ref().is_none_or(|p| p.definition.validate().is_ok() && valid_id(&p.policy_pin))
         && valid_id(&state.workspace) && state.epoch > 0 && state.items.len() <= MAX_ITEMS
@@ -1277,11 +1378,12 @@ fn valid_state(state: &State) -> bool {
                 && valid_membership(state, id, item)
                 && (item.pushed.is_none() || (item.group_of.is_some() && item.pushed.as_deref().is_some_and(valid_id)))
                 && valid_id(&item.policy_pin) && valid_id(&item.resource)
+                // A compatible publication may retain usage above its lowered limits.
+                && (item.carried_progress || usage_within_limits(item))
                 && if item.definition.schema == 2 {
                     usize::from(item.iteration) == item.back_edges.values().map(|n| usize::from(*n)).sum::<usize>()
-                        && item.back_edges.iter().all(|(stage, taken)| item.definition.stages.iter()
-                            .any(|s| &s.id == stage && s.limit >= *taken))
-                    } else { item.iteration <= item.definition.max_reworks && item.back_edges.is_empty() }
+                        && item.back_edges.keys().all(|stage| item.definition.stages.iter().any(|s| &s.id == stage))
+                    } else { item.back_edges.is_empty() }
                 && item.ci_reruns.iter().all(|(step, count)| *count == 1
                     && (item.definition.policies.values().any(|p| &p.step == step)
                         || item.definition.stages.iter().any(|s| &s.id == step && s.kind == StageKind::AwaitCi)))
@@ -1289,7 +1391,6 @@ fn valid_state(state: &State) -> bool {
                     && (item.definition.policies.contains_key(&r.policy) || r.policy == crate::ci::SETUP_RERUN)
                     && item.definition.stages.get(item.stage).is_some_and(|s|
                         s.kind == StageKind::AwaitCi && item.ci_reruns.get(&s.id) == Some(&1)))
-                && item.retries <= item.definition.execution_limits().retries
                 && item.rework_history.len() <= usize::from(item.iteration)
                 && item.rework_history.iter().enumerate().all(|(index, r)|
                     valid_id(&r.id) && valid_id(&r.principal) && valid_id(&r.run)
@@ -1297,11 +1398,11 @@ fn valid_state(state: &State) -> bool {
                     && valid_id(&r.definition_pin) && valid_id(&r.evidence.policy_pin)
                     && valid_rework_reason(&r.reason) && r.iteration < item.iteration
                     && (index == 0 || item.rework_history[index-1].iteration < r.iteration))
-                && item.sent_back.len() <= usize::from(item.definition.execution_limits().send_backs)
+                && item.sent_back.len() <= usize::from(u8::MAX)
                 && item.sent_back.iter().all(|b| valid_id(&b.id) && valid_rework_reason(&b.reason))
                 && item.brief.as_deref().is_none_or(valid_rework_reason)
                 && item.failure.as_deref().is_none_or(valid_rework_reason)
-                && item.followers.len() <= usize::from(item.definition.execution_limits().group_members)
+                && item.followers.len() <= usize::from(u8::MAX)
                 // A live lead's tickets follow it and no other; a closed one's list is history, as they've let go.
                 && (matches!(item.phase, Phase::Done | Phase::Cancelled)
                     || item.followers.iter().all(|f| state.items.get(f).is_some_and(|t| t.follows.as_deref() == Some(id.as_str()))))
@@ -1312,10 +1413,15 @@ fn valid_state(state: &State) -> bool {
         })
 }
 
-fn request_size(input: &Input) -> Result<usize, Refusal> {
+pub fn request_size(input: &Input, count_occupancy: bool) -> Result<usize, Refusal> {
     // Occupancy is separately bounded store metadata, not caller command payload.
     let mut request = input.clone();
-    request.busy_resources.clear();
-    if let Command::Start { start_load, .. } = &mut request.command { *start_load = None; }
+    if !count_occupancy { request.busy_resources.clear(); }
+    match &mut request.command {
+        Command::Start { start_load, .. } => *start_load = None,
+        // This internal list is separately bounded by the live item map.
+        Command::AdoptPublication { items, .. } => items.clear(),
+        _ => {}
+    }
     serde_json::to_vec(&request).map(|v| v.len()).map_err(|_| Refusal::Invalid)
 }

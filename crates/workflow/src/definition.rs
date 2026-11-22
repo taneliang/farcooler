@@ -127,7 +127,7 @@ pub struct Definition {
     /// Owner-published admission policy. Omission keeps manual starts and legacy pin bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_policy: Option<crate::scheduling::StartPolicy>,
-    /// Execution limits are pinned with the run; changing a publication affects future runs.
+    /// Execution limits apply to new operations, including those of an in-place publication update.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limits: Option<crate::scheduling::Limits>,
     /// Build directories this run may release when it stops building (ov-1126). Omitted on older

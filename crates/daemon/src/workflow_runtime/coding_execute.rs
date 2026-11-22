@@ -586,27 +586,31 @@ impl Exec {
                 if let Err(why) = self.ensure_start_objects(&binding.base, &log).await {
                     return self.refuse_unstarted(binding, why);
                 }
-                match &binding.effect.tree {
-                Some(named) => match self.provision_named(workspace, binding, named).await {
-                    // A refusal said as a sentence comes before anything is made (an adopted tree with changes, or
-                    // a pane still in it): the step fails with it, kept so a restart reads it (ov-1074).
-                    Err(Error::Domain(refused)) => {
-                        return self.refuse_unstarted(binding, refused.to_string());
-                    }
-                    other => other?,
-                },
-                None => {
-                    let branch = adapters::private_branch(workspace, &binding.effect);
-                    if let Err(error) = crate::git::create_worktree_with(&self.repository(), &branch, &binding.base, &tree, true).await {
-                        // Nothing made fails the step with a sentence (ov-1220); git's own reason is in the warning just above.
-                        tracing::warn!(item = %binding.effect.item, %error, "worktree provisioning failed");
-                        return match named_tree::unmade(&self.repository(), &tree, Some(&branch), error, "configured worktree provisioning uncertain").await {
-                            Error::Domain(refused) => self.refuse_unstarted(binding, refused.to_string()),
-                            uncertain => Err(uncertain),
-                        };
+                if binding.effect.reuse_checkout {
+                    self.verify_tree_identity(binding).await?;
+                } else {
+                    match &binding.effect.tree {
+                        Some(named) => match self.provision_named(workspace, binding, named).await {
+                            // A refusal said as a sentence comes before anything is made (an adopted tree with changes, or
+                            // a pane still in it): the step fails with it, kept so a restart reads it (ov-1074).
+                            Err(Error::Domain(refused)) => {
+                                return self.refuse_unstarted(binding, refused.to_string());
+                            }
+                            other => other?,
+                        },
+                        None => {
+                            let branch = adapters::private_branch(workspace, &binding.effect);
+                            if let Err(error) = crate::git::create_worktree_with(&self.repository(), &branch, &binding.base, &tree, true).await {
+                                // Nothing made fails the step with a sentence (ov-1220); git's own reason is in the warning just above.
+                                tracing::warn!(item = %binding.effect.item, %error, "worktree provisioning failed");
+                                return match named_tree::unmade(&self.repository(), &tree, Some(&branch), error, "configured worktree provisioning uncertain").await {
+                                    Error::Domain(refused) => self.refuse_unstarted(binding, refused.to_string()),
+                                    uncertain => Err(uncertain),
+                                };
+                            }
+                        }
                     }
                 }
-            }
                 spotlight::exclude_builds(&tree).await;
             },
             StageKind::AwaitBase | StageKind::Fold | StageKind::Push | StageKind::AwaitCi | StageKind::RerunCi | StageKind::Route
@@ -782,17 +786,22 @@ impl Exec {
         })
     }
     pub(super) async fn verify_tree(&self, binding: &Binding) -> Result<String> {
+        let candidate = self.verify_tree_identity(binding).await?;
         let tree = self.tree(binding);
-        let common = self.git_recorded(binding, &tree, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).await?;
-        if Path::new(&common).canonicalize()? != self.repository().join(".git").canonicalize()? {
-            return Err(Error::Refused("worktree belongs to another repository"));
-        }
         let changed = self.tree_changes(binding, &tree).await?;
         if !changed.is_empty() {
             let shown = changed.iter().take(3).map(String::as_str).collect::<Vec<_>>().join(", ");
             let more = if changed.len() > 3 { format!(" and {} more", changed.len() - 3) } else { String::new() };
             return Err(Error::Domain(farcooler_core::error::DomainError::refused(format!(
                 "The worktree has changes that aren't committed: {shown}{more}. Commit them to its branch or discard them, then start the run again."))));
+        }
+        Ok(candidate)
+    }
+    async fn verify_tree_identity(&self, binding: &Binding) -> Result<String> {
+        let tree = self.tree(binding);
+        let common = self.git_recorded(binding, &tree, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).await?;
+        if Path::new(&common).canonicalize()? != self.repository().join(".git").canonicalize()? {
+            return Err(Error::Refused("worktree belongs to another repository"));
         }
         let candidate = self.git_recorded(binding, &tree, &["rev-parse", "HEAD"]).await?;
         if !sha(&candidate) { return Err(Error::Refused("invalid candidate SHA")); }
@@ -822,7 +831,8 @@ impl Exec {
             Err(error) => return Err(error),
         };
         let mut reasons = Vec::new();
-        if started.as_ref() == Some(&head) || head == binding.base || binding.effect.candidate.as_ref() == Some(&head) {
+        if head == binding.base || ((started.as_ref() == Some(&head) || binding.effect.candidate.as_ref() == Some(&head))
+            && !binding.effect.reuse_checkout) {
             reasons.push("The build ended without changes: it made no new commit.".to_string());
         }
         if !changed.is_empty() {
@@ -946,7 +956,9 @@ impl Exec {
                 return Ok(Outcome::SafeFailureBecause(why));
             }
         }
-        let mut candidate = match self.verify_tree(binding).await {
+        let reused = matches!(kind, StageKind::Provision) && binding.effect.reuse_checkout;
+        let verified = if reused { self.verify_tree_identity(binding).await } else { self.verify_tree(binding).await };
+        let mut candidate = match verified {
             // A provisioned tree with someone's changes in it fails the step with the sentence, never Uncertain (ov-1074).
             Err(Error::Domain(refused)) if matches!(kind, StageKind::Provision) =>
                 return Ok(Outcome::SafeFailureBecause(refused.to_string())),
@@ -958,7 +970,7 @@ impl Exec {
             StageKind::Provision => {
                 // An adopted branch starts at its own work (ov-968); the build brings it onto the base.
                 let adopted = binding.effect.tree.as_ref().is_some_and(|t| t.adopted);
-                if candidate != binding.base && !adopted { return Err(Error::Refused("provisioned base changed")); }
+                if candidate != binding.base && !adopted && !reused { return Err(Error::Refused("provisioned base changed")); }
             }
             StageKind::Land => {
                 self.verify_candidate(binding, &tree).await?;

@@ -146,6 +146,7 @@ enum Inbox {
     Apply(Authority, Box<Request>, i64, oneshot::Sender<Result<Receipt>>),
     State(String, oneshot::Sender<Result<Option<State>>>),
     Wire(Box<Admission>, Box<farcooler_protocol::workflow_commands::Action>, oneshot::Sender<Result<serde_json::Value>>),
+    PublicationPreview(Box<Admission>, Box<farcooler_protocol::workflow_commands::Action>, oneshot::Sender<Result<usize>>),
     /// Bring cards under the engine with no run: (workspace, item, column).
     Track(Vec<(String, String, String)>, oneshot::Sender<Result<usize>>),
     /// Move a tracker-only ticket to a column: (workspace, item, column), as `MoveBy` says.
@@ -501,7 +502,10 @@ impl Runtime {
             // Ungrouped workflows need no grouping event. Once a grouping exists, an empty
             // publication must still replace it so old landing rules cannot survive removal.
             if self.state(workspace)?.is_some_and(|s| s.grouping.as_ref() != Some(&grouping)
-                && (s.grouping.is_some() || !grouping.definition.groups.is_empty())) {
+                && (s.grouping.is_some() || !grouping.definition.groups.is_empty())
+                // Give the migration first use of an idle group and its tickets.
+                && (!self.service_mode || !s.items.values().any(|i| i.group_of.is_some() && i.phase == Phase::Blocked
+                    && i.stage == 0 && i.candidate.is_none() && i.pending.is_none() && i.policy_pin != grouping.policy_pin))) {
                 self.internal(workspace, Command::RefreshGroups { definition: grouping.definition,
                     policy_pin: grouping.policy_pin }, Grant::Controller, now_ms)?;
             }
@@ -572,7 +576,7 @@ impl Runtime {
         let released_or_recovered = self.last_occupancy.as_ref() != Some(&fingerprint);
         self.last_occupancy = Some(fingerprint);
         for workspace in &workspaces {
-            self.refresh_groups(workspace, now_ms)?;
+            if !self.service_mode { self.refresh_groups(workspace, now_ms)?; }
             let state = self.state(workspace)?.ok_or(Error::Refused("missing state"))?;
             if released_or_recovered && state.items.values().any(|i| i.phase == Phase::Blocked) {
                 // Store stamps actual cross-workspace occupancy in the same transaction.
@@ -613,7 +617,6 @@ impl Runtime {
             if scan {
                 scan = self.continuous;
                 let current = self.store.workflow_workspaces()?;
-                for workspace in &current { self.refresh_groups(workspace, clock())?; }
                 let before = count;
                 let scan_at = clock();
                 // Idle polling is due one second after the latest scan. A long cleanup
@@ -672,7 +675,7 @@ impl Runtime {
                 }
                 Event::Message(message) => {
                     if let Some(message) = message {
-                        let read_only = matches!(message, Inbox::State(..));
+                        let read_only = matches!(message, Inbox::State(..) | Inbox::PublicationPreview(..));
                         self.receive(message).await;
                         if !read_only {
                             // A cancel may have ended a group.
@@ -745,11 +748,16 @@ impl Runtime {
     async fn launch_ready_noting(&mut self, workspaces: &[String], now_ms: i64, running: &mut Vec<Running>,
         futures: &mut Vec<Slot>, count: &mut usize, waiting: &mut Vec<Placed>) -> Result<()>
     {
+        for workspace in workspaces {
+            if self.adopt_publication(workspace, now_ms)? { *count += 1; }
+            self.refresh_groups(workspace, now_ms)?;
+        }
         let ready_queues = self.check_auto_queues(workspaces, now_ms).await?;
         self.schedule_ready(workspaces, now_ms, &ready_queues)?;
         let started = std::time::Instant::now();
         let clock = || now_ms.saturating_add(i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX));
         for workspace in workspaces {
+            let published = if self.service_mode { self.store.workflow_configuration(workspace)? } else { None };
             let mut uncertain = BTreeSet::new();
             for stored in self.store.workflow_outbox(workspace)? {
                 if self.shutdown.as_ref().is_some_and(|s| *s.borrow()) { return Ok(()); }
@@ -820,10 +828,10 @@ impl Runtime {
                     waiting.push(Placed::new(workspace, &effect, pool));
                     continue;
                 }
-                if let Some(command) = self.pending_repin(workspace, item, &effect, selected.is_ok())? {
-                    // Re-pinning replaces only an unstarted outbox entry. The next scan
-                    // validates and claims the new entry through ordinary admission.
-                    if self.internal(workspace, command, Grant::Controller, clock())?.result.is_ok() { *count += 1; }
+                // Only admitted operations and post-push group accounting may
+                // continue on the previous publication while a migration waits.
+                if matches!(effect.kind, EffectKind::Execute(_)) && item.pushed.is_none()
+                    && published.as_ref().is_some_and(|c| c.pin != item.policy_pin) {
                     continue;
                 }
                 let tree = self.effect_tree(workspace, &effect);
@@ -947,7 +955,7 @@ impl Runtime {
     }
     async fn receive(&self, message: Inbox) {
         // The orchestrator's word may have written the receipt an Uncertain effect waits on: look at once (ov-1301).
-        let read = matches!(&message, Inbox::State(..))
+        let read = matches!(&message, Inbox::State(..) | Inbox::PublicationPreview(..))
             || matches!(&message, Inbox::Wire(_, action, _) if matches!(**action, farcooler_protocol::workflow_commands::Action::Get));
         if !read { self.recovery.wake(); }
         match message {
@@ -965,6 +973,11 @@ impl Runtime {
             #[cfg(test)]
             Inbox::Resolve(workspace, item, reply) => {
                 let _ = reply.send(self.resolve_provision(&self.controller(), &workspace, &item).await);
+            }
+            Inbox::PublicationPreview(admission, action, reply) => {
+                let result = admission.recheck().and_then(|()| admission.permits(&action)).map_err(Error::Domain)
+                    .and_then(|()| self.publication_preview(&admission.workspace(), &admission.principal(), &action));
+                let _ = reply.send(result);
             }
             Inbox::Wire(admission, action, reply) => {
                 let result = async {
@@ -1061,7 +1074,7 @@ impl Runtime {
                     }
                     message = self.inbox.recv() => {
                         let Some(message) = message else { return Ok(()); };
-                        let read_only = matches!(message, Inbox::State(..));
+                        let read_only = matches!(message, Inbox::State(..) | Inbox::PublicationPreview(..));
                         self.receive(message).await;
                         if !read_only { break; }
                     }

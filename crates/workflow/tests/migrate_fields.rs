@@ -51,7 +51,7 @@ fn every_field_set() -> Value {
         "sent_back": [{ "id": "i", "revision": 1, "run": "r", "from": "gate-0", "to": "build", "reason": "why" }],
     });
     let more = json!({
-        "restart": "restart-input", "reason": "gate: failed", "stopped_from": "stopped-run",
+        "restart": "restart-input", "reuse_checkout": true, "carried_progress": true, "reason": "gate: failed", "stopped_from": "stopped-run",
         "history": [{ "phase": "Cancelled", "run": "old-run", "pin": "p", "fence": 1, "candidate": null,
             "tree": null, "models": {}, "reason": null, "rework_history": [], "sent_back": [], "back_edges": {} }],
         "brief": "why", "follows": "b", "followers": ["b"], "cancel_reason": "why", "closed": { "Continued": { "item": "b" } },

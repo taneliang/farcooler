@@ -63,9 +63,24 @@ pub(crate) fn migration(tx: &Transaction<'_>) -> rusqlite::Result<()> {
 
 /// Only called from accepted transition transaction. Never replay old event history.
 pub(crate) fn select(tx: &Transaction<'_>, input: &Input, old: &State, new: &State) -> Result<()> {
+    if let farcooler_workflow::Command::AdoptPublication { policy_pin, items, .. } = &input.command {
+        let tickets: Vec<_> = items.iter().filter(|(id, restart)| **restart && old.items[*id].group_of.is_none())
+            .map(|(id, _)| id.clone()).collect();
+        if let Some(first) = tickets.first() {
+            let item = &new.items[first];
+            let policy = notification_policy(tx, policy_pin)?;
+            let notice = Notice {
+                id: digest(&("workflow-publication-restarted/v1", &input.workspace, new.epoch, new.revision)),
+                event: input.id.clone(), workspace: input.workspace.clone(), epoch: new.epoch, revision: new.revision,
+                item: first.clone(), run: item.run.clone(), stage: item.stage, iteration: item.iteration, attempt: item.attempt,
+                candidate: item.candidate.clone(), definition_pin: item.pin.clone(), execution_policy_pin: policy_pin.clone(),
+                notification_policy_pin: policy.pin(), point: NoticePoint::PublicationRestarted, verb: None, tickets,
+            };
+            insert(tx, &notice)?;
+        }
+    }
     for (id, item) in &new.items {
-        let raw: Option<String> = tx.query_row("SELECT policy FROM workflow_notification_policies WHERE bundle_pin=?1", [&item.policy_pin], |r| r.get(0)).optional()?;
-        let policy: NotificationPolicy = raw.map(|s| serde_json::from_str(&s)).transpose()?.unwrap_or_default();
+        let policy = notification_policy(tx, &item.policy_pin)?;
         // A tracker-only ticket is a board card, not a run: it has nobody to ask and nothing to report, so
         // tracking every open card writes no notice (ov-962). The run that Start makes is another matter.
         if item.definition.is_ticket() { continue; }
@@ -80,7 +95,8 @@ pub(crate) fn select(tx: &Transaction<'_>, input: &Input, old: &State, new: &Sta
             };
             points.extend(point);
         }
-        if previous.is_some_and(|i| (&i.run,i.stage,i.iteration) != (&item.run,item.stage,item.iteration)) {
+        if !matches!(&input.command, farcooler_workflow::Command::AdoptPublication { items, .. } if items.contains_key(id))
+            && previous.is_some_and(|i| (&i.run,i.stage,i.iteration) != (&item.run,item.stage,item.iteration)) {
             points.push(NoticePoint::StageChanged);
         }
         for point in points.into_iter().filter(|p| policy.points.contains(p)) {
@@ -91,10 +107,21 @@ pub(crate) fn select(tx: &Transaction<'_>, input: &Input, old: &State, new: &Sta
                 notification_policy_pin:policy.pin(),point,
                 verb:item.definition.stages.get(item.stage).map(|s|verb_name(&s.kind)),
                 tickets:item.members.iter().map(|m|&m.item).chain(&item.handed).cloned().collect() };
-            tx.execute("INSERT INTO workflow_notice_outbox(id,workspace,revision,payload,payload_hash) VALUES(?1,?2,?3,?4,?5)",
-                params![notice.id,notice.workspace,notice.revision,serde_json::to_string(&notice)?,digest(&notice)])?;
+            insert(tx, &notice)?;
         }
     }
+    Ok(())
+}
+
+fn notification_policy(tx: &Transaction<'_>, bundle_pin: &str) -> Result<NotificationPolicy> {
+    let raw: Option<String> = tx.query_row("SELECT policy FROM workflow_notification_policies WHERE bundle_pin=?1",
+        [bundle_pin], |r| r.get(0)).optional()?;
+    Ok(raw.map(|s| serde_json::from_str(&s)).transpose()?.unwrap_or_default())
+}
+
+fn insert(tx: &Transaction<'_>, notice: &Notice) -> Result<()> {
+    tx.execute("INSERT INTO workflow_notice_outbox(id,workspace,revision,payload,payload_hash) VALUES(?1,?2,?3,?4,?5)",
+        params![notice.id, notice.workspace, notice.revision, serde_json::to_string(notice)?, digest(notice)])?;
     Ok(())
 }
 

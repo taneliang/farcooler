@@ -3,7 +3,7 @@ use super::{adapters, coding, Error, Exec, Result, Runtime};
 use super::coding_verbs::PickConflict;
 use farcooler_protocol::workflow_commands::{Action, MAX_BYTES};
 use farcooler_protocol::workflow_config::AdapterConfiguration;
-use farcooler_workflow::{digest, valid_id, Command, Grant, Grouping, Item, JoinRefresh, Member, Phase, StageKind};
+use farcooler_workflow::{digest, valid_id, Command, Grant, Grouping, Item, JoinRefresh, Member, Phase, StageKind, State};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
@@ -29,8 +29,10 @@ impl Runtime {
             if self.shutdown.as_ref().is_some_and(|s| *s.borrow()) { break; }
             if self.service_mode && self.store.workflow_board_deleted(workspace)? { continue; }
             let Some(state) = self.state(workspace)? else { continue };
+            let published = if self.service_mode { self.store.workflow_configuration(workspace)? } else { None };
             for (key, item) in state.items.iter().filter(|(_, i)| i.phase == Phase::WaitingJoin
-                && i.definition.start_policy.as_ref().is_some_and(|p| p.auto_queue))
+                && i.definition.start_policy.as_ref().is_some_and(|p| p.auto_queue)
+                && published.as_ref().is_none_or(|p| queue_publication_is_current(&state, i, &p.pin)))
             {
                 if self.automatic_queue_deferred(workspace, key, now_ms) { continue; }
                 match self.check_waiting_join(workspace, key, item, state.grouping.as_ref(), &mut heads).await
@@ -53,6 +55,11 @@ impl Runtime {
             if revision != state.revision || epoch.is_some_and(|epoch| epoch != state.epoch) { return Ok(QueueCheck::Ready); }
             let Some(item) = state.items.get(key).filter(|i| i.phase == Phase::WaitingJoin
                 && run.is_none_or(|(run, pin)| i.run == run && i.pin == pin)) else { return Ok(QueueCheck::Ready) };
+            if self.service_mode && self.store.workflow_configuration(workspace)?
+                .is_some_and(|p| !queue_publication_is_current(&state, item, &p.pin))
+            {
+                return Ok(QueueCheck::Held);
+            }
             self.check_waiting_join(workspace, key, item, state.grouping.as_ref(), &mut BTreeMap::new()).await
         }.await;
         if let Err(error) = &result { tracing::debug!(%workspace, item = %key, %error, "queue held for waiting candidate"); }
@@ -118,6 +125,11 @@ pub(super) enum QueueCheck {
     Ready,
     Held,
     Conflict { run: String, pin: String, candidate: String, base: String, paths: Vec<String> },
+}
+
+/// Do not queue an old candidate or start the old group rules while publication migration waits.
+fn queue_publication_is_current(state: &State, item: &Item, pin: &str) -> bool {
+    item.policy_pin == pin && state.grouping.as_ref().is_none_or(|g| g.policy_pin == pin)
 }
 
 impl Exec {

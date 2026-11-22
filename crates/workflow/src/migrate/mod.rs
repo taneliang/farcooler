@@ -92,7 +92,7 @@ fn mentions(log: &[Input]) -> BTreeMap<String, u64> {
             | Command::Move { item, .. } | Command::Start { item, .. } | Command::Resolve { item, .. }
             | Command::SendBack { item, .. } | Command::Land { item, .. } | Command::Reopen { item, .. }
             | Command::RefreshJoin { item, result: crate::JoinRefresh::Conflict { .. }, .. } => item,
-            Command::Advance | Command::RefreshGroups { .. } | Command::RepinPending { .. }
+            Command::Advance | Command::RefreshGroups { .. } | Command::RepinPending { .. } | Command::AdoptPublication { .. }
             | Command::RefreshJoin { result: crate::JoinRefresh::Rebased { .. }, .. } => continue,
         };
         out.insert(item.clone(), input.expected_revision);

@@ -28,6 +28,8 @@ pub const ITEM_FIELDS: &[(&str, Decision)] = &[
     ("phase", Decision::Mapped("Location, by 11.2 and the dispatch status of 10.1")),
     ("run", Decision::Mapped("Decision::run at a decision station; Work::run is the pending effect, which binds answers")),
     ("restart", Decision::Dropped("the legacy log keeps the Start that replaced the run")),
+    ("reuse_checkout", Decision::Refused("the replacement must verify and reuse its legacy checkout first")),
+    ("carried_progress", Decision::Dropped("the pipeline derives usage from the retained visits")),
     ("history", Decision::Dropped("the legacy log keeps the events of each earlier run")),
     ("reason", Decision::Dropped("the legacy log keeps the observation or verdict that produced the reason")),
     ("pending", Decision::Mapped("Work::pending, or a queued token with its outbox row suppressed")),

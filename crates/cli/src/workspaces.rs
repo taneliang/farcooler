@@ -438,7 +438,10 @@ async fn workspace_via(
         WorkspaceCmd::SetWorkflow { workspace, repo, publication } => {
             let action = publication.action()?;
             let (ws, _) = named(&mut link, repo.as_deref(), &workspace, env).await?;
-            crate::workflow::send(&mut link, uuid_of(&ws.id), action, json).await?;
+            let workspace = uuid_of(&ws.id);
+            let restarts = crate::workflow::publication_restart_count(&mut link, workspace, &action).await?;
+            eprintln!("Publishing this workflow will restart {restarts} running ticket{}.", if restarts == 1 { "" } else { "s" });
+            crate::workflow::send(&mut link, workspace, action, json).await?;
         }
         WorkspaceCmd::Create(args) => {
             let asked = args.checked()?;

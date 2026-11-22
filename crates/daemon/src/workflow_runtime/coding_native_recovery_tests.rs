@@ -154,17 +154,20 @@ async fn workflow_service_changed_pinned_file_names_it_on_the_item() {
 }
 /// Re-pin after Provision, with the old Build effect already in the outbox.
 #[tokio::test]
-async fn ov1379_only_an_engine_hooks_repin_carries_the_pending_build() {
+async fn ov1425_publications_carry_compatible_runs_and_restart_other_runs() {
     use crate::workflow_starter::{repin, repin_definition, Repin};
     use farcooler_protocol::{workflow_commands::{Action, Mutation}, workflow_config::{AdapterConfiguration, NoticePoint, NotificationPolicy}};
     use farcooler_store::workflow_publication::notification_configuration_pin;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    enum Change { None, Command, Approval, Route, Notification }
+    enum Change { None, StartPolicy, Limits, ModelDefaults, Command, Approval, Route, Notification }
 
     for (app_owned, repin_files, change) in [
         (true, true, Change::None),
         (false, true, Change::None),
+        (true, false, Change::StartPolicy),
+        (true, false, Change::Limits),
+        (true, false, Change::ModelDefaults),
         (true, false, Change::Command),
         (true, true, Change::Command),
         (true, false, Change::Approval),
@@ -174,8 +177,15 @@ async fn ov1379_only_an_engine_hooks_repin_carries_the_pending_build() {
         (true, false, Change::Notification),
         (true, true, Change::Notification),
     ] {
-        let carries = app_owned && repin_files && change == Change::None;
-        let (dir, configured, _fake) = tests::native("pass").await;
+        let carries = app_owned && repin_files && change == Change::None
+            || matches!(change, Change::StartPolicy | Change::Limits | Change::ModelDefaults);
+        let (dir, configured, _fake) = if repin_files {
+            let (dir, runtime, fake) = tests::native("pass").await;
+            (dir, runtime, Some(fake))
+        } else {
+            let (dir, runtime) = configured(false, "pass").await;
+            (dir, runtime, None)
+        };
         let svc = crate::service::Service::open_in(dir.path().join("state")).await.unwrap();
         let repo_root = svc.store.create_repository_root(svc.host_id, dir.path().to_str().unwrap(), 0).unwrap();
         let mut config = configured.coding.clone().unwrap();
@@ -191,13 +201,12 @@ async fn ov1379_only_an_engine_hooks_repin_carries_the_pending_build() {
             std::fs::write(&old_file, &text).unwrap();
             let CodingHarness::Native { settings, .. } = &mut config.harness else { unreachable!() };
             *settings = Some(LaunchFile { path: old_file.clone(), digest: digest(&text) });
-        } else {
-            config.harness = CodingHarness::Command(CodingCommand {
-                argv: vec!["/usr/bin/false".into()], environment: Default::default(), timeout_ms: 5000,
-            });
         }
         let mut definition = config.definition().unwrap();
         definition.schema = 2;
+        if change == Change::ModelDefaults {
+            definition.models.insert("build".into(), vec!["claude:opus".into(), "claude:sonnet".into()]);
+        }
         let notices = NotificationPolicy { points: [NoticePoint::StageChanged].into() };
         let old_adapter = AdapterConfiguration::Coding(config.clone());
         let old_pin = notification_configuration_pin(&definition, Some(&old_adapter), Some(&notices));
@@ -228,6 +237,16 @@ async fn ov1379_only_an_engine_hooks_repin_carries_the_pending_build() {
         let mut next_definition = repin_definition(&definition, &config, &next).unwrap();
         let mut next_notices = notices;
         match change {
+            Change::StartPolicy => next_definition.start_policy = Some(serde_json::from_value(serde_json::json!({
+                "columns": ["todo"], "budget": "Unlimited",
+            })).unwrap()),
+            Change::Limits => {
+                let mut limits = next_definition.execution_limits();
+                limits.send_backs += 1;
+                next_definition.send_backs = Some(limits.send_backs);
+                next_definition.limits = Some(limits);
+            }
+            Change::ModelDefaults => next_definition.models.get_mut("build").unwrap().reverse(),
             Change::Approval => next_definition.stages[1].progression = Progression::AwaitApproval { principal: "owner".into() },
             Change::Route => { next_definition.stages[1].routes.insert("rejected".into(), Target::Done); }
             Change::Notification => { next_notices.points.insert(NoticePoint::Done); }
@@ -236,37 +255,137 @@ async fn ov1379_only_an_engine_hooks_repin_carries_the_pending_build() {
         let adapter = AdapterConfiguration::Coding(next);
         let next_pin = notification_configuration_pin(&next_definition, Some(&adapter), Some(&next_notices));
         assert_ne!(next_pin, old_pin);
-        publish(&mut runtime, "after", state.revision, 2, Some(old_pin.clone()), next_definition, adapter, Some(next_notices));
-        if carries { std::fs::write(&old_file, "overwritten by an app update").unwrap(); }
+        let action = Action::Publish { reason: None, notifications: Some(next_notices), mutation: mutation("after", state.revision, 2),
+            expected_pin: Some(old_pin.clone()), definition: next_definition, adapter: Some(Box::new(adapter)) };
+        assert_eq!(runtime.publication_preview(&workspace, "owner", &action).unwrap(), usize::from(!carries));
+        assert_eq!(runtime.store.workflow_configuration(&workspace).unwrap().unwrap().pin, old_pin);
+        let reply = runtime.wire_command(&workspace, "owner", action).unwrap();
+        assert!(reply.pointer("/receipt/result/Ok").is_some(), "{reply}");
+        if carries && repin_files { std::fs::write(&old_file, "overwritten by an app update").unwrap(); }
 
         let root = runtime.root.clone();
         drop(runtime);
         let mut runtime = Runtime::open_service(&root, svc.store.clone()).unwrap();
-        let state = finish(&mut runtime, &workspace).await;
+        assert!(runtime.adopt_publication(&workspace, 3).unwrap());
+        let state = runtime.state(&workspace).unwrap().unwrap();
         let item = &state.items["one"];
         let effects = runtime.store.workflow_outbox(&workspace).unwrap();
         let old_build = effects.iter().find(|s| s.effect.id == original.id).unwrap();
         assert_eq!(old_build.effect, original);
         assert_eq!(old_build.dispatch_state, "suppressed");
-        if !carries {
-            assert_eq!(item.phase, Phase::Failed, "{change:?}, file re-pin {repin_files}: {item:?}");
-            assert_eq!(item.policy_pin, old_pin);
-            assert!(item.failure.as_deref().is_some_and(|s| s.contains("Carry")), "{item:?}");
-            assert!(!effects.iter().any(|s| s.effect.policy_pin == next_pin));
-            assert!(!dir.path().join("started").exists());
-            assert!(!tree.join("result.txt").exists());
+        assert_eq!(item.policy_pin, next_pin);
+        assert_eq!(item.phase, Phase::Running);
+        let next = effects.iter().find(|s| s.active).unwrap();
+        let notices: Vec<_> = runtime.store.workflow_notice_deliveries(&workspace).unwrap().into_iter()
+            .filter(|d| d.notice.point == NoticePoint::PublicationRestarted).collect();
+        if carries {
+            assert_eq!(next.effect.kind, original.kind);
+            assert_eq!(next.effect.run, original.run);
+            assert!(item.history.is_empty());
+            assert!(notices.is_empty());
+            let state = finish(&mut runtime, &workspace).await;
+            let item = &state.items["one"];
+            assert_eq!(item.phase, Phase::Done, "{change:?}: {:?}", item.failed_reason());
         } else {
-            assert_eq!(item.phase, Phase::Done, "{item:?}");
-            assert_eq!(item.policy_pin, next_pin);
-            let provision = effects.iter().find(|s| s.effect.kind == EffectKind::Execute(StageKind::Provision)).unwrap();
-            assert_eq!(provision.effect.policy_pin, old_pin);
-            assert_eq!(provision.dispatch_state, "settled");
-            let build = effects.iter().find(|s| s.effect.kind == original.kind && s.effect.policy_pin == next_pin).unwrap();
-            assert_eq!(build.effect.run, original.run);
-            assert_eq!(build.dispatch_state, "settled");
-            assert_eq!(std::fs::read_to_string(tree.join("result.txt")).unwrap(), "candidate native PTY");
+            assert_eq!(next.effect.kind, EffectKind::Execute(StageKind::Provision));
+            assert_ne!(next.effect.run, original.run);
+            assert_eq!(item.history.len(), 1);
+            assert_eq!(notices.len(), 1);
+            assert_eq!(notices[0].notice.tickets, ["one"]);
+            runtime.pump(4).await.unwrap();
+            let state = runtime.state(&workspace).unwrap().unwrap();
+            assert!(matches!(state.items["one"].phase, Phase::Running | Phase::WaitingApproval));
+            assert!(tree.exists());
+            assert!(!runtime.adopt_publication(&workspace, 5).unwrap());
         }
     }
+}
+
+#[tokio::test]
+async fn ov1425_restarts_reviewed_tickets_in_place_with_one_notice() {
+    use farcooler_protocol::{workflow_commands::{Action, Mutation}, workflow_config::{AdapterConfiguration, NoticePoint}};
+    use farcooler_store::workflow_publication::configuration_pin;
+
+    let (dir, fixture) = configured(false, "pass").await;
+    let service = crate::service::Service::open_in(dir.path().join("state")).await.unwrap();
+    let repository_root = service.store.create_repository_root(service.host_id, dir.path().to_str().unwrap(), 0).unwrap();
+    let config = fixture.coding.clone().unwrap();
+    let repository = service.store.create_repository(service.host_id, repository_root.id, "private",
+        config.repository.join(".git").to_str().unwrap(), "").unwrap();
+    let workspace = service.store.ensure_main_workspace(repository.id).unwrap().id.to_string();
+    drop(fixture);
+    let mut runtime = Runtime::open_service(&service.root_dir().join("workflow"), service.store.clone()).unwrap();
+
+    let mut definition = config.definition().unwrap();
+    definition.stages.insert(4, config.stage("review", StageKind::Review(Reviewer::Person("owner".into())),
+        "coding-review/v1", "person:owner"));
+    definition.stages[5].progression = Progression::AwaitApproval { principal: "owner".into() };
+    let adapter = AdapterConfiguration::Coding(config);
+    let pin = configuration_pin(&definition, Some(&adapter));
+    let mutation = |id: &str, revision, sequence| Mutation { id: id.into(), revision, epoch: 1, sequence };
+    let publish = |id, revision, expected_pin, definition| Action::Publish { reason: None, notifications: None,
+        mutation: mutation(id, revision, 1), expected_pin, definition, adapter: Some(Box::new(adapter.clone())) };
+    let send = |runtime: &Runtime, action| {
+        let reply = runtime.wire_command(&workspace, "owner", action).unwrap();
+        assert!(reply.pointer("/receipt/result/Ok").is_some(), "{reply}");
+    };
+    send(&runtime, publish("original", 0, None, definition.clone()));
+    let keys = ["ov-41", "ov-42"];
+    for (revision, key) in keys.iter().enumerate() {
+        send(&runtime, Action::Enqueue { mutation: mutation(key, revision as u64, revision as u64 + 1),
+            item: (*key).into(), pin: pin.clone() });
+    }
+    for clock in 2..6 { runtime.pump(clock).await.unwrap(); }
+    let state = runtime.state(&workspace).unwrap().unwrap();
+    assert!(keys.iter().all(|key| state.items[*key].phase == Phase::WaitingReview));
+
+    // A compatible publication preserves the original review evidence and allows it to be decided.
+    definition.send_backs = Some(2);
+    let compatible_pin = configuration_pin(&definition, Some(&adapter));
+    send(&runtime, publish("limits", state.revision, Some(pin), definition.clone()));
+    runtime.pump(6).await.unwrap();
+    let mut reviewed = std::collections::BTreeMap::new();
+    for (index, key) in keys.iter().enumerate() {
+        let state = runtime.state(&workspace).unwrap().unwrap();
+        let item = &state.items[*key];
+        assert_eq!(item.phase, Phase::WaitingReview);
+        assert_eq!(item.policy_pin, compatible_pin);
+        send(&runtime, Action::Review { mutation: mutation(&format!("review-{key}"), state.revision, index as u64 + 3),
+            item: (*key).into(), run: item.run.clone(), pin: item.pin.clone(),
+            evidence: item.last_evidence.clone().unwrap(), passed: true, reason: None });
+        let tree = runtime.item_tree(&workspace, key);
+        let branch = adapters::git(&tree, &["symbolic-ref", "HEAD"]).await.unwrap();
+        let candidate = adapters::git(&tree, &["rev-parse", "HEAD"]).await.unwrap();
+        reviewed.insert(*key, (tree, branch, candidate));
+    }
+
+    let state = runtime.state(&workspace).unwrap().unwrap();
+    assert!(keys.iter().all(|key| state.items[*key].phase == Phase::WaitingApproval && state.items[*key].stage == 5));
+    definition.stages[1].progression = Progression::AwaitApproval { principal: "owner".into() };
+    let new_pin = configuration_pin(&definition, Some(&adapter));
+    let publication = publish("approval", state.revision, Some(compatible_pin), definition);
+    assert_eq!(runtime.publication_preview(&workspace, "owner", &publication).unwrap(), 2);
+    send(&runtime, publication.clone());
+    runtime.pump(7).await.unwrap();
+    let state = runtime.state(&workspace).unwrap().unwrap();
+    for key in keys {
+        let item = &state.items[key];
+        assert_eq!(item.phase, Phase::WaitingApproval);
+        assert_eq!(item.stage, 1, "the newly required build approval has to be made");
+        assert_eq!(item.policy_pin, new_pin);
+        assert_eq!(item.history.len(), 1);
+        let (tree, branch, candidate) = &reviewed[key];
+        assert_eq!(&runtime.item_tree_for(&workspace, key, item.restart.as_deref()), tree);
+        assert_eq!(&adapters::git(tree, &["symbolic-ref", "HEAD"]).await.unwrap(), branch);
+        assert_eq!(&adapters::git(tree, &["rev-parse", "HEAD"]).await.unwrap(), candidate);
+    }
+
+    send(&runtime, publication);
+    runtime.pump(8).await.unwrap();
+    let notices: Vec<_> = runtime.store.workflow_notice_deliveries(&workspace).unwrap().into_iter()
+        .filter(|d| d.notice.point == NoticePoint::PublicationRestarted).collect();
+    assert_eq!(notices.len(), 1);
+    assert_eq!(notices[0].notice.tickets, keys);
 }
 
 /// ov-1130: an install removed the server after the verdict and output were saved, before settlement.

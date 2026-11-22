@@ -61,9 +61,13 @@ pub(crate) async fn discover(store:&Store,inventory:&LiveInventory, notice:&Noti
 pub(crate) async fn invoke(store:&Store,inventory:&LiveInventory, notice:&Notice, endpoint:Endpoint, stop:&mut watch::Receiver<bool>)->Result<()> {
     use std::os::unix::fs::MetadataExt;
     if stopping(stop) {return Ok(())}
+    let publication = notice.point == farcooler_protocol::workflow_config::NoticePoint::PublicationRestarted;
+    let meaning = if publication {
+        "The workflow publication restarted the listed tickets in their existing worktrees."
+    } else { "Informational workflow event. No approval or execution authority is granted." };
     let message=serde_json::to_string(&serde_json::json!({"schema":"workflow-notice/v1","notice":notice,
-        "meaning":"Informational workflow event. No approval or execution authority is granted."}))?;
-    if message.len()>MAX_BYTES {return Err(Error::Refused("workflow notice exceeds native byte bound"))}
+        "meaning":meaning}))?;
+    if message.len() > if publication { 64 * 1024 } else { MAX_BYTES } {return Err(Error::Refused("workflow notice exceeds native byte bound"))}
     let attempt=Uuid::now_v7().to_string();
     if !store.workflow_prepare_notice(notice,&attempt,&endpoint.identity)? {return Ok(())}
     // The attempt is durably prepared BEFORE process creation. Final durable
