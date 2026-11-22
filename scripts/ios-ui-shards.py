@@ -57,7 +57,7 @@ NIGHTLY = ROOT / ".github/workflows/nightly.yml"
 # absorb, so the bar is the 60% this was cut to, not the 75% the budget enforces.
 #
 # Oct 20 (nightly 39450769439): `phone` ran 39.6 min (88%): ClaudeSignInUITests, untimed
-# before, took 496 s, PagesUITests 538 s, PhoneReopenTests 210 s. The per-class seconds
+# before, took 496 s, and PhoneReopenTests took 210 s. The per-class seconds
 # in the comments below predate that run except where a move says otherwise; phone4
 # took four classes, leaving phone 1,138 s of tests, phone2 1,247 s, phone3 1,165 s and
 # phone4 1,264 s.
@@ -163,9 +163,6 @@ SHARDS = {
     # phone6's earlier measurements put PhonePlanColumn at 376 s. Move them
     # off the over-budget phone3 and phone6 jobs.
     "phone7": ["PlanRulingsUITests", "PhonePlanColumnUITests"],
-    # Pages took 1,750 s in the same run, leaving phone no room for its
-    # other classes. Give it a separate job until new measurements are available.
-    "phone8": ["PagesUITests"],
     # The team classes, added on Oct 30 when `phone` was cancelled at the
     # timeout (ov-722): moved from phone, and RunnerPeopleUITests from phone2.
     "phone5": [
