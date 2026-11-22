@@ -33,6 +33,19 @@ fn old_landings_remain_available_without_entering_the_plan() {
     assert!(has_history(&store.conn(), main).unwrap());
 }
 
+/// History follows the most recent move first, breaking ties by id.
+#[test]
+fn landing_history_is_ordered_by_last_move() {
+    let (store, main, task) = board();
+    let older = old_landing(&store, main, 3, "open", None, &[task], 100);
+    let first = old_landing(&store, main, 1, "open", None, &[task], 200);
+    let second = old_landing(&store, main, 2, "open", None, &[task], 200);
+    let mut tied = [first, second];
+    tied.sort();
+    let (history, _) = store.landing_history(main).unwrap();
+    assert_eq!(history.iter().map(|view| view.landing.id).collect::<Vec<_>>(), [tied[0], tied[1], older]);
+}
+
 /// Review B2: on a board that never cut over, a ticket left on an open old
 /// landing read as Dropped but stayed the landing's: the engine refused it and
 /// left it untracked, and no writer was left to take it off. History holds no

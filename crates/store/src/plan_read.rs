@@ -246,7 +246,8 @@ impl Store {
 
     /// Historical landings and the cards they name, for the CLI history read.
     pub fn landing_history(&self, workspace: Uuid) -> Result<(Vec<LandingView>, Vec<CardRef>)> {
-        let landings = self.landings(workspace)?;
+        let mut landings = self.landings(workspace)?;
+        landings.sort_by(|a, b| b.state_since.cmp(&a.state_since).then_with(|| a.id.cmp(&b.id)));
         let conn = self.conn();
         crate::agents::board_exists(&conn, workspace)?;
         let mut cards = BTreeMap::new();
