@@ -34,6 +34,7 @@ async fn a_landed_group_releases_build_output_instead_of_parking_it() {
     command(&runtime, Command::Queue { item: "one".into() });
     let state = until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Done)).await;
     let first = group_of(&state);
+    assert_eq!(phase_of(&state, &first), Some(Phase::Done), "the landed group stays on the board");
     assert!(!runtime.item_tree("w", &first).exists(), "a landed group frees its fold and gate checkout");
     assert!(branch_exists(&runtime, "w", &first).await, "its commits aren't merged into the local checkout, so its branch stays");
     let listed = adapters::git(&runtime.repository(), &["worktree", "list", "--porcelain"]).await.unwrap();
@@ -47,7 +48,7 @@ async fn a_landed_group_releases_build_output_instead_of_parking_it() {
     assert!(std::fs::read_dir(&runtime.root).unwrap().all(|e|
         !e.unwrap().file_name().to_string_lossy().starts_with("build-")), "no ended output is parked");
     let records = runtime.store.workflow_cleanups("w").unwrap();
-    let cleanup = records.iter().find(|r| r.effect.item == first).expect("group cleanup recorded");
+    let cleanup = records.iter().find(|r| r.effect.item == first && r.effect.directory.is_none()).expect("group cleanup recorded");
     assert!(cleanup.result.as_ref().unwrap().bytes_freed > 1);
     assert_eq!(trees(&runtime).len(), 2, "only ticket source checkouts remain");
 }

@@ -1026,7 +1026,9 @@ def gate(args):
                 print(f"  {'SKIP' if s.skip else 'run '} {s.label()}{where}" + (f"  -- {s.skip}" if s.skip else ""))
         return 0
 
-    logdir = pathlib.Path(args.log_dir) if args.log_dir else pathlib.Path(tempfile.mkdtemp(prefix="lane-gate-logs-"))
+    managed_logs = os.environ.get("FARCOOLER_LANE_GATE_LOG_DIR")
+    log_path = args.log_dir or managed_logs
+    logdir = pathlib.Path(log_path) if log_path else pathlib.Path(tempfile.mkdtemp(prefix="lane-gate-logs-"))
     logdir.mkdir(parents=True, exist_ok=True)
     write_rust_evidence(logdir, proposal)
     tracked_before = tracked_state(repo)

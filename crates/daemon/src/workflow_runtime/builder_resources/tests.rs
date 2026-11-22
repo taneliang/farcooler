@@ -133,7 +133,8 @@ async fn cleanup_preserves_tracked_output_and_never_follows_target_symlinks() {
     std::fs::create_dir(tree.join("target")).unwrap();
     std::fs::write(tree.join("target/source"), "tracked source").unwrap();
     adapters::git(&tree, &["add", "-f", "--", "target/source"]).await.unwrap();
-    runtime.release_run_targets().await.unwrap();
+    runtime.prune_trees(&["w".into()], true);
+    runtime.release_builds(&["w".into()]).await.unwrap();
     assert!(tree.join("target/source").exists(), "ignored directories can still contain tracked source");
 
     at_join(&mut runtime, "two", &definition).await;
@@ -141,7 +142,8 @@ async fn cleanup_preserves_tracked_output_and_never_follows_target_symlinks() {
     let foreign = tempfile::tempdir().unwrap();
     std::fs::write(foreign.path().join("keep"), "not build output").unwrap();
     std::os::unix::fs::symlink(foreign.path(), tree.join("target")).unwrap();
-    runtime.release_run_targets().await.unwrap();
+    runtime.prune_trees(&["w".into()], true);
+    runtime.release_builds(&["w".into()]).await.unwrap();
     assert!(foreign.path().join("keep").exists(), "cleanup must never traverse a symlink");
 }
 

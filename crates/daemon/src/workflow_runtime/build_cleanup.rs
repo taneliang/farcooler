@@ -51,12 +51,17 @@ impl Exec {
         self.release_builds_checked(workspaces, || Ok(())).await
     }
     pub(super) async fn release_builds_checked(&self, workspaces: &[String], mut before_result: impl FnMut() -> Result<()>) -> Result<bool> {
+        self.release_builds_at(workspaces, now(), &mut before_result).await
+    }
+    pub(super) async fn release_builds_at(&self, workspaces: &[String], at: i64, mut before_result: impl FnMut() -> Result<()>) -> Result<bool> {
         let mut retry = false;
         for workspace in workspaces {
-            self.retain_finished_group_cleanups(workspace)?;
-            for record in self.store.workflow_cleanups(workspace)? {
-                if record.result.as_ref().is_some_and(|r| !r.retry) { continue; }
+            for record in self.store.workflow_pending_cleanups(workspace)? {
                 let effect = record.effect;
+                if let Some(directory) = &effect.directory {
+                    retry |= self.release_owned_directory(&effect, directory, record.result.as_ref(), at).await?;
+                    continue;
+                }
                 let tree = effect.tree.as_ref().map_or_else(|| self.item_tree_for(workspace, &effect.item, effect.restart.as_deref()), |t| PathBuf::from(&t.path));
                 // Retry rather than settle a skip. A cancellation can end the item before its
                 // already-running future is joined, and a waiting branch can also be in use.
@@ -148,28 +153,47 @@ impl Exec {
                 if item.phase == Phase::Uncertain { return Ok(skip("run is Uncertain")); }
                 if workspace == &effect.workspace && id == &effect.item {
                     if item.definition.stages.get(item.stage).is_some_and(|s| matches!(s.kind, StageKind::Build | StageKind::Provision))
-                        && !matches!(item.phase, Phase::Done | Phase::Failed | Phase::Cancelled) {
+                        && !matches!(item.phase, Phase::Done | Phase::Failed | Phase::Cancelled | Phase::WaitingApproval) {
                         return Ok(skip("run is still building"));
                     }
                 } else if !matches!(item.phase, Phase::Done | Phase::Failed | Phase::Cancelled) {
                     return Ok(skip("worktree is shared with another live run"));
                 }
             }
+            // A prior writer can survive daemon restart after its item has left live state.
+            for stored in self.store.workflow_unsettled_writers(workspace)? {
+                let path = self.effect_tree(workspace, &stored);
+                if path == tree || path.canonicalize().is_ok_and(|p| p == canonical) {
+                    return Ok(CleanupResult { retry: true, ..skip("worktree has an unsettled writer") });
+                }
+            }
         }
         after_check();
-        if group_recovery {
-            return Ok(match self.release_group_tree(tree, held, effect, true).await {
-                Ok(_) => CleanupResult { retry: false, bytes_freed: 0, skipped: Vec::new() },
+        if group_recovery || effect.tree.is_none() && self.finished_landing_group(effect)? {
+            return Ok(match self.release_group_tree(tree, held, effect, group_recovery).await {
+                Ok(bytes_freed) => CleanupResult { retry: false, bytes_freed, skipped: Vec::new() },
                 Err(why) => CleanupResult { retry: true, bytes_freed: 0, skipped: vec![why] },
             });
         }
         let mut result = CleanupResult { retry: false, bytes_freed: 0, skipped: Vec::new() };
         let mut paths = BTreeSet::new();
-        for pattern in &effect.folders {
-            if !valid_folder(pattern) { result.skipped.push(format!("{pattern}: unsafe folder")); continue; }
-            match expand(tree, pattern) {
-                Ok(found) => paths.extend(found),
-                Err(error) => result.skipped.push(format!("{pattern}: {error}")),
+        for folder in &effect.folders {
+            // Older defaults stored a wildcard. Only its known literal replacements may be reclaimed.
+            let folders = if folder == "apps/*/build" {
+                &farcooler_workflow::cleanup::DEFAULT_BUILD_FOLDERS[2..6]
+            } else {
+                &[folder.as_str()][..]
+            };
+            for &folder in folders {
+                if !valid_folder(folder) || folder.contains('*') {
+                    result.skipped.push(format!("{folder}: cleanup requires a literal folder"));
+                    continue;
+                }
+                match checked_folder(tree, folder) {
+                    Ok(Some(path)) => { paths.insert(path); }
+                    Ok(None) => {}
+                    Err(error) => result.skipped.push(format!("{folder}: {error}")),
+                }
             }
         }
         // Nested/duplicate patterns must not count or remove a folder twice.
@@ -208,15 +232,7 @@ impl Exec {
             check.0.notify_one();
             check.1.notified().await;
         }
-        let mut command = tokio::process::Command::new("lsof");
-        command.args(["-nP", "-F", "p", "+D"]).arg(path).kill_on_drop(true);
-        let output = tokio::time::timeout(Duration::from_secs(30), command.output()).await
-            .map_err(|_| "open-file check timed out".to_string())?.map_err(|e| format!("open-file check unavailable: {e}"))?;
-        // Some lsof versions return 1 alongside matching records. Any match still means busy.
-        if !output.stdout.is_empty() { return Err("open files under folder".into()); }
-        if output.status.code() != Some(1) || !output.stderr.is_empty() {
-            return Err("open-file check could not establish safety".into());
-        }
+        check_open_files(path).await?;
         *retry = false;
         // Recheck ancestors immediately before removal. remove_dir_all itself does not follow symlinks.
         let mut parent = tree.to_path_buf();
@@ -240,30 +256,32 @@ impl Exec {
         }).await.map_err(|e| e.to_string())?
     }
 }
-/// Expand only directories, checking every ancestor without following links. Missing output is already released.
-fn expand(tree: &Path, pattern: &str) -> std::io::Result<Vec<PathBuf>> {
-    let mut paths = vec![tree.to_path_buf()];
-    for part in pattern.split('/') {
-        let mut next = Vec::new();
-        for path in paths {
-            if part == "*" {
-                for entry in std::fs::read_dir(path)? {
-                    let entry = entry?;
-                    if !entry.file_name().eq_ignore_ascii_case(".git") && !entry.file_name().eq_ignore_ascii_case("reports") && entry.file_type()?.is_dir() { next.push(entry.path()); }
-                }
-            } else {
-                let child = path.join(part);
-                match child.symlink_metadata() {
-                    Ok(meta) if meta.file_type().is_dir() => next.push(child),
-                    Ok(_) => return Err(std::io::Error::other("folder or ancestor is a symlink or not a directory")),
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
-                    Err(e) => return Err(e),
-                }
-            }
-        }
-        paths = next;
+pub(super) async fn check_open_files(path: &Path) -> std::result::Result<(), String> {
+    // macOS launch agents may run without /usr/sbin on PATH.
+    let mut command = tokio::process::Command::new(if cfg!(target_os = "macos") { "/usr/sbin/lsof" } else { "lsof" });
+    command.args(["-nP", "-F", "p", "+D"]).arg(path).kill_on_drop(true);
+    let output = tokio::time::timeout(Duration::from_secs(120), command.output()).await
+        .map_err(|_| "open-file check timed out".to_string())?.map_err(|e| format!("open-file check unavailable: {e}"))?;
+    if !output.stdout.is_empty() { return Err("open files under folder".into()); }
+    if output.status.code() != Some(1) || !output.stderr.is_empty() {
+        return Err("open-file check could not establish safety".into());
     }
-    Ok(paths)
+    Ok(())
+}
+
+/// Check every ancestor without following links. Missing output is already released.
+pub(super) fn checked_folder(tree: &Path, folder: &str) -> std::io::Result<Option<PathBuf>> {
+    let mut path = tree.to_path_buf();
+    for part in folder.split('/') {
+        path.push(part);
+        match path.symlink_metadata() {
+            Ok(meta) if meta.is_dir() => {}
+            Ok(_) => return Err(std::io::Error::other("folder or ancestor is a symlink or not a directory")),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(Some(path))
 }
 fn size(path: &Path, device: u64, generated_reports: bool) -> std::io::Result<u64> {
     let meta = path.symlink_metadata()?;
@@ -273,7 +291,7 @@ fn size(path: &Path, device: u64, generated_reports: bool) -> std::io::Result<u6
     if !meta.file_type().is_dir() { return Ok(meta.len()); }
     // Bare repositories have no `.git` component. Preserve their objects too, even when an
     // untracked cache holds them; a build-folder policy is never permission to delete commits.
-    if path.join("HEAD").try_exists()? && path.join("objects").try_exists()? {
+    if path.join("HEAD").symlink_metadata().is_ok() && path.join("objects").symlink_metadata().is_ok() {
         return Err(std::io::Error::other("contains git metadata (bare repository)"));
     }
     let mut bytes = 0u64;

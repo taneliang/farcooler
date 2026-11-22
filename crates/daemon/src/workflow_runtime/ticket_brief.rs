@@ -84,6 +84,7 @@ mod tests {
                 assert!(brief.contains(text), "missing {text:?}: {brief}");
             }
             assert!(brief.contains("Companion ticket"));
+            assert!(brief.contains(super::super::owned_directories::SCRATCH_PROMPT));
             assert!(!brief.contains("`farcooler "), "all CLI commands have an installed path: {brief}");
             if review {
                 assert!(brief.contains("Don't change, commit or stage anything here."));

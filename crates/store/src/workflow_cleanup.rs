@@ -20,6 +20,18 @@ pub(crate) fn select(tx: &Transaction<'_>, before: &State, after: &State) -> Res
     Ok(())
 }
 impl Store {
+    /// A directory's creating process must have settled before it can be reclaimed.
+    /// A missing, replaced or uncertain owner is never evidence of quiescence.
+    pub fn workflow_cleanup_owner_settled(&self, effect: &CleanupEffect, owner: &str) -> Result<bool> {
+        let conn = self.conn();
+        if !crate::engine_cutover::engine_allowed(&conn, self.engine_incarnation)? { return Ok(false); }
+        Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM workflow_outbox
+            WHERE workspace=?1 AND id=?2 AND active=0 AND dispatch_state='settled')
+            AND NOT EXISTS(SELECT 1 FROM engine_cutover_quarantine WHERE resource='workspace:'||?1
+            OR resource=(SELECT json_extract(payload,'$.resource') FROM workflow_outbox WHERE workspace=?1 AND id=?2))",
+            params![effect.workspace, owner], |r| r.get(0))?)
+    }
+
     /// Recovery can retain a new, deterministic tree-release intent for a known finished group.
     /// Never overwrite a prior attempt; recovery explicitly reconciles finished group trees.
     pub fn workflow_cleanup_enqueue(&self, effect: &CleanupEffect) -> Result<()> {
@@ -28,11 +40,10 @@ impl Store {
         Ok(())
     }
 
-    /// Only the exclusive runtime's recovery pass may revive an interrupted, known finished
-    /// group with an engine-owned tree. Ordinary build output must never be replayed.
-    pub fn workflow_cleanup_recover_group(&self, effect: &CleanupEffect) -> Result<()> {
-        let resumed = CleanupResult { retry: true, bytes_freed: 0,
-            skipped: vec!["group tree cleanup interrupted; bytes freed unknown".into()] };
+    /// Only the exclusive runtime's recovery pass may revive an interrupted cleanup
+    /// whose path has retained ownership evidence. Ordinary build output is never replayed.
+    pub fn workflow_cleanup_recover(&self, effect: &CleanupEffect, reason: &str) -> Result<()> {
+        let resumed = CleanupResult { retry: true, bytes_freed: 0, skipped: vec![reason.into()] };
         self.conn().execute("UPDATE engine_build_cleanup SET result=?3 WHERE workspace=?1 AND id=?2 AND result=?4",
             params![effect.workspace, effect.id, serde_json::to_string(&resumed)?, serde_json::to_string(&interrupted())?])?;
         Ok(())
@@ -57,12 +68,29 @@ impl Store {
     }
 
     pub fn workflow_cleanups(&self, workspace: &str) -> Result<Vec<CleanupRecord>> {
+        self.read_workflow_cleanups(workspace, false)
+    }
+
+    pub fn workflow_pending_cleanups(&self, workspace: &str) -> Result<Vec<CleanupRecord>> {
+        self.read_workflow_cleanups(workspace, true)
+    }
+
+    fn read_workflow_cleanups(&self, workspace: &str, pending_only: bool) -> Result<Vec<CleanupRecord>> {
         let conn = self.conn();
-        let mut stmt = conn.prepare("SELECT payload,result FROM engine_build_cleanup WHERE workspace=?1 ORDER BY rowid")?;
-        let rows = stmt.query_map([workspace], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))?;
+        let mut stmt = conn.prepare("SELECT payload,result FROM engine_build_cleanup WHERE workspace=?1
+            AND (NOT ?2 OR result IS NULL OR json_extract(result,'$.retry')=1) ORDER BY rowid")?;
+        let rows = stmt.query_map(params![workspace, pending_only], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))?;
         rows.map(|r| { let (effect, result) = r?;
             Ok(CleanupRecord { effect: serde_json::from_str(&effect)?, result: result.map(|s| serde_json::from_str(&s)).transpose()? })
         }).collect()
+    }
+
+    pub fn workflow_unsettled_writers(&self, workspace: &str) -> Result<Vec<farcooler_workflow::Effect>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT payload FROM workflow_outbox WHERE workspace=?1
+            AND dispatch_state IN ('admitted','uncertain') AND json_type(payload,'$.kind.Execute') IS NOT NULL")?;
+        let rows = stmt.query_map([workspace], |r| r.get::<_, String>(0))?;
+        rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
     }
     /// Claim the observed pending or retryable result before filesystem mutation.
     /// The compare-and-swap prevents concurrent or stale sweeps from repeating an attempt.

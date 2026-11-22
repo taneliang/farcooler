@@ -9,7 +9,7 @@ use std::time::Duration;
 const FRAME_CAP: usize = 1 << 20;
 
 fn effect(workspace: &str, n: usize) -> CleanupEffect {
-    CleanupEffect { id: format!("cleanup-{n:04}"), workspace: workspace.into(), revision: n as u64, item: format!("ov-{n}"), run: format!("run-{n}"),
+    CleanupEffect { id: format!("cleanup-{n:04}"), workspace: workspace.into(), revision: n as u64, item: format!("ov-{n}"), run: format!("run-{n}"), directory: None,
         restart: None, tree: None, folders: (0..12).map(|f| format!("/Users/someone/Library/Application Support/worktrees/overnight/ov-{n}/target/debug/build-{f}")).collect(), uncertain: false }
 }
 

@@ -56,6 +56,7 @@ mod places;
 pub use places::{DEFAULT_EFFECT_CAP, DEFAULT_LANDING_PLACES, DEFAULT_WORK_PLACES};
 use places::{Placed, Places, Pool};
 mod build_cleanup;
+mod owned_directories;
 #[cfg(test)]
 mod repin_reply_tests;
 #[cfg(test)]
@@ -563,7 +564,7 @@ impl Runtime {
             }
         }
         // A group that ended since the last sweep leaves its tree; the first sweep also clears what a stopped daemon left (ov-1084).
-        self.exec.prune_trees(&workspaces, !self.trees_recovered).await;
+        self.exec.prune_trees(&workspaces, !self.trees_recovered);
         self.trees_recovered = true;
         let fingerprint = digest(&occupancy);
         let released_or_recovered = self.last_occupancy.as_ref() != Some(&fingerprint);
@@ -602,6 +603,8 @@ impl Runtime {
         let mut scan = true;
         let mut cleanup_requested = true;
         let mut cleanup = None;
+        let maintenance = Duration::from_secs(3600);
+        let mut next_maintenance = tokio::time::Instant::now() + maintenance;
         loop {
             // Ended groups' candidate branches leave the landing remote (ov-1269), off this loop.
             self.exec.sweep_candidate_branches();
@@ -646,7 +649,13 @@ impl Runtime {
                 _ = build_cleanup::wait_for_retry(self.next_cleanup), if !stopping => Event::CleanupRetry,
             };
             match event {
-                Event::Tick => { scan = true; }
+                Event::Tick => {
+                    scan = true;
+                    if tokio::time::Instant::now() >= next_maintenance {
+                        cleanup_requested = true;
+                        next_maintenance = tokio::time::Instant::now() + maintenance;
+                    }
+                }
                 Event::CleanupRetry => { cleanup_requested = true; }
                 Event::CleanupFinished(result) => {
                     cleanup = None;
@@ -665,7 +674,7 @@ impl Runtime {
                         self.receive(message).await;
                         if !read_only {
                             // A cancel may have ended a group.
-                            self.exec.prune_trees(&workspaces, false).await;
+                            self.exec.prune_trees(&workspaces, false);
                             cleanup_requested = true;
                         }
                         // A command may have started work, and a long wait must not hold it back.
@@ -707,7 +716,7 @@ impl Runtime {
                     }
                     count += 1;
                     // Not at the end of the sweep, which a long gate elsewhere may hold for hours.
-                    self.exec.prune_trees(&workspaces, false).await;
+                    self.exec.prune_trees(&workspaces, false);
                     cleanup_requested = true;
                     scan |= self.continuous && !stopping;
                 }

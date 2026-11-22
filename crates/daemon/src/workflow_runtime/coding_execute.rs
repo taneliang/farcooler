@@ -307,9 +307,10 @@ impl Exec {
     /// An agent gate's brief (ov-969). Fixed text, so a recovery rebuilds the same command. The verdict is the
     /// receipt `farcooler workflow verdict` writes: whatever the agent says in its turn decides nothing.
     pub(super) fn reviewing(item: &str) -> String {
+        let scratch = super::owned_directories::SCRATCH_PROMPT;
         format!("You are reviewing ticket {item}. The ticket is included below. The work under review is \
             the commits from $FARCOOLER_BASE to $FARCOOLER_CANDIDATE in this worktree. Review it against the ticket. Don't \
-            change, commit or stage anything here.\n\nWhen you've decided, record your verdict with \
+            change, commit or stage anything here.\n\n{scratch}\n\nWhen you've decided, record your verdict with \
             `farcooler workflow verdict --passed true` or `farcooler workflow verdict --passed false --summary \"What needs to change\"`, then end your turn. \
             The rejection summary becomes a finding on the ticket so the next agent knows what to fix. \
             Only that command's verdict counts. If you end your turn without one, the review hasn't happened, and it \
@@ -345,7 +346,7 @@ impl Exec {
                 If a review turned it back, the reviewer wrote what must change on the ticket: read its newest notes with \
                 `farcooler task show {item}`. Fix that, keep what was right, and commit."));
         }
-        format!("{brief}\n\n{prompt}")
+        format!("{brief}\n\n{}\n\n{prompt}", super::owned_directories::SCRATCH_PROMPT)
     }
     /// Context wins over command environment and is pinned in the process fact.
     pub(super) fn pin_context(&self, command: &mut CodingCommand, binding: &Binding, candidate: &str, receipt: &Path) -> Result<()> {
@@ -401,7 +402,7 @@ impl Exec {
             Ok(())
         }
     }
-    async fn run_coding(&self, binding: &Binding, command: CodingCommand,
+    async fn run_coding(&self, binding: &Binding, owner: &str, mut command: CodingCommand,
         cancel: tokio::sync::watch::Receiver<bool>) -> Result<()> {
         if matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build)) {
             let head = self.git_recorded(binding, &self.tree(binding), &["rev-parse", "HEAD"]).await?;
@@ -428,6 +429,10 @@ impl Exec {
             }
             return Err(error);
         }
+        // These are local launch resources. Receipts still authenticate the pinned command,
+        // without requiring local output to survive recovery or an upgrade.
+        let pinned_environment = command.environment.clone();
+        self.attach_owned_directory(binding, owner, &mut command)?;
         // A named tree is one people edit in: what a Run gate changes there is noted as it runs, so a crash that
         // stops the run can name what changed while the gate ran (ov-979). They are only named, never cleared.
         let ledger = (binding.effect.tree.is_some() && matches!(binding.effect.kind, EffectKind::Execute(StageKind::Run)))
@@ -474,7 +479,7 @@ impl Exec {
         if let Some(ledger) = &ledger { named_tree::end_gate(ledger)?; }
         let exit = exit?;
         let fact = ProcessFact { binding: binding.clone(), argv: command.argv,
-            environment: command.environment, managed_build: true, exit, log_path: Some(log.clone()), log_digest: digest(&self.bytes(&log)?) };
+            environment: pinned_environment, managed_build: true, exit, log_path: Some(log.clone()), log_digest: digest(&self.bytes(&log)?) };
         durable(&self.fact_path(binding), &serde_json::to_vec(&fact)?)
     }
     fn check_binding(&self, workspace: &str, binding: &Binding) -> Result<()> {
@@ -659,10 +664,10 @@ impl Exec {
                     // No cleanup while the reviewer reads: both see the same candidate. Both futures are
                     // drained even on failure, so neither writer survives the stage's result.
                     let (review, gate) = tokio::join!(
-                        self.run_coding(binding, command, cancel.clone()),
-                        self.run_coding(&check, self.coding_command(&check)?, cancel));
+                        self.run_coding(binding, &binding.effect.id, command, cancel.clone()),
+                        self.run_coding(&check, &binding.effect.id, self.coding_command(&check)?, cancel));
                     review?; gate?;
-                } else if let Err(error) = self.run_coding(binding, command, cancel).await {
+                } else if let Err(error) = self.run_coding(binding, &binding.effect.id, command, cancel).await {
                     // run_coding exposes I/O as retryable only before launch or after quiescence.
                     if matches!(kind, StageKind::Run) && matches!(&error, Error::Io(_)) {
                         return Ok(Outcome::SafeFailure);

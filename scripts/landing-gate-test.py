@@ -609,7 +609,10 @@ class LandingTests(unittest.TestCase):
                 "import shutil\n"
                 "shutil.disk_usage = lambda path: shutil._ntuple_diskusage(100 * 1024**3, 0, 100 * 1024**3)\n"
             )
-            env = {**os.environ, "FARCOOLER_BASE": base, "PYTHONPATH": str(stub)}
+            logs = repo / ".git" / "managed-gate-logs"
+            logs.mkdir()
+            env = {**os.environ, "FARCOOLER_BASE": base, "PYTHONPATH": str(stub),
+                   "FARCOOLER_LANE_GATE_LOG_DIR": str(logs)}
             out = subprocess.run(["bash", str(repo / "scripts/landing-gate"), "--worktree", tmp,
                                   "--keep-target", "--no-load-wait"], env=env,
                                  capture_output=True, text=True)
@@ -620,6 +623,8 @@ class LandingTests(unittest.TestCase):
             self.assertIn("jobs: wire, doc-comments", out.stdout)
             self.assertIn("no builds selected", out.stdout)
             self.assertIn("landing-gate: PASS", out.stdout)
+            self.assertIn(f"logs in {logs}", out.stdout)
+            self.assertTrue(any(logs.iterdir()), "the engine-selected directory holds the gate output")
             engine = {**env, "FARCOOLER_OPERATION_BINDING": "fixture-engine"}
             for bad_env, flags, message in (
                 ({k: v for k, v in engine.items() if k != "FARCOOLER_BASE"}, [], "engine requires FARCOOLER_BASE"),

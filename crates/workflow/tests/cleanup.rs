@@ -133,3 +133,21 @@ fn build_cleanup_keeps_build_output_for_the_following_check() {
     assert_eq!(after.items["one"].definition.stages[2].kind, StageKind::Check);
     assert!(effects(&before, &after).is_empty());
 }
+
+#[test]
+fn build_cleanup_selects_a_rest_column_or_wait_without_a_step_change() {
+    let mut before = initial();
+    before.items.get_mut("one").unwrap().stage = 1;
+    let mut after = before.clone();
+    after.revision += 1;
+    after.items.get_mut("one").unwrap().phase = Phase::WaitingApproval;
+    assert_eq!(effects(&before, &after).len(), 1);
+    assert!(effects(&after, &after).is_empty());
+
+    let resting = after.items.get_mut("one").unwrap();
+    resting.definition = Definition::ticket();
+    resting.phase = Phase::Blocked;
+    let intents = effects(&before, &after);
+    assert_eq!(intents.len(), 1);
+    assert_eq!(intents[0].run, before.items["one"].run);
+}

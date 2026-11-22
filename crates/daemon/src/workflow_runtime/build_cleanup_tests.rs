@@ -411,12 +411,13 @@ async fn build_cleanup_group_build_to_review_releases_output_and_records_result_
     until(&mut runtime, |s| s.items[&group].phase == Phase::WaitingReview).await;
     assert!(!tree.join("target").exists(), "a group waiting for review releases its output");
     let records: Vec<_> = runtime.store.workflow_cleanups("w").unwrap().into_iter()
-        .filter(|r| r.effect.item == group).collect();
+        .filter(|r| r.effect.item == group && r.effect.directory.is_none()).collect();
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].result.as_ref().unwrap().bytes_freed, 12);
     assert!(records[0].result.as_ref().unwrap().skipped.is_empty());
     runtime.pump(100).await.unwrap();
-    let again = runtime.store.workflow_cleanups("w").unwrap().into_iter().find(|r| r.effect.item == group).unwrap();
+    let again = runtime.store.workflow_cleanups("w").unwrap().into_iter()
+        .find(|r| r.effect.item == group && r.effect.directory.is_none()).unwrap();
     assert_eq!(again.result, records[0].result);
 }
 
@@ -429,7 +430,8 @@ async fn build_cleanup_group_inherits_published_folder_list() {
     until(&mut runtime, |s| s.items[&group].phase == Phase::WaitingReview).await;
     assert!(tree.join("target/output").exists());
     assert!(!tree.join("custom-output").exists());
-    let record = runtime.store.workflow_cleanups("w").unwrap().into_iter().find(|r| r.effect.item == group).unwrap();
+    let record = runtime.store.workflow_cleanups("w").unwrap().into_iter()
+        .find(|r| r.effect.item == group && r.effect.directory.is_none()).unwrap();
     assert_eq!(record.effect.folders, ["custom-output"]);
     assert_eq!(record.result.unwrap().bytes_freed, 6);
 }
@@ -800,16 +802,36 @@ async fn build_cleanup_recovery_releases_a_group_tree_retained_by_an_older_engin
     runtime.store.workflow_cleanup_result(&record.effect, &farcooler_workflow::cleanup::CleanupResult {
         bytes_freed: 0, skipped: Vec::new(), retry: false,
     }).unwrap();
+    let reader = File::open(tree.join("target/binary")).unwrap();
     let root = runtime.root.clone();
     drop(runtime);
     let mut runtime = Runtime::open(&root).unwrap();
     runtime.pump(100).await.unwrap();
+    assert!(tree.exists(), "the recovery sweep leaves a checkout with a live reader");
+    drop(reader);
+    runtime.release_builds(&["w".into()]).await.unwrap();
     assert!(!tree.exists(), "recovery releases a known finished group's old tree");
     let records = runtime.store.workflow_cleanups("w").unwrap();
     let released = records.iter().rev().find(|r| r.effect.item == group && r.effect.id != record.effect.id).unwrap();
     assert!(released.result.as_ref().unwrap().bytes_freed > 12);
     runtime.pump(100).await.unwrap();
     assert_eq!(runtime.store.workflow_cleanups("w").unwrap().len(), records.len());
+}
+
+#[tokio::test]
+async fn recovery_accounts_for_idle_output_left_by_an_older_engine() {
+    let (_dir, mut runtime, tree) = building().await;
+    review(&mut runtime).await;
+    std::fs::create_dir(tree.join("target")).unwrap();
+    std::fs::write(tree.join("target/old-output"), b"left behind").unwrap();
+    let root = runtime.root.clone();
+    drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    runtime.pump(100).await.unwrap();
+    assert!(!tree.join("target").exists());
+    let records = runtime.store.workflow_cleanups("w").unwrap();
+    assert_eq!(records.last().unwrap().result.as_ref().unwrap().bytes_freed, 11);
+    assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::WaitingReview);
 }
 
 #[tokio::test]
