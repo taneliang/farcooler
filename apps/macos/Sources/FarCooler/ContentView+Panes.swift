@@ -29,7 +29,6 @@ extension ContentView {
             onAction: { action in Task { await run(action, on: term, in: ws) } },
             hasKeyboard: keyboard && WorkspaceScreen.bareTakesKeyboard(shown)
         )
-        // A path its agent's tool call names opens in this worktree's Files.
     }
 
     /// A workspace's navigator, or a sentence saying where its board went.

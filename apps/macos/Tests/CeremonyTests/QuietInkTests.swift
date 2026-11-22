@@ -279,7 +279,7 @@ struct QuietInkTests {
             "Plan/PlanOrchestratorPages", "Plan/PlanAgentsView", "Plan/PlanHome", "Plan/PlanColumnView", "Plan/PlanOutsideRow",
             "Plan/ContentView+OneTree", "TaskColumn", "TaskUsageView", "BoardHistoryView", "Components/TaskWorkers",
             "BoardSummaryStrip", "TaskNoteStyle", "TaskBoard",
-            "ChangesPane", "ChangesLfsNotice", "RepColumn", "WelcomeView", "CharterSetupView", "TileView", "Files/FilesPane", "Files/CodeLineRow", "Files/OpenInFiles", "DiffView", "DiffReadFailureRow",
+            "ChangesPane", "ChangesLfsNotice", "RepColumn", "WelcomeView", "CharterSetupView", "TileView", "Files/FilesPane", "Files/CodeLineRow", "DiffView", "DiffReadFailureRow",
         ]
         // Left on purpose: a disabled control (Ask, when it can't send) is exempt from contrast,
         // (a rule or a bar's fill is not text, and none of those goes through foregroundStyle).
