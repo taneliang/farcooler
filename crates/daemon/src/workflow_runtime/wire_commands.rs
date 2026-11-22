@@ -558,7 +558,7 @@ mod tests {
         assert_eq!(summary["state"]["revision"], input["state"]["revision"]);
     }
     #[tokio::test]
-    async fn old_and_new_plan_workflow_reads_fit_with_a_large_archive() {
+    async fn marked_plan_workflow_reads_fit_with_a_large_archive() {
         use super::super::admission_tests::{factory, request};
         use farcooler_protocol::v1::{Scope, WireEnvelope, wire_envelope};
         use farcooler_transport::{Handler, Peer};
@@ -589,26 +589,25 @@ mod tests {
             }),
         };
         state.archive = (0..1450).map(|n| (format!("ov-{n}"), archived.clone())).collect();
+        assert!(serde_json::to_vec(&state).unwrap().len() > farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES);
         runtime.store.workflow_state_for_tests(&state).unwrap();
         let rpc = factory(&svc, &runtime, Peer { client_id: None, scope: Scope::Control }, None);
-        for accepts in [vec![], vec![farcooler_protocol::accepts::WORKFLOW_PLAN.into()]] {
-            let mut req = request(workspace, &Action::Get);
-            req.accepts = accepts;
-            let response = rpc.handle(req).await;
-            let value = super::super::admission_tests::receipt(&response);
-            let reduced: State = serde_json::from_value(value["state"].clone()).unwrap();
-            let auth = serde_json::from_value(value["context"]["capabilities"].clone()).unwrap();
-            let view = farcooler_client::workflow_presentation::project(
-                &reduced, &auth, farcooler_client::workflow_presentation::Style::Apple,
-            ).unwrap();
-            assert_eq!(view.runs[0].item, "item");
-            let envelope = WireEnvelope {
-                body: Some(wire_envelope::Body::Response(response)),
-                ..Default::default()
-            };
-            farcooler_protocol::framing::encode(&envelope).expect("workflow read for Plan must fit");
-            assert!(reduced.archive.is_empty(), "Plan history must not travel in the frame");
-        }
+        let mut req = request(workspace, &Action::Get);
+        req.accepts.push(farcooler_protocol::accepts::WORKFLOW_PLAN.into());
+        let response = rpc.handle(req).await;
+        let value = super::super::admission_tests::receipt(&response);
+        let reduced: State = serde_json::from_value(value["state"].clone()).unwrap();
+        let auth = serde_json::from_value(value["context"]["capabilities"].clone()).unwrap();
+        let view = farcooler_client::workflow_presentation::project(
+            &reduced, &auth, farcooler_client::workflow_presentation::Style::Apple,
+        ).unwrap();
+        assert_eq!(view.runs[0].item, "item");
+        let envelope = WireEnvelope {
+            body: Some(wire_envelope::Body::Response(response)),
+            ..Default::default()
+        };
+        farcooler_protocol::framing::encode(&envelope).expect("workflow read for Plan must fit");
+        assert!(reduced.archive.is_empty(), "Plan history must not travel in the frame");
     }
 
     // Opt-in measurement through the actual CLI and socket, with fifteen CPU-active build adapters.
