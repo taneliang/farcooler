@@ -8,7 +8,7 @@ use farcooler_protocol::{MAX_CONTROL_ENVELOPE_BYTES, v1 as pb};
 use prost::Message;
 
 // Leave space for the response, result and envelope around the Plan.
-const PLAN_BUDGET: usize = MAX_CONTROL_ENVELOPE_BYTES - 1024;
+pub(super) const PLAN_BUDGET: usize = MAX_CONTROL_ENVELOPE_BYTES - 1024;
 const HISTORY_BYTES: usize = 64 * 1024;
 const RECENT_LINES: usize = 40;
 const RECENT_LANDINGS: usize = 20;
@@ -23,17 +23,13 @@ pub(super) fn summarize(plan: &mut pb::Plan) {
 
     // A closed card with no visible line, landing or agent is represented by
     // its theme and board counts. Keep the cards that those rows still name.
-    let shown: HashSet<_> = plan.lines.iter().map(|line| &line.task_id)
+    let shown: HashSet<_> = plan.lines.iter().flat_map(|line| std::iter::once(&line.task_id).chain(&line.stack_parent))
         .chain(plan.landings.iter().flat_map(|landing| &landing.task_ids))
         .chain(plan.agents.iter().flat_map(|agent| agent.tickets.iter().map(|ticket| &ticket.task_id)))
         .collect();
     plan.cards.retain(|card| shown.contains(&card.task_id)
         || !matches!(card.status(), pb::TaskStatus::Done | pb::TaskStatus::Cancelled));
     retain_card_refs(plan);
-
-    if plan.encoded_len() > PLAN_BUDGET {
-        bound_live_overview(plan);
-    }
 }
 
 // Select by recency across legacy landings and engine groups, then retain
@@ -64,11 +60,15 @@ fn retain_card_refs(plan: &mut pb::Plan) {
     }
 }
 
-// A board can also grow in live rows or unusually large text. Give each main
-// section a share of the frame so one section cannot crowd out the others.
-fn bound_live_overview(plan: &mut pb::Plan) {
+// Released clients read one response. Reserve room for each section and keep
+// the remaining rows usable without another read. Paging clients call summarize
+// directly and fetch all the live rows.
+pub(super) fn bound_legacy(plan: &mut pb::Plan) {
+    if plan.encoded_len() <= PLAN_BUDGET {
+        return;
+    }
+    plan.overview_truncated = true;
     let share = PLAN_BUDGET / 16;
-    bound_rows(&mut plan.themes, 4 * share);
     bound_rows(&mut plan.lines, 4 * share);
     bound_rows(&mut plan.cards, 3 * share);
     bound_rows(&mut plan.landings, 2 * share);
@@ -81,11 +81,19 @@ fn bound_live_overview(plan: &mut pb::Plan) {
         bound_rows(&mut cost.compare, share / 4);
         bound_rows(&mut cost.week, share / 4);
     }
+    let cards: HashSet<_> = plan.cards.iter().map(|card| &card.task_id).collect();
+    plan.lines.retain(|line| cards.contains(&line.task_id));
+    plan.landings.retain(|landing| landing.task_ids.iter().all(|id| cards.contains(id)));
+    for agent in &mut plan.agents {
+        agent.tickets.retain(|ticket| cards.contains(&ticket.task_id));
+    }
+    plan.suggested_reviewers.retain(|reviewers| cards.contains(&reviewers.task_id));
     retain_card_refs(plan);
+    bound_rows(&mut plan.themes, 4 * share);
 }
 
 // Include a conservative allowance for the repeated field's tag and length.
-fn row_bytes(row: &impl Message) -> usize {
+pub(super) fn row_bytes(row: &impl Message) -> usize {
     row.encoded_len() + 10
 }
 

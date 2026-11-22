@@ -28,6 +28,7 @@ pub mod needs_you_view;
 #[cfg(all(target_os = "macos", feature = "native"))]
 pub mod pipe;
 pub mod plan_json;
+pub mod plan_pages;
 pub mod plan_view;
 pub mod workspace_layout;
 pub mod rows_json;

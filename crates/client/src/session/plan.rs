@@ -9,14 +9,17 @@ impl Session {
     /// can't answer.
     pub async fn plan(&self, workspace: Uuid) -> Result<farcooler_protocol::v1::Plan, SessionError> {
         require(self.capabilities(), farcooler_protocol::capability::BOARD_PLAN, "plan.get")?;
-        let payload = request::Payload::PlanGet(farcooler_protocol::v1::PlanGetRequest {
-            workspace_id: bytes::Bytes::copy_from_slice(workspace.as_bytes()),
-            include_closed: false,
-            ..Default::default()
-        });
-        match self.value("plan.get", None, Some(payload)).await? {
-            result::Value::Plan(plan) => Ok(plan),
-            other => Err(wrong("plan", &other)),
+        let mut pages = crate::plan_pages::PlanPages::overview(bytes::Bytes::copy_from_slice(workspace.as_bytes()));
+        loop {
+            let payload = request::Payload::PlanGet(pages.request());
+            match self.value("plan.get", None, Some(payload)).await? {
+                result::Value::Plan(page) => {
+                    if let Some(plan) = pages.push(page)? {
+                        return Ok(plan);
+                    }
+                }
+                other => return Err(wrong("plan", &other)),
+            }
         }
     }
 

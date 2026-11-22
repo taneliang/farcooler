@@ -320,8 +320,11 @@ async fn run_on<L: DispatchLink>(
         Some(PlanCmd::Set { tickets }) => {
             let plan = get_ticket_plan(link, &ws, tickets.clone()).await?;
             let ids = ranked(&plan, &tickets)?;
-            let set = request::Payload::LineOrder(pb::LineOrder { workspace_id: ws, task_ids: ids, actor: actor.into() });
-            let result::Value::Plan(plan) = send(link, board, "line.order", set).await? else { return Err(unreadable()) };
+            let set = request::Payload::LineOrder(pb::LineOrder { workspace_id: ws.clone(), task_ids: ids, actor: actor.into() });
+            let result::Value::Plan(mut plan) = send(link, board, "line.order", set).await? else { return Err(unreadable()) };
+            if plan.overview_truncated {
+                plan = get_plan(link, &ws, false).await?;
+            }
             Ok(if json { plan_json(&plan).to_string() } else { overview(&plan, now) })
         }
         Some(PlanCmd::Theme(cmd)) => theme(link, board, ws, cmd, actor, json, now).await,
@@ -394,7 +397,8 @@ pub(crate) async fn get_plan<L: DispatchLink>(link: &mut L, workspace: &bytes::B
     if all {
         get_plan_detail(link, workspace, None).await
     } else {
-        read_plan_page(link, workspace, None).await
+        let pages = farcooler_client::plan_pages::PlanPages::overview(workspace.clone());
+        read_plan(link, pages).await
     }
 }
 
@@ -407,38 +411,26 @@ async fn get_plan_detail<L: DispatchLink>(
     workspace: &bytes::Bytes,
     subject: Option<pb::plan_detail_read::Subject>,
 ) -> Result<pb::Plan, Failed> {
-    let mut query = pb::PlanDetailRead { offset: 0, subject };
-    let mut plan = read_plan_page(link, workspace, Some(query.clone())).await?;
-    while let Some(offset) = plan.next_offset {
-        if offset <= query.offset {
-            return Err(unreadable());
-        }
-        query.offset = offset;
-        let next = read_plan_page(link, workspace, Some(query.clone())).await?;
-        plan.themes.extend(next.themes);
-        plan.cards.extend(next.cards);
-        plan.rulings.extend(next.rulings);
-        plan.ci.extend(next.ci);
-        plan.lines.extend(next.lines);
-        plan.landings.extend(next.landings);
-        plan.agents.extend(next.agents);
-        plan.next_offset = next.next_offset;
-    }
-    Ok(plan)
+    let pages = farcooler_client::plan_pages::PlanPages::detail(workspace.clone(), subject);
+    read_plan(link, pages).await
 }
 
-async fn read_plan_page<L: DispatchLink>(
-    link: &mut L, workspace: &bytes::Bytes, detail: Option<pb::PlanDetailRead>,
+async fn read_plan<L: DispatchLink>(
+    link: &mut L,
+    mut pages: farcooler_client::plan_pages::PlanPages,
 ) -> Result<pb::Plan, Failed> {
-    let mut r = with(
-        req_for("plan.get", crate::uuid_of(workspace)),
-        request::Payload::PlanGet(pb::PlanGetRequest { workspace_id: workspace.clone(), include_closed: detail.is_some(), detail }),
-    );
-    r.required_capabilities.push(capability::BOARD_PLAN.to_string());
-    let answer = link.call(r).await.map_err(|e| refused_here(e, "The runner couldn't read the plan."))?;
-    match expect_value(answer.value)? {
-        result::Value::Plan(plan) => Ok(plan),
-        _ => Err(unreadable()),
+    loop {
+        let page = pages.request();
+        let mut r = with(
+            req_for("plan.get", crate::uuid_of(&page.workspace_id)),
+            request::Payload::PlanGet(page),
+        );
+        r.required_capabilities.push(capability::BOARD_PLAN.to_string());
+        let answer = link.call(r).await.map_err(|e| refused_here(e, "The runner couldn't read the plan."))?;
+        let result::Value::Plan(page) = expect_value(answer.value)? else { return Err(unreadable()) };
+        if let Some(plan) = pages.push(page)? {
+            return Ok(plan);
+        }
     }
 }
 

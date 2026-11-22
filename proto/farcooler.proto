@@ -4926,12 +4926,14 @@ message PlanCard {
 message Plan {
   // The runner's clock, so ages and `stale` agree across devices.
   int64 now_ms = 1;
+  // In a paged read, a theme can appear in consecutive fragments with the
+  // same ID and disjoint task_ids. Append the IDs in order.
   repeated BoardThemeView themes = 2;
   // Lanes, their order, coverage, trains, the agents and their spend, and
   // whom to ask about a lane, until ov-872 replaced them with the fields
   // from 16 on.
   reserved 3, 4, 6, 8, 12, 13, 15;
-  // Every card any theme, ticket or landing names, once.
+  // Cards named by the visible rows, once per read.
   repeated PlanCard cards = 5;
   // Decided for you (ov-304), behind `board_rulings`: every standing ruling,
   // newest first, then the confirmed (said "kept" to the owner, ov-333) and
@@ -4974,8 +4976,14 @@ message Plan {
   repeated TicketReviewers suggested_reviewers = 20;
   // Open cards with no theme, including cards outside the plan.
   optional uint64 unthemed_open = 21;
-  // Present only when a paged detail read has more records.
+  // Present when a paged overview or detail read has more records.
   optional uint32 next_offset = 22;
+  // A single-response caller received a reduced overview because of the frame
+  // limit. The complete live overview is available with overview_offset.
+  bool overview_truncated = 23;
+  // A fingerprint of the paged result, independent of now_ms. Restart at
+  // offset zero if this changes between pages.
+  optional fixed64 page_revision = 24;
 }
 
 // One reviewer pull requests of a board are waiting on (ov-579).
@@ -5066,6 +5074,9 @@ message PlanGetRequest {
   bool include_closed = 2;
   // Opt in to byte-bounded detail pages. Older callers omit this.
   PlanDetailRead detail = 3;
+  // Opt in to paging the recent overview. Start at zero and follow
+  // Plan.next_offset. Omit detail and leave include_closed false.
+  optional uint32 overview_offset = 4;
 }
 
 // A page of Plan rows. An unset subject reads across all sections.

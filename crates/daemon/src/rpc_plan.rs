@@ -74,8 +74,15 @@ pub(crate) async fn dispatch(svc: &Arc<Service>, watcher: &Arc<Watcher>, scope: 
             let mut plan = read_plan(svc, watcher, workspace, closed_since, admin, control).await?;
             if let Some(query) = p.detail {
                 plan = detail::page(plan, query)?;
-            } else if !p.include_closed {
-                overview::summarize(&mut plan);
+            } else {
+                if !p.include_closed {
+                    overview::summarize(&mut plan);
+                }
+                if let Some(offset) = p.overview_offset {
+                    plan = detail::overview(plan, offset)?;
+                } else {
+                    overview::bound_legacy(&mut plan);
+                }
             }
             Ok(result::Value::Plan(plan))
         }
@@ -110,6 +117,7 @@ pub(crate) async fn dispatch(svc: &Arc<Service>, watcher: &Arc<Watcher>, scope: 
             watcher.announce_plan_changed(workspace, actor);
             let mut plan = read_plan(svc, watcher, workspace, now() - CLOSED_FOR_MS, admin, control).await?;
             overview::summarize(&mut plan);
+            overview::bound_legacy(&mut plan);
             Ok(result::Value::Plan(plan))
         }
         "line.set" => {
@@ -645,7 +653,7 @@ fn pb_plan(svc: &Service, p: &Plan, admin: bool) -> Result<pb::Plan> {
         agents: p.agents.iter().map(pb_agent).collect(),
         agents_spend: Some(pb_spend(&p.agents_spend)),
         suggested_reviewers: Vec::new(),
-        next_offset: None,
+        ..Default::default()
     })
 }
 

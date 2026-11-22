@@ -473,6 +473,9 @@ pub fn plan_json(plan: &pb::Plan) -> Value {
         "agents_spend": plan.agents_spend.as_ref().map(spend_json),
     });
     if let Some(count) = plan.unthemed_open { out["unthemed_open"] = json!(count); }
+    if plan.overview_truncated {
+        out["overview_truncated"] = json!(true);
+    }
     // Only a runner that sent waits (ov-579): the fixture the Mac decodes keeps its shape.
     if !plan.review_waits.is_empty() {
         out["review_waits"] = plan.review_waits.iter().map(|w| json!({
