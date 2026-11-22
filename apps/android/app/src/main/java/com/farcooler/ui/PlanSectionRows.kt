@@ -152,7 +152,7 @@ fun LazyListScope.planSections(
                     onOpen = { onOpen(PlanPage.Theme(it)) },
                 )
             }
-            // Drawn last, after Cost and Pages (`PlanScreens`).
+            // Drawn last, after Cost (`PlanScreens`).
             PlanViewKind.LandedToday -> {}
         }
     }
