@@ -48,6 +48,9 @@ pub(crate) enum AppCmd {
         /// Open the app first if it isn't open.
         #[arg(long)]
         launch: bool,
+        /// Wait for in-flight landing checks and pushes to finish before updating.
+        #[arg(long)]
+        wait: bool,
     },
     /// The installed app's version, build and channel, and the newest build
     /// its update feed offers.
@@ -78,9 +81,8 @@ pub(crate) async fn app(runner: Option<&str>, cmd: AppCmd, json: bool) -> crate:
     let socket = socket_path()?;
     let names = Names::of(CHANNEL);
     match cmd {
-        AppCmd::Update { no_relaunch, launch } => {
-            let conn = reach(&socket, &names, launch).await?;
-            let report = update(conn, &socket, &names, !no_relaunch).await?;
+        AppCmd::Update { no_relaunch, launch, wait } => {
+            let report = request_update(&socket, &names, launch, !no_relaunch, wait).await?;
             println!("{}", if json { report.json().to_string() } else { report.said(&names) });
         }
         AppCmd::Version { launch } => {
@@ -96,6 +98,28 @@ pub(crate) async fn app(runner: Option<&str>, cmd: AppCmd, json: bool) -> crate:
 /// `FARCOOLER_HOME` moves both together.
 fn socket_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
     Ok(farcooler_daemon_contracts::paths::runtime_dir()?.join("app.sock"))
+}
+
+async fn request_update(
+    socket: &Path,
+    names: &Names,
+    launch: bool,
+    relaunch: bool,
+    wait: bool,
+) -> Result<UpdateReport, Box<dyn std::error::Error>> {
+    let home = socket.parent().expect("app socket has a runtime directory");
+    if home.try_exists()? && farcooler_daemon::landing_update::try_update(home)?.is_none() {
+        if !wait {
+            return Err(format!(
+                "{} must wait for in-flight landing checks or pushes to finish. Run `{} app update --wait` to wait.",
+                names.app, names.cli
+            ).into());
+        }
+        eprintln!("Waiting for in-flight landing checks or pushes to finish before updating {}.", names.app);
+        drop(crate::daemon_link::wait_for_landing(home).await?);
+    }
+    let conn = reach(socket, names, launch).await?;
+    update(conn, socket, names, relaunch).await
 }
 
 /// What a channel's app is called and how to open it. The same mapping as

@@ -115,6 +115,25 @@ async fn an_app_on_the_newest_build_says_so() {
 }
 
 #[tokio::test]
+async fn a_busy_landing_refuses_an_update_unless_the_caller_asks_to_wait() {
+    let app = FakeApp::start(vec![vec![
+        serde_json::json!({ "event": "upToDate", "app": about("2329", "8476e3b", 10) }),
+    ]]);
+    let hold = farcooler_daemon::landing_update::try_update(app._dir.path()).unwrap().unwrap();
+    let names = canary();
+    let error = request_update(&app.socket, &names, false, true, false).await.unwrap_err();
+    assert!(error.to_string().contains("wait for in-flight landing checks or pushes to finish"));
+    assert!(error.to_string().contains("app update --wait"));
+    let mut waiting = std::pin::pin!(request_update(&app.socket, &names, false, true, true));
+    assert!(tokio::time::timeout(Duration::from_millis(20), &mut waiting).await.is_err());
+    assert!(app.requests().is_empty());
+    drop(hold);
+    let report = tokio::time::timeout(Duration::from_secs(5), waiting).await.unwrap().unwrap();
+    assert!(matches!(report, UpdateReport::UpToDate(_)));
+    assert_eq!(app.requests(), vec![serde_json::json!({ "op": "update", "relaunch": true })]);
+}
+
+#[tokio::test]
 async fn an_update_reports_the_build_before_and_the_relaunched_one_after() {
     let app = FakeApp::start(vec![
         vec![

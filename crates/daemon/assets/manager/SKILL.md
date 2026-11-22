@@ -182,7 +182,7 @@ Log each ticket's tokens, model and fix rounds; route by that record.
 Every non-trivial change passes a review gate first. The workflow's gates mirror CI:
 every step and its environment (display scale, `CI=true`, shard timeouts). A
 CI-only failure earns a gate. A red main comes first; when a known-flaky test did
-it, rerun the failed job once, file a flaky card, and keep landing on the rerun's result.
+it, rerun the failed job once, file a flaky card, and keep landing on the rerun's result. After each green main, run `{{cli}} app update --wait` on the Mac that runs the app.
 
 **The workflow engine lands.** A ticket whose run reaches its definition's landing step waits there, `WaitingJoin`, until you queue it. Its group leaves
 for its gate by itself when nothing is ahead. The group folds, gates, pushes and watches CI (a canceled run reruns once); a failed

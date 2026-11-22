@@ -60,6 +60,7 @@ pub mod orchestrator;
 pub mod paste_mode;
 pub mod pastes;
 pub mod paths;
+pub mod landing_update;
 pub mod daemon_log;
 pub mod caller_person;
 pub mod caller_seat;

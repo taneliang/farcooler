@@ -752,6 +752,7 @@ impl Runtime {
                     if current.items.get(&effect.item).is_some_and(|i| i.pending.as_ref() == Some(&effect.id)) {
                         self.observe(&workspace, &effect, outcome, false, clock())?;
                     }
+                    drop(job._landing);
                     count += 1;
                     // Not at the end of the sweep, which a long gate elsewhere may hold for hours.
                     self.exec.prune_trees(&workspaces, false);
@@ -873,6 +874,17 @@ impl Runtime {
                 }
                 let tree = self.effect_tree(workspace, &effect);
                 let Ok(tree) = self.tree_lock(&tree).try_read_owned() else { continue };
+                let landing = match &effect.kind {
+                    EffectKind::Execute(StageKind::Land | StageKind::Push | StageKind::PushCandidate | StageKind::PushBranch) => true,
+                    EffectKind::Execute(StageKind::Run | StageKind::Check | StageKind::Review(Reviewer::Agent | Reviewer::Dispatch)) =>
+                        item.group_of.is_some(),
+                    _ => false,
+                };
+                let landing = if landing {
+                    let home = if self.service_mode { self.root.parent().unwrap_or(&self.root) } else { &self.root };
+                    let Some(hold) = crate::landing_update::try_landing(home)? else { continue };
+                    Some(hold)
+                } else { None };
                 let Some(claim) = self.store.workflow_claim_effect(workspace, &effect.id,
                     &format!("runtime:{}", self.instance), state.revision, state.epoch,
                     clock(), clock().saturating_add(30_000))? else {
@@ -934,7 +946,7 @@ impl Runtime {
                     else if exec.coding.is_some() { exec.execute_coding(&run_workspace, &run_binding, cancelled).await }
                     else { exec.execute(&run_workspace, &run_binding).await }
                 })));
-                running.push(Running { workspace: workspace.clone(), effect, binding, cancel, pool, _tree: tree });
+                running.push(Running { workspace: workspace.clone(), effect, binding, cancel, pool, _tree: tree, _landing: landing });
             }
             self.recovery.keep_only(workspace, &uncertain);
         }
@@ -1141,6 +1153,7 @@ struct Running {
     /// The places it holds; None for a stop or a wait on the base, CI or a pull request, which take none.
     pool: Option<Pool>,
     _tree: tokio::sync::OwnedRwLockReadGuard<()>,
+    _landing: Option<std::fs::File>,
 }
 enum Event {
     Tick,

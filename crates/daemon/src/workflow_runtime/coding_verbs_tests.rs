@@ -24,6 +24,14 @@ const GATE: &str = r#"elif stage == 'gate':
     if mode == 'gate-slow':
         pathlib.Path('half-built.out').write_text('left by the gate')
         __import__('time').sleep(60)
+    if mode == 'update-wait':
+        import time
+        marker = pathlib.Path(os.environ['MARKER'])
+        marker.touch()
+        deadline = time.monotonic() + 10
+        while not marker.with_suffix('.release').exists():
+            if time.monotonic() >= deadline: sys.exit(5)
+            time.sleep(0.01)
     if mode == 'batch-fail':
         head = subprocess.check_output(['/usr/bin/git', '--git-dir', os.environ['REMOTE'], 'rev-parse', 'refs/heads/main']).decode().strip()
         if int(subprocess.check_output(['/usr/bin/git', 'rev-list', '--count', head + '..HEAD']).decode().strip()) > 1: sys.exit(5)

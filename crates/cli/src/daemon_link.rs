@@ -225,9 +225,8 @@ impl Ensured {
 /// built from different source behave like two different programs, and the
 /// symptom is a bug you already fixed still happening.
 ///
-/// Replacing costs nothing that matters: terminals are tmux windows and outlive
-/// this entirely, agent shims reconnect on the next start, and durable state is
-/// committed to SQLite per call.
+/// Terminals outlive replacement in tmux, and agent shims reconnect on the next
+/// start. Landing checks and pushes must record their results before it starts.
 pub async fn ensure_local() -> Result<(Ensured, String), Box<dyn std::error::Error>> {
     let socket = farcooler_daemon_contracts::paths::socket_path()?;
     let database = farcooler_daemon_contracts::paths::database_path()?;
@@ -240,7 +239,7 @@ async fn ensure_in(
     socket: &std::path::Path,
     database: &std::path::Path,
 ) -> Result<(Ensured, String), Box<dyn std::error::Error>> {
-    let mut link = match dial(socket).await {
+    let link = match dial(socket).await {
         Ok(link) => link,
         Err(ClientError::Connect(_)) => {
             if cutover_stranded_here(database) { return Err(CUTOVER_STRANDED.into()); }
@@ -271,28 +270,21 @@ async fn ensure_in(
         Err(other) => return Err(Box::new(other)),
     };
 
-    if farcooler_protocol::build_identity::same_build(link.daemon_build(), farcooler_protocol::BUILD) {
-        return Ok((Ensured::Unchanged, link.daemon_build().to_string()));
+    if let Some(kept) = keep_running(link.daemon_build(), database) {
+        return Ok((kept, link.daemon_build().to_string()));
     }
 
-    // Different source, and before anything is stopped: which way? A daemon
-    // whose database is newer than this build is a newer daemon, and the
-    // replacement would be a downgrade. That's an older app at launch (a
-    // Local build from an older worktree, a reinstalled older DMG), and
-    // replacing used to cost every agent transcript and then, where this
-    // build can't open the database, start a daemon that refuses everyone.
+    // A gate can start while Sparkle downloads the new app. Take the lock
+    // at the point that actually stops the old runner.
+    drop(link);
+    let home = database.parent().expect("database has a runtime directory");
+    let _landing = wait_for_landing(home).await?;
+    // The runner may have changed while we waited.
+    let mut link = dial(socket).await?;
     let running = link.daemon_build().to_string();
-    // The same question for an attempt in flight: the running daemon is the only
-    // one that can finish or recover it, so replacing it would strand the runner.
-    if cutover_stranded_here(database) {
-        tracing::info!(running, ours = farcooler_protocol::BUILD, "leaving the daemon that holds an unfinished cutover");
-        return Ok((Ensured::KeptHeld, running));
+    if let Some(kept) = keep_running(&running, database) {
+        return Ok((kept, running));
     }
-    if schema_of(database).is_some_and(|s| s.newer_than_here()) {
-        tracing::info!(running, ours = farcooler_protocol::BUILD, "leaving a newer local daemon running");
-        return Ok((Ensured::KeptNewer, running));
-    }
-
     tracing::info!(running, ours = farcooler_protocol::BUILD, "replacing the local daemon");
     stop(&mut link).await?;
     drop(link);
@@ -312,6 +304,29 @@ async fn ensure_in(
         .into());
     }
     Ok((Ensured::Replaced, build))
+}
+
+/// Leave the runner in place if it matches, owns an unfinished cutover, or
+/// has written data this build cannot open.
+fn keep_running(build: &str, database: &Path) -> Option<Ensured> {
+    if farcooler_protocol::build_identity::same_build(build, farcooler_protocol::BUILD) {
+        Some(Ensured::Unchanged)
+    } else if cutover_stranded_here(database) {
+        Some(Ensured::KeptHeld)
+    } else if schema_of(database).is_some_and(|schema| schema.newer_than_here()) {
+        Some(Ensured::KeptNewer)
+    } else {
+        None
+    }
+}
+
+pub(crate) async fn wait_for_landing(home: &Path) -> std::io::Result<std::fs::File> {
+    loop {
+        if let Some(hold) = farcooler_daemon::landing_update::try_update(home)? {
+            return Ok(hold);
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
 }
 
 /// An engine cutover is in flight in `database`: an attempt's baseline is on
@@ -664,6 +679,41 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[tokio::test]
+    async fn ensure_waits_for_a_landing_and_checks_the_runner_again_before_stopping_it() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("farcooler.sock");
+        let database = dir.path().join("farcooler.db");
+        let daemon = OtherBuild::default();
+        let handshakes = std::sync::Arc::new(AtomicUsize::new(0));
+        let server = farcooler_transport::UnixListenerServer::bind(&socket).unwrap();
+        let serving = {
+            let daemon = daemon.clone();
+            let handshakes = handshakes.clone();
+            tokio::spawn(async move {
+                server.serve(move |_| {
+                    let version = match handshakes.fetch_add(1, Ordering::SeqCst) {
+                        0 => "a-previous-build",
+                        _ => farcooler_protocol::BUILD,
+                    };
+                    Some((farcooler_transport::HandshakeConfig { daemon_version: version.into() }, daemon.clone()))
+                }).await
+            })
+        };
+        let hold = farcooler_daemon::landing_update::try_update(dir.path()).unwrap().unwrap();
+        let mut ensuring = std::pin::pin!(ensure_in(&socket, &database));
+        assert!(tokio::time::timeout(Duration::from_millis(100), &mut ensuring).await.is_err());
+        assert_eq!(handshakes.load(Ordering::SeqCst), 1);
+        assert_eq!(daemon.shutdowns.load(Ordering::SeqCst), 0);
+        drop(hold);
+        let (result, _) = tokio::time::timeout(Duration::from_secs(5), ensuring).await.unwrap().unwrap();
+        assert_eq!(result, Ensured::Unchanged);
+        assert_eq!(daemon.shutdowns.load(Ordering::SeqCst), 0);
+        serving.abort();
     }
 
     /// A database one schema ahead of this build, stamped as not readable
