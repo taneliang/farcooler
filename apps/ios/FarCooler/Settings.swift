@@ -300,11 +300,6 @@ struct SettingsView: View {
             // everything but the selected runner.
             Section {
                 Toggle("Connect Every Runner at Once", isOn: $allRunnersAtOnce)
-                // Editing the runner's own file, rather than telling someone to
-                // go and edit it. That instruction used to be the theme
-                // section's footer — reasonable advice, and not something
-                // anybody does from a phone over ssh. It lives with the
-                // runners because it is about one.
                 if let connection {
                     NavigationLink("Runner Settings") {
                         RunnerSettingsView(
