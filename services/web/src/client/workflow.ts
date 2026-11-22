@@ -2,10 +2,8 @@
 // Session adapter owns reads, availability and latest-state action validation.
 // The runs are the Rust core's presentation, generated into generated/wire-types.ts (ov-1035). An absent
 // optional field is left out of the JSON.
-import type { Action, ActionForm, Presentation, RunCard, StageCard } from './generated/wire-types'
+import type { Action, Presentation, RunCard } from './generated/wire-types'
 export type WorkflowAction = Action
-export type WorkflowStage = StageCard
-export type WorkflowForm = ActionForm
 export type WorkflowRun = RunCard
 export type WorkflowPresentation = Presentation
 export interface RetainedWorkflow { reinspect?: boolean; id: string; item: string; run: string; label: string }

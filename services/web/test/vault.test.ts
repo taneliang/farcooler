@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { Device, Granted } from '../src/client/device'
-import { b64url, type Copy, copyOf, deriveKeys, fromB64url, needsSaving, openCopy, type Prf, prfOf, PRF_SALT, prfUse, relayHoldsOurs, restore, type RestoreDeps, saveCopy, sealCopy, syncCopy, type Vault } from '../src/client/vault'
+import { b64url, type Copy, copyOf, deriveKeys, fromB64url, needsSaving, openCopy, type Prf, prfOf, PRF_SALT, prfUse, restore, type RestoreDeps, saveCopy, sealCopy, syncCopy, type Vault } from '../src/client/vault'
 
 const ACCOUNT = 'user_OWNER'
 const RUNNERS: Granted[] = [{ id: 'r1', label: 'studio', user: 'owner', host_key: 'ssh-ed25519 AAAAhost', token: 'tok', why: '' }]
@@ -115,20 +115,6 @@ describe('the sealed copy', () => {
     }
   })
 
-  it('knows whether the relay still holds the copy this browser last sent', async () => {
-    const { vaultKey } = await deriveKeys(prfBytes(7))
-    const device = enrolled()
-    let sent = ''
-    await saveCopy(async (_route, body: any) => ((sent = body.sealed), { status: 200, body: { ok: true } }), vaultKey, device, false)
-    const ours = { credential: b64url(CRED), uv: false, sealed: sent }
-    expect(await relayHoldsOurs([ours], device, vaultKey)).toBe(true)
-    // Overwritten by a session without the passkey, or gone: not ours.
-    expect(await relayHoldsOurs([{ ...ours, sealed: sent.slice(0, -2) + 'AA' }], device, vaultKey)).toBe(false)
-    expect(await relayHoldsOurs([], device, vaultKey)).toBe(false)
-    expect(await relayHoldsOurs([{ ...ours, credential: 'b3RoZXI' }], device, vaultKey)).toBe(false)
-    // A second browser can open it without having sent it.
-    expect(await relayHoldsOurs([ours], enrolled({ vaultSealed: undefined }), vaultKey)).toBe(true)
-  })
 })
 
 describe('what one assertion’s PRF output may change', () => {
@@ -214,7 +200,6 @@ describe('restoring after the site’s storage was cleared', () => {
     expect(done.device.offer).toBeUndefined()
     // The copy it came from is the one the relay holds: nothing to save again.
     expect(await needsSaving(done.device)).toBe(false)
-    expect(await relayHoldsOurs(vaults, done.device, done.vaultKey)).toBe(true)
   })
 
   it('gets back a node key enrolled before ov-779 from the copy, since the passkey can’t derive it', async () => {

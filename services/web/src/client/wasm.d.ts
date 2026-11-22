@@ -27,9 +27,6 @@ declare module 'fc-web' {
     clientDataJson: Uint8Array,
     signature: Uint8Array,
   ): string
-  /// `{granted_by, runners}` as JSON, or throws an Error whose message is the
-  /// ceremony's word (`stale` once the code is past the window).
-  export function acceptReply(reply: string, offer: string, alreadyTaken: boolean, shownAtMs: number): string
   export function offerIsStale(shownAtMs: number): boolean
   export function freshnessMs(): number
   /// This build's app host: the RP ID its passkey is made and used for.
@@ -78,7 +75,6 @@ declare module 'fc-web' {
     setThemeNext(theme: string, next: string): Promise<void>
     keepRuling(ruling: string): Promise<void>
     keepAllRulings(workspace: string): Promise<number>
-    page(workspace: string, slot: string): Promise<string>
     /// An agent's rows in the apps' shape (crates/client's rows_json): the
     /// newest, or up to `limit` before row `before`; and what changed after a
     /// revision, held by the runner while nothing has.

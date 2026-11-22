@@ -186,13 +186,6 @@ export async function saveCopy(call: VaultCall, key: CryptoKey, device: Device, 
   return 'saved'
 }
 
-/// Whether the relay holds a readable copy for this device's passkey.
-export async function relayHoldsOurs(vaults: Vault[], device: Device, key: CryptoKey): Promise<boolean> {
-  if (!device.passkey) return false
-  const ours = vaults.find(v => v.credential === b64url(device.passkey!.id))
-  return !!ours && !!(await openCopy(key, device.account, device.passkey.id, ours.sealed))
-}
-
 /// Read before writing, merge only authenticated runners, and retry a raced
 /// write. Edited local entries replace shared grants; stale entries do not.
 /// A touch with unchanged local data only writes to repair a missing,

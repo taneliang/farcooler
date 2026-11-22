@@ -20,7 +20,6 @@ pub mod enroll;
 pub mod error;
 pub mod handshake;
 pub mod liveness;
-mod pages;
 pub mod passkey;
 pub mod register;
 pub mod ssh;

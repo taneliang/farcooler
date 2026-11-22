@@ -207,20 +207,6 @@ pub fn registration_proof(
     register::proof(account, challenge, key_line, &assertion).map_err(|e| failure(e.word(), &e.to_string()))
 }
 
-/// Take the phone's reply to the offer this browser showed at `shown_at_ms`.
-/// Answers `enroll::Taken` as JSON — who granted it when it isn't this
-/// account, and the runners, each with its pinned host key — or refuses with
-/// the ceremony's word (`stale` past the window).
-///
-/// "Now" is read here, not passed in, so the page cannot leave the window out.
-#[wasm_bindgen(js_name = acceptReply)]
-pub fn accept_reply(reply: &str, offer: &str, already_taken: bool, shown_at_ms: f64) -> Result<String, JsValue> {
-    let offer = farcooler_ceremony::decode_offer(offer).map_err(|e| failure(e.code(), &e.to_string()))?;
-    let manifest = enroll::accept(reply, &offer, already_taken, shown_at_ms, js_sys::Date::now())
-        .map_err(|e| failure(e.code(), &e.to_string()))?;
-    serde_json::to_string(&enroll::taken(&manifest)).map_err(|e| failure("malformed", &e.to_string()))
-}
-
 /// The ceremony's window in milliseconds, so the page can retire a code on
 /// time without a second spelling of the number.
 #[wasm_bindgen(js_name = freshnessMs)]
@@ -376,12 +362,6 @@ impl WebRunner {
     pub async fn keep_all_rulings(&self, workspace: String) -> Result<u32, JsValue> {
         let id = Uuid::parse_str(&workspace).map_err(|e| failure("protocol", &e.to_string()))?;
         Ok(self.0.keep_all_rulings(id).await.map_err(web_failure)? as u32)
-    }
-
-    /// One orchestrator page, as JSON in the phones' shape (`page_json`).
-    pub async fn page(&self, workspace: String, slot: String) -> Result<String, JsValue> {
-        let id = Uuid::parse_str(&workspace).map_err(|e| failure("protocol", &e.to_string()))?;
-        Ok(self.0.page(id, &slot).await.map_err(web_failure)?.to_string())
     }
 
     /// An agent's newest rows, or up to `limit` before row `before`, as JSON

@@ -194,30 +194,6 @@ fn held_for(shown_at_ms: f64, now_ms: f64) -> Duration {
     if !held.is_finite() || held < 0.0 { Duration::MAX } else { Duration::from_millis(held as u64) }
 }
 
-/// Take the phone's reply to `offer`, or refuse it with the ceremony's own
-/// reason: already taken, then too late, then the reply itself, exactly as
-/// every native device does (`farcooler_ceremony::take_reply`).
-///
-/// `shown_at_ms` is when this browser's code went up and `now_ms` is now, both
-/// on this browser's clock. The window bounds how long a code on a screen can
-/// be answered: the reply leg is unauthenticated, and everything a forged reply
-/// must echo is printed in the code.
-pub fn accept(
-    reply: &str,
-    offer: &Offer,
-    already_taken: bool,
-    shown_at_ms: f64,
-    now_ms: f64,
-) -> Result<Manifest, CeremonyError> {
-    let manifest = farcooler_ceremony::take_reply(reply, offer, already_taken, held_for(shown_at_ms, now_ms))?;
-    // QR replies carry no independently fetched poster/runner authority. A
-    // teammate uses the verified sealed route; QR cannot downgrade that gate.
-    if offer.reply_key.is_some() || manifest.granted_by.is_some() || manifest.proof.is_some() {
-        return Err(CeremonyError::UnregisteredKey);
-    }
-    Ok(manifest)
-}
-
 /// Whether a code shown at `shown_at_ms` is past the window, so a stored offer
 /// is discarded and a new code shown rather than kept answerable for days.
 pub fn offer_is_stale(shown_at_ms: f64, now_ms: f64) -> bool {
@@ -312,27 +288,6 @@ mod tests {
         assert!(open_all(&answer, &o, &secret, false, 0.0, 1.0).is_err());
     }
 
-    fn reply_to(o: &Offer, granted_by: Option<&str>) -> String {
-        let mut m = farcooler_ceremony::manifest(o, Vec::new());
-        m.granted_by = granted_by.map(str::to_string);
-        farcooler_ceremony::encode_manifest(&m)
-    }
-
-    /// The blocker ov-764's review found: a reply held up long after the code
-    /// went up is refused, however right it is.
-    #[test]
-    fn a_reply_after_the_window_is_refused() {
-        let o = offer("Chrome on Mac", "acct", KEY, NODE, &new_reply_secret()).unwrap();
-        let reply = reply_to(&o, None);
-        let window = farcooler_ceremony::FRESHNESS.as_millis() as f64;
-        assert_eq!(accept(&reply, &o, false, SHOWN, SHOWN + window), Err(CeremonyError::UnregisteredKey));
-        assert_eq!(accept(&reply, &o, false, SHOWN, SHOWN + window + 1.0), Err(CeremonyError::Stale));
-        // A start in the future is a time this device can't vouch for.
-        assert_eq!(accept(&reply, &o, false, SHOWN, SHOWN - 1.0), Err(CeremonyError::Stale));
-        assert_eq!(accept(&reply, &o, false, f64::NAN, SHOWN), Err(CeremonyError::Stale));
-        assert_eq!(accept(&reply, &o, true, SHOWN, SHOWN), Err(CeremonyError::AlreadyTaken));
-    }
-
     /// A stored code past the window is discarded, not kept answerable.
     #[test]
     fn a_code_past_the_window_is_stale() {
@@ -372,16 +327,6 @@ mod tests {
             causes,
             vec![("cosmo", "pending", "not_allowed"), ("odd", "pending", ""), ("quiet", "pending", ""), ("fine", "", "")]
         );
-    }
-
-    /// A teammate's reply says whose runners these are, so the page can ask.
-    #[test]
-    fn a_teammates_reply_names_who_granted_it() {
-        let o = offer("Chrome on Mac", "acct", KEY, NODE, &new_reply_secret()).unwrap();
-        // Stripping the grantor cannot downgrade a browser offer to raw QR.
-        assert_eq!(accept(&reply_to(&o, None), &o, false, SHOWN, SHOWN), Err(CeremonyError::UnregisteredKey));
-        assert_eq!(accept(&reply_to(&o, Some("ana@example.com")), &o, false, SHOWN, SHOWN), Err(CeremonyError::UnregisteredKey));
-        assert_eq!(accept(&reply_to(&o, Some("  ")), &o, false, SHOWN, SHOWN), Err(CeremonyError::UnregisteredKey));
     }
 
     /// One runner whose host key prints as `host_key`, reached by tunnel.
