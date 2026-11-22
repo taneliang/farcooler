@@ -45,7 +45,8 @@ struct PlanViewTests {
     /// `target` "" is this Mac's own runner; another is someone's, where
     /// `member list` says this Mac is `you` (ov-707).
     static func store(
-        plan: Bool, defaults: UserDefaults, calls: Calls = Calls(), target: String = "", you: String = ""
+        plan: Bool, defaults: UserDefaults, calls: Calls = Calls(), target: String = "", you: String = "",
+        capabilities: Set<String>? = nil
     ) async throws -> TaskBoardStore {
         let client = DaemonClient(target: target, notifications: NotificationCenter())
         if calls.plan == nil { calls.plan = try fixture() }
@@ -66,7 +67,7 @@ struct PlanViewTests {
         }
         client.daemonBuild = DaemonBuild(
             version: "test", matches: true, platform: "macos",
-            capabilities: Set(Capability.allCases.map(\.rawValue).filter { plan || $0 != "board_plan" }))
+            capabilities: capabilities ?? Set(Capability.allCases.map(\.rawValue).filter { plan || $0 != "board_plan" }))
         let store = TaskBoardStore(
             client: client, workspace: .implicit(repository: "r"), readStore: DefaultsBoardReads(defaults))
         await store.readIfNeverRead()
@@ -183,11 +184,8 @@ struct PlanViewTests {
     func runnerWithRetiredPages() async throws {
         let defaults = Self.defaults()
         let calls = Calls()
-        let store = try await Self.store(plan: true, defaults: defaults, calls: calls)
-        store.client.daemonBuild = DaemonBuild(
-            version: "old", matches: false, platform: "macos",
-            capabilities: ["board_plan", "board_pages"])
-        await store.plan.reload()
+        let store = try await Self.store(
+            plan: true, defaults: defaults, calls: calls, capabilities: ["board_plan", "board_pages"])
         let drawn = await Self.draw(store, defaults: defaults)
         defer { drawn.window.close() }
         #expect(store.plan.hasRead && store.plan.trouble == nil)
