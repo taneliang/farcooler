@@ -3,7 +3,7 @@ use super::{adapters, coding, Error, Exec, Result, Runtime};
 use super::coding_verbs::PickConflict;
 use farcooler_protocol::workflow_commands::{Action, MAX_BYTES};
 use farcooler_protocol::workflow_config::AdapterConfiguration;
-use farcooler_workflow::{digest, valid_id, Command, Grant, Grouping, Item, Member, Phase, StageKind};
+use farcooler_workflow::{digest, valid_id, Command, Grant, Grouping, Item, JoinRefresh, Member, Phase, StageKind};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
@@ -86,14 +86,14 @@ impl Runtime {
         let member = Member { item: key.into(), candidate: candidate.into() };
         let Some(conflict) = exec.check_member(head, &member).await? else { return Ok(QueueCheck::Ready) };
         Ok(QueueCheck::Conflict { run: item.run.clone(), pin: item.pin.clone(), candidate: member.candidate,
-            reason: farcooler_workflow::rebase_conflict_brief(head, &conflict.files) })
+            base: head.into(), paths: conflict.files })
     }
 
     pub(super) fn apply_queue_check(&self, workspace: &str, key: &str, check: QueueCheck, now_ms: i64) -> Result<bool> {
-        let (run, pin, candidate, reason) = match check {
+        let (run, pin, candidate, base, paths) = match check {
             QueueCheck::Ready => return Ok(true),
             QueueCheck::Held => return Ok(false),
-            QueueCheck::Conflict { run, pin, candidate, reason } => (run, pin, candidate, reason),
+            QueueCheck::Conflict { run, pin, candidate, base, paths } => (run, pin, candidate, base, paths),
         };
         let Some(state) = self.state(workspace)? else { return Ok(false) };
         if !state.items.get(key).is_some_and(|i| i.phase == Phase::WaitingJoin && i.run == run
@@ -104,7 +104,7 @@ impl Runtime {
         let receipt = self.apply(super::Request {
             id: format!("runtime:{}", uuid::Uuid::now_v7()), workspace: workspace.into(),
             expected_revision: state.revision, sequence: state.source_sequences.get("runtime").copied().unwrap_or(0) + 1,
-            command: Command::SendBack { item: key.into(), reason },
+            command: Command::RefreshJoin { item: key.into(), previous: candidate, base, result: JoinRefresh::Conflict { paths } },
         }, "runtime", Grant::Controller, now_ms)?;
         if let Err(error) = receipt.result {
             self.defer_automatic_queue(workspace, key, now_ms);
@@ -117,7 +117,7 @@ impl Runtime {
 pub(super) enum QueueCheck {
     Ready,
     Held,
-    Conflict { run: String, pin: String, candidate: String, reason: String },
+    Conflict { run: String, pin: String, candidate: String, base: String, paths: Vec<String> },
 }
 
 impl Exec {

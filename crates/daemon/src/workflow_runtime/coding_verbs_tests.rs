@@ -1159,7 +1159,7 @@ async fn tickets_that_apply_alone_but_conflict_together_return_the_conflicting_m
 
 /// Once the original candidates are queued, the fixture builder handles its brief by replaying
 /// its edits over main and resolving overlapping lines in favor of its own work.
-fn resolve_fixture_conflicts(script: &Path, remote: &Path) {
+pub(super) fn resolve_fixture_conflicts(script: &Path, remote: &Path) {
     let source = std::fs::read_to_string(script).unwrap();
     let remote = serde_json::to_string(remote.to_str().unwrap()).unwrap();
     let rebuild = format!("if stage == 'build':\n    main = subprocess.check_output(['/usr/bin/git', '--git-dir', {remote}, 'rev-parse', 'refs/heads/main']).decode().strip()\n    subprocess.check_call(['/usr/bin/git', 'rebase', '--no-autostash', '-X', 'theirs', main])");

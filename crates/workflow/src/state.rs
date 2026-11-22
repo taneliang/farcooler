@@ -364,7 +364,8 @@ pub enum Command {
     Retry { item: String },
     /// The orchestrator queues a ticket waiting at its `Join` step into the open group.
     Queue { item: String },
-    /// A waiting branch rebase from an older runner. Retained for event replay.
+    /// A conflict with the landing target returns a waiting candidate to build without spending a back edge.
+    /// Older runners also recorded successful rebases here. Those events still replay.
     RefreshJoin { item: String, previous: String, base: String, result: JoinRefresh },
     /// The orchestrator pulls a queued ticket out of a group that has not left yet.
     Leave { item: String },
