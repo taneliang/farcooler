@@ -625,6 +625,17 @@ class LandingTests(unittest.TestCase):
             self.assertIn("landing-gate: PASS", out.stdout)
             self.assertIn(f"logs in {logs}", out.stdout)
             self.assertTrue(any(logs.iterdir()), "the engine-selected directory holds the gate output")
+            scratch = repo / ".git" / "agent-scratch"
+            scratch.mkdir()
+            agent_env = {**env, "FARCOOLER_SCRATCH": str(scratch)}
+            del agent_env["FARCOOLER_LANE_GATE_LOG_DIR"]
+            agent = subprocess.run(["bash", str(repo / "scripts/landing-gate"), "--worktree", tmp,
+                                    "--keep-target", "--no-load-wait"], env=agent_env,
+                                   capture_output=True, text=True)
+            self.assertEqual(agent.returncode, 0, agent.stdout + agent.stderr)
+            agent_logs, = scratch.iterdir()
+            self.assertIn(f"logs in {agent_logs}", agent.stdout)
+            self.assertTrue(any(agent_logs.iterdir()), "the agent's gate output lives in its scratch directory")
             engine = {**env, "FARCOOLER_OPERATION_BINDING": "fixture-engine"}
             for bad_env, flags, message in (
                 ({k: v for k, v in engine.items() if k != "FARCOOLER_BASE"}, [], "engine requires FARCOOLER_BASE"),

@@ -767,7 +767,7 @@ pub(super) mod tests {
         let (dir, runtime) = configured(false, "pass").await;
         native_in(dir, runtime, mode, agent).await
     }
-    pub(super) async fn native_in(dir: tempfile::TempDir, mut runtime: Runtime, mode: &str, agent: &str)
+    pub(in crate::workflow_runtime) async fn native_in(dir: tempfile::TempDir, mut runtime: Runtime, mode: &str, agent: &str)
         -> (tempfile::TempDir, Runtime, Fake)
     {
         assert!(farcooler_core::programs::find("tmux").is_some(), "native ownership proof requires real tmux");

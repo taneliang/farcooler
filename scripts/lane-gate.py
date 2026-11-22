@@ -1028,7 +1028,8 @@ def gate(args):
 
     managed_logs = os.environ.get("FARCOOLER_LANE_GATE_LOG_DIR")
     log_path = args.log_dir or managed_logs
-    logdir = pathlib.Path(log_path) if log_path else pathlib.Path(tempfile.mkdtemp(prefix="lane-gate-logs-"))
+    logdir = pathlib.Path(log_path) if log_path else pathlib.Path(tempfile.mkdtemp(
+        prefix="lane-gate-logs-", dir=os.environ.get("FARCOOLER_SCRATCH") or None))
     logdir.mkdir(parents=True, exist_ok=True)
     write_rust_evidence(logdir, proposal)
     tracked_before = tracked_state(repo)

@@ -17,7 +17,7 @@ impl Exec {
             _ => return Ok(()),
         };
         let id = digest(&("owned-directory/v1", binding, key));
-        let path = self.owned_directory_path(&id);
+        let path = if key == SCRATCH_ENV { self.scratch_path(&id)? } else { self.owned_directory_path(&id) };
         if self.root.canonicalize()? != self.root { return Err(Error::Refused("aliased engine root")); }
         std::fs::DirBuilder::new().mode(0o700).create(&path)?;
         let metadata = path.symlink_metadata()?;
@@ -38,16 +38,26 @@ impl Exec {
         self.root.join(format!("output-{}", adapters::folder_name(id)))
     }
 
+    fn scratch_path(&self, id: &str) -> Result<PathBuf> {
+        // Codex workspace-write includes /tmp. Use its canonical spelling on macOS,
+        // and namespace each directory by the engine root as well as the effect.
+        let name = adapters::folder_name(&digest(&(&self.root, id)));
+        Ok(Path::new("/tmp").canonicalize()?.join(format!("farcooler-scratch-{name}")))
+    }
+
     pub(super) async fn release_owned_directory(&self, effect: &CleanupEffect, directory: &OwnedDirectory,
         previous: Option<&CleanupResult>, at: i64) -> Result<bool> {
         if at < directory.retain_until_ms
             || !self.store.workflow_cleanup_owner_settled(effect, &directory.owner_effect)? { return Ok(false); }
         if !self.store.workflow_cleanup_begin(effect, previous)? { return Ok(false); }
-        let path = self.owned_directory_path(&effect.id);
+        let path = PathBuf::from(&directory.path);
         let mut result = CleanupResult { bytes_freed: 0, skipped: Vec::new(), retry: false };
         let deletion = async {
-            if path != Path::new(&directory.path) || path.parent() != Some(self.root.as_path())
-                || self.root.canonicalize()? != self.root {
+            // Keep accepting recorded output under the engine root, including scratch
+            // created before agent scratch moved to the sandbox's writable area.
+            let engine_output = path.parent() == Some(self.root.as_path()) && path == self.owned_directory_path(&effect.id);
+            if self.root.canonicalize()? != self.root
+                || (!engine_output && !self.scratch_path(&effect.id).is_ok_and(|expected| path == expected)) {
                 return Err(std::io::Error::other("foreign engine output directory"));
             }
             if !owned_identity(&path, directory)? { return Ok(0); }
