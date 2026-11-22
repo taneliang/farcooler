@@ -141,7 +141,6 @@ fun RunnerSettingsScreen(
     val daemon by connection.daemon.collectAsStateWithLifecycle()
     val mayAdminister = daemon?.mayAdministerRunner() ?: true
 
-
     // Its own function because two things ask for it: the first load, and a
     // repository having just been added under a folder that may or may not have
     // been watched before. Both have to set the trouble as well as the list, or

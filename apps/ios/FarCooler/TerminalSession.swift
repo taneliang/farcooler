@@ -2199,8 +2199,7 @@ struct TerminalCell {
     var foregroundPacked: UInt32
     var backgroundPacked: UInt32
 
-    /// The same two colors for anything drawing a handful of cells rather
-    /// than a screenful of them — the theme editor's preview, above all.
+    /// The same two colors for SwiftUI terminal drawing.
     var foreground: Color { Color(packed: foregroundPacked) }
     var background: Color { Color(packed: backgroundPacked) }
 

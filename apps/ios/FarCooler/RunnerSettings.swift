@@ -269,7 +269,6 @@ final class RunnerSettingsModel: ObservableObject {
     /// The sentence for a write whose answer was nil: the runner didn't take it,
     /// and nothing on the screen changed.
     private static let notSaved = "That runner didn’t accept the change."
-
 }
 
 /// Why a section's own controls are dimmed rather than live.
