@@ -225,8 +225,6 @@ const NOTICES: Record<string, [ok: boolean, sentence: string]> = {
   'err-failed': [false, 'That didn’t go through. Try again.'],
 }
 
-export const noticeKeys = (): string[] => Object.keys(NOTICES)
-
 export function banner(key: string | null): string {
   if (!key || !Object.hasOwn(NOTICES, key)) return ''
   const [ok, sentence] = NOTICES[key]

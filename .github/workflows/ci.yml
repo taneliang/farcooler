@@ -69,7 +69,6 @@ jobs:
       contents: read
     outputs:
       non_docs: ${{ steps.changes.outputs.non_docs }}
-      app: ${{ steps.changes.outputs.app }}
       rust: ${{ steps.changes.outputs.rust }}
       apple: ${{ steps.changes.outputs.apple }}
       android: ${{ steps.changes.outputs.android }}

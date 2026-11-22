@@ -2,13 +2,13 @@
 """Does this push or pull request change anything but the website and docs? (ov-507)
 
 ci.yml's `changes` job runs this, and the expensive jobs (Swift, Rust on macOS
-and Linux, Android, iOS and the UI shards) wait on its `app` output:
+and Linux, Android, iOS and the UI shards) use its family outputs:
 
     EVENT=push AFTER=<sha> CANDIDATES=<file> scripts/ci-changes.py
     EVENT=pull_request BASE=<sha> HEAD=<sha> scripts/ci-changes.py
     scripts/ci-changes.py --self-test
 
-It writes `app=true|false` to $GITHUB_OUTPUT and says why.
+It writes job-family flags to $GITHUB_OUTPUT and says why.
 
 A push to main of a commit that already passed CI as a landing group's
 candidate (ov-1269) runs nothing again: the engine pushes the folded commit
@@ -100,7 +100,7 @@ DOCS = pattern(DOCS_ONLY)
 # wire in proto/, Cargo.*, every crate the apps link, the toolchain, scripts, the
 # workflows and actions), reaches ALL of them: a job a change can break never skips.
 FAMILIES = ["rust", "apple", "android", "web", "relay"]
-FLAGS = [*FAMILIES, "docs", "app", "non_docs", "proven"]
+FLAGS = [*FAMILIES, "app", "non_docs", "proven"]
 # crates/android (farcooler-jni) is linked by Android only; crates/cli is built by the Mac
 # (apps/macos/test.sh `cargo build --bins`) and not by Android; crates/web is its own
 # wasm workspace, linked by neither app (checked with `cargo metadata`, ov-1021). Every
@@ -128,16 +128,15 @@ def families(files):
     if files is None:
         return {**{k: True for k in FLAGS}, "proven": False}
     hit = set()
-    app = docs = False
+    app = False
     for f in files:
         narrow = next((fam for rx, fam in NARROW if re.fullmatch(rx, f)), None)
         if SITE.match(f):
-            docs = True
             hit |= narrow or set()
         else:
             app = True
             hit |= narrow if narrow is not None else set(FAMILIES)
-    return {**{k: k in hit for k in FAMILIES}, "docs": docs, "app": app,
+    return {**{k: k in hit for k in FAMILIES}, "app": app,
             "non_docs": any(not DOCS.fullmatch(f) for f in files), "proven": False}
 
 
@@ -246,6 +245,8 @@ def main():
     if out:
         with open(out, "a") as f:
             for k in FLAGS:
+                if k == "app":
+                    continue
                 f.write(f"{k}={'true' if flags[k] else 'false'}\n")
     return 0
 
@@ -340,12 +341,10 @@ def self_test():
     ]:
         got = {k for k, v in families(files).items() if v and k in ALL}
         expect(f"{what} selects {sorted(want)}", got, want)
-    expect("docs-only sets the docs flag", families(["docs/a.md"])["docs"], True)
     expect("docs-only leaves app off", families(["docs/a.md"])["app"], False)
     for path in ["reports/ov-1157/landing-rca.md", ".claude/agent/reports/ov-1157/landing-rca.md"]:
         expect(f"{path} selects only cheap jobs", families([path]),
-               {**{k: False for k in ALL}, "docs": True, "app": False, "non_docs": False, "proven": False})
-    expect("a Swift change leaves docs off", families(["apps/macos/a.swift"])["docs"], False)
+               {**{k: False for k in ALL}, "app": False, "non_docs": False, "proven": False})
     for files, want in [
         (["docs/a.md", "README.md", "reports/run.txt", ".claude/agent/reports/a.md"], False),
         (["docs/a.md", "apps/android/a.kt"], True),
@@ -355,7 +354,7 @@ def self_test():
         ([".claude/agent/reports"], True),
     ]:
         expect(f"non-doc CI suites for {files}", families(files)["non_docs"], want)
-    expect("every flag is on when nothing is known", families(None), {**{k: True for k in [*ALL, "docs", "app", "non_docs"]}, "proven": False})
+    expect("every flag is on when nothing is known", families(None), {**{k: True for k in [*ALL, "app", "non_docs"]}, "proven": False})
 
     with tempfile.TemporaryDirectory() as tmp:
         repo = pathlib.Path(tmp)
@@ -420,13 +419,13 @@ def self_test():
         done = subprocess.run([sys.executable, __file__], cwd=repo, env=env, capture_output=True, text=True)
         expect("the script exits 0", done.returncode, 0)
         expect("site files keep non-doc suites on", outputs.read_text() if outputs.exists() else None,
-               "rust=false\napple=false\nandroid=false\nweb=false\nrelay=false\ndocs=true\napp=false\nnon_docs=true\nproven=false\n")
+               "rust=false\napple=false\nandroid=false\nweb=false\nrelay=false\nnon_docs=true\nproven=false\n")
         outputs.unlink()
         env.update(EVENT="pull_request", BASE=b, HEAD=c)
         done = subprocess.run([sys.executable, __file__], cwd=repo, env=env, capture_output=True, text=True)
         expect("a docs-only PR exits 0", done.returncode, 0)
         expect("docs-only writes non-doc suites off", outputs.read_text() if outputs.exists() else None,
-               "rust=false\napple=false\nandroid=false\nweb=false\nrelay=false\ndocs=true\napp=false\nnon_docs=false\nproven=false\n")
+               "rust=false\napple=false\nandroid=false\nweb=false\nrelay=false\nnon_docs=false\nproven=false\n")
         outputs.unlink()
         env.update(EVENT="push", AFTER=c)
         env["CANDIDATES_ERROR"] = "gh: Server Error (HTTP 502)"
@@ -434,7 +433,7 @@ def self_test():
         expect("a failed listing exits 0", done.returncode, 0)
         expect("with a notice", done.stdout.startswith("::notice::could not list the green CI runs"), True)
         expect("and writes every flag on", outputs.read_text() if outputs.exists() else None,
-               "rust=true\napple=true\nandroid=true\nweb=true\nrelay=true\ndocs=true\napp=true\nnon_docs=true\nproven=false\n")
+               "rust=true\napple=true\nandroid=true\nweb=true\nrelay=true\nnon_docs=true\nproven=false\n")
 
     # ov-1269: main's push of a commit CI already passed on a landing branch runs nothing again; nothing else does.
     sha = "a" * 40
@@ -463,7 +462,7 @@ def self_test():
         expect("a proven push exits 0", done.returncode, 0)
         expect("and says which branch proved it", "landing/0123456789abcdef" in done.stdout, True)
         expect("and turns every job off but itself", outputs.read_text() if outputs.exists() else None,
-               "rust=false\napple=false\nandroid=false\nweb=false\nrelay=false\ndocs=false\napp=false\nnon_docs=false\nproven=true\n")
+               "rust=false\napple=false\nandroid=false\nweb=false\nrelay=false\nnon_docs=false\nproven=true\n")
         outputs.unlink()
         env["REF"] = "refs/heads/landing/0123456789abcdef"
         done = subprocess.run([sys.executable, __file__], cwd=tmp, env=env, capture_output=True, text=True)
