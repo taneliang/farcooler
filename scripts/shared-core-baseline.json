@@ -518,7 +518,6 @@
   "apps/macos/Sources/FarCooler/Files/DaemonClient+Files.swift": 1,
   "apps/macos/Sources/FarCooler/Files/FilesPane.swift": 33,
   "apps/macos/Sources/FarCooler/Files/FilesRouting.swift": 4,
-  "apps/macos/Sources/FarCooler/Files/OpenInFiles.swift": 1,
   "apps/macos/Sources/FarCooler/Files/ReadOnlyFolders.swift": 1,
   "apps/macos/Sources/FarCooler/FleetPlaceholder.swift": 26,
   "apps/macos/Sources/FarCooler/FleetStore.swift": 7,

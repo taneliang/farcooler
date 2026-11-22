@@ -14,37 +14,4 @@ struct OpenInFiles {
 
 extension EnvironmentValues {
     @Entry var openInFiles: OpenInFiles? = nil
-    /// The worktree an agent's pane works in, so a path its tool call names
-    /// can be read as one of that worktree's files.
-    @Entry var filesWorktree: Worktree? = nil
-}
-
-/// A path in an agent's tool call, as a link into Files when it's inside the
-/// worktree the agent works in, else as plain text.
-struct ToolLocationLabel: View {
-    let location: String
-
-    @Environment(\.openInFiles) private var openInFiles
-    @Environment(\.filesWorktree) private var worktree
-
-    var body: some View {
-        if let openInFiles, let worktree, let path = FilesLogic.relative(location, in: worktree.path) {
-            Button {
-                openInFiles.open(worktree, path, nil)
-            } label: {
-                text
-            }
-            .buttonStyle(.link)
-            .help("Show \(path) in Files")
-        } else {
-            text.foregroundStyle(.quietInk)
-        }
-    }
-
-    private var text: some View {
-        Text(location)
-            .font(.caption.monospaced())
-            .lineLimit(1)
-            .truncationMode(.middle)
-    }
 }

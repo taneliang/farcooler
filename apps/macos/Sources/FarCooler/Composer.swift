@@ -148,14 +148,6 @@ enum Agents {
         all.first { $0.id == id } ?? all[0]
     }
 
-    /// Whether this preset's agent takes its first message as a launch
-    /// argument: claude, codex and cursor, the three the daemon hands a
-    /// prompt to. Anything else ignores `--prompt`, so it is typed instead.
-    static func takesPrompt(preset: String) -> Bool {
-        let agent = preset.split(separator: ":", maxSplits: 1).first.map(String.init) ?? preset
-        return ["claude", "codex", "cursor"].contains(agent)
-    }
-
     /// The preset string the daemon expects: `agent` or `agent:model`.
     static func preset(agent: String, model: String) -> String {
         model.isEmpty ? agent : "\(agent):\(model)"

@@ -68,13 +68,6 @@ final class Preferences: ObservableObject {
     /// live in readline inside a tiled worktree, this is the switch.
     @AppStorage("tiling.directTraversal") var directTraversal = true
 
-    /// Which agent a new task starts with.
-    ///
-    /// Only quick-create uses it. ⌘T still makes a plain shell, because that is
-    /// the other thing you want a terminal for and guessing wrong there costs a
-    /// process launch.
-    @AppStorage("tasks.defaultAgent") var defaultAgent = "claude"
-
     /// Which Settings tab to open on.
     ///
     /// Stored rather than passed because Settings is a scene, not a sheet —
@@ -360,16 +353,6 @@ struct SettingsView: View {
 
     private var general: some View {
         Form {
-            Section {
-                Setting("⌘T opens a plain shell.") {
-                    Picker("New worktrees start with", selection: $preferences.defaultAgent) {
-                        Text("Claude Code").tag("claude")
-                        Text("Codex").tag("codex")
-                        Text("Cursor").tag("cursor")
-                    }
-                }
-            }
-
             Section {
                 Setting("Applies to the terminal and, when Appearance is Theme, the app.") {
                     Picker("Theme", selection: themes.selectedNameBinding) {

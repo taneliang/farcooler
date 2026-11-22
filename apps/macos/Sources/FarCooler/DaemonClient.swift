@@ -1760,11 +1760,6 @@ final class DaemonClient: ObservableObject {
     }
 
     @discardableResult
-    func swapPanes(_ a: String, _ b: String, in worktree: Worktree) async -> [PaneGroup] {
-        await layout(worktree, ["swap"], [a, b])
-    }
-
-    @discardableResult
     func resizePane(
         _ terminal: String, side: TileDirection, cells: Int, in worktree: Worktree
     ) async -> [PaneGroup] {

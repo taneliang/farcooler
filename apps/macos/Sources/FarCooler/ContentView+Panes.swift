@@ -30,7 +30,6 @@ extension ContentView {
             hasKeyboard: keyboard && WorkspaceScreen.bareTakesKeyboard(shown)
         )
         // A path its agent's tool call names opens in this worktree's Files.
-        .environment(\.filesWorktree, ws)
     }
 
     /// A workspace's navigator, or a sentence saying where its board went.
@@ -166,7 +165,6 @@ extension ContentView {
             hasKeyboard: KeptOrchestrator.takesKeyboard(
                 shown, onScreen: keyboard, key: selectedPane, onBoard: keyboardOnBoard)
         )
-        .environment(\.filesWorktree, ws)
     }
 
     /// The runner this window's restore is waiting for, while it is

@@ -173,29 +173,6 @@ extension ContentView {
         }
     }
 
-    /// Send a terminal to another layout, or to one of its own.
-    ///
-    /// `nil` is `break-pane`: a layout with just this in it. Naming a layout moves
-    /// the pane against that layout's focused pane, because "which layout" is only
-    /// half an instruction — tmux has to be told which pane and which edge, and the
-    /// menu has no way to ask. Dragging is how you say the other half, and the drop
-    /// indicator is why that is easier than answering a dialog about it.
-    private func moveToLayout(_ terminal: Terminal, in worktree: Worktree, group: PaneGroup?) {
-        Task {
-            let groups: [PaneGroup]
-            if let group, let onto = group.panes.first(where: \.focused) ?? group.panes.first {
-                groups = await act(.arrange, on: worktree, default: []) { c in
-                    await c.movePane(terminal.short, onto: onto.short, side: .right, in: worktree)
-                }
-            } else {
-                groups = await act(.arrange, on: worktree, default: []) { c in
-                    await c.breakPane(terminal.short, in: worktree)
-                }
-            }
-            reveal(groups, in: worktree, preferring: terminal.id)
-        }
-    }
-
     /// Drop a terminal on an edge of a pane: it splits that pane on that edge.
     ///
     /// One write for every drag in the app — a pane onto a pane, from a tile
