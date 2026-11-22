@@ -268,3 +268,8 @@ pub fn old_landing(store: &crate::Store, workspace: Uuid, number: u32, state: &s
 pub fn workflow_cancel_receipt_count(store: &crate::Store, workspace: &str) -> i64 {
     store.conn().query_row("SELECT count(*) FROM workflow_receipts WHERE workspace = ?1 AND payload LIKE '%Cancel%'", [workspace], |r| r.get(0)).unwrap()
 }
+
+/// Attach a lander to a historical landing fixture.
+pub fn old_landing_lander(store: &crate::Store, landing: Uuid, agent: Uuid) {
+    store.conn().execute("UPDATE landings SET lander_id = ?1 WHERE id = ?2", rusqlite::params![agent.as_bytes().as_slice(), landing.as_bytes().as_slice()]).unwrap();
+}

@@ -82,3 +82,10 @@ async fn landings_are_only_read_here() {
     assert_eq!(landing_say(&mut old, "list").await.unwrap_err().to_string(), NEEDS_LINE);
     assert!(old.sent.is_empty());
 }
+
+#[tokio::test]
+async fn older_runner_uses_history_in_its_plan() {
+    let mut link = Runner { history_unsupported: true, ..runner() };
+    assert!(landing_say(&mut link, "list").await.unwrap().contains("Landing 9"));
+    assert!(landing_say(&mut link, "show 9").await.unwrap().contains("Landing 9"));
+}

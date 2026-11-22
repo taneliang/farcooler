@@ -244,6 +244,36 @@ impl Store {
         Ok(plan)
     }
 
+    /// Historical landings and the cards they name, for the CLI history read.
+    pub fn landing_history(&self, workspace: Uuid) -> Result<(Vec<LandingView>, Vec<CardRef>)> {
+        let landings = self.landings(workspace)?;
+        let conn = self.conn();
+        crate::agents::board_exists(&conn, workspace)?;
+        let mut cards = BTreeMap::new();
+        let mut views = Vec::new();
+        for landing in landings {
+            let mut titles = Vec::new();
+            for id in &landing.tickets {
+                let card = conn.query_row("SELECT id, key, title, status FROM tasks WHERE id = ?1 AND workspace_id = ?2", params![uuid_blob(*id), uuid_blob(workspace)], |r| {
+                    let status: String = r.get(3)?;
+                    Ok(CardRef { task_id: get_uuid(r, 0)?, key: r.get(1)?, title: r.get(2)?, status: TaskStatus::parse(&status).unwrap_or(TaskStatus::Backlog) })
+                });
+                match card {
+                    Ok(card) => { titles.push(sentence(&card.title)); cards.insert(*id, card); }
+                    Err(rusqlite::Error::QueryReturnedNoRows) => (),
+                    Err(e) => return Err(map_err(e)),
+                }
+            }
+            let spend = match landing.lander_id {
+                Some(id) => spend_of_agent(&conn, &crate::agents::agent_in(&conn, id)?)?,
+                None => Spend::default(),
+            };
+            let ended = crate::landing_phase::history(&landing);
+            views.push(LandingView { title: landing_title(&landing), landing, summary: titles.join("; "), spend, phase: ended.phase, phase_since: ended.since, reason: None });
+        }
+        Ok((views, cards.into_values().collect()))
+    }
+
     /// Per board, its themes asking the owner something: not dropped, with an
     /// `owner_ask`. What the Needs You count adds to a board's needs-you
     /// items; one cheap query, since the runner's count is taken on every
@@ -622,6 +652,31 @@ pub(crate) fn spend_of_ticket(conn: &Connection, task: Uuid) -> Result<Spend> {
         )
         .map_err(map_err)?;
     Ok(spend_from(row, (agents - measured).max(0) as u32, shared.max(0) as u32))
+}
+
+/// What one agent spent, all its turns (`TURNS_OF_AGENT`). An agent no turn
+/// of is read is `unmeasured_agents`, never zero.
+pub(crate) fn spend_of_agent(conn: &Connection, agent: &crate::agents::Agent) -> Result<Spend> {
+    let row: (i64, i64, i64, i64, i64, i64, i64) = conn
+        .query_row(
+            &format!(
+                "SELECT CAST(coalesce(sum(m.input_tokens), 0) AS INTEGER),
+                        CAST(coalesce(sum(m.output_tokens), 0) AS INTEGER),
+                        CAST(coalesce(sum(m.cache_read_tokens), 0) AS INTEGER),
+                        CAST(coalesce(sum(m.cache_write_tokens), 0) AS INTEGER),
+                        CAST(coalesce(sum(m.cost_micros), 0) AS INTEGER),
+                        coalesce(sum(m.cost_micros IS NULL), 0),
+                        count(DISTINCT t.id)
+                   FROM agents a JOIN agent_turns t ON {TURNS_OF_AGENT}
+                   JOIN agent_turn_models m ON m.turn_id = t.id
+                  WHERE a.id = ?1"
+            ),
+            params![uuid_blob(agent.id)],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
+        )
+        .map_err(map_err)?;
+    let runs = row.6;
+    Ok(spend_from(row, u32::from(runs == 0), 0))
 }
 
 #[cfg(test)]

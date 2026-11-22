@@ -20,7 +20,7 @@ use farcooler_protocol::v1 as pb;
 use serde_json::json;
 
 use super::overview_text::{agent_name, key_of};
-use super::{Common, Failed, age, ago, events_json, events_of, get_plan, needs_the_line, on_a_board, send, spend_words, unreadable};
+use super::{Common, Failed, age, ago, events_json, events_of, get_plan, needs_the_line, on_a_board, spend_words, unreadable};
 use crate::ci_words::{landing_phase_word, landing_state_word, read_for, stale, summary};
 use crate::tasks::{Board, DispatchLink};
 
@@ -179,11 +179,19 @@ pub(super) async fn run_on<L: DispatchLink>(
     let board = &board;
     let mut plan = get_plan(link, &ws, true).await?;
     let payload = pb::request::Payload::PlanGet(pb::PlanGetRequest { workspace_id: ws, include_closed: true });
-    let history = match send(link, board, "landing.history", payload).await? {
-        pb::result::Value::Plan(history) => history,
-        _ => return Err(unreadable()),
-    };
-    plan.landings.extend(history.landings);
+    let mut request = super::with(super::req_for("landing.history", board.repository), payload);
+    request.required_capabilities.push(farcooler_protocol::capability::BOARD_LINE.to_string());
+    match link.call(request).await {
+        Ok(answer) => match super::expect_value(answer.value)? {
+            pb::result::Value::Plan(history) => {
+                plan.landings.extend(history.landings);
+                plan.cards.extend(history.cards);
+            }
+            _ => return Err(unreadable()),
+        },
+        Err(super::ClientError::Daemon { code, .. }) if code == pb::ErrorCode::CapabilityUnsupported as i32 => (),
+        Err(e) => return Err(super::refused_here(e, "The runner couldn't read landing history.")),
+    }
     match cmd {
         LandingCmd::List => Ok(if json {
             let all: Vec<_> = plan.landings.iter().map(|l| farcooler_client::plan_json::landing_json(&plan, l)).collect();

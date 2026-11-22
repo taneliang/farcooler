@@ -288,6 +288,7 @@ struct Runner {
     /// A plan to answer in place of `the_plan()`.
     plan: Option<pb::Plan>,
     large_board: bool,
+    history_unsupported: bool,
 }
 
 fn runner() -> Runner {
@@ -310,6 +311,7 @@ fn runner() -> Runner {
         events: vec![],
         plan: None,
         large_board: false,
+        history_unsupported: false,
     }
 }
 
@@ -331,6 +333,9 @@ impl DispatchLink for Runner {
                 message: String::new(),
                 what: what.into(),
             });
+        }
+        if self.history_unsupported && method == "landing.history" {
+            return Err(ClientError::Daemon { code: pb::ErrorCode::CapabilityUnsupported as i32, retryable: false, message: String::new(), what: "a newer Far Cooler".into() });
         }
         if self.large_board && method == "task.list" {
             panic!("the runner dropped the oversized task.list response");
