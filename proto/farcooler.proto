@@ -16,14 +16,14 @@ message WireEnvelope {
   uint32 protocol_version = 1;
   bytes message_id = 2; // UUIDv7, 16 bytes
 
+  reserved 15, 16;
+
   oneof body {
     ClientHello client_hello = 10;
     ServerHello server_hello = 11;
     Request request = 12;
     Response response = 13;
     Event event = 14;
-    SnapshotChunk snapshot_chunk = 15;
-    TerminalFrame terminal_frame = 16;
   }
 }
 
@@ -1159,22 +1159,9 @@ message Notice {
   string author = 13;
 }
 
-message SnapshotChunk {
-  oneof kind {
-    SnapshotBegin begin = 1;
-    SnapshotEnd end = 2;
-    Event resource = 3;
-  }
-}
-
-message SnapshotBegin {
-  bytes snapshot_id = 1;
-  google.protobuf.Timestamp generated_at = 2;
-}
-
-message SnapshotEnd {
-  bytes snapshot_id = 1;
-}
+message SnapshotChunk { reserved 1 to 3; }
+message SnapshotBegin { reserved 1 to 2; }
+message SnapshotEnd { reserved 1; }
 
 // ---------------------------------------------------------------------------
 // Terminal channel
@@ -1187,12 +1174,10 @@ message TerminalFrame {
   bytes terminal_id = 1;
   uint64 epoch = 2;
 
+  reserved 11 to 14;
+
   oneof kind {
     TerminalOutput output = 10;
-    TerminalInput input = 11;
-    TerminalInputAck input_ack = 12;
-    TerminalResizeFrame resize = 13;
-    FlowAck flow_ack = 14;
     Gap gap = 15;
   }
 }
@@ -1202,25 +1187,10 @@ message TerminalOutput {
   bytes payload = 2;
 }
 
-message TerminalInput {
-  uint64 lease_generation = 1;
-  uint64 client_input_id = 2;
-  bytes payload = 3;
-}
-
-message TerminalInputAck {
-  uint64 client_input_id = 1;
-}
-
-message TerminalResizeFrame {
-  uint32 columns = 1;
-  uint32 rows = 2;
-  uint64 view_activity_id = 3;
-}
-
-message FlowAck {
-  uint64 acked_sequence = 1; // one past the highest contiguous byte applied
-}
+message TerminalInput { reserved 1 to 3; }
+message TerminalInputAck { reserved 1; }
+message TerminalResizeFrame { reserved 1 to 3; }
+message FlowAck { reserved 1; }
 
 message Gap {
   uint64 resumed_at_sequence = 1;
@@ -3091,11 +3061,7 @@ message StackGet {
   string branch = 2;
 }
 
-message StackSetParent {
-  bytes repository_id = 1;
-  string branch = 2;
-  string parent_branch = 3;
-}
+message StackSetParent { reserved 1 to 3; }
 
 message PrRefresh { bytes repository_id = 1; }
 
@@ -6043,41 +6009,8 @@ message BoardCiRead {
   int64 asked_at = 8;
 }
 
-// `landing.start`, at `control`: a landing with these tickets, open. The
-// board's collecting landing is adopted when it has one: it keeps its number,
-// carries exactly the tickets listed, and stops collecting.
-message LandingStart {
-  bytes workspace_id = 1;
-  LandingRoute route = 2;
-  string base = 3;
-  repeated bytes task_ids = 4;
-  string title = 5;
-  optional bytes lander_id = 6;
-  string actor = 7;
-  // The runner runs the landing (ov-872): the charter's `## Landing` section
-  // chooses each ticket's route, and the push route is folded, gated, pushed
-  // and watched to landed by the runner's landing job. `route` is ignored.
-  // Refused `no_landing_rules` when the charter has no such section.
-  bool run = 8;
-  // With `run`: you said to land tickets the charter asked about. Only a
-  // person says it, never an agent (`land_is_yours`).
-  bool land = 9;
-}
-
-// `landing.set`, at `control`: move it, rebase it, record what it pushed,
-// name its lander, and put tickets on or off it. A new SHA without a state
-// moves it to pushed.
-message LandingSet {
-  bytes landing_id = 1;
-  LandingState state = 2;
-  optional string base = 3;
-  optional string sha = 4;
-  repeated bytes add_task_ids = 5;
-  repeated bytes remove_task_ids = 6;
-  optional string title = 7;
-  optional bytes lander_id = 8;
-  string actor = 9;
-}
+message LandingStart { reserved 1 to 9; }
+message LandingSet { reserved 1 to 9; }
 
 // ---------------------------------------------------------------------------
 // Orchestrator pages (ov-269)

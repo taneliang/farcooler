@@ -1229,15 +1229,6 @@ pub const MAX_UNACKED_TERMINAL_BYTES: u64 = 1024 * 1024;
 /// Control channel ceiling: queued unwritten control envelopes per client.
 pub const MAX_QUEUED_CONTROL_BYTES: u64 = 4 * 1024 * 1024;
 
-/// Clients acknowledge at 256 KiB unacknowledged or 250 ms, whichever first,
-/// and always within 1 s of output that leaves anything unacknowledged.
-pub const FLOW_ACK_BYTES_THRESHOLD: u64 = 256 * 1024;
-pub const FLOW_ACK_INTERVAL_MS: u64 = 250;
-pub const FLOW_ACK_MAX_DELAY_MS: u64 = 1000;
-
-/// A disconnected writer lease expires after 30 seconds.
-pub const WRITER_LEASE_EXPIRY_SECS: u64 = 30;
-
 /// Terminal dimensions are clamped to these ranges.
 pub const MIN_COLUMNS: u32 = 20;
 pub const MAX_COLUMNS: u32 = 500;
