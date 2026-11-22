@@ -418,7 +418,7 @@ extension ContentView {
             }
         case .workspace(let host, let id, .plan(.engine(let focus))?):
             if let client = store.clients[host], let workspace = board(host: host, id: id) {
-                EnginePage(client: client, workspace: workspace, focus: focus, visible: current && settled) {
+                EnginePage(client: client, workspace: workspace, focus: focus, visible: current && settled && windowVisible) {
                     openTask($0, host: host, workspace: id)
                 }
             } else {

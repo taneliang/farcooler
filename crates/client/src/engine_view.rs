@@ -78,6 +78,8 @@ pub struct Station {
     id: String,
     label: String,
     tickets: Vec<Ticket>,
+    #[serde(skip)]
+    pinned_index: usize,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize)]
@@ -231,7 +233,7 @@ fn project(state: &State, definition: Option<&Definition>, places: &Places,
     let projection = Projection { places, stops, cards, style };
     let mut stations = Vec::new();
     if let Some(definition) = definition {
-        stations.extend(definition.stages.iter().map(|stage| Station::new(stage, style)));
+        stations.extend(definition.stages.iter().enumerate().map(|(index, stage)| Station::new(stage, index, style)));
     }
     let mut joined = BTreeMap::<&str, Vec<Ticket>>::new();
     let mut agents = Vec::new();
@@ -251,17 +253,18 @@ fn project(state: &State, definition: Option<&Definition>, places: &Places,
         let station = match stations.iter().position(|s| s.id == stage.id) {
             Some(index) => &mut stations[index],
             None => {
-                stations.push(Station::new(stage, style));
+                stations.push(Station::new(stage, item.stage, style));
                 stations.last_mut().expect("station just inserted")
             }
         };
         station.tickets.push(ticket);
     }
-    // Unpublished tracker stations keep their workflow order, even when the
-    // first ticket encountered was moved to a later column.
+    // Keep unmapped stations in workflow order. Tracker pins rotate their
+    // step list to start at the ticket's current column.
     let published = definition.map_or(0, |d| d.stages.len());
     stations[published..].sort_by_key(|s| {
-        farcooler_workflow::TICKET_COLUMNS.iter().position(|id| *id == s.id).unwrap_or(usize::MAX)
+        let column = farcooler_workflow::TICKET_COLUMNS.iter().position(|id| *id == s.id);
+        (column.is_none(), column.unwrap_or(s.pinned_index))
     });
     for station in &mut stations {
         station.tickets.sort_by_key(|ticket| ticket.position);
@@ -312,8 +315,8 @@ fn project(state: &State, definition: Option<&Definition>, places: &Places,
 }
 
 impl Station {
-    fn new(stage: &Stage, style: Style) -> Self {
-        Self { id: stage.id.clone(), label: stage_name(stage, style), tickets: Vec::new() }
+    fn new(stage: &Stage, pinned_index: usize, style: Style) -> Self {
+        Self { id: stage.id.clone(), label: stage_name(stage, style), tickets: Vec::new(), pinned_index }
     }
 }
 
@@ -332,7 +335,7 @@ impl Projection<'_> {
         } else { None };
         let failure = item.failure.clone().or_else(|| {
             self.stops.get(owner).filter(|stop| stop.run == item.run).map(|stop| stop.text.clone())
-        });
+        }).or_else(|| item.reason.as_ref().filter(|_| phase == Phase::Failed).cloned());
         let reason = reason(item, step, &phase, state, position, style)
             .filter(|reason| Some(reason) != failure.as_ref() && !(phase == Phase::Failed && failure.is_some()));
         let current_failure = matches!(phase, Phase::Failed | Phase::Uncertain | Phase::Blocked | Phase::WaitingSlot);
@@ -482,7 +485,7 @@ fn github_ci(plan: &Plan, sha: &str, style: Style) -> Option<Ci> {
 mod tests {
     use super::*;
     use farcooler_protocol::v1::{BoardCiRead, PlanCard};
-    use farcooler_workflow::{Command, ExecutionView, Grant, Input, SendBack as Decision};
+    use farcooler_workflow::{Command, Dispatch, Grant, Input, SendBack as Decision, execution_view};
 
     fn enqueue(state: &mut State, id: &str, definition: &Definition) {
         let input = Input {
@@ -508,8 +511,7 @@ mod tests {
             let item = state.items.get_mut(key).unwrap();
             item.stage = 1;
             item.phase = Phase::Running;
-            item.execution = Some(ExecutionView { phase: Phase::WaitingSlot, position: Some(position),
-                holders: vec![], text: "Queued".into() });
+            item.execution = Some(execution_view(Dispatch::Pending, Some(position), Vec::new()));
         }
         let view = project(&state, Some(&published), &Places::default(), &BTreeMap::new(), None, Style::Apple);
         assert_eq!(view.stations.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
@@ -522,6 +524,18 @@ mod tests {
     }
 
     #[test]
+    fn without_a_publication_active_stations_follow_the_pinned_step_order() {
+        let mut state = State::empty("w".into(), 1);
+        let definition = Definition::coding();
+        enqueue(&mut state, "ov-1", &definition);
+        enqueue(&mut state, "ov-2", &definition);
+        state.items.get_mut("ov-1").unwrap().stage = 3;
+        state.items.get_mut("ov-2").unwrap().stage = 1;
+        let view = project(&state, None, &Places::default(), &BTreeMap::new(), None, Style::Apple);
+        assert_eq!(view.stations.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["stage-1", "stage-3"]);
+    }
+
+    #[test]
     fn inspector_keeps_exact_run_failure_separate_from_send_backs_and_review() {
         let mut state = State::empty("w".into(), 1);
         let mut definition = Definition::coding();
@@ -530,6 +544,7 @@ mod tests {
         let item = state.items.get_mut("ov-1").unwrap();
         item.stage = 3;
         item.phase = Phase::Failed;
+        item.reason = Some("stage-3: The review could not finish (receipt review-1)".into());
         item.sent_back.push(Decision { id: "back-1".into(), revision: 8, run: "earlier".into(),
             from: "stage-3".into(), to: "stage-1".into(), reason: "Earlier failure".into() });
         let plan = Plan { cards: vec![PlanCard { key: "ov-1".into(), title: "A long ticket title".repeat(8),
@@ -537,7 +552,10 @@ mod tests {
         let mut stops = BTreeMap::from([("ov-1".into(), Stop { run: "stale".into(), text: "Wrong run".into() })]);
         let places = Places::default();
         let view = project(&state, Some(&definition), &places, &stops, Some(&plan), Style::Apple);
-        assert!(view.stations[3].tickets[0].failure.is_none());
+        let ticket = &view.stations[3].tickets[0];
+        assert_eq!(ticket.failure.as_deref(), state.items["ov-1"].reason.as_deref());
+        assert_eq!(ticket.summary, ticket.failure);
+        assert!(ticket.reason.is_none());
         stops.insert("ov-1".into(), Stop { run: state.items["ov-1"].run.clone(), text: "Failure\nFull detail".into() });
         let view = project(&state, Some(&definition), &places, &stops, Some(&plan), Style::Apple);
         let ticket = &view.stations[3].tickets[0];

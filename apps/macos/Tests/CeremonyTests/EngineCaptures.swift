@@ -25,8 +25,40 @@ struct EngineCaptures {
             ("narrow", 420, 1060, .large, .aqua),
             ("largest-text", 420, 2300, .accessibility5, .accessibilityHighContrastDarkAqua),
         ]
-        for variant in out == nil ? Array(variants.prefix(1)) : variants {
+        for variant in variants {
             try await check(variant, out: out)
+        }
+    }
+
+    @Test("The workspace Plan opens Engine through the window’s navigation")
+    func workspaceNavigation() async throws {
+        let data = try Self.snapshot()
+        let asked = CharterInterceptTests.Asked()
+        let client = CharterInterceptTests.client(charter: "", asked: asked, orchestrator: true)
+        let fallback = try #require(client.commandRunnerForTesting)
+        let engine = ["plan", "engine", "--repo", "repo-1", "--workspace", "ws-main", "--json"]
+        client.commandRunnerForTesting = { args in
+            guard args != engine else {
+                asked.calls.append(args)
+                return (data, nil)
+            }
+            return await fallback(args)
+        }
+        let store = FleetStore(clients: ["": client])
+        await client.recheckInstalled()
+        await client.refreshRepositories()
+        await client.refresh()
+        try await Capture.wait(expecting: "the runner’s Main workspace") { CharterInterceptTests.main(store) != nil }
+        try await CharterInterceptTests.withMain {
+            let (window, seen) = try await Window.show(ContentView(store: store), size: CGSize(width: 1640, height: 1040))
+            defer { window.close() }
+            try await Capture.wait(expecting: "the workspace’s Plan link to Engine") { seen.views["plan-open-engine"] != nil }
+            try await Window.click("plan-open-engine", in: window, seen)
+            let row = "engine-ticket-ov-1321"
+            try await Capture.wait(expecting: "Engine in the workspace") { seen.views[row] != nil }
+            #expect(asked.calls.contains(engine))
+            try await Window.click(row, in: window, seen)
+            try await Capture.wait(expecting: "the selected ticket’s inspector") { seen.views["engine-inspector"] != nil }
         }
     }
 

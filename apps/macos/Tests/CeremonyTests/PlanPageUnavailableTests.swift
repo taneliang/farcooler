@@ -55,7 +55,12 @@ struct PlanPageUnavailableTests {
         let plan = PlanStore(
             client: client, workspace: .implicit(repository: "r"), host: "mini",
             defaults: ScratchDefaults.suite("p6-\(UUID().uuidString)")!)
-        let ids = await Self.drawn(plan, page: .theme("00000000-0000-0000-0000-000000003001"))
+        // Keep the first failed read in view while the window lays out under load.
+        // PlanReconnectingTests covers the later retries and give-up state.
+        plan.retryDelay = .seconds(600)
+        plan.retryCeiling = .seconds(600)
+        let ids = await Self.drawn(
+            plan, page: .theme("00000000-0000-0000-0000-000000003001"), until: "plan-reconnecting")
         #expect(calls.args.contains { $0.first == "plan" }, "the page asked for the plan")
         #expect(ids.contains("plan-reconnecting"), "drew \(ids)")
         #expect(!ids.contains("plan-page-unavailable"), "no answer isn't an unreadable plan (ov-631)")
