@@ -211,6 +211,20 @@ class BackstackTest {
         assertNull(Backstack.decodeStack("""[{"type":"fleet"}]"""))
     }
 
+    @Test
+    fun `an old saved orchestrator page restores its workspace`() {
+        assertEquals(
+            listOf(Backstack.ROOT, Route.Workspace("h", "billing")),
+            Backstack.decodeStack(
+                """[
+                    {"type":"needs-you"},
+                    {"type":"workspace","hostId":"h","workspaceId":"billing"},
+                    {"type":"plan-page","hostId":"h","workspaceId":"billing","kind":"page","pageId":"status"}
+                ]"""
+            ),
+        )
+    }
+
     /** A field added by a later build must not cost an older one its place. */
     @Test
     fun anUnknownFieldIsIgnored() {

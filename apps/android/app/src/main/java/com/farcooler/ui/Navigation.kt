@@ -449,7 +449,7 @@ object Backstack {
      * alternative — recovering the routes before the unknown one — would be
      * guessing at what somebody meant from a format this app no longer speaks.
      *
-     * **Two routes this build retired are read, not refused** (spec §9):
+     * Retired routes the decoder recognizes:
      *
      * - `fleet`, the worktree list, is dropped and the rest of the stack kept.
      *   It was a place in the middle of a story — the list a worktree was
@@ -459,6 +459,7 @@ object Backstack {
      *   board lives now. kotlinx.serialization has no alias for a
      *   discriminator, so it's decoded as the deprecated [Route.Board] and
      *   mapped here.
+     * - A saved `plan-page` of kind `page` is dropped, leaving its workspace.
      */
     fun decodeStack(saved: String?): List<Route>? {
         if (saved.isNullOrBlank()) return null
@@ -470,6 +471,7 @@ object Backstack {
             if (type == RETIRED_FLEET) continue
             val route = runCatching { json.decodeFromJsonElement(Route.serializer(), entry) }
                 .getOrNull() ?: return null
+            if (route is Route.PlanPage && route.kind == "page") continue
             decoded += migrated(route)
         }
         return decoded.ifEmpty { null }
