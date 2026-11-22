@@ -93,6 +93,7 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 directories.workspace = true
 libc.workspace = true
+tempfile = "3"
 # Key bytes and the seed they come from are wiped when dropped (runner_key.rs).
 zeroize = "1"
 # Reading and writing `authorized_keys`, which is the one file this daemon
@@ -152,7 +153,6 @@ landlock = "0.4"
 farcooler-ffi-guard.workspace = true
 
 [dev-dependencies]
-tempfile = "3"
 # Parses `rpc.rs` so `every_method_is_dispatched` reads the arms off the syntax
 # tree rather than scanning the text. Already in the lockfile through the
 # derive macros; a dev-dependency only.

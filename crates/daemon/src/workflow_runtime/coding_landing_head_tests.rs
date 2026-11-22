@@ -3,7 +3,9 @@ use super::{adapters, Request, Runtime};
 use super::coding_verbs_tests::{
     at_join, batched_push, candidate_of, command, lander, outbox, phase_of, remote_head, settled, until,
 };
-use farcooler_workflow::{step, Command, EffectKind, Phase, Refusal, StageKind, State};
+use farcooler_protocol::workflow_commands::{Action, Mutation};
+use farcooler_workflow::{step, Command, Definition, EffectKind, Phase, Refusal, StageKind, State, Target};
+use farcooler_workflow::scheduling::{Budget, StartPolicy};
 
 /// Rewrite the runtime's pinned configuration, and open it again: the Nov 15 head no CI run was ever started on.
 fn with_unrun(runtime: Runtime, subject: &str, unrun: farcooler_protocol::workflow_config::CiUnrun) -> Runtime {
@@ -62,10 +64,53 @@ async fn a_head_with_no_ci_run_ends_the_base_step_after_the_grace_with_a_sentenc
     }
 }
 
+fn waiting_definition(runtime: &Runtime, auto_queue: bool) -> Definition {
+    let mut definition = batched_push(runtime, "any", 5000);
+    let join = definition.stages.last_mut().unwrap();
+    join.limit = 1;
+    join.routes.insert("rejected".into(), Target::Step("build".into()));
+    if auto_queue {
+        definition.start_policy = Some(StartPolicy {
+            columns: ["todo".into()].into(), budget: Budget::Fixed(1), files: Default::default(),
+            dependencies: Default::default(), rotate_models: false, auto_queue: true,
+        });
+    }
+    definition
+}
+
 #[tokio::test]
-async fn waiting_ticket_conflicts_with_main_before_joining_a_group() {
+async fn workflow_send_back_restarts_a_waiting_builder_and_charges_the_join_limit() {
+    let (_dir, mut runtime) = lander("pass").await;
+    let definition = waiting_definition(&runtime, false);
+    at_join(&mut runtime, "ticket", &definition).await;
+    let reason = "Fix the compile error against the new main.";
+    let send_back = |runtime: &Runtime, sequence| {
+        let state = runtime.state("w").unwrap().unwrap();
+        let ticket = &state.items["ticket"];
+        runtime.wire_command("w", "orchestrator", Action::SendBack {
+            mutation: Mutation { id: format!("send-back-{sequence}"), revision: state.revision, epoch: state.epoch, sequence },
+            item: "ticket".into(), run: ticket.run.clone(), pin: ticket.pin.clone(), reason: reason.into(),
+        }).unwrap()
+    };
+    let reply = send_back(&runtime, 1);
+    assert!(reply.pointer("/receipt/result/Ok").is_some(), "{reply}");
+    let state = until(&mut runtime, |s| s.items["ticket"].phase == Phase::WaitingJoin
+        && s.items["ticket"].sent_back.len() == 1).await;
+    assert_eq!(state.items["ticket"].back_edges["join"], 1);
+    let builds: Vec<_> = runtime.store.workflow_outbox("w").unwrap().into_iter()
+        .filter(|s| s.effect.kind == EffectKind::Execute(StageKind::Build)).collect();
+    assert_eq!(builds.len(), 2);
+    assert_ne!(builds[0].effect.run, builds[1].effect.run);
+    assert_eq!(builds[1].effect.brief.as_deref(), Some(reason));
+    let refused = send_back(&runtime, 2);
+    assert_eq!(refused.pointer("/receipt/result/Err/SendBackRefused").and_then(|v| v.as_str()),
+        Some("join: The back-edge limit of 1 has been reached."), "{refused}");
+}
+
+#[tokio::test]
+async fn automatic_queue_sends_a_conflicting_ticket_back_before_joining_a_group() {
     let (dir, mut runtime) = lander("conflict").await;
-    let definition = batched_push(&runtime, "any", 5000);
+    let definition = waiting_definition(&runtime, true);
     at_join(&mut runtime, "ticket", &definition).await;
     let before = runtime.state("w").unwrap().unwrap();
     let candidate = before.items["ticket"].candidate.as_deref().unwrap();
@@ -76,6 +121,7 @@ async fn waiting_ticket_conflicts_with_main_before_joining_a_group() {
     assert_ne!(state.items["ticket"].phase, Phase::WaitingJoin, "a stale conflicting candidate was still eligible to queue");
     assert!(state.items.values().all(|item| item.group_of.is_none()));
     assert_eq!(outbox(&runtime, StageKind::Fold), 0);
+    assert_eq!(state.items["ticket"].back_edges["join"], 1);
     let builds: Vec<_> = runtime.store.workflow_outbox("w").unwrap().into_iter()
         .filter(|s| s.effect.kind == EffectKind::Execute(StageKind::Build)).collect();
     let brief = builds[1].effect.brief.as_deref().unwrap();
@@ -88,7 +134,7 @@ async fn waiting_ticket_conflicts_with_main_before_joining_a_group() {
 #[tokio::test]
 async fn waiting_ticket_queue_checks_main_before_admitting_a_conflict() {
     let (dir, mut runtime) = lander("conflict").await;
-    let definition = batched_push(&runtime, "any", 5000);
+    let definition = waiting_definition(&runtime, false);
     at_join(&mut runtime, "ticket", &definition).await;
     let before = runtime.state("w").unwrap().unwrap();
     let main = move_waiting_ticket_main(&dir, &runtime, "shared.txt").await;
@@ -105,53 +151,7 @@ async fn waiting_ticket_queue_checks_main_before_admitting_a_conflict() {
 }
 
 #[tokio::test]
-async fn waiting_ticket_holds_the_rebase_for_a_dirty_submodule() {
-    let (dir, mut runtime) = lander("pass").await;
-    let source = dir.path().join("module-source");
-    std::fs::create_dir(&source).unwrap();
-    adapters::git(&source, &["init", "-q"]).await.unwrap();
-    std::fs::write(source.join("tracked.txt"), "committed").unwrap();
-    adapters::git(&source, &["add", "tracked.txt"]).await.unwrap();
-    adapters::git(&source, &["-c", "user.name=Test", "-c", "user.email=test@localhost",
-        "-c", "commit.gpgsign=false", "commit", "-qm", "submodule base"]).await.unwrap();
-    let script = dir.path().join("adapter.py");
-    let text = std::fs::read_to_string(&script).unwrap().replace("if stage == 'build':", &format!(r#"if stage == 'build':
-    subprocess.check_call(['/usr/bin/git', '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', {}, 'module'])
-"#, serde_json::to_string(&source).unwrap()));
-    std::fs::write(&script, text).unwrap();
-    let definition = batched_push(&runtime, "any", 5000);
-    at_join(&mut runtime, "ticket", &definition).await;
-    let before = runtime.state("w").unwrap().unwrap();
-    let candidate = before.items["ticket"].candidate.as_deref().unwrap();
-    let tree = runtime.item_tree("w", "ticket");
-    let tracked = tree.join("module/tracked.txt");
-    let untracked = tree.join("module/untracked.txt");
-    let main = move_waiting_ticket_main(&dir, &runtime, "independent.txt").await;
-
-    std::fs::write(&tracked, "local edit").unwrap();
-    assert!(adapters::git(&tree, &["status", "--porcelain"]).await.unwrap().is_empty());
-    assert!(!runtime.prepare_queue("w", "ticket", before.revision, None, None, 10).await);
-    assert_eq!(std::fs::read_to_string(&tracked).unwrap(), "local edit");
-    std::fs::write(&tracked, "committed").unwrap();
-
-    std::fs::write(&untracked, "local file").unwrap();
-    runtime.pump(11).await.unwrap();
-    assert_eq!(runtime.state("w").unwrap().unwrap(), before);
-    assert_eq!(adapters::git(&tree, &["rev-parse", "HEAD"]).await.unwrap(), candidate);
-    assert_eq!(std::fs::read_to_string(&untracked).unwrap(), "local file");
-    std::fs::remove_file(&untracked).unwrap();
-
-    runtime.pump(12).await.unwrap();
-    let state = runtime.state("w").unwrap().unwrap();
-    assert_eq!(state.items["ticket"].phase, Phase::WaitingJoin);
-    let head = adapters::git(&tree, &["rev-parse", "HEAD"]).await.unwrap();
-    assert_ne!(head, candidate);
-    assert_eq!(candidate_of(&state, "ticket"), Some(head.as_str()));
-    assert_eq!(adapters::git(&tree, &["rev-parse", "HEAD^"]).await.unwrap(), main);
-}
-
-#[tokio::test]
-async fn waiting_ticket_rebases_a_signed_candidate_only_after_its_worktree_is_clean() {
+async fn waiting_ticket_queues_a_signed_candidate_unchanged_after_main_moves() {
     let (dir, mut runtime) = lander("pass").await;
     let key = dir.path().join("signing-key");
     assert!(tokio::process::Command::new("ssh-keygen")
@@ -159,7 +159,6 @@ async fn waiting_ticket_rebases_a_signed_candidate_only_after_its_worktree_is_cl
     let repository = runtime.repository();
     adapters::git(&repository, &["config", "gpg.format", "ssh"]).await.unwrap();
     adapters::git(&repository, &["config", "user.signingkey", key.to_str().unwrap()]).await.unwrap();
-    adapters::git(&repository, &["config", "rebase.autoStash", "true"]).await.unwrap();
     let script = dir.path().join("adapter.py");
     let text = std::fs::read_to_string(&script).unwrap();
     std::fs::write(&script, text.replace("'commit', '--quiet', '-m', 'build '+iteration",
@@ -171,40 +170,28 @@ async fn waiting_ticket_rebases_a_signed_candidate_only_after_its_worktree_is_cl
     let tree = runtime.item_tree("w", "ticket");
     let path = adapters::git(&tree, &["diff-tree", "--no-commit-id", "--name-only", "-r", previous]).await.unwrap();
     let file = tree.join(path);
-    let committed = std::fs::read(&file).unwrap();
     std::fs::write(&file, "local edit").unwrap();
     let main = move_waiting_ticket_main(&dir, &runtime, "independent.txt").await;
 
-    assert!(!runtime.prepare_queue("w", "ticket", before.revision, None, None, 10).await);
-    assert_eq!(runtime.state("w").unwrap().unwrap(), before);
-    assert_eq!(adapters::git(&tree, &["rev-parse", "HEAD"]).await.unwrap(), previous);
-    assert_eq!(std::fs::read_to_string(&file).unwrap(), "local edit");
-    std::fs::write(&file, &committed).unwrap();
-
-    runtime.pump(11).await.unwrap();
+    assert_ne!(adapters::git(&tree, &["rev-parse", "HEAD^"]).await.unwrap(), main);
+    let worktrees = adapters::git(&repository, &["worktree", "list", "--porcelain"]).await.unwrap();
+    let receipt = runtime.submit(&runtime.controller(), Request { id: "queue-after-independent-change".into(),
+        workspace: "w".into(), expected_revision: before.revision, sequence: 2,
+        command: Command::Queue { item: "ticket".into() } }, 12).await.unwrap();
+    assert!(receipt.result.is_ok(), "{receipt:?}");
     let state = runtime.state("w").unwrap().unwrap();
-    let ticket = &state.items["ticket"];
-    assert_eq!(ticket.phase, Phase::WaitingJoin);
-    let rebased = ticket.candidate.as_deref().unwrap();
-    assert_ne!(rebased, previous);
-    assert_eq!(adapters::git(&tree, &["rev-parse", "HEAD"]).await.unwrap(), rebased);
-    assert_eq!(adapters::git(&tree, &["rev-parse", "HEAD^"]).await.unwrap(), main);
-    assert!(adapters::git(&tree, &["status", "--porcelain"]).await.unwrap().is_empty());
-    assert_eq!(std::fs::read(&file).unwrap(), committed);
+    assert_eq!(state.items["ticket"].phase, Phase::Joined);
+    assert_eq!(candidate_of(&state, "ticket"), Some(previous));
+    let member = state.items.values().find_map(|i| i.members.first()).unwrap();
+    assert_eq!(member.candidate, previous);
+    assert_eq!(adapters::git(&tree, &["rev-parse", "HEAD"]).await.unwrap(), previous);
+    assert_eq!(adapters::git(&repository, &["worktree", "list", "--porcelain"]).await.unwrap(), worktrees);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "local edit");
     let allowed_signers = dir.path().join("allowed-signers");
     std::fs::write(&allowed_signers, format!("test@localhost {}", std::fs::read_to_string(key.with_extension("pub")).unwrap())).unwrap();
-    for commit in [previous, rebased] {
-        assert!(tokio::process::Command::new("/usr/bin/git").current_dir(&tree)
-            .args(["-c", &format!("gpg.ssh.allowedSignersFile={}", allowed_signers.display()), "verify-commit", commit])
-            .status().await.unwrap().success());
-    }
-    let receipt = runtime.submit(&runtime.controller(), Request { id: "queue-rebased".into(),
-        workspace: "w".into(), expected_revision: state.revision, sequence: 2,
-        command: Command::Queue { item: "ticket".into() } }, 12).await.unwrap();
-    assert!(receipt.result.is_ok());
-    let state = runtime.state("w").unwrap().unwrap();
-    let member = state.items.values().find_map(|i| i.members.first()).unwrap();
-    assert_eq!(member.candidate, rebased);
+    assert!(tokio::process::Command::new("/usr/bin/git").current_dir(&tree)
+        .args(["-c", &format!("gpg.ssh.allowedSignersFile={}", allowed_signers.display()), "verify-commit", previous])
+        .status().await.unwrap().success());
     let mut replay = State::empty("w".into(), 1);
     for event in runtime.events("w").unwrap() { replay = step(&replay, &event).unwrap().state; }
     assert_eq!(state, replay);

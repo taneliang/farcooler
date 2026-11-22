@@ -718,6 +718,11 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     if item.fence == u64::MAX {
                         return Err(refused(&format!("The fence limit of {} has been reached.", u64::MAX)));
                     }
+                    if item.phase == Phase::WaitingJoin && stage.limit > 0 {
+                        let taken = item.back_edges.entry(stage.id.clone()).or_default();
+                        *taken += 1;
+                        item.iteration = item.iteration.checked_add(1).ok_or(Refusal::Limit)?;
+                    }
                     item.sent_back.push(SendBack { id: input.id.clone(), revision: input.expected_revision, run: item.run.clone(),
                         from: item.definition.stages[item.stage].id.clone(), to: item.definition.stages[to].id.clone(), reason: reason.clone() });
                     item.brief = Some(reason.clone());
@@ -913,17 +918,6 @@ fn conflict_brief(evidence: &Evidence, files: &[String]) -> Result<String, Refus
         reason.push_str("… See the fold receipt for the full conflicting file list.");
     }
     Ok(reason)
-}
-
-fn rebase_conflict_brief(base: &str, paths: &[String]) -> String {
-    let mut brief = format!("Rebase your existing work onto landing base {base}, resolve the conflicts, run the affected tests, and commit the result. Conflicting paths: {paths:?}");
-    if brief.len() > MAX_REWORK_REASON_BYTES {
-        let mut end = MAX_REWORK_REASON_BYTES - '…'.len_utf8();
-        while !brief.is_char_boundary(end) { end -= 1; }
-        brief.truncate(end);
-        brief.push('…');
-    }
-    brief
 }
 
 /// An absent limit leaves the landing batch uncapped. The state envelope still bounds memory.

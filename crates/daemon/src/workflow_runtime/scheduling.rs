@@ -4,6 +4,8 @@ use farcooler_workflow::scheduling::StartPolicy;
 use std::collections::BTreeMap;
 use farcooler_store::workflow_publication::Configuration;
 
+const REFUSED_RETRY_MS: i64 = 60_000;
+
 #[derive(Default)]
 pub(super) struct Scheduler {
     boards: BTreeMap<String, Board>,
@@ -34,6 +36,13 @@ fn load_milli() -> Option<u64> {
     (read == 1 && load >= 0.0).then_some((load * 1000.0) as u64)
 }
 impl Runtime {
+    pub(super) fn automatic_queue_deferred(&self, workspace: &str, item: &str, now_ms: i64) -> bool {
+        self.scheduling.lock().unwrap().refused.get(&(workspace.into(), item.into(), true))
+            .is_some_and(|until| now_ms < *until)
+    }
+    pub(super) fn defer_automatic_queue(&self, workspace: &str, item: &str, now_ms: i64) {
+        self.scheduling.lock().unwrap().refused.insert((workspace.into(), item.into(), true), now_ms.saturating_add(REFUSED_RETRY_MS));
+    }
     pub(super) fn schedule_ready(&self, workspaces: &[String], now_ms: i64, ready_queues: &BTreeSet<(String, String)>) -> Result<()> {
         self.schedule(workspaces, now_ms, load_milli(), Some(ready_queues))
     }
@@ -129,7 +138,7 @@ impl Runtime {
                     other => {
                         // Refusals do not change revision, and ownership can clear outside workflow state.
                         // Retry after a minute rather than creating 86,400 immutable receipts per day.
-                        scan.refused.insert(retry_key, now_ms.saturating_add(60_000));
+                        scan.refused.insert(retry_key, now_ms.saturating_add(REFUSED_RETRY_MS));
                         match other {
                             Ok((receipt, _)) => tracing::warn!(%workspace, item = %key, ?receipt.result, "automatic command refused"),
                             Err(error) => return Err(error.into()),

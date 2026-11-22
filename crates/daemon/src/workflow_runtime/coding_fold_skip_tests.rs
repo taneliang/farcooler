@@ -54,8 +54,8 @@ async fn a_stacked_ticket_folds_clean_after_the_ticket_it_is_stacked_on() {
     g(&["cherry-pick", &b]);
     let expected = g(&["rev-parse", "HEAD^{tree}"]);
     g(&["checkout", "-q", "--detach", &base]);
-    assert!(runtime.pick_member(&binding, repo.path(), &base, &member("a", &a)).await.unwrap().is_none());
-    assert!(runtime.pick_member(&binding, repo.path(), &base, &member("b", &b)).await.unwrap().is_none(), "A's commits are skipped");
+    assert!(runtime.pick_member(Some(&binding), repo.path(), &member("a", &a)).await.unwrap().is_none());
+    assert!(runtime.pick_member(Some(&binding), repo.path(), &member("b", &b)).await.unwrap().is_none(), "A's commits are skipped");
     assert_eq!(g(&["rev-parse", "HEAD^{tree}"]), expected);
 }
 
@@ -77,7 +77,7 @@ async fn a_ticket_stacked_on_commits_already_on_the_base_as_copies_folds_clean()
     g(&["cherry-pick", "a~1", "a"]);
     let base = g(&["rev-parse", "HEAD"]);
     g(&["checkout", "-q", "--detach", &base]);
-    assert!(runtime.pick_member(&binding, repo.path(), &base, &member("b", &b)).await.unwrap().is_none());
+    assert!(runtime.pick_member(Some(&binding), repo.path(), &member("b", &b)).await.unwrap().is_none());
     assert_eq!(g(&["rev-list", "--count", &format!("{base}..HEAD")]), "1", "only B's own commit is added");
     assert_eq!(std::fs::read_to_string(repo.path().join("shared.txt")).unwrap(),
         "one\ntwo-a2\nthree\nfour-main\nfive\nsix-b\nseven\n");
@@ -94,8 +94,7 @@ async fn a_commit_that_truly_conflicts_still_fails_the_fold_naming_the_file() {
     let t = g(&["rev-parse", "t"]);
     g(&["checkout", "-q", "main"]);
     edit(repo.path(), "two", "two-main"); g(&["commit", "-qam", "main moved"]);
-    let base = g(&["rev-parse", "HEAD"]);
-    let conflict = runtime.pick_member(&binding, repo.path(), &base, &member("t", &t)).await.unwrap().unwrap();
-    assert_eq!(conflict["files"], serde_json::json!(["shared.txt"]));
+    let conflict = runtime.pick_member(Some(&binding), repo.path(), &member("t", &t)).await.unwrap().unwrap();
+    assert_eq!(conflict.files, ["shared.txt"]);
     assert_eq!(g(&["status", "--porcelain"]), "", "the aborted pick leaves the tree settled");
 }

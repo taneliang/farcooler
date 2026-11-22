@@ -442,11 +442,13 @@ impl Runtime {
     }
     pub async fn submit(&self, controller: &Controller, request: Request, now_ms: i64) -> Result<Receipt> {
         self.authorize(controller.instance)?;
-        if let Command::Queue { item } = &request.command
-            && !self.prepare_queue(&request.workspace, item, request.expected_revision, None, None, now_ms).await
-            && self.state(&request.workspace)?.is_some_and(|s| s.revision == request.expected_revision)
-        {
-            return Err(Error::Refused("waiting branch could not be rebased onto the landing head"));
+        if let Command::Queue { item } = &request.command {
+            let check = self.check_queue(&request.workspace, item, request.expected_revision, None, None).await;
+            if !self.apply_queue_check(&request.workspace, item, check, now_ms)?
+                && self.state(&request.workspace)?.is_some_and(|s| s.revision == request.expected_revision)
+            {
+                return Err(Error::Refused("waiting candidate could not be applied to the landing head"));
+            }
         }
         self.submit_now(controller, request, now_ms)
     }
@@ -743,7 +745,7 @@ impl Runtime {
     async fn launch_ready_noting(&mut self, workspaces: &[String], now_ms: i64, running: &mut Vec<Running>,
         futures: &mut Vec<Slot>, count: &mut usize, waiting: &mut Vec<Placed>) -> Result<()>
     {
-        let ready_queues = self.refresh_waiting_joins(workspaces, now_ms).await?;
+        let ready_queues = self.check_auto_queues(workspaces, now_ms).await?;
         self.schedule_ready(workspaces, now_ms, &ready_queues)?;
         let started = std::time::Instant::now();
         let clock = || now_ms.saturating_add(i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX));
@@ -971,7 +973,7 @@ impl Runtime {
                     self.validate_wire_publication(&admission.workspace(), &admission.principal(), &action).await?;
                     let tree = self.prepare_start(&admission.workspace(), &admission.principal(), &action).await?;
                     let close_verified = self.verify_close(&admission.workspace(), &admission.principal(), &action).await?;
-                    let queue_held = self.wire_queue_held(&admission.workspace(), &admission.principal(), &action).await?;
+                    let queue_check = self.wire_queue_check(&admission.workspace(), &admission.principal(), &action).await?;
                     // The remote is read before anything is written: a commit it does not hold lands nothing.
                     // It is the last await, so the recheck below sees any authority lost while it was pending.
                     let landed_refusal = if let farcooler_protocol::workflow_commands::Action::Landed { item, run, pin, sha, .. } = &*action {
@@ -981,6 +983,9 @@ impl Runtime {
                     admission.recheck().and_then(|()| admission.permits(&action))
                         .map_err(|_| Error::Refused("workflow caller authority changed"))?;
                     let deciders = admission.deciders().map_err(|_| Error::Refused("workflow caller authority changed"))?;
+                    let queue_held = if let farcooler_protocol::workflow_commands::Action::Queue { item, .. } = &*action {
+                        !self.apply_queue_check(&admission.workspace(), item, queue_check, now())?
+                    } else { false };
                     let get = matches!(*action, farcooler_protocol::workflow_commands::Action::Get);
                     let mut result = if let farcooler_protocol::workflow_commands::Action::Settle { mutation, item, run, pin, landed } = &*action {
                         self.settle_wire(&admission.workspace(), item, run, pin, *landed, mutation.epoch).await?

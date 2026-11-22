@@ -364,7 +364,7 @@ pub enum Command {
     Retry { item: String },
     /// The orchestrator queues a ticket waiting at its `Join` step into the open group.
     Queue { item: String },
-    /// The runner checked this exact waiting candidate against the landing head.
+    /// A waiting branch rebase from an older runner. Retained for event replay.
     RefreshJoin { item: String, previous: String, base: String, result: JoinRefresh },
     /// The orchestrator pulls a queued ticket out of a group that has not left yet.
     Leave { item: String },
@@ -488,6 +488,18 @@ pub const MAX_REWORK_REASON_BYTES: usize = 4096;
 pub fn valid_rework_reason(reason: &str) -> bool {
     !reason.trim().is_empty() && reason.len() <= MAX_REWORK_REASON_BYTES
         && !reason.chars().any(|c| c.is_control() && !matches!(c, '\t' | '\r' | '\n'))
+}
+
+/// The builder's instructions after a landing conflict.
+pub fn rebase_conflict_brief(base: &str, paths: &[String]) -> String {
+    let mut brief = format!("Rebase your existing work onto landing base {base}, resolve the conflicts, run the affected tests, and commit the result. Conflicting paths: {paths:?}");
+    if brief.len() > MAX_REWORK_REASON_BYTES {
+        let mut end = MAX_REWORK_REASON_BYTES - '…'.len_utf8();
+        while !brief.is_char_boundary(end) { end -= 1; }
+        brief.truncate(end);
+        brief.push('…');
+    }
+    brief
 }
 
 /// Each step's back-edge budget, including unused and zero-limit steps.

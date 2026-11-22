@@ -51,6 +51,13 @@ pub(super) fn is_verb(kind: &StageKind) -> bool {
 const COMMIT_IDENTITY: [&str; 8] = ["-c", "user.name=Far Cooler", "-c", "user.email=landing@farcooler.invalid",
     "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"];
 
+#[derive(Serialize)]
+pub(super) struct PickConflict {
+    member: String,
+    commit: String,
+    pub files: Vec<String>,
+}
+
 impl Exec {
     pub(super) fn verb_path(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.verb.json", digest(&binding.effect)))
@@ -568,7 +575,7 @@ impl Exec {
         spotlight::exclude_builds(&tree).await;
         for member in members {
             if *cancel.borrow() { return Ok(Outcome::SafeFailure); }
-            if let Some(conflict) = self.pick_member(binding, &tree, &base, member).await? {
+            if let Some(conflict) = self.pick_member(Some(binding), &tree, member).await? {
                 // Diagnose the whole batch on main, retaining only successful members. This
                 // catches both conflicts with main and conflicts between tickets in one pass.
                 let mut conflicts = Vec::new();
@@ -577,10 +584,8 @@ impl Exec {
                 for suspect in members {
                     if *cancel.borrow() { return Ok(Outcome::SafeFailure); }
                     let checkpoint = self.git_recorded(binding, &tree, &["rev-parse", "HEAD"]).await?;
-                    if let Some(detail) = self.pick_member(binding, &tree, &base, suspect).await? {
-                        if let Some(paths) = detail.get("files").and_then(|v| v.as_array()) {
-                            files.extend(paths.iter().filter_map(|v| v.as_str().map(String::from)));
-                        }
+                    if let Some(detail) = self.pick_member(Some(binding), &tree, suspect).await? {
+                        files.extend(detail.files);
                         conflicts.push(suspect.item.clone());
                         // Aborting a pick only undoes its last commit; discard every earlier
                         // commit from this member before testing the next member.
@@ -610,49 +615,67 @@ impl Exec {
 
     /// Apply one pinned member; an empty pick is already on the base. Abort a conflict before
     /// returning so diagnosis and the next member always start from a settled tree.
-    pub(super) async fn pick_member(&self, binding: &Binding, tree: &Path, _base: &str,
-        member: &farcooler_workflow::Member) -> Result<Option<serde_json::Value>>
+    pub(super) async fn pick_member(&self, binding: Option<&Binding>, tree: &Path,
+        member: &farcooler_workflow::Member) -> Result<Option<PickConflict>>
     {
         // `git cherry` lists what the member holds that the tree (the base plus every member folded so
         // far) lacks, oldest first, marking with `-` a commit whose patch is already there under another
         // sha. A ticket stacked on another's commits, or on copies already on the base, skips those.
-        let listed = self.git_recorded(binding, tree, &["cherry", "HEAD", &member.candidate]).await?;
+        let listed = self.pick_read(binding, tree, &["cherry", "HEAD", &member.candidate]).await?;
         for commit in listed.lines().filter_map(|l| l.strip_prefix("+ ")).filter(|c| !c.is_empty()) {
             let pick = |extra: &'static [&'static str]| -> Vec<&str> {
                 COMMIT_IDENTITY.iter().copied().chain(extra.iter().copied()).collect()
             };
             let mut args = pick(&["cherry-pick", "-x"]); args.push(commit);
-            if self.try_git(binding, tree, &args).await?.0 { continue; }
-            let unmerged = self.git_recorded(binding, tree, &["diff", "--name-only", "--diff-filter=U"]).await?;
-            let clean = self.try_git(binding, tree, &["diff", "--cached", "--quiet"]).await?.0
-                && self.try_git(binding, tree, &["diff", "--quiet"]).await?.0;
-            if unmerged.trim().is_empty() && clean && self.try_git(binding, tree, &pick(&["cherry-pick", "--skip"])).await?.0 {
+            if self.pick_git(binding, tree, &args).await?.0 { continue; }
+            let unmerged = self.pick_read(binding, tree, &["diff", "--name-only", "--diff-filter=U"]).await?;
+            let clean = self.pick_git(binding, tree, &["diff", "--cached", "--quiet"]).await?.0
+                && self.pick_git(binding, tree, &["diff", "--quiet"]).await?.0;
+            if unmerged.is_empty() && clean && self.pick_git(binding, tree, &pick(&["cherry-pick", "--skip"])).await?.0 {
                 continue;
             }
             // Only confirmed unmerged paths diagnose a member; infrastructure failures retry the fold.
-            if unmerged.trim().is_empty() { return Err(Error::Refused("fold cherry-pick failed without conflicts")); }
-            self.git_recorded(binding, tree, &pick(&["cherry-pick", "--abort"])).await?;
+            if unmerged.is_empty() { return Err(Error::Refused("fold cherry-pick failed without conflicts")); }
+            self.pick_read(binding, tree, &pick(&["cherry-pick", "--abort"])).await?;
             // A copy of this change on the tree under other context (a later commit of the same ticket
             // touched the same file) is not a conflict: the change is already there.
             if self.change_is_in_tree(binding, tree, commit).await? { continue; }
-            return Ok(Some(serde_json::json!({ "member": member.item, "commit": commit,
-                "files": unmerged.lines().collect::<Vec<_>>() })));
+            return Ok(Some(PickConflict { member: member.item.clone(), commit: commit.into(),
+                files: unmerged.lines().map(str::to_owned).collect() }));
         }
         Ok(None)
     }
 
+    async fn pick_git(&self, binding: Option<&Binding>, tree: &Path, args: &[&str]) -> Result<(bool, String)> {
+        if let Some(binding) = binding {
+            let (ok, stdout, _) = self.try_git(binding, tree, args).await?;
+            return Ok((ok, stdout));
+        }
+        // A linked worktree shares the repository's recorded conflict resolutions.
+        let mut probe = vec!["-c", "rerere.enabled=false"];
+        probe.extend_from_slice(args);
+        let output = crate::git::git(tree, &probe).await.map_err(|_| Error::Refused("queue Git check failed"))?;
+        Ok((output.ok, output.stdout.trim().into()))
+    }
+
+    async fn pick_read(&self, binding: Option<&Binding>, tree: &Path, args: &[&str]) -> Result<String> {
+        let (ok, stdout) = self.pick_git(binding, tree, args).await?;
+        if !ok { return Err(Error::Refused("Git refused while applying landing commits")); }
+        Ok(stdout)
+    }
+
     /// Whether the tree already holds a commit with exactly this commit's lines changed, whatever its sha
     /// and context: the commits since the two last met are compared by their zero-context change.
-    async fn change_is_in_tree(&self, binding: &Binding, tree: &Path, commit: &str) -> Result<bool> {
+    async fn change_is_in_tree(&self, binding: Option<&Binding>, tree: &Path, commit: &str) -> Result<bool> {
         let change = |commit: String| async move {
-            let diff = self.git_recorded(binding, tree, &["diff-tree", "-p", "-U0", "--no-commit-id", "-r", &commit]).await?;
+            let diff = self.pick_read(binding, tree, &["diff-tree", "-p", "-U0", "--no-commit-id", "-r", &commit]).await?;
             Ok::<_, Error>(diff.lines().filter(|l| !l.starts_with("index ") && !l.starts_with("@@")).collect::<Vec<_>>().join("\n"))
         };
         let wanted = change(commit.to_string()).await?;
         if wanted.is_empty() { return Ok(false); }
-        let fork = self.git_recorded(binding, tree, &["merge-base", "HEAD", commit]).await?;
+        let fork = self.pick_read(binding, tree, &["merge-base", "HEAD", commit]).await?;
         let range = format!("{fork}..HEAD");
-        for held in self.git_recorded(binding, tree, &["rev-list", &range]).await?.lines().filter(|c| !c.is_empty()) {
+        for held in self.pick_read(binding, tree, &["rev-list", &range]).await?.lines().filter(|c| !c.is_empty()) {
             if change(held.to_string()).await? == wanted { return Ok(true); }
         }
         Ok(false)
