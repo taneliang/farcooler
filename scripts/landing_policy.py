@@ -158,6 +158,7 @@ SCRIPT_USERS = {
     'scripts/landing-benchmark-test.py': {'wire'},  # wire lane-gate --self-test runs this regression suite in its scratch repository.
     'scripts/landing-benchmark.py': None,  # Full: transitive gate users not established; retain conservative fallback.
     'scripts/landing-gate': None,  # Full: entry wrapper chooses and admits the entire gate.
+    'scripts/lane-gate-lifetime-test.py': {'wire'},  # wire checks the self-test process lifetime.
     'scripts/landing-gate-test.py': {'wire'},  # ci.yml wire invokes this regression suite; its gate/build subprocesses use scratch fixtures.
     'scripts/landing-policy-test.py': {'wire'},  # wire lane-gate --self-test runs this regression suite in its scratch repository.
     'scripts/landing-timing.py': {'wire'},  # ci.yml wire runs self-test/check; script calls are checks or release automation, not platform builds.

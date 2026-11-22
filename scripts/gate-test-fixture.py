@@ -12,6 +12,8 @@ import subprocess
 import sys
 import tempfile
 
+import process_guard
+
 
 def run(source):
     with tempfile.TemporaryDirectory(prefix="lane-gate-source-") as temporary, \
@@ -53,4 +55,5 @@ def run(source):
         candidates = repo / ".git/green.ndjson"
         candidates.write_text(json.dumps({"head_sha": green}) + "\n")
         env["CANDIDATES"] = str(candidates)
-        return subprocess.call([sys.executable, str(repo / "scripts/lane-gate.py"), "--self-test"], cwd=repo, env=env)
+        return process_guard.run([sys.executable, str(repo / "scripts/lane-gate.py"), "--self-test"],
+                                 cwd=repo, env=env).returncode
