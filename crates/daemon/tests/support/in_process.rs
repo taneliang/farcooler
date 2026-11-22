@@ -52,7 +52,7 @@ pub async fn start_legacy(scope: Scope) -> Harness {
 
 async fn start_with(peer: Peer, legacy: bool) -> Harness {
     let dir = tempfile::Builder::new().prefix("ny").tempdir_in(short_tmp()).unwrap();
-    let socket = dir.path().join("d.sock");
+    let socket = dir.path().join("farcoolerd.sock");
     let home = dir.path().join("home");
     std::fs::create_dir(&home).unwrap();
     farcooler_daemon::service::stub_agents_in_this_process();
