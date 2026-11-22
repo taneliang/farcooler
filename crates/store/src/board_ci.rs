@@ -1,12 +1,7 @@
-//! What the runner last read of CI (ov-309, ov-306): one row per subject a
-//! board names, so a landing group's pushed SHA and a page's CI reference draw from
-//! the same read.
+//! What the runner last read of CI for a landing group's pushed SHA.
 //!
-//! A **subject** is `sha:<sha>` (every run on that commit), `run:<id>` (one
-//! run) or `main` (every run on the default branch's newest commit that has
-//! any). The runner reads them through `gh`, read only, while something on the
-//! board names them (`daemon/src/ci_watch.rs`), and writes each read here
-//! whole. Nothing is derived from a guess: a subject `gh` couldn't answer for
+//! The runner reads the runs on that commit through `gh` and records them
+//! under `sha:<sha>` (`daemon/src/ci_watch.rs`). Nothing is derived from a guess: a subject `gh` couldn't answer for
 //! reads `unknown`, never green.
 //!
 //! The table is migration 0027's (`lane_migrations.rs`).
@@ -25,9 +20,6 @@ use crate::tasks::now_millis;
 pub fn sha_subject(sha: &str) -> String {
     format!("sha:{}", sha.to_ascii_lowercase())
 }
-
-/// The default branch's subject.
-pub const MAIN_SUBJECT: &str = "main";
 
 /// Where a subject's CI stands, over all its runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

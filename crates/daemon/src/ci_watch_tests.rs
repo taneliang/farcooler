@@ -1,6 +1,6 @@
 //! The CI watch's parsers, fed what a real `gh` printed for this repository
 //! with the watch's own filters (`test/fixtures/ci/`, recorded Oct 5 with
-//! `gh api -X GET ... --jq <RUNS_JQ | RUN_JQ | JOBS_JQ>`).
+//! `gh api -X GET ...`).
 
 use super::*;
 
@@ -39,8 +39,7 @@ fn a_failed_commit_reads_failed_with_its_jobs() {
 }
 
 /// One commit's runs (here 898ae57d's, from a list of main's), one per
-/// workflow, all passed. Which commit main is at is asked of gh, not guessed
-/// from the newest run (a_page_reads_live_ci).
+/// workflow, all passed.
 #[test]
 fn a_commit_s_runs_count_each_workflow_once() {
     let runs = parse_runs(&fixture("runs-main.json")).expect("gh's runs parse");

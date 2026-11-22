@@ -160,7 +160,7 @@ fn a_stage_move_into_or_out_of_landing_works_after_release() {
 
 #[test]
 fn a_main_ci_read_after_release_does_not_send_the_collecting_landing_off() {
-    use crate::board_ci::{CiRead, CiStatus, MAIN_SUBJECT};
+    use crate::board_ci::{CiRead, CiStatus};
     let r = released();
     let s = &r.store;
     // Lift the landing fences so only the legacy gate, not the fence, can keep depart out.
@@ -173,7 +173,7 @@ fn a_main_ci_read_after_release_does_not_send_the_collecting_landing_off() {
     s.conn().execute("UPDATE landings SET state='landed' WHERE number=2", []).unwrap();
     s.put_on_line(r.other, &NewTicketLine { reason: "p".into(), branch: "o".into(), worktree_id: None, worktree_path: "/p".into(), stack_parent: None }, Actor::User).unwrap();
     s.conn().execute("UPDATE ticket_lines SET stage='landing' WHERE task_id=?1", [r.other.as_bytes().as_slice()]).unwrap();
-    let read = CiRead { subject: MAIN_SUBJECT.into(), sha: "abc".into(), status: CiStatus::Passed, url: String::new(),
+    let read = CiRead { subject: "main".into(), sha: "abc".into(), status: CiStatus::Passed, url: String::new(),
         jobs: Vec::new(), fetched_at: 5, changed_at: 5, asked_at: 5 };
     s.record_ci(r.ws, &read).unwrap();
     assert_eq!(s.conn().query_row("SELECT state||collecting FROM landings WHERE number=4", [], |x| x.get::<_, String>(0)).unwrap(), "open1", "the collecting landing stays");

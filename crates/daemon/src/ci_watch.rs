@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use farcooler_store::board_ci::{self, CiJob, CiRead, CiStatus, MAIN_SUBJECT};
+use farcooler_store::board_ci::{self, CiJob, CiRead, CiStatus};
 use farcooler_store::models::Actor;
 use serde::Deserialize;
 use uuid::Uuid;
@@ -47,8 +47,6 @@ pub const QUIET: Duration = Duration::from_secs(10 * 60);
 /// What a list of runs is cut down to: the fields read here, nothing more.
 pub const RUNS_JQ: &str =
     "[.workflow_runs[] | {id, name, head_sha, status, conclusion, html_url, created_at, display_title, event, updated_at}]";
-/// One run, the same fields.
-pub const RUN_JQ: &str = "{id, name, head_sha, status, conclusion, html_url, created_at, display_title, event, updated_at}";
 /// A run's jobs.
 pub const JOBS_JQ: &str = "[.jobs[] | {name, status, conclusion, html_url}]";
 
@@ -69,7 +67,6 @@ pub async fn run(svc: Arc<Service>, watcher: Arc<Watcher>) {
 pub struct Memo {
     shas: HashMap<String, String>,
     jobs: HashMap<u64, (String, Option<String>, Vec<GhJob>)>,
-    default_branch: HashMap<Uuid, String>,
     /// Subjects GitHub didn't answer for, or had no run for: how many reads
     /// in a row, and when to ask again (review train-1005c M2).
     misses: HashMap<(Uuid, String), (u32, i64)>,
@@ -103,7 +100,7 @@ pub fn next_wait(busy: bool, first_due_ms: Option<i64>, now_ms: i64) -> Duration
     }
 }
 
-/// One run, as `RUNS_JQ` and `RUN_JQ` print it.
+/// One run, as `RUNS_JQ` prints it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct GhRun {
     pub id: u64,
@@ -139,7 +136,7 @@ pub fn parse_runs(bytes: &[u8]) -> Option<Vec<GhRun>> {
     serde_json::from_slice(bytes).map_err(|e| tracing::warn!(error = %e, "could not read gh's runs")).ok()
 }
 
-/// `RUN_JQ`'s output.
+/// One run from a CI receipt.
 pub fn parse_run(bytes: &[u8]) -> Option<GhRun> {
     serde_json::from_slice(bytes).map_err(|e| tracing::warn!(error = %e, "could not read gh's run")).ok()
 }
@@ -156,8 +153,7 @@ pub fn parse_jobs(bytes: &[u8]) -> Option<Vec<GhJob>> {
 /// Never the nightly iOS UI run (`NIGHTLY`, ov-534). It carries main's head at
 /// 11:23 UTC, so it would sit beside a train's CI as an hour of "running" and,
 /// with one red shard, turn a green push into "failed". It is a verdict on
-/// main, reported by its own issue, not on the commit a train pushed. (A
-/// `run:` subject names one run on purpose and does not come through here.)
+/// main, reported by its own issue, not on the commit a train pushed.
 pub fn latest_per_workflow(runs: &[GhRun]) -> Vec<GhRun> {
     let mut newest: BTreeMap<&str, &GhRun> = BTreeMap::new();
     for run in runs.iter().filter(|r| r.name != NIGHTLY) {
@@ -291,7 +287,7 @@ pub fn memo_holds(run_status: &str) -> bool {
     run_status == "completed"
 }
 
-/// The full SHA a ref names (a short SHA, or a branch), through gh.
+/// The full SHA a short SHA names, through gh.
 async fn commit_of(svc: &Service, tree: &Path, reference: &str) -> Option<String> {
     let path = format!("repos/{{owner}}/{{repo}}/commits/{reference}");
     let found = gh_get(svc, tree, &api_args(&path, &[], ".sha")).await;
@@ -317,8 +313,7 @@ async fn runs_on(svc: &Service, tree: &Path, sha: &str) -> Option<Vec<GhRun>> {
 }
 
 /// Read one subject now.
-pub async fn read_subject(svc: &Service, repository: Uuid, tree: &Path, subject: &str, memo: &mut Memo) -> CiRead {
-    const RUNS: &str = "repos/{owner}/{repo}/actions/runs";
+async fn read_subject(svc: &Service, tree: &Path, subject: &str, memo: &mut Memo) -> CiRead {
     let runs = if let Some(sha) = subject.strip_prefix("sha:") {
         let full = match memo.shas.get(sha) {
             Some(full) => Some(full.clone()),
@@ -338,26 +333,6 @@ pub async fn read_subject(svc: &Service, repository: Uuid, tree: &Path, subject:
             Some(full) => runs_on(svc, tree, &full).await,
             None => None,
         }
-    } else if let Some(id) = subject.strip_prefix("run:") {
-        let path = format!("{RUNS}/{id}");
-        gh_get(svc, tree, &api_args(&path, &[], RUN_JQ)).await.and_then(|b| parse_run(&b)).map(|r| vec![r])
-    } else if subject == MAIN_SUBJECT {
-        let branch = match memo.default_branch.get(&repository) {
-            Some(b) => b.clone(),
-            None => {
-                let found = svc.default_branch(repository, tree).await.unwrap_or_else(|| "main".into());
-                let bare = found.strip_prefix("origin/").unwrap_or(&found).to_string();
-                memo.default_branch.insert(repository, bare.clone());
-                bare
-            }
-        };
-        // The commit main is at now, asked every time: never the commit of
-        // the newest-created run, which a late follow-up run on an older
-        // commit can be (review train-1005c M3). Its own runs, or none yet.
-        match commit_of(svc, tree, &branch).await {
-            Some(head) => runs_on(svc, tree, &head).await,
-            None => None,
-        }
     } else {
         None
     };
@@ -370,10 +345,10 @@ pub async fn read_subject(svc: &Service, repository: Uuid, tree: &Path, subject:
 }
 
 /// The main checkout `gh` runs in for a board's repository.
-pub(crate) fn tree_of(svc: &Service, workspace: Uuid) -> Option<(Uuid, PathBuf)> {
+fn tree_of(svc: &Service, workspace: Uuid) -> Option<PathBuf> {
     let ws = svc.store.get_workspace(workspace).ok()?;
     let repo = svc.store.get_repository(ws.repository_id).ok()?;
-    Some((repo.id, svc.repository_worktree(&repo)))
+    Some(svc.repository_worktree(&repo))
 }
 
 /// Every board's CI subjects from its engine landing groups.
@@ -399,7 +374,7 @@ pub async fn read_all(svc: &Service, watcher: &Watcher, memo: &mut Memo) -> Dura
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
     let mut busy = false;
     for (workspace, subjects) in wanted {
-        let Some((repository, tree)) = tree_of(svc, workspace) else { continue };
+        let Some(tree) = tree_of(svc, workspace) else { continue };
         let mut changed = false;
         for subject in subjects {
             let last = svc.store.ci_read(workspace, &subject).ok().flatten();
@@ -410,7 +385,7 @@ pub async fn read_all(svc: &Service, watcher: &Watcher, memo: &mut Memo) -> Dura
             if memo.misses.get(&key).is_some_and(|(_, due)| now < *due) {
                 continue;
             }
-            let read = read_subject(svc, repository, &tree, &subject, memo).await;
+            let read = read_subject(svc, &tree, &subject, memo).await;
             busy |= keeps_busy(read.status);
             if matches!(read.status, CiStatus::Unknown | CiStatus::None) {
                 let misses = memo.misses.get(&key).map_or(0, |(n, _)| *n) + 1;

@@ -37,8 +37,8 @@ pub enum Ruling {
     /// reads its member's and writes none, these four being no messenger's
     /// (`rep_may`).
     PerPerson,
-    /// The plan layer: the ranking, a theme, a ticket, an agent, a ruling, a landing or an
-    /// orchestrator's page. Every member's to change, written under their
+    /// The plan layer: the ranking, a theme, a ticket, an agent, a ruling or a landing.
+    /// Every member's to change, written under their
     /// name (ov-707), and a rep's on its member's behalf, written under the
     /// member's (`stamp_rep`). The owner, 24 Oct (ov-736), reversing ov-637:
     /// a team works on one plan through one orchestrator.

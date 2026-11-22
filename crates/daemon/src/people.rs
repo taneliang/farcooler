@@ -539,8 +539,7 @@ fn ruling_of(req: &Request) -> Option<Ruling> {
 }
 
 /// Whether `req` changes the plan layer (`Ruling::Plan`): the ranking, a
-/// theme, a ticket on the line, an agent, a ruling, a landing or an
-/// orchestrator's page. Every
+/// theme, a ticket on the line, an agent, a ruling or a landing. Every
 /// member's to change, under their own name, as the task layer is (the
 /// owner, 24 Oct, ov-736, reversing ov-637), and a rep's for its member
 /// (`stamp_rep`).
