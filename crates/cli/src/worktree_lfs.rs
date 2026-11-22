@@ -13,8 +13,7 @@ use farcooler_protocol::v1::{self as pb, result};
 use crate::tasks::{DispatchLink, Refused, refused};
 use crate::{Fallible, expect_value, find_worktree, list_worktrees, req_for, short_bytes, uuid_of};
 
-/// What a runner without `lfs_pointers` is told, in the style of the other
-/// old-runner refusals (`This runner needs an update to show pages.`).
+/// What a runner without `lfs_pointers` is told.
 pub(crate) const NO_LFS: &str = "This runner needs an update to download large files again.";
 
 /// Ask the runner to try again for `worktree`, and print what's left.

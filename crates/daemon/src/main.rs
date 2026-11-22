@@ -364,8 +364,8 @@ async fn run(selected: &paths::RuntimeSelection) -> Result<(), i32> {
     #[cfg(unix)]
     let check_in_task = tokio::spawn(watcher.clone().run_check_in_scheduler(uuid::Uuid::now_v7(), check_in_shutdown_rx));
 
-    // The CI watch (ov-309): reads GitHub Actions through `gh` for the trains
-    // and pages that name a commit, only here, never in a `--stdio` session.
+    // The CI watch reads GitHub Actions through `gh` for commits pushed by
+    // landing groups. It runs here, outside the `--stdio` session.
     tokio::spawn(farcooler_daemon::ci_watch::run(service.clone(), watcher.clone()));
 
     // The PR watch (ov-312): re-reads the pull requests of lanes in review or

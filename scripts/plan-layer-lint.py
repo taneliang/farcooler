@@ -18,8 +18,8 @@ So are budgets and cost (ov-307): the table of token budgets, and the cost reads
 (a theme's trend, the week's tokens, the harness and model comparison) that the
 plan carries.
 
-So are trains (ov-309) and the CI reads the runner keeps for trains and
-pages: their tables, types and store calls are names the board must not use.
+So are trains (ov-309) and CI reads for landing groups: their tables, types
+and store calls are names the board must not use.
 
 So, since ov-872, are the line and its landings, which replaced lanes and
 trains. Agents and their work on tickets (`agents`, `ticket_work`) are not:
