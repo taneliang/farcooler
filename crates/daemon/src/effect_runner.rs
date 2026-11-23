@@ -128,21 +128,39 @@ pub(crate) async fn owned_yielding(tree: &Path, argv: &[String], environment: &s
 pub(crate) struct Owner { pub pid: u32, pub started: String }
 impl Owner {
     pub(crate) fn started_at(pid: u32) -> std::io::Result<String> {
+        Self::start_micros(pid).map(|micros| micros.to_string())
+    }
+
+    fn start_micros(pid: u32) -> std::io::Result<i64> {
         #[cfg(test)]
         if TEST_START_UNAVAILABLE.try_with(|_| ()).is_ok() {
             return Err(std::io::Error::other("injected unavailable process start identity"));
         }
-        crate::process_reads::OWNER.read(move || Self::read_started_at(pid))
-            .ok_or_else(|| std::io::Error::other("process start identity query unavailable"))?
+        i32::try_from(pid).ok().filter(|&pid| pid > 0)
+            .and_then(crate::proc_table::owner_start_micros)
+            .ok_or_else(|| std::io::Error::other("process start identity query unavailable"))
     }
-    fn read_started_at(pid: u32) -> std::io::Result<String> {
-        let output = std::process::Command::new("/bin/ps")
-            .args(["-o", "lstart=", "-p", &pid.to_string()]).env_clear().output()?;
-        let started = String::from_utf8(output.stdout).map_err(std::io::Error::other)?.trim().to_string();
-        if !output.status.success() || started.is_empty() {
-            return Err(std::io::Error::other("process start identity unavailable"));
+
+    pub(crate) fn matches_started(pid: u32, started: &str) -> std::io::Result<bool> {
+        let micros = Self::start_micros(pid)?;
+        if let Ok(expected) = started.parse::<i64>() {
+            return Ok(micros == expected);
         }
-        Ok(started)
+        // Existing receipts contain the local time from `ps -o lstart=`.
+        let seconds = (micros / 1_000_000) as libc::time_t;
+        let mut local = std::mem::MaybeUninit::<libc::tm>::uninit();
+        let mut formatted = [0u8; 64];
+        // SAFETY: both calls write to the supplied buffers, and strftime
+        // reads the tm only after localtime_r initialized it successfully.
+        let len = unsafe {
+            if libc::localtime_r(&seconds, local.as_mut_ptr()).is_null() { 0 } else {
+                libc::strftime(formatted.as_mut_ptr().cast(), formatted.len(),
+                    c"%a %b %e %H:%M:%S %Y".as_ptr(), local.as_ptr())
+            }
+        };
+        if len == 0 { return Err(std::io::Error::other("cannot format legacy process start identity")); }
+        let legacy = std::str::from_utf8(&formatted[..len]).map_err(std::io::Error::other)?;
+        Ok(legacy.split_whitespace().eq(started.split_whitespace()))
     }
     pub(crate) fn write(path: &Path, pid: u32) -> std::io::Result<()> {
         let bytes = serde_json::to_vec(&Owner { pid, started: Self::started_at(pid)? }).map_err(std::io::Error::other)?;
@@ -168,7 +186,7 @@ impl Owner {
         // from a recycled PID. Neither signal it nor authorize another gate.
         if owner.started.trim().is_empty() { return Ok(false); }
         if unsafe { libc::kill(owner.pid as i32, 0) } == 0 {
-            if Self::started_at(owner.pid)? != owner.started { return Ok(true); }
+            if !Self::matches_started(owner.pid, &owner.started)? { return Ok(true); }
         } else {
             let error = std::io::Error::last_os_error();
             if error.raw_os_error() != Some(libc::ESRCH) { return Err(error); }
@@ -341,6 +359,34 @@ tokio::task_local! { pub(crate) static TEST_UNSETTLED: std::cell::RefCell<Option
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn kernel_start_identity_matches_a_legacy_owner_receipt() {
+        let pid = std::process::id();
+        let old_ps = std::process::Command::new("/bin/ps")
+            .args(["-o", "lstart=", "-p", &pid.to_string()]).env_clear().output().unwrap();
+        assert!(old_ps.status.success());
+        let legacy = std::str::from_utf8(&old_ps.stdout).unwrap().trim();
+        assert!(Owner::matches_started(pid, legacy).unwrap(), "{legacy}");
+        let micros = Owner::started_at(pid).unwrap().parse::<i64>().unwrap();
+        assert!(Owner::matches_started(pid, &micros.to_string()).unwrap());
+        assert!(!Owner::matches_started(pid, &(micros + 1).to_string()).unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_child_can_exit_before_its_owner_receipt_is_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("owner.json");
+        let mut child = std::process::Command::new("/bin/sh").args(["-c", "exit 0"]).spawn().unwrap();
+        let pid = child.id();
+        tokio::time::timeout(Duration::from_secs(2), exited(pid)).await.unwrap().unwrap();
+        let written = Owner::write(&path, pid);
+        assert!(child.wait().unwrap().success());
+        written.unwrap();
+        let owner: Owner = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(owner.pid, pid);
+        assert!(owner.started.parse::<i64>().unwrap() > 0);
+    }
+
     #[tokio::test]
     async fn process_output_keeps_the_bounded_tail_of_both_streams() {
         let dir = tempfile::tempdir().unwrap();

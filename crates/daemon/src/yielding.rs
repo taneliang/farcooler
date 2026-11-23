@@ -116,12 +116,15 @@ fn signal(target: &Target, sig: i32) -> bool {
     match target {
         Target::Group { pid, started } => {
             // The leader is the identity: a group whose leader started at another time is not ours.
-            if !started.is_empty() && crate::effect_runner::Owner::started_at(*pid).is_ok_and(|actual| actual == *started) {
-                unsafe { libc::killpg(*pid as i32, sig); }
-                if sig == libc::SIGSTOP {
-                    // Wait for the pending stops before another process can enter the heavy queue.
-                    return heavy_queue::group_stopped(*pid as i32) && heavy_queue::group_stopped(*pid as i32);
-                }
+            match crate::effect_runner::Owner::matches_started(*pid, started) {
+                Ok(false) => return true,
+                Err(_) => return matches!(crate::effect_runner::Group::gone(*pid), Ok(true)),
+                Ok(true) => {},
+            }
+            unsafe { libc::killpg(*pid as i32, sig); }
+            if sig == libc::SIGSTOP {
+                // Wait for the pending stops before another process can enter the heavy queue.
+                return heavy_queue::group_stopped(*pid as i32) && heavy_queue::group_stopped(*pid as i32);
             }
         }
         Target::Hold(hold) => {

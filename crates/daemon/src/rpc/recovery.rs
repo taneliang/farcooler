@@ -53,10 +53,16 @@ impl RecoveryHandler {
     /// Pid, terminal and session leader of the caller, for the journal.
     fn caller_note(&self) -> String {
         let Some((pid, start)) = self.caller else { return "unknown caller".into() };
-        // SAFETY: getsid reads another process's session id; it changes nothing.
-        let session = unsafe { libc::getsid(pid) };
-        let tty = std::process::Command::new("ps").args(["-o", "tty=", "-p", &pid.to_string()]).output().ok()
-            .and_then(|o| String::from_utf8(o.stdout).ok()).map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).unwrap_or_else(|| "?".into());
+        let session = crate::process_reads::DETAILS.read(move || {
+            // SAFETY: getsid reads another process's session id.
+            unsafe { libc::getsid(pid) }
+        }).filter(|&session| session >= 0).map_or_else(|| "?".into(), |session| session.to_string());
+        let topology = crate::proc_table::topology();
+        let tty = topology.as_deref().and_then(|rows| rows.lines().find_map(|row| {
+            let mut fields = row.split_whitespace();
+            if fields.next()?.parse::<i32>().ok()? != pid { return None; }
+            fields.nth(2)
+        })).unwrap_or("?");
         format!("pid {pid} (started {}), tty {tty}, session leader {session}", start.map_or("?".to_string(), |s| s.to_string()))
     }
 

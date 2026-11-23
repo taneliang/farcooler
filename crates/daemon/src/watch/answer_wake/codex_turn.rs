@@ -112,7 +112,7 @@ fn remember(pid: i32, path: Option<PathBuf>, started: Option<i64>) {
 
 /// The rollout codex process `pid` holds open now, looked up afresh (not
 /// `rollout_of`'s join, kept for seconds): the one a send's record goes to.
-/// Off the executor: it spawns `ps` and `lsof`.
+/// Off the executor while it waits for the bounded process reads.
 pub(crate) async fn rollout_now(pid: i32) -> Option<PathBuf> {
     tokio::task::spawn_blocking(move || crate::log_join::codex_rollout_of(pid)).await.ok().flatten()
 }

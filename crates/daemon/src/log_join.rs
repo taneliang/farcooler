@@ -362,18 +362,9 @@ pub fn codex_rollout_of(pid: i32) -> Option<PathBuf> {
 /// shell holds no rollout open at all. Asking `lsof` about the pane pid alone
 /// finds nothing, forever, in the ordinary way the product is used.
 ///
-/// One `ps` for the whole table rather than a walk that spawns per level:
-/// the tree is rebuilt from `pid`/`ppid` pairs, so depth costs nothing.
+/// Use one bounded topology read for the whole tree.
 fn process_subtree(root: i32) -> Vec<i32> {
-    let out = Command::new("ps")
-        .args(["-axo", "pid=,ppid="])
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output();
-    let Ok(out) = out else { return vec![root] };
-    let text = String::from_utf8_lossy(&out.stdout);
-
-    subtree_from_ps(root, &text)
+    crate::proc_table::topology().map_or_else(|| vec![root], |text| subtree_from_ps(root, &text))
 }
 
 pub(crate) fn subtree_from_ps(root: i32, text: &str) -> Vec<i32> {
@@ -412,12 +403,12 @@ fn open_files_for_pid(pid: i32) -> Vec<PathBuf> {
     // `lsof -p` takes a comma-separated list, so the whole subtree costs the
     // same single spawn one pid did.
     let pids = process_subtree(pid).iter().map(i32::to_string).collect::<Vec<_>>().join(",");
-    let out = Command::new("lsof")
+    let out = crate::process_reads::OPEN_FILES.read(move || Command::new("lsof")
         .args(["-p", &pids, "-Fn"])
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .output();
-    let Ok(out) = out else { return Vec::new() };
+        .output());
+    let Some(Ok(out)) = out else { return Vec::new() };
 
     // `-Fn` is a field-per-line format: each process's block opens with a
     // `p<pid>` line (not a path, and skipped by the tag check below), followed
