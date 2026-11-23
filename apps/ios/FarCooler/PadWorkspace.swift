@@ -8,7 +8,7 @@ import SwiftUI
 // - Tree: the One tree as an outline, the Mac's sidebar: the same
 //   `OneTree.rows`, each row with children opened and closed in place.
 // - Plan: the canvas's home, the same sections the phone's Plan sheet draws
-//   (`PlanHomeList`). A theme, ticket, page or task picked in the tree shows
+//   (`PlanHomeList`). A theme, ticket or task picked in the tree shows
 //   here, and so does the Board, the toolbar's item.
 // - Chat: the orchestrator's pane, always shown.
 //
