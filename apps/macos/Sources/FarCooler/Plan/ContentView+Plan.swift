@@ -160,8 +160,7 @@ extension ContentView {
     /// What a plan page reads from the board: its rows, and where a task,
     /// a ticket or a theme opens.
     func planContext(_ board: TaskBoardStore, host: String, workspace: String) -> PlanPageContext {
-        let worktrees = store.fleet.worktrees.filter { ($0.host ?? "") == host && $0.workspace == workspace }
-        return PlanPageContext(
+        PlanPageContext(
             rows: Dictionary(board.board.rows.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
             onTask: { row in openTask(row.id, host: host, workspace: workspace) },
             onOpen: { page in openPlan(page, host: host, workspace: workspace) })
