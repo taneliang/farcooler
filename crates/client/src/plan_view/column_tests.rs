@@ -238,18 +238,18 @@ fn ov895_landing_facts_and_agent_identity_survive_the_projection() {
             json!({ "terminal": "term-l", "title": "Land the mobile fixes" }))],
         "board_counts": { "done": 8, "in_progress": 2 },
     }), json!({}));
-    assert_eq!(facts(&c), ["Next landing: 1 ticket, 14 min", "8 of 10 done"]);
+    assert_eq!(facts(&c), ["8 of 10 done"]);
     assert_eq!(c.roster[0].terminal.as_deref(), Some("term-l"));
     assert_eq!(c.roster[0].title, "Land the mobile fixes");
     assert_eq!(c.roster[0].doing, "Watching source checks");
-    assert!(c.pipeline[1].assigned[0].detail.as_ref().unwrap().contains("Landing: checking on CI"));
+    assert!(!c.pipeline[1].assigned[0].detail.as_ref().unwrap().contains("Landing:"));
     let red = column(json!({
         "lines": [with(line("t1", "landing"), json!({ "landing": 9 }))],
         "landings": [landing(9, "red", &["t1"], "ci_failed", NOW - 5 * MINUTE)],
     }), json!({}));
     assert!(!red.facts.iter().any(|f| f.kind == FactKind::NextLanding));
     assert_eq!(red.pipeline[0].stage, PipeStage::Landing);
-    assert!(red.pipeline[0].unattended[0].detail.as_ref().unwrap().contains("CI failed"));
+    assert!(!red.pipeline[0].unattended[0].detail.as_ref().unwrap().contains("CI failed"));
 }
 
 /// The actual Rust answer drives the focused DOM and screenshot check on every UI edge.
@@ -289,7 +289,7 @@ fn ov895_next_landing_and_pipeline_share_status_eligibility() {
         "landings": [landing(9, "gating", &["t1", "t2", "t3"], "waiting_for_ci", NOW - MINUTE)],
     }), json!({ "statuses": { "t2": "done", "t3": "cancelled" } }));
     assert_eq!(c.pipeline[0].count, 1);
-    assert_eq!(facts(&c), ["Next landing: 1 ticket, 1 min"]);
+    assert!(facts(&c).is_empty());
 }
 
 /// A ticket's engine run is said under it in the pipeline (ov-1040), in the plan's words, and a ticket with none says nothing.

@@ -136,7 +136,12 @@ fn sections_match_the_shared_cases() {
             .collect();
         assert!(!expect.is_empty(), "{} has an outline", case["name"]);
         for style in ["apple", "material"] {
-            let got = outline(&view_of(request(case, style)));
+            // These historical fixtures also exercise the internal card builder.
+            let mut raw_plan = case["plan"].clone();
+            drop_nulls(&mut raw_plan);
+            let plan: input::Plan = serde_json::from_value(raw_plan).unwrap();
+            let context: input::Context = serde_json::from_value(request(case, style)["context"].clone()).unwrap();
+            let got = outline(&build::build(&plan, &context, None));
             assert_eq!(got, expect, "{} in {style}", case["name"]);
         }
     }
@@ -152,10 +157,10 @@ fn titles_follow_the_platform_case_but_never_a_login() {
     assert_eq!(title(&material, SectionKind::InReview), "In review");
     assert_eq!(title(&apple, SectionKind::NeedsYou), "Needs You");
     assert_eq!(title(&material, SectionKind::NeedsYou), "Needs you");
-    assert_eq!(apple.in_review[0].status, "In Review");
-    assert_eq!(material.in_review[0].status, "In review");
-    assert_eq!(apple.landings[0].phase_word, "Waiting for Tickets");
-    assert_eq!(material.landings[0].phase_word, "Waiting for tickets");
+    assert_eq!(apple.in_review.iter().find(|c| c.key == "ov-311").unwrap().status, "In Review");
+    assert_eq!(material.in_review.iter().find(|c| c.key == "ov-311").unwrap().status, "In review");
+    assert!(apple.landings.is_empty());
+    assert!(material.landings.is_empty());
 
     let mut plan = case["plan"].clone();
     let line = plan["lines"].as_array_mut().unwrap().iter_mut().find(|l| l["key"] == "ov-311").unwrap();
@@ -275,60 +280,14 @@ fn the_view_golden_is_current() {
     }
 }
 
-/// A ticket on a landing carries what the Apple apps draw beside its title:
-/// its mark, its warnings (stale, over budget) as notes, its branch and what a
-/// screen reader says; and an agent names its raw model for the screen reader.
 #[test]
-fn a_landing_ticket_carries_its_mark_and_warnings() {
-    let hour = 3_600_000;
-    let now = 1_800_000_000_000i64;
-    let line = |task: &str, stage: &str, extra: Value| {
-        let mut l = json!({ "task": task, "key": task, "title": format!("Title of {task}"), "stage": stage,
-            "branch": format!("lane-{task}"), "stage_since": now - 30 * hour, "landing": 7 });
-        l.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
-        l
-    };
-    let plan = json!({
-        "now_ms": now,
-        "lines": [
-            line("ov-1", "building", json!({ "stale": true, "budget_tokens": 10, "spend": { "input_tokens": 20 } })),
-            line("ov-2", "landing", json!({})),
-            line("ov-3", "building", json!({ "work": [{ "agent": "a", "role": "fix" }], "fix_rounds": 2 })),
-            line("ov-4", "needs_you", json!({ "stale": true })),
-        ],
-        "landings": [{ "id": "l7", "number": 7, "state": "open", "tickets": [] }],
-        "agents": [{ "id": "pane:l", "role": "lander", "model": "claude-opus-4-1", "working": true, "tickets": [] }],
-    });
-    let mut plan = plan;
-    plan["landings"][0]["lander"] = json!("pane:l");
-    let view = view_of(json!({ "schema": SCHEMA, "plan": plan, "context": { "style": "apple" } }));
-    let card = &view.landings[0];
-    assert_eq!(card.lander.as_ref().unwrap().model, "claude-opus-4-1");
-    let ticket = |key: &str| card.tickets.iter().find(|t| t.key == key).unwrap();
-
-    let stale = ticket("ov-1");
-    assert_eq!(stale.mark, Mark::Building);
-    assert!(stale.mark_attention);
-    assert_eq!(stale.branch, "lane-ov-1");
-    let notes: Vec<(NoteKind, &str)> = stale.notes.iter().map(|n| (n.kind, n.text.as_str())).collect();
-    assert_eq!(notes, [(NoteKind::Warning, "No move in 30 h"), (NoteKind::OverBudget, "Over budget: 20 of 10 tokens")]);
-    assert_eq!(stale.accessibility, "Title of ov-1, No move in 30 h, Over budget. 20 of 10 tokens used.");
-
-    // The line under its title: its key, and how long it has stood, unless a
-    // warning says so; a landed one leads with its commit.
-    assert_eq!(stale.second, "ov-1");
-    let ready = ticket("ov-2");
-    assert_eq!((ready.mark, ready.mark_attention, ready.notes.len()), (Mark::Landing, false, 0));
-    assert_eq!(ready.second, "ov-2 · 1 d");
-    assert_eq!(ticket("ov-3").mark, Mark::Fixing);
-
-    // Waiting on the owner says "Needs you" once, as its note: never stale too.
-    let owner = ticket("ov-4");
-    assert_eq!(owner.note.as_deref(), Some("Needs you"));
-    assert_eq!(owner.notes.iter().map(|n| n.text.as_str()).collect::<Vec<_>>(), ["Needs you"]);
-    assert!(owner.mark_attention);
-    assert_eq!(owner.second, "ov-4");
-    assert_eq!(owner.accessibility, "Title of ov-4, Needs you");
+fn old_landing_rows_do_not_affect_the_plan() {
+    let plan = json!({ "lines": [{ "task": "t1", "key": "ov-1", "stage": "landing", "landing": 7 }],
+        "landings": [{ "id": "l7", "number": 7, "state": "gating", "phase": "waiting_for_ci", "tickets": [{ "task": "t1" }] }] });
+    let view = view_of(json!({ "schema": SCHEMA, "plan": plan, "context": {} }));
+    assert!(view.landings.is_empty());
+    assert!(!view.column.facts.iter().any(|f| f.kind == column::FactKind::NextLanding));
+    assert!(!view.column.pipeline[0].unattended[0].detail.as_deref().unwrap().contains("Landing:"));
 }
 
 /// Android draws a working ticket's agent as a line of its own, and its second

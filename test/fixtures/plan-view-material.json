@@ -311,7 +311,7 @@
             "agents": [],
             "assigned": [
               {
-                "detail": "Assigned: Lander · In stage for 3 h · Landing: waiting for tickets",
+                "detail": "Assigned: Lander · In stage for 3 h",
                 "initiative": "Teams and accounts",
                 "initiativeId": "th-1",
                 "key": "ov-487",
@@ -437,29 +437,29 @@
             "id": "t-ov-487",
             "stage": null,
             "stale": null,
-            "status": "Landing · in Landing 86",
-            "statusBesideStage": "Landing · in Landing 86"
+            "status": "Landing",
+            "statusBesideStage": "Landing"
           },
           {
             "id": "t-ov-485",
             "stage": null,
             "stale": null,
-            "status": "Waiting · in Landing 86",
-            "statusBesideStage": "Waiting · in Landing 86"
+            "status": "Waiting",
+            "statusBesideStage": "Waiting"
           },
           {
             "id": "t-ov-300",
             "stage": null,
             "stale": null,
-            "status": "Waiting · in Landing 84",
-            "statusBesideStage": "Waiting · in Landing 84"
+            "status": "Waiting",
+            "statusBesideStage": "Waiting"
           },
           {
             "id": "t-ov-301",
             "stage": null,
             "stale": null,
-            "status": "Waiting · in Landing 89",
-            "statusBesideStage": "Waiting · in Landing 89"
+            "status": "Waiting",
+            "statusBesideStage": "Waiting"
           },
           {
             "id": "t-ov-302",
@@ -521,6 +521,33 @@
         "trackSummary": "1 waiting on you · 2 moving"
       },
       "inReview": [
+        {
+          "accessibility": "The team directory, Teams and accounts, Landing · ov-487",
+          "agent": {
+            "id": "pane:i1",
+            "line": "Lander · opus · 1.4M",
+            "model": "opus",
+            "terminal": null,
+            "tokens": "1.4M",
+            "who": "Lander · opus"
+          },
+          "branch": "team-dir",
+          "heading": "The team directory",
+          "id": "t-ov-487",
+          "key": "ov-487",
+          "landedLanding": null,
+          "mark": "landing",
+          "markAttention": false,
+          "note": null,
+          "notes": [],
+          "rank": null,
+          "run": null,
+          "second": "Landing · ov-487",
+          "stage": "landing",
+          "status": "Landing",
+          "theme": "Teams and accounts",
+          "waitsOnOwner": false
+        },
         {
           "accessibility": "Title of ov-311, Trustworthy agent view, In review · ov-311",
           "agent": null,
@@ -611,227 +638,7 @@
           "waitsOnOwner": false
         }
       ],
-      "landings": [
-        {
-          "attention": false,
-          "carries": null,
-          "ciUnread": null,
-          "explanation": "Some of its tickets aren't ready to land yet.",
-          "id": "tr-86",
-          "label": "Landing 86",
-          "ladder": {
-            "at": 0,
-            "compact": "Waiting for tickets · step 1 of 3",
-            "steps": [
-              {
-                "explanation": "Some of its tickets aren't ready to land yet.",
-                "label": "Waiting for tickets"
-              },
-              {
-                "explanation": "Pushed, with CI running its checks.",
-                "label": "Checking on CI"
-              },
-              {
-                "explanation": "Everything passed and it has landed on main.",
-                "label": "Landed"
-              }
-            ]
-          },
-          "lander": {
-            "id": "pane:i1",
-            "line": "Lander · opus · 1.4M",
-            "model": "opus",
-            "terminal": null,
-            "tokens": "1.4M",
-            "who": "Lander · opus"
-          },
-          "landerWords": "Lander · opus · 1.4M",
-          "number": 86,
-          "phase": "waiting_for_tickets",
-          "phaseSentence": "waiting for tickets",
-          "phaseWord": "Waiting for tickets",
-          "pushedSha": null,
-          "since": 1799992800000,
-          "subtitle": null,
-          "tickets": [
-            {
-              "accessibility": "The team directory",
-              "agent": {
-                "id": "pane:i1",
-                "line": "Lander · opus · 1.4M",
-                "model": "opus",
-                "terminal": null,
-                "tokens": "1.4M",
-                "who": "Lander · opus"
-              },
-              "branch": "team-dir",
-              "heading": "The team directory",
-              "id": "t-ov-487",
-              "key": "ov-487",
-              "landedLanding": null,
-              "mark": "landing",
-              "markAttention": false,
-              "note": null,
-              "notes": [],
-              "rank": null,
-              "run": null,
-              "second": "ov-487 · 3 h",
-              "stage": "landing",
-              "status": "Landing · in Landing 86",
-              "theme": "Teams and accounts",
-              "waitsOnOwner": false
-            },
-            {
-              "accessibility": "Title of ov-485",
-              "agent": {
-                "id": "pane:i1",
-                "line": "Lander · opus · 1.4M",
-                "model": "opus",
-                "terminal": null,
-                "tokens": "1.4M",
-                "who": "Lander · opus"
-              },
-              "branch": "ios-overwrite",
-              "heading": "Title of ov-485",
-              "id": "t-ov-485",
-              "key": "ov-485",
-              "landedLanding": null,
-              "mark": "waiting",
-              "markAttention": false,
-              "note": null,
-              "notes": [],
-              "rank": null,
-              "run": null,
-              "second": "ov-485 · 5 h",
-              "stage": "waiting",
-              "status": "Waiting · in Landing 86",
-              "theme": "Teams and accounts",
-              "waitsOnOwner": false
-            }
-          ]
-        },
-        {
-          "attention": false,
-          "carries": null,
-          "ciUnread": null,
-          "explanation": "Some of its tickets aren't ready to land yet.",
-          "id": "tr-89",
-          "label": "Landing 89",
-          "ladder": {
-            "at": 0,
-            "compact": "Waiting for tickets · step 1 of 3",
-            "steps": [
-              {
-                "explanation": "Some of its tickets aren't ready to land yet.",
-                "label": "Waiting for tickets"
-              },
-              {
-                "explanation": "Pushed, with CI running its checks.",
-                "label": "Checking on CI"
-              },
-              {
-                "explanation": "Everything passed and it has landed on main.",
-                "label": "Landed"
-              }
-            ]
-          },
-          "lander": null,
-          "landerWords": null,
-          "number": 89,
-          "phase": "waiting_for_tickets",
-          "phaseSentence": "waiting for tickets",
-          "phaseWord": "Waiting for tickets",
-          "pushedSha": null,
-          "since": 1799996400000,
-          "subtitle": null,
-          "tickets": [
-            {
-              "accessibility": "Each person's asks reach the orchestrator",
-              "agent": null,
-              "branch": "reps",
-              "heading": "Each person's asks reach the orchestrator",
-              "id": "t-ov-301",
-              "key": "ov-301",
-              "landedLanding": null,
-              "mark": "waiting",
-              "markAttention": false,
-              "note": null,
-              "notes": [],
-              "rank": null,
-              "run": null,
-              "second": "ov-301 · 1 h",
-              "stage": "waiting",
-              "status": "Waiting · in Landing 89",
-              "theme": "Marketing",
-              "waitsOnOwner": false
-            }
-          ]
-        },
-        {
-          "attention": true,
-          "carries": null,
-          "ciUnread": null,
-          "explanation": "Nothing here has moved for a while.",
-          "id": "tr-84",
-          "label": "Landing 84",
-          "ladder": {
-            "at": 0,
-            "compact": "Stalled · step 1 of 3",
-            "steps": [
-              {
-                "explanation": "Nothing here has moved for a while.",
-                "label": "Stalled"
-              },
-              {
-                "explanation": "Pushed, with CI running its checks.",
-                "label": "Checking on CI"
-              },
-              {
-                "explanation": "Everything passed and it has landed on main.",
-                "label": "Landed"
-              }
-            ]
-          },
-          "lander": null,
-          "landerWords": null,
-          "number": 84,
-          "phase": "stalled",
-          "phaseSentence": "stalled",
-          "phaseWord": "Stalled",
-          "pushedSha": null,
-          "since": 1799874000000,
-          "subtitle": null,
-          "tickets": [
-            {
-              "accessibility": "Title of ov-300, Needs you",
-              "agent": null,
-              "branch": "web-site",
-              "heading": "Title of ov-300",
-              "id": "t-ov-300",
-              "key": "ov-300",
-              "landedLanding": null,
-              "mark": "waiting",
-              "markAttention": true,
-              "note": "Needs you",
-              "notes": [
-                {
-                  "attention": true,
-                  "help": null,
-                  "kind": "warning",
-                  "text": "Needs you"
-                }
-              ],
-              "rank": null,
-              "run": null,
-              "second": "ov-300",
-              "stage": "waiting",
-              "status": "Waiting · in Landing 84",
-              "theme": "Marketing",
-              "waitsOnOwner": true
-            }
-          ]
-        }
-      ],
+      "landings": [],
       "needsYou": 2,
       "now": 1800000000000,
       "onLandedLanding": [],
@@ -846,15 +653,15 @@
           "title": "Needs you"
         },
         {
-          "count": 3,
-          "empty": null,
+          "count": 0,
+          "empty": "Nothing is landing right now.",
           "folded": false,
           "help": "Reviewed tickets land on main together, after one round of checks.",
           "kind": "landing",
           "title": "Landing"
         },
         {
-          "count": 3,
+          "count": 4,
           "empty": null,
           "folded": false,
           "help": null,
@@ -870,7 +677,7 @@
           "title": "Building"
         },
         {
-          "count": 2,
+          "count": 5,
           "empty": null,
           "folded": false,
           "help": null,
@@ -965,24 +772,6 @@
           {
             "cards": [
               {
-                "glyph": "not_started",
-                "id": "t-ov-300",
-                "key": "ov-300",
-                "title": "Title of ov-300"
-              }
-            ],
-            "done": 0,
-            "fraction": 0.0,
-            "id": "th-2",
-            "moving": true,
-            "name": "Marketing",
-            "ownerAsk": "How do we ship the site?",
-            "progress": "0 of 3 done",
-            "total": 3
-          },
-          {
-            "cards": [
-              {
                 "glyph": "in_progress",
                 "id": "t-ov-487",
                 "key": "ov-487",
@@ -1009,6 +798,24 @@
             "ownerAsk": null,
             "progress": "2 of 5 done",
             "total": 5
+          },
+          {
+            "cards": [
+              {
+                "glyph": "not_started",
+                "id": "t-ov-300",
+                "key": "ov-300",
+                "title": "Title of ov-300"
+              }
+            ],
+            "done": 0,
+            "fraction": 0.0,
+            "id": "th-2",
+            "moving": false,
+            "name": "Marketing",
+            "ownerAsk": "How do we ship the site?",
+            "progress": "0 of 3 done",
+            "total": 3
           }
         ]
       },
@@ -1016,6 +823,53 @@
         {
           "attention": false,
           "cards": [
+            {
+              "accessibility": "Title of ov-485, Teams and accounts, Waiting · ov-485",
+              "agent": {
+                "id": "pane:i1",
+                "line": "Lander · opus · 1.4M",
+                "model": "opus",
+                "terminal": null,
+                "tokens": "1.4M",
+                "who": "Lander · opus"
+              },
+              "branch": "ios-overwrite",
+              "heading": "Title of ov-485",
+              "id": "t-ov-485",
+              "key": "ov-485",
+              "landedLanding": null,
+              "mark": "waiting",
+              "markAttention": false,
+              "note": null,
+              "notes": [],
+              "rank": null,
+              "run": null,
+              "second": "Waiting · ov-485",
+              "stage": "waiting",
+              "status": "Waiting",
+              "theme": "Teams and accounts",
+              "waitsOnOwner": false
+            },
+            {
+              "accessibility": "Each person's asks reach the orchestrator, Marketing, Waiting · ov-301",
+              "agent": null,
+              "branch": "reps",
+              "heading": "Each person's asks reach the orchestrator",
+              "id": "t-ov-301",
+              "key": "ov-301",
+              "landedLanding": null,
+              "mark": "waiting",
+              "markAttention": false,
+              "note": null,
+              "notes": [],
+              "rank": null,
+              "run": null,
+              "second": "Waiting · ov-301",
+              "stage": "waiting",
+              "status": "Waiting",
+              "theme": "Marketing",
+              "waitsOnOwner": false
+            },
             {
               "accessibility": "Title of ov-302, Marketing, Waiting · ov-302",
               "agent": null,
@@ -1059,6 +913,40 @@
           ],
           "kind": "not_ranked",
           "title": "Not ranked"
+        },
+        {
+          "attention": true,
+          "cards": [
+            {
+              "accessibility": "Title of ov-300, Marketing, Waiting · ov-300, Needs you",
+              "agent": null,
+              "branch": "web-site",
+              "heading": "Title of ov-300",
+              "id": "t-ov-300",
+              "key": "ov-300",
+              "landedLanding": null,
+              "mark": "waiting",
+              "markAttention": true,
+              "note": null,
+              "notes": [
+                {
+                  "attention": true,
+                  "help": null,
+                  "kind": "warning",
+                  "text": "Needs you"
+                }
+              ],
+              "rank": null,
+              "run": null,
+              "second": "Waiting · ov-300",
+              "stage": "waiting",
+              "status": "Waiting",
+              "theme": "Marketing",
+              "waitsOnOwner": true
+            }
+          ],
+          "kind": "on_you",
+          "title": "Waiting on you"
         }
       ]
     },

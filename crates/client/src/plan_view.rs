@@ -478,7 +478,14 @@ struct WordsStyle {
 /// Build the view from a plan, what the app knows beside it, and the
 /// workspace's workflow presentation.
 pub fn view(plan: &input::Plan, context: &input::Context, workflow: Option<&Presentation>) -> PlanView {
-    build::build(plan, context, workflow.or(plan.workflow.as_ref()))
+    // Older runners still send numbered pre-engine landings. They belong to
+    // history, not the Plan; engine landing groups arrive in the workflow.
+    let mut presented = plan.clone();
+    presented.landings.clear();
+    for line in &mut presented.lines {
+        line.landing = None;
+    }
+    build::build(&presented, context, workflow.or(plan.workflow.as_ref()))
 }
 
 /// The JSON bridge every platform calls: a request in, `{schema, view}` or

@@ -104,29 +104,6 @@
               }
             ],
             "text": "1 ticket needs you"
-          },
-          {
-            "attention": false,
-            "kind": "next_landing",
-            "runs": [
-              {
-                "strong": false,
-                "text": "Next landing: "
-              },
-              {
-                "strong": true,
-                "text": "1"
-              },
-              {
-                "strong": false,
-                "text": " ticket"
-              },
-              {
-                "strong": false,
-                "text": ", 14 min"
-              }
-            ],
-            "text": "Next landing: 1 ticket, 14 min"
           }
         ],
         "footer": [],
@@ -256,7 +233,7 @@
             "agents": [],
             "assigned": [
               {
-                "detail": "Assigned: Lander · In stage for 3 h · Landing: checking on CI",
+                "detail": "Assigned: Lander · In stage for 3 h",
                 "initiative": null,
                 "initiativeId": null,
                 "key": "ov-4",
@@ -394,8 +371,8 @@
             "id": "t4",
             "stage": null,
             "stale": "No move in 3 h",
-            "status": "Landing · in Landing 9",
-            "statusBesideStage": "Landing · in Landing 9"
+            "status": "Landing",
+            "statusBesideStage": "Landing"
           },
           {
             "id": "t5",
@@ -463,6 +440,40 @@
           "waitsOnOwner": false
         },
         {
+          "accessibility": "Source checks on an older landing, Landing · ov-4 · Lander · sonnet, No move in 3 h",
+          "agent": {
+            "id": "l",
+            "line": "Lander · sonnet",
+            "model": "sonnet",
+            "terminal": null,
+            "tokens": null,
+            "who": "Lander · sonnet"
+          },
+          "branch": "branch-t4",
+          "heading": "Source checks on an older landing",
+          "id": "t4",
+          "key": "ov-4",
+          "landedLanding": null,
+          "mark": "landing",
+          "markAttention": true,
+          "note": null,
+          "notes": [
+            {
+              "attention": true,
+              "help": null,
+              "kind": "warning",
+              "text": "No move in 3 h"
+            }
+          ],
+          "rank": null,
+          "run": null,
+          "second": "Landing · ov-4 · Lander · sonnet",
+          "stage": "landing",
+          "status": "Landing",
+          "theme": null,
+          "waitsOnOwner": false
+        },
+        {
           "accessibility": "Schema choice, Needs You · ov-5, Needs you",
           "agent": null,
           "branch": "branch-t5",
@@ -511,79 +522,7 @@
         }
       ],
       "landedToday": [],
-      "landings": [
-        {
-          "attention": false,
-          "carries": null,
-          "ciUnread": null,
-          "explanation": "Pushed, with CI running its checks.",
-          "id": "landing-9",
-          "label": "Landing 9",
-          "ladder": {
-            "at": 1,
-            "compact": "Checking on CI · step 2 of 3",
-            "steps": [
-              {
-                "explanation": "The full test run, on the runner.",
-                "label": "Checking Here"
-              },
-              {
-                "explanation": "Pushed, with CI running its checks.",
-                "label": "Checking on CI"
-              },
-              {
-                "explanation": "Everything passed and it has landed on main.",
-                "label": "Landed"
-              }
-            ]
-          },
-          "lander": null,
-          "landerWords": null,
-          "number": 9,
-          "phase": "waiting_for_ci",
-          "phaseSentence": "checking on CI",
-          "phaseWord": "Checking on CI",
-          "pushedSha": null,
-          "since": 1799999160000,
-          "subtitle": null,
-          "tickets": [
-            {
-              "accessibility": "Source checks on an older landing, No move in 3 h",
-              "agent": {
-                "id": "l",
-                "line": "Lander · sonnet",
-                "model": "sonnet",
-                "terminal": null,
-                "tokens": null,
-                "who": "Lander · sonnet"
-              },
-              "branch": "branch-t4",
-              "heading": "Source checks on an older landing",
-              "id": "t4",
-              "key": "ov-4",
-              "landedLanding": null,
-              "mark": "landing",
-              "markAttention": true,
-              "note": null,
-              "notes": [
-                {
-                  "attention": true,
-                  "help": null,
-                  "kind": "warning",
-                  "text": "No move in 3 h"
-                }
-              ],
-              "rank": null,
-              "run": null,
-              "second": "ov-4",
-              "stage": "landing",
-              "status": "Landing · in Landing 9",
-              "theme": null,
-              "waitsOnOwner": false
-            }
-          ]
-        }
-      ],
+      "landings": [],
       "needsYou": 1,
       "now": 1800000000000,
       "onLandedLanding": [],
@@ -598,15 +537,15 @@
           "title": "Needs You"
         },
         {
-          "count": 1,
-          "empty": null,
+          "count": 0,
+          "empty": "Nothing is landing right now.",
           "folded": false,
           "help": "Reviewed tickets land on main together, after one round of checks.",
           "kind": "landing",
           "title": "Landing"
         },
         {
-          "count": 4,
+          "count": 5,
           "empty": null,
           "folded": false,
           "help": null,

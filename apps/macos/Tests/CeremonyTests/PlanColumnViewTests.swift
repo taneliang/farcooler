@@ -67,7 +67,7 @@ struct PlanColumnViewTests {
         for (a, b) in zip(order.indices, order.indices.dropFirst()) where !["plan-pipeline"].contains(order[a]) {
             #expect(frames[a].maxY <= frames[b].minY + 0.5, "\(order[a]) then \(order[b])")
         }
-        #expect(drawn["plan-fact-stuck"] == nil && drawn["plan-fact-nextLanding"] != nil && drawn["plan-fact-done"] != nil)
+        #expect(drawn["plan-fact-stuck"] == nil && drawn["plan-fact-nextLanding"] == nil && drawn["plan-fact-done"] != nil)
     }
 
     @Test("Tickets are in their own stage, outside the unique agent roster")
