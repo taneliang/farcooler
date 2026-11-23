@@ -27,6 +27,7 @@ async fn list_and_show_read_an_engine_group() {
     let store = &h.service.store;
     let task = store.create_task(repo.workspace, "Engine landing", Actor::Manager).unwrap();
     let mut state = State::empty(repo.workspace.to_string(), 1);
+    state.revision = 1;
     state.archive.insert("group-00000000000000000001-landing".into(), Archived {
         phase: Phase::Done,
         candidate: Some("abcdef1".into()),
@@ -43,8 +44,8 @@ async fn list_and_show_read_an_engine_group() {
     });
     let json = serde_json::to_string(&state).unwrap().replace('\'', "''");
     exec_for_tests(store, &format!(
-        "INSERT INTO workflow_states(workspace, revision, epoch, state) VALUES ('{}', 0, 1, '{json}')",
-        repo.workspace,
+        "INSERT INTO workflow_states(workspace, revision, epoch, state) VALUES ('{}', {}, 1, '{json}')",
+        repo.workspace, state.revision,
     ));
     exec_for_tests(store, &format!(
         "INSERT INTO workflow_owned_items(workspace, item, task_id) VALUES ('{}', '{}', X'{}')",
