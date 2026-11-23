@@ -1,5 +1,8 @@
 //! Workflow command admission, execution and reply shaping.
-use farcooler_protocol::workflow_commands::{Action, BUNDLE_VIEW, MAX_BYTES};
+use farcooler_protocol::{
+    accepts::{WORKFLOW_FULL, WORKFLOW_PLAN, WORKFLOW_PLAN_PAGE},
+    workflow_commands::{Action, BUNDLE_VIEW, MAX_BYTES},
+};
 
 use super::*;
 use crate::workflow_runtime::{GetView, encode_legacy_get, encode_plan_get};
@@ -44,12 +47,9 @@ impl Rpc {
             return crate::workflow_drafts::handle(svc, &self.watcher, workspace, &action);
         } // filed and asked of a person here, never the engine (ov-971)
         // Every read bypasses the effect inbox and its per-message git/tree cleanup.
-        let plan_view = req
-            .accepts
-            .iter()
-            .any(|v| v == farcooler_protocol::accepts::WORKFLOW_PLAN);
-        let summary = req.accepts.iter().any(|v| v == "workflow_summary_v1");
-        let full = req.accepts.iter().any(|v| v == "workflow_full_v1");
+        let full = req.accepts.iter().any(|v| v == WORKFLOW_FULL);
+        let plan_view = !full && req.accepts.iter().any(|v| v == WORKFLOW_PLAN);
+        let summary = !full && req.accepts.iter().any(|v| v == "workflow_summary_v1");
         if let Action::Logs { item } = action {
             let value = handle
                 .read_logs(admission, item)
@@ -78,7 +78,7 @@ impl Rpc {
         let value = if action_is_get {
             let view = if plan_view {
                 GetView::Plan
-            } else if summary && !full {
+            } else if summary {
                 GetView::Summary
             } else {
                 GetView::Full
@@ -92,23 +92,24 @@ impl Rpc {
             _ => DomainError::NotFound,
         })?;
         if action_is_get && plan_view {
+            let cursor = req.accepts.iter().find_map(|v| v.strip_prefix(WORKFLOW_PLAN_PAGE));
             return Ok(result::Value::WorkflowReply(
                 farcooler_protocol::v1::WorkflowReply {
                     schema: 1,
-                    json: encode_plan_get(value),
+                    json: encode_plan_get(value, cursor)?,
                 },
             ));
         }
         let mut value = value;
         // `workspace re-pin` reads the published workflow and nothing else (ov-1373): the state, notices and
         // lists beside it grow without bound, and the reply may not pass the 1 MiB frame cap.
-        if action_is_get && req.accepts.iter().any(|v| v == "workflow_repin_v1") {
+        if action_is_get && !full && req.accepts.iter().any(|v| v == "workflow_repin_v1") {
             if let Some(o) = value.as_object_mut() {
                 o.retain(|k, _| matches!(k.as_str(), "schema" | "configuration" | "context"));
             }
         }
         self.announce_workflow_publication(&value);
-        if summary && !full {
+        if summary {
             return Ok(result::Value::WorkflowReply(
                 farcooler_protocol::v1::WorkflowReply {
                     schema: 1,

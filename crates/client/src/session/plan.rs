@@ -28,9 +28,15 @@ impl Session {
     pub async fn plan_with_workflow(&self, workspace: Uuid) -> Result<serde_json::Value, SessionError> {
         let plan = self.plan(workspace).await?;
         let read = self.can(farcooler_protocol::capability::WORKFLOW_COMMANDS).then_some(async {
-            self.start_request(crate::plan_json::workflow_plan_request(workspace))?.value().await
+            let mut pages = crate::plan_json::WorkflowPlanPages::new(workspace);
+            loop {
+                let reply = self.start_request(pages.request())?.value().await?;
+                if let Some(state) = pages.push(reply)? {
+                    break Ok(state);
+                }
+            }
         });
-        crate::plan_json::with_workflow(&plan, workspace, read).await
+        crate::plan_json::with_workflow_state(&plan, workspace, read).await
     }
 
     /// The owner keeps one ruling (`ruling.set` to confirmed, as `user`,

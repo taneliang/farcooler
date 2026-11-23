@@ -149,14 +149,12 @@ impl Session {
         let value = self.value_requiring(action.method(), Some(workspace),
             Some(request::Payload::WorkflowCommand(WorkflowCommand { schema: 1, json })),
             vec![capability::WORKFLOW_COMMANDS.into()]).await?;
-        match value {
-            result::Value::WorkflowReply(reply) if reply.schema == 1 => serde_json::from_str(&reply.json).map_err(|e| invalid(e.to_string())),
-            _ => Err(invalid("invalid workflow reply")),
-        }
+        crate::plan_json::workflow_reply(value)
     }
     /// Fetch authenticated state, admission context and schema2 cards.
     pub async fn workflow_snapshot(&self, workspace: Uuid, style: Style) -> Result<WorkflowSnapshot, SessionError> {
-        let raw = self.workflow_wire(workspace, serde_json::to_string(&wire::Action::Get).expect("closed action")).await?;
+        let reply = self.start_request(crate::plan_json::workflow_request(workspace))?.value().await?;
+        let raw = crate::plan_json::workflow_reply(reply)?;
         let (state, context, presentation) = decode_presentation(workspace, &raw, style)?;
         let host = self.host().await?;
         let host = Uuid::from_slice(&host.id).map_err(|_| invalid("invalid workflow host identity"))?.to_string();

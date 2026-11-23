@@ -233,6 +233,10 @@ pub mod accepts {
     pub const NEEDS_YOU_FYI: &str = "needs_you_fyi";
     /// Renderable state for Plan's workflow enrichment, without the full workflow history.
     pub const WORKFLOW_PLAN: &str = "workflow_plan_v1";
+    /// A Plan continuation returned in `plan_next` and echoed in `Request.accepts`.
+    pub const WORKFLOW_PLAN_PAGE: &str = "workflow_plan_page_v1:";
+    /// The complete Engine read. An oversized response is refused by the transport.
+    pub const WORKFLOW_FULL: &str = "workflow_full_v1";
 }
 
 pub mod workflow_commands;

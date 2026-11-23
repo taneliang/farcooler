@@ -13,10 +13,16 @@
 use farcooler_protocol::v1 as pb;
 use serde_json::{Value, json};
 
-use crate::session::{short, uuid_of};
+use crate::session::{SessionError, short, uuid_of};
 
 /// The authenticated workflow snapshot request used by Engine.
 pub fn workflow_request(workspace: uuid::Uuid) -> pb::Request {
+    let mut request = workflow_get_request(workspace);
+    request.accepts.push(farcooler_protocol::accepts::WORKFLOW_FULL.into());
+    request
+}
+
+fn workflow_get_request(workspace: uuid::Uuid) -> pb::Request {
     use farcooler_protocol::capability;
     let mut request = farcooler_transport::request("workflow.get");
     request.target_resource_id = Some(bytes::Bytes::copy_from_slice(workspace.as_bytes()));
@@ -28,11 +34,66 @@ pub fn workflow_request(workspace: uuid::Uuid) -> pb::Request {
     request
 }
 
-/// The compact workflow read used to enrich every app's Plan, including the CLI.
-pub fn workflow_plan_request(workspace: uuid::Uuid) -> pb::Request {
-    let mut request = workflow_request(workspace);
-    request.accepts.push(farcooler_protocol::accepts::WORKFLOW_PLAN.into());
-    request
+/// Assemble Plan's workflow items and stops before projecting the run cards.
+pub struct WorkflowPlanPages {
+    workspace: uuid::Uuid,
+    next: Option<String>,
+    state: Option<Value>,
+}
+
+impl WorkflowPlanPages {
+    pub fn new(workspace: uuid::Uuid) -> Self {
+        Self { workspace, next: None, state: None }
+    }
+
+    pub fn request(&self) -> pb::Request {
+        let mut request = workflow_get_request(self.workspace);
+        request.accepts.push(farcooler_protocol::accepts::WORKFLOW_PLAN.into());
+        request.accepts.extend(self.next.iter().cloned());
+        request
+    }
+
+    pub fn push(&mut self, reply: pb::result::Value) -> Result<Option<Value>, SessionError> {
+        let mut page = workflow_reply(reply)?;
+        let next = page.as_object_mut().and_then(|fields| fields.remove("plan_next"));
+        self.next = next.map(|next| {
+            next.as_str()
+                .filter(|s| s.starts_with(farcooler_protocol::accepts::WORKFLOW_PLAN_PAGE))
+                .map(str::to_owned)
+                .ok_or_else(|| SessionError::Protocol("Invalid workflow Plan continuation.".into()))
+        }).transpose()?;
+        if let Some(raw) = &mut self.state {
+            if raw["context"] != page["context"] || raw["state"]["revision"] != page["state"]["revision"]
+                || raw["state"]["epoch"] != page["state"]["epoch"]
+            {
+                return Err(SessionError::Protocol("The workflow changed while Plan was loading. Try again.".into()));
+            }
+            merge_workflow_rows(raw, &mut page, "/state/items")?;
+            merge_workflow_rows(raw, &mut page, "/stops")?;
+        } else {
+            self.state = Some(page);
+        }
+        Ok(if self.next.is_none() { self.state.take() } else { None })
+    }
+}
+
+fn merge_workflow_rows(raw: &mut Value, page: &mut Value, path: &str) -> Result<(), SessionError> {
+    let invalid = || SessionError::Protocol("Invalid workflow Plan page.".into());
+    let rows = raw.pointer_mut(path).and_then(Value::as_object_mut).ok_or_else(invalid)?;
+    let incoming = page.pointer_mut(path).and_then(Value::as_object_mut).ok_or_else(invalid)?;
+    if (path == "/state/items" && incoming.is_empty()) || incoming.keys().any(|id| rows.contains_key(id)) {
+        return Err(invalid());
+    }
+    rows.extend(std::mem::take(incoming));
+    Ok(())
+}
+
+pub(crate) fn workflow_reply(reply: pb::result::Value) -> Result<Value, SessionError> {
+    match reply {
+        pb::result::Value::WorkflowReply(reply) if reply.schema == 1 =>
+            serde_json::from_str(&reply.json).map_err(|e| SessionError::Protocol(e.to_string())),
+        _ => Err(SessionError::Protocol("invalid workflow reply".into())),
+    }
 }
 
 /// The single enrichment and compatibility policy for CLI, native and web Plan reads.
@@ -42,12 +103,19 @@ pub async fn with_workflow(
     workspace: uuid::Uuid,
     read: Option<impl std::future::Future<Output = Result<pb::result::Value, crate::session::SessionError>>>,
 ) -> Result<Value, crate::session::SessionError> {
-    use crate::session::{SessionError, workflow::decode_presentation};
+    with_workflow_state(plan, workspace, read.map(|read| async { workflow_reply(read.await?) })).await
+}
+
+pub async fn with_workflow_state(
+    plan: &pb::Plan,
+    workspace: uuid::Uuid,
+    read: Option<impl std::future::Future<Output = Result<Value, SessionError>>>,
+) -> Result<Value, SessionError> {
+    use crate::session::workflow::decode_presentation;
     let mut value = plan_json(plan);
     let Some(read) = read else { return Ok(value); };
     match read.await {
-        Ok(pb::result::Value::WorkflowReply(reply)) if reply.schema == 1 => {
-            let raw = serde_json::from_str(&reply.json).map_err(|e| SessionError::Protocol(e.to_string()))?;
+        Ok(raw) => {
             let (_, _, presentation) = decode_presentation(workspace, &raw, crate::workflow_presentation::Style::Apple)?;
             value["workflow"] = serde_json::to_value(presentation).expect("presentation serializes");
         }
@@ -55,7 +123,6 @@ pub async fn with_workflow(
         Err(SessionError::Refused { code, .. }) if matches!(pb::ErrorCode::try_from(code),
             Ok(pb::ErrorCode::ScopeDenied | pb::ErrorCode::CapabilityUnsupported)) => {}
         Err(error) => return Err(error),
-        _ => return Err(SessionError::Protocol("invalid workflow reply".into())),
     }
     Ok(value)
 }

@@ -17,14 +17,14 @@ async fn a_large_first_sync_does_not_disconnect_the_control_session() {
     exercise(750 * 1024, 0).await;
 }
 
-/// Released Plan clients use an unmarked workflow read to enrich the board.
+/// An unmarked read with too much live state refuses the call and keeps the link.
 #[tokio::test]
-async fn released_plan_loads_when_live_workflow_items_exceed_the_frame() {
+async fn unmarked_workflow_refuses_when_live_items_exceed_the_frame() {
     exercise(1200 * 1024, 0).await;
 }
 
 #[tokio::test]
-async fn released_plan_keeps_live_runs_when_workflow_metadata_exceeds_the_frame() {
+async fn unmarked_workflow_refuses_when_metadata_exceeds_the_frame() {
     exercise(8 * 1024, 1200 * 1024).await;
 }
 
@@ -109,36 +109,10 @@ async fn exercise(item_bytes: usize, metadata_bytes: usize) {
     }));
     let read = tokio::time::timeout(Duration::from_secs(5), client.call(get.clone())).await.unwrap();
     let workflow_oversized = json.len() > cap;
-    let reply = read.expect("released workflow read").value.unwrap();
     if workflow_oversized {
-        let result::Value::WorkflowReply(ref raw) = reply else { panic!("wrong workflow reply") };
-        let value: serde_json::Value = serde_json::from_str(&raw.json).unwrap();
-        assert_eq!(value["state"]["source_sequences"]["wire:owner"], 42);
-        let workspace_id = workspace.as_bytes().to_vec().into();
-        let mut plan_get = rpc("plan.get");
-        plan_get.payload = Some(request::Payload::PlanGet(pb::PlanGetRequest {
-            workspace_id, ..Default::default()
-        }));
-        let result::Value::Plan(plan) = client.call(plan_get).await.unwrap().value.unwrap() else {
-            panic!("wrong Plan reply");
-        };
-        let view = farcooler_client::plan_json::with_workflow(&plan, workspace, Some(async { Ok(reply) }))
-            .await.expect("released app decodes the bounded workflow snapshot");
-        let workflow = &view["workflow"];
-        assert_eq!(workflow["revision"], state.revision);
-        assert_eq!(workflow["epoch"], state.epoch);
-        let runs = workflow["runs"].as_array().unwrap();
-        assert!(!runs.is_empty());
-        assert!(runs.iter().all(|run| run["gate"].is_object()));
-        if item_bytes > cap {
-            assert!(runs.len() < state.items.len());
-        } else {
-            assert_eq!(runs.len(), state.items.len());
-        }
-        let mut full = get.clone();
-        full.accepts.push("workflow_full_v1".into());
-        oversized(client.call(full).await);
+        oversized(read);
     } else {
+        let reply = read.expect("released workflow read").value.unwrap();
         let result::Value::WorkflowReply(reply) = reply else { panic!("wrong reply") };
         let value: serde_json::Value = serde_json::from_str(&reply.json).unwrap();
         assert_eq!(value["state"], serde_json::to_value(&state).unwrap(), "complete workflow state");

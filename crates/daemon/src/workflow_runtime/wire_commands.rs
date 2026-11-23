@@ -81,120 +81,77 @@ pub(crate) enum GetView {
 fn retain_plan_items(state: &mut State) {
     state.archive.clear();
     state.seen.clear();
+    state.source_sequences.clear();
     state.grouping = None;
     state.items.retain(|_, item| !item.definition.is_ticket()
         && !(item.group_of.is_some() && matches!(item.phase, Phase::Done | Phase::Cancelled)));
 }
 
-/// Released Plan and Engine clients share the unmarked workflow read.
+/// Released Plan can load large archives through the unmarked read. Keep the
+/// rest of the reply intact so an oversized live state gets the frame refusal.
 pub(crate) fn encode_legacy_get(mut value: serde_json::Value) -> String {
     let json = value.to_string();
     if json.len() <= PLAN_WORKFLOW_BYTES {
         return json;
     }
-    if let Some(archive) = value.pointer_mut("/state/archive").and_then(|v| v.as_object_mut()) {
+    if let Some(archive) = value.pointer_mut("/state/archive").and_then(|v| v.as_object_mut())
+        && !archive.is_empty()
+    {
         let omitted = archive.len();
         archive.clear();
         value["archive_omitted"] = omitted.into();
-        let json = value.to_string();
-        if json.len() <= PLAN_WORKFLOW_BYTES {
-            return json;
-        }
+        return value.to_string();
     }
-    if let Some(seen) = value.pointer_mut("/state/seen") {
-        *seen = serde_json::json!([]);
-        let json = value.to_string();
-        if json.len() <= PLAN_WORKFLOW_BYTES {
-            return json;
-        }
-    }
-
-    // Plan decodes this as State and validates each retained item's pinned
-    // definition. Keep the authenticated context and the caller's mutation
-    // sequence, and budget whole items rather than editing their fields.
-    let fields = value.as_object_mut().expect("workflow reply object");
-    let configuration = fields.remove("configuration");
-    let places = fields.remove("places");
-    fields.retain(|key, _| matches!(key.as_str(), "schema" | "context" | "state" | "stops" | "archive_omitted"));
-    let caller_source = value.pointer("/context/capabilities/decision_principal")
-        .and_then(|v| v.as_str()).map(|principal| format!("wire:{principal}"));
-    if let Some(state) = value.get_mut("state").and_then(|v| v.as_object_mut()) {
-        state.remove("grouping");
-        if let Some(sequences) = state.get_mut("source_sequences").and_then(|v| v.as_object_mut()) {
-            sequences.retain(|key, _| Some(key.as_str()) == caller_source.as_deref());
-        }
-    }
-
-    // Reserve room for the omission count before fitting items and stops.
-    let count = value.pointer("/state/items").and_then(|v| v.as_object()).map_or(0, |items| items.len());
-    value["items_omitted"] = count.into();
-    fit_workflow_items(&mut value);
-    let retained = value.pointer("/state/items").and_then(|v| v.as_object()).map_or(0, |items| items.len());
-    value["items_omitted"] = (count - retained).into();
-
-    // Engine can still use the published workflow and placement when they fit.
-    let mut remaining = PLAN_WORKFLOW_BYTES - value.to_string().len();
-    let fields = value.as_object_mut().expect("workflow reply object");
-    for (key, field) in [("configuration", configuration), ("places", places)] {
-        if let Some(field) = field
-            && let Some(next) = remaining.checked_sub(workflow_field_bytes(key, &field))
-        {
-            remaining = next;
-            fields.insert(key.into(), field);
-        }
-    }
-    value.to_string()
+    json
 }
 
-pub(crate) fn encode_plan_get(mut value: serde_json::Value) -> String {
-    let json = value.to_string();
-    if json.len() <= PLAN_WORKFLOW_BYTES {
-        return json;
+pub(crate) fn encode_plan_get(mut value: serde_json::Value, cursor: Option<&str>)
+    -> std::result::Result<String, farcooler_core::error::DomainError>
+{
+    use farcooler_core::error::DomainError;
+    use farcooler_protocol::accepts::WORKFLOW_PLAN_PAGE;
+
+    let epoch = value["state"]["epoch"].as_u64().unwrap_or(1);
+    let revision = value["state"]["revision"].as_u64().unwrap_or(0);
+    let binding = value["context"]["binding"].as_str().unwrap_or_default();
+    let prefix = format!("{epoch}:{revision}:{binding}:");
+    let offset = match cursor {
+        None => 0,
+        Some(cursor) => cursor.strip_prefix(&prefix).and_then(|n| n.parse::<usize>().ok())
+            .filter(|&n| n > 0)
+            .ok_or_else(|| DomainError::refused("The workflow changed while Plan was loading. Try again.".into()))?,
+    };
+
+    let items = value.pointer_mut("/state/items").and_then(|v| v.as_object_mut())
+        .map(std::mem::take).unwrap_or_default();
+    let mut stops = std::mem::take(value["stops"].as_object_mut().expect("workflow plan stops"));
+    if cursor.is_some() && offset >= items.len() {
+        return Err(DomainError::InvalidArgument { what: "workflow_plan_page" });
     }
-    fit_workflow_items(&mut value);
-    value.to_string()
+
+    // Leave space for the continuation as well as the protobuf envelope.
+    let mut remaining = (PLAN_WORKFLOW_BYTES - 256).saturating_sub(value.to_string().len());
+    for (index, (id, item)) in items.into_iter().enumerate().skip(offset) {
+        let stop = stops.remove(&id);
+        let bytes = workflow_field_bytes(&id, &item)
+            + stop.as_ref().map_or(0, |stop| workflow_field_bytes(&id, stop));
+        let Some(next) = remaining.checked_sub(bytes) else {
+            if index == offset {
+                return Err(DomainError::refused("A workflow run is too large to show in Plan.".into()));
+            }
+            value["plan_next"] = format!("{WORKFLOW_PLAN_PAGE}{prefix}{index}").into();
+            break;
+        };
+        remaining = next;
+        if let Some(stop) = stop { value["stops"][&id] = stop; }
+        value["state"]["items"][id] = item;
+    }
+    Ok(value.to_string())
 }
 
 /// Serialized object field, including escaped key, colon and a comma.
 fn workflow_field_bytes(key: &str, value: &serde_json::Value) -> usize {
     serde_json::to_string(key).expect("JSON key").len() + value.to_string().len() + 2
-}
-
-fn fit_workflow_items(value: &mut serde_json::Value) {
-    let mut items: Vec<_> = value.pointer_mut("/state/items").and_then(|v| v.as_object_mut())
-        .map(std::mem::take).unwrap_or_default().into_iter().collect();
-    let stops = value.get_mut("stops").and_then(|v| v.as_object_mut()).map(std::mem::take).unwrap_or_default();
-    if value.to_string().len() > PLAN_WORKFLOW_BYTES && let Some(state) = value["state"].as_object_mut() {
-        state.insert("source_sequences".into(), serde_json::json!({}));
-    }
-    let mut remaining = PLAN_WORKFLOW_BYTES.saturating_sub(value.to_string().len());
-    items.sort_by_key(|(_, item)| {
-        let group = item["group_of"].is_object();
-        let phase = item["phase"].as_str();
-        let priority = if group && !matches!(phase, Some("Done" | "Cancelled")) {
-            0
-        } else if matches!(phase, Some("Done" | "Failed" | "Cancelled")) {
-            3
-        } else if item["definition"]["source"] == farcooler_workflow::TICKET_SOURCE {
-            2
-        } else {
-            1
-        };
-        (priority, std::cmp::Reverse(item["since_ms"].as_i64().unwrap_or_default()))
-    });
-    for (id, item) in items {
-        let Some(next) = remaining.checked_sub(workflow_field_bytes(&id, &item)) else { continue };
-        remaining = next;
-        value["state"]["items"][id] = item;
-    }
-    for (id, stop) in stops {
-        if value["state"]["items"].get(&id).is_some()
-            && let Some(next) = remaining.checked_sub(workflow_field_bytes(&id, &stop))
-        {
-            remaining = next;
-            value["stops"][id] = stop;
-        }
-    }
 }
 
 /// The newest this many `build_cleanup` records and process logs ride in a `workflow.get` reply (ov-1373). Both lists

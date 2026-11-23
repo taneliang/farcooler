@@ -310,11 +310,17 @@ async fn run_on<L: DispatchLink>(
             let supported = link.capabilities().iter().any(|c| c == capability::WORKFLOW_COMMANDS);
             let workspace = crate::uuid_of(&ws);
             let read = supported.then_some(async {
-                let request = farcooler_client::plan_json::workflow_plan_request(workspace);
-                let answer = link.call(request).await.map_err(farcooler_client::session::SessionError::from)?;
-                answer.value.ok_or_else(|| farcooler_client::session::SessionError::Protocol("workflow.get returned nothing".into()))
+                use farcooler_client::{plan_json::WorkflowPlanPages, session::SessionError};
+                let mut pages = WorkflowPlanPages::new(workspace);
+                loop {
+                    let answer = link.call(pages.request()).await?;
+                    let reply = answer.value.ok_or_else(|| SessionError::Protocol("workflow.get returned nothing".into()))?;
+                    if let Some(state) = pages.push(reply)? {
+                        break Ok(state);
+                    }
+                }
             });
-            let value = farcooler_client::plan_json::with_workflow(&plan, workspace, read).await?;
+            let value = farcooler_client::plan_json::with_workflow_state(&plan, workspace, read).await?;
             Ok(value.to_string())
         }
         Some(PlanCmd::Set { tickets }) => {

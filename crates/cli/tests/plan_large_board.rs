@@ -81,9 +81,9 @@ async fn a_large_board_loads_in_plan_overview_and_detail_commands() {
     assert!(read.cards.len() < 1500, "closed cards must be summarized");
 
     // The released app reads the unpaged board, then sends workflow.get with no view marker.
-    let get_workflow = farcooler_client::plan_json::workflow_request(repo.workspace);
-    let mut get_full = get_workflow.clone();
-    get_full.accepts.push("workflow_full_v1".into());
+    let get_full = farcooler_client::plan_json::workflow_request(repo.workspace);
+    let mut get_workflow = get_full.clone();
+    get_workflow.accepts.clear();
     let legacy = farcooler_client::plan_json::with_workflow(&read, repo.workspace, Some(async {
         let reply = link.call(get_workflow).await?.value.unwrap();
         let result::Value::WorkflowReply(workflow) = &reply else {
