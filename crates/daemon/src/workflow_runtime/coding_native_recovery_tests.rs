@@ -307,6 +307,10 @@ async fn ov1425_restarts_reviewed_tickets_in_place_with_one_notice() {
     use farcooler_store::workflow_publication::configuration_pin;
 
     let (dir, fixture) = configured(false, "pass").await;
+    let script = dir.path().join("adapter.py");
+    let build = std::fs::read_to_string(&script).unwrap();
+    std::fs::write(&script, build.replace("if stage == 'build':",
+        "if stage == 'build' and pathlib.Path('result.txt').exists():\n    sys.exit(0)\nif stage == 'build':")).unwrap();
     let service = crate::service::Service::open_in(dir.path().join("state")).await.unwrap();
     let repository_root = service.store.create_repository_root(service.host_id, dir.path().to_str().unwrap(), 0).unwrap();
     let config = fixture.coding.clone().unwrap();
@@ -386,6 +390,20 @@ async fn ov1425_restarts_reviewed_tickets_in_place_with_one_notice() {
         .filter(|d| d.notice.point == NoticePoint::PublicationRestarted).collect();
     assert_eq!(notices.len(), 1);
     assert_eq!(notices[0].notice.tickets, keys);
+
+    for (index, key) in keys.iter().enumerate() {
+        let state = runtime.state(&workspace).unwrap().unwrap();
+        let item = &state.items[*key];
+        send(&runtime, Action::Approve { mutation: mutation(&format!("approve-{key}"), state.revision, index as u64 + 5),
+            item: (*key).into(), run: item.run.clone(), pin: item.pin.clone(), candidate: item.candidate.clone() });
+    }
+    for clock in 9..13 { runtime.pump(clock).await.unwrap(); }
+    let state = runtime.state(&workspace).unwrap().unwrap();
+    for key in keys {
+        let item = &state.items[key];
+        assert_eq!(item.phase, Phase::WaitingReview, "{key}: {:?}", item.failed_reason());
+        assert_eq!(item.candidate.as_ref(), Some(&reviewed[key].2));
+    }
 }
 
 /// ov-1130: an install removed the server after the verdict and output were saved, before settlement.
