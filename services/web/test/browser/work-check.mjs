@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Run from services/web with WORK_VIEW_BIN and CHROME_PATH set. An optional
-// argument captures the work dialog and terminal page at phone/desktop widths.
+// Run from services/web with WORK_VIEW_BIN set. Playwright uses its installed
+// Chromium unless CHROME_PATH is set. An optional argument captures screenshots.
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync } from 'node:fs'

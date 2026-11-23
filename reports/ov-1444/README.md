@@ -37,11 +37,13 @@ The three Rust projection tests first failed against an empty projection. The in
 
 The shared Rust client suite passed 399 tests with one ignored. The browser Rust suite, WASM target check, TypeScript check, web unit and workflow suites, and shared-core lint passed.
 
-The **Web bundles and browser checks** CI job builds `work_view_bin` and runs the work browser check with Chromium or Chrome. Running that step locally with a deliberately incorrect terminal ID in the rename assertion exited with status 1. The superseded-selection and Plan quote-error regressions also failed before the fix. After restoration and the fix, all eleven work browser cases and the Plan render check passed.
+The **Web bundles and browser checks** CI job builds `work_view_bin` and runs the work browser check using the same Playwright Chromium installation as the Plan render check. Running that step locally with a deliberately incorrect terminal ID in the rename assertion exited with status 1. The superseded-selection and Plan quote-error regressions also failed before the fix. After restoration and the fix, all eleven work browser cases and the Plan render check passed.
+
+The macOS landing replay built the example, then exited at the lookup for `google-chrome` or `chromium` on `PATH`. Using Playwright’s installed Chromium lets the same CI step run on both hosts. The adjacent tmux self-test passed independently.
 
 The existing SSH browser fixtures now serve the work inventory and preserve runner identity during the host-pin test. All seven Chromium sleep cases passed once the test waited for terminal reattachment before sending input.
 
-To rerun the browser tests after installing the web dependencies, build the shared client example and pass the Chrome executable path.
+To rerun the browser tests after installing the web dependencies, build the shared client example and install Playwright Chromium. Set `CHROME_PATH` to use an existing Chrome executable.
 
 ```sh
 export CARGO_TARGET_DIR="$FARCOOLER_SCRATCH/target"
@@ -49,6 +51,7 @@ mkdir -p "$FARCOOLER_SCRATCH/tmp"
 export TMPDIR="$FARCOOLER_SCRATCH/tmp"
 cargo build -p farcooler-client --example work_view_bin
 cd services/web
+npx playwright-core install --only-shell chromium
 WORK_VIEW_BIN="$CARGO_TARGET_DIR/debug/examples/work_view_bin" \
-  CHROME_PATH="/path/to/chrome" node test/browser/work-check.mjs ../../reports/ov-1444
+  node test/browser/work-check.mjs ../../reports/ov-1444
 ```

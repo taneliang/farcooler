@@ -1954,9 +1954,8 @@ jobs:
         shell: bash
         run: |
           cargo build --locked --manifest-path ../../Cargo.toml -p farcooler-client --example work_view_bin
-          CHROME_PATH="$(command -v google-chrome || command -v chromium)"
           WORK_VIEW_BIN="${CARGO_TARGET_DIR:-../../target}/debug/examples/work_view_bin" \
-            CHROME_PATH="$CHROME_PATH" node test/browser/work-check.mjs
+            node test/browser/work-check.mjs
       - run: node test/browser/csp-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon --tunnel-delay 100
       - run: node test/browser/sleep-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon --engines chromium
 
