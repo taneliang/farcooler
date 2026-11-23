@@ -88,3 +88,19 @@ The base archive carried the same fixture and the test-only executable substitut
 The store suite passed 674 tests. The 132 targeted daemon tests covered cleanup, scheduling, effect observation, admission, log reads, CI watch and task paging. All nine draft-approval integration tests and 649 CLI tests passed. The daemon layer, file-size and nightly-dispatch checks passed.
 
 The private-pane test sent bytes through the real input channel while a cleanup sweep was held in preflight. Each key had its own 100 ms deadline. The five measured echoes took 9.1–10.4 ms and the resumed sweep released the output.
+
+## Landing-base verification
+
+On landing base `1c0c2027a`, the dispatcher uses the new automatic queue check on the existing 30-second cadence. The idle fixture now enables automatic queueing and places its candidate at the join stage so the census exercises that check.
+
+| Loaded RPC | Rebased replay |
+| --- | ---: |
+| Plan | 1,175 ms |
+| Plan theme list | 1,237 ms |
+| Workflow Get | 347 ms |
+| Task List, first page | 33 ms |
+| Worktree List | 5.2 ms |
+
+All four read latency bounds passed, and the read sequence spawned zero tmux clients. In the idle minute, the daemon launched 20 `lsof` commands (9 recursive), 71 Git commands (2 remote-head probes), 1 `gh` command (0 polls of the finished run), and 64 tmux clients. During cleanup, all five pane echoes arrived within the 100 ms budget, with a slowest echo of 89.7 ms. The resumed sweep released the output.
+
+The full CLI, store, and workflow suites and the affected daemon unit and integration suites covered 3,385 tests. The initial run passed 3,319. The other 66 passed on rerun with short private fixture paths and a corrected test home. The daemon layer, file-size, and Nightly dispatch checks passed.

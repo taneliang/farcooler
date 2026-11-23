@@ -257,6 +257,7 @@ pub(crate) async fn idle_board_fixture(
 ) -> (tempfile::TempDir, Runtime) {
     use super::{adapters, CodingLanding, RunTree};
     use farcooler_protocol::workflow_config::AdapterConfiguration;
+    use farcooler_workflow::scheduling::{Budget, StartPolicy};
 
     let (config_dir, mut fixture) = super::coding_tests::configured(false, "pass").await;
     let config = fixture.coding.as_mut().unwrap();
@@ -270,7 +271,11 @@ pub(crate) async fn idle_board_fixture(
         config_digest: String::new(),
     });
     let config = AdapterConfiguration::Coding(config.clone());
-    let definition = fixture.configured_definition().unwrap();
+    let mut definition = super::coding_verbs_tests::batched_push(&fixture, "any", 5_000);
+    definition.start_policy = Some(StartPolicy {
+        columns: ["todo".into()].into(), budget: Budget::Fixed(1), files: Default::default(),
+        dependencies: Default::default(), rotate_models: false, auto_queue: true,
+    });
     let mut runtime = Runtime::open_service(&svc.root_dir().join("workflow"), svc.store.clone()).unwrap();
     runtime.user_home = Some(config_dir.path().to_path_buf());
     runtime.host = Some(svc.worktree_host().unwrap());
@@ -283,6 +288,7 @@ pub(crate) async fn idle_board_fixture(
     let waiting = state.items.get_mut("waiting").unwrap();
     let bundle = farcooler_store::workflow_publication::configuration_pin(&definition, Some(&config));
     waiting.policy_pin = bundle.clone();
+    waiting.stage = definition.stages.len() - 1;
     waiting.phase = Phase::WaitingJoin;
     waiting.candidate = Some(base.clone());
     waiting.pending = None;
