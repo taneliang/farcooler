@@ -1,8 +1,7 @@
 //! The rules a `route` step pins: which route a ticket takes, by the paths it changes (ov-959).
 //!
 //! The step is generic: it reads the paths, applies rules the definition carries, and answers with a
-//! label that the definition routes. Nothing here knows about landing. A charter's `## Landing` section
-//! is one place the rules can come from; a person can write them for any other reason.
+//! label that the definition routes.
 use farcooler_core::charter_landing::{glob_matches, Route};
 use serde::{Deserialize, Serialize};
 
@@ -28,7 +27,8 @@ fn parse(label: &str) -> Option<Route> {
 fn care(route: Route) -> u8 { match route { Route::Push => 0, Route::PullRequest => 1, Route::Ask => 2 } }
 
 impl PathRules {
-    pub fn new(default: Route, rules: &[(String, Route)]) -> Self {
+    #[cfg(test)]
+    fn new(default: Route, rules: &[(String, Route)]) -> Self {
         Self { default: label(default).into(), rules: rules.iter().map(|(g, r)| (g.clone(), label(*r).into())).collect() }
     }
     /// The text a step pins as its argument.

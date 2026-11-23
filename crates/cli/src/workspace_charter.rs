@@ -67,15 +67,9 @@ fn set_said(what: &str) -> Option<&'static str> {
         "charter_not_a_file" => "the charter's name on the runner isn't a plain file, so it wasn't written over",
         "charter_too_long" => "a charter is at most 256 KB",
         "charter_empty" => "a charter needs something written in it",
-        "charter_landing" => LANDING_FORMAT,
         _ => return None,
     })
 }
-
-/// What a `## Landing` section holds, for a charter whose section didn't read.
-pub(crate) const LANDING_FORMAT: &str = "the charter's ## Landing section doesn't read. Each line is a bullet: \
-`- Route: push|pull request|ask`, `- Route `<glob>`: <route>`, `- Gate: <command>` (or `none`), `- Base: <branch>`, \
-`- Remote: <name>` or `- CI: github|none`";
 
 /// `workspace set-charter`, once the workspace is named and the text read.
 pub(crate) async fn set<L: DispatchLink>(link: &mut L, ws: &pb::Workspace, text: String, expected: &str, json: bool) -> Fallible {
