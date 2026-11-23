@@ -77,6 +77,7 @@ SCRIPT_USERS = {
     'scripts/claude-rewake-check.py': None,  # Full: transitive gate users not established; retain conservative fallback.
     'scripts/com.farcooler.site-proof.plist': None,  # Full: transitive gate users not established; retain conservative fallback.
     'scripts/copy-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.
+    'scripts/daemon-layer-check': {'wire'},  # Alias for daemon-layers.py, the wire dependency check.
     'scripts/daemon-layers-counts.txt': {'wire'},  # wire daemon-layers reads dependency counts and checks them against main.
     'scripts/daemon-layers.json': {'wire'},  # wire daemon-layers reads layer membership and allowed dependencies.
     'scripts/daemon-layers.py': {'wire'},  # ci.yml wire runs self-test/check; script calls are checks or release automation, not platform builds.
