@@ -71,7 +71,8 @@ impl Exec {
             let tree = item.tree.as_ref().map_or_else(|| self.item_tree_for(workspace, id, item.restart.as_deref()),
                 |tree| PathBuf::from(&tree.path));
             let folders = item.definition.build_folders();
-            if !folders.iter().any(|folder| build_cleanup::folder_paths(&tree, folder)
+            let adopted = item.tree.as_ref().is_some_and(|tree| tree.adopted);
+            if !build_cleanup::build_folders(&folders, adopted).any(|folder| build_cleanup::folder_paths(&tree, folder)
                 .any(|path| matches!(path, Ok(Some(_))))) { continue; }
             self.store.workflow_cleanup_enqueue(&CleanupEffect {
                 id: digest(&("idle-build-release/v1", workspace, id, &item.run, item.fence)),

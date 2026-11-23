@@ -323,6 +323,7 @@ pub struct Runtime {
     next_lease: Option<i64>,
     /// Pending transient cleanup must wake both idle and occupied dispatch loops (ov-1203).
     next_cleanup: Option<tokio::time::Instant>,
+    orphan_cleanup_retries: Vec<PathBuf>,
     continuous: bool,
     #[cfg(test)]
     sweeps: usize,
@@ -434,7 +435,7 @@ impl Runtime {
         let store = Store::open(root.join("workflow.sqlite"))
             .map_err(|_| Error::Refused("cannot open fixture database"))?;
         let (send, inbox) = mpsc::channel(32);
-        let runtime = Self { inbox, send, next_lease: None, next_cleanup: None, continuous: false,
+        let runtime = Self { inbox, send, next_lease: None, next_cleanup: None, orphan_cleanup_retries: Vec::new(), continuous: false,
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
             exec: Exec { yielding: crate::yielding::Yielding::at(&root), activities: Default::default(), places: std::sync::Arc::new(std::sync::Mutex::new(Places::load(&root)?)), root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, host: None,
                 seeding: Default::default(), tree_locks: Default::default(), disk_usage: Default::default(), #[cfg(test)] user_home: None, #[cfg(test)] build_free_bytes: Some(u64::MAX), #[cfg(test)] cleanup_check: None },
@@ -666,19 +667,28 @@ impl Runtime {
             if cleanup_requested && cleanup.is_none() {
                 let exec = self.exec.clone();
                 let recover_trees = std::mem::take(&mut recover_trees);
+                let mut orphans = std::mem::take(&mut self.orphan_cleanup_retries);
                 let mut task = BackgroundTask::new(async move {
                     let workspaces = exec.store.workflow_workspaces()?;
                     let retry = exec.release_builds(&workspaces).await?;
                     if recover_trees {
-                        if let Err(error) = exec.release_orphan_builds().await {
-                            tracing::warn!(%error, "could not sweep legacy build output");
-                        }
-                        if exec.service_mode {
-                            // Warm the first workflow.get sample after startup cleanup.
-                            drop(exec.refresh_disk_usage());
+                        match exec.private_trees() {
+                            Ok(trees) => orphans = trees,
+                            Err(error) => tracing::warn!(%error, "could not list legacy workflow trees"),
                         }
                     }
-                    Ok(retry)
+                    let swept = !orphans.is_empty();
+                    let pending = match exec.release_orphan_builds(&orphans).await {
+                        Ok(pending) => pending,
+                        Err(error) => {
+                            tracing::warn!(%error, "could not sweep legacy build output");
+                            orphans
+                        }
+                    };
+                    if (recover_trees || swept) && exec.service_mode {
+                        drop(exec.refresh_disk_usage());
+                    }
+                    Ok((retry, pending))
                 });
                 task.start();
                 cleanup = Some(task);
@@ -711,7 +721,10 @@ impl Runtime {
                 Event::CleanupRetry => { cleanup_requested = true; }
                 Event::CleanupFinished(result) => {
                     cleanup = None;
-                    self.next_cleanup = result?.then(|| tokio::time::Instant::now() + Duration::from_secs(1));
+                    let (retry, orphans) = result?;
+                    self.orphan_cleanup_retries = orphans;
+                    self.next_cleanup = (retry || !self.orphan_cleanup_retries.is_empty())
+                        .then(|| tokio::time::Instant::now() + Duration::from_secs(1));
                     // A pending effect may have been waiting for cleanup to release its tree.
                     scan = self.continuous && !stopping;
                 }
@@ -1172,7 +1185,7 @@ struct Running {
 enum Event {
     Tick,
     CleanupRetry,
-    CleanupFinished(Result<bool>),
+    CleanupFinished(Result<(bool, Vec<PathBuf>)>),
     Finished(usize, Result<Outcome>),
     Shutdown,
     Message(Option<Inbox>),

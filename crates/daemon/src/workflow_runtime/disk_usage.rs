@@ -71,8 +71,8 @@ impl Exec {
                     let tree = item.tree.as_ref().map_or_else(|| self.item_tree_for(&workspace, id, item.restart.as_deref()),
                         |tree| PathBuf::from(&tree.path));
                     if tree.canonicalize().ok().as_deref() != Some(tree.as_path()) { continue; }
-                    for folder in item.definition.build_folders() {
-                        folders.extend(build_cleanup::folder_paths(&tree, &folder).filter_map(|path| path.ok().flatten()));
+                    for folder in build_cleanup::build_folders(&item.definition.build_folders(), true) {
+                        folders.extend(build_cleanup::folder_paths(&tree, folder).filter_map(|path| path.ok().flatten()));
                     }
                 }
             }

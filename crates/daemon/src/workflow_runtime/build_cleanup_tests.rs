@@ -837,37 +837,58 @@ async fn recovery_accounts_for_idle_output_left_by_an_older_engine() {
 #[tokio::test]
 async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output() {
     let (_dir, runtime, group, active_tree) = building_group(None).await;
+    let layouts = [
+        ("target/debug/deps/runner", b"\x7fELFtest".as_slice()),
+        ("crates/web/target/wasm32-unknown-unknown/debug/deps/site.wasm", b"\0asm\x01\0\0\0"),
+        ("apps/macos/.build/out/Intermediates.noindex/AgentKit.o", b"\xcf\xfa\xed\xfetest"),
+        ("apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKit.swiftmodule", b"\xe2\x9c\xa8\x0etest"),
+    ];
+    std::fs::write(runtime.repository().join(".git/info/exclude"),
+        "/target/\n/crates/web/target/\n/apps/macos/.build/\n/apps/shared/AgentKit/.build/\n").unwrap();
     let mut orphan_trees = Vec::new();
-    for separator in ['-', ':'] {
-        let tree = runtime.root.join(format!("tree-wf1{separator}{}", "a".repeat(64)));
+    for (separator, digit) in [('-', "a"), (':', "b")] {
+        let tree = runtime.root.join(format!("tree-wf1{separator}{}", digit.repeat(64)));
         adapters::git(&runtime.repository(), &["worktree", "add", "--detach", tree.to_str().unwrap(), "HEAD"]).await.unwrap();
-        std::fs::create_dir(tree.join("target")).unwrap();
-        std::fs::write(tree.join("target/binary"), b"old output").unwrap();
+        for (file, bytes) in layouts {
+            let path = tree.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, bytes).unwrap();
+        }
         std::fs::write(tree.join("uncommitted.txt"), b"keep this").unwrap();
         orphan_trees.push(tree);
     }
     assert_eq!(runtime.state("w").unwrap().unwrap().items[&group].phase, Phase::Running);
-    assert!(runtime.store.workflow_cleanups("w").unwrap().iter().all(|record|
-        record.effect.tree.as_ref().is_none_or(|tree| !orphan_trees.contains(&PathBuf::from(&tree.path)))));
-    let reader = File::open(orphan_trees[0].join("uncommitted.txt")).unwrap();
-    runtime.release_orphan_builds().await.unwrap();
-    assert!(active_tree.join("target/output").exists(), "the live state protects the group without a held process lock");
-    assert!(orphan_trees[0].join("target/binary").is_file(), "an open source file protects the tree");
-    drop(reader);
-    runtime.release_orphan_builds().await.unwrap();
-    for tree in &orphan_trees {
-        assert!(!tree.join("target").exists());
-        assert_eq!(std::fs::read(tree.join("uncommitted.txt")).unwrap(), b"keep this");
-        std::fs::create_dir(tree.join("target")).unwrap();
-        std::fs::write(tree.join("target/binary"), b"old output").unwrap();
-    }
-    // A second sweep is triggered by opening and pumping a new runtime.
+    // Even in the absence of a process lock, the running group's state protects real artifacts.
+    let live_output = active_tree.join(layouts[0].0);
+    std::fs::create_dir_all(live_output.parent().unwrap()).unwrap();
+    std::fs::write(&live_output, layouts[0].1).unwrap();
+    runtime.release_orphan_builds(&[active_tree]).await.unwrap();
+    assert!(live_output.is_file());
+
     let root = runtime.root.clone();
     drop(runtime);
     let mut runtime = Runtime::open(&root).unwrap();
+    // The legacy and current names map to one lock for a given digest. Use a
+    // source reader on the current tree and a held lock on a different digest.
+    let reader = File::open(orphan_trees[0].join("uncommitted.txt")).unwrap();
+    let lock = runtime.tree_lock(&orphan_trees[1]).read_owned().await;
     runtime.pump(100).await.unwrap();
+    assert_eq!(runtime.orphan_cleanup_retries.len(), 2);
     for tree in &orphan_trees {
-        assert!(!tree.join("target").exists());
+        assert!(tree.join(layouts[0].0).is_file());
+    }
+    drop(reader);
+    drop(lock);
+    let (stop, shutdown) = tokio::sync::watch::channel(false);
+    let task = tokio::spawn(async move { runtime.run(shutdown).await.unwrap(); });
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while orphan_trees.iter().any(|tree| layouts.iter().any(|(file, _)| tree.join(file).exists())) {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }).await.unwrap();
+    stop.send(true).unwrap();
+    task.await.unwrap();
+    for tree in &orphan_trees {
         assert!(tree.join(".git").is_file());
         assert_eq!(std::fs::read(tree.join("uncommitted.txt")).unwrap(), b"keep this");
     }

@@ -197,7 +197,8 @@ async fn adopted(wait_for_review: bool) -> (tempfile::TempDir, Runtime, PathBuf,
         definition.source = "adapted-local-policy/v1".into();
         let review = definition.stages.iter_mut().find(|stage| matches!(stage.kind, StageKind::Review(_))).unwrap();
         review.kind = StageKind::Review(Reviewer::Person("owner".into()));
-        local_output(dir.path());
+        adapter(dir.path(), |s| s.replace("if stage == 'build':\n",
+            "if stage == 'build':\n    pathlib.Path('target/debug/deps').mkdir(parents=True, exist_ok=True)\n    pathlib.Path('target/debug/deps/built').write_bytes(bytes.fromhex('7f454c46') + b'localout')\n"));
     }
     let state = runtime.state(&workspace).unwrap().unwrap();
     let receipt = runtime.apply(Request { id: "start".into(), workspace: workspace.clone(), expected_revision: state.revision, sequence: 2,
@@ -248,12 +249,26 @@ async fn wait_for_adopted_review(runtime: &mut Runtime, workspace: &str) {
 async fn waiting_adopted_worktree_releases_build_output_and_reclaims_older_output_on_startup() {
     let (_dir, mut runtime, tree, workspace) = adopted(true).await;
     wait_for_adopted_review(&mut runtime, &workspace).await;
-    assert!(!tree.join("target").exists());
-    assert!(tree.join("result.txt").is_file());
     let records = runtime.store.workflow_cleanups(&workspace).unwrap();
+    assert!(!tree.join("target/debug/deps/built").exists(), "{records:?}");
+    assert!(tree.join("result.txt").is_file());
     assert!(records.iter().any(|record| record.result.as_ref().is_some_and(|r| r.bytes_freed == 12)));
-    std::fs::create_dir(tree.join("target")).unwrap();
-    std::fs::write(tree.join("target/from-old-engine"), b"old output").unwrap();
+    std::fs::write(runtime.repository().join(".git/info/exclude"), "target/\n/apps/macos/.build/\n").unwrap();
+    let old_artifacts = [tree.join("target/debug/deps/from-old-engine"), tree.join("apps/macos/.build/out/Products/runner")];
+    let mut binary = [0x5a; 8192];
+    binary[..4].copy_from_slice(b"\x7fELF");
+    for artifact in &old_artifacts {
+        std::fs::create_dir_all(artifact.parent().unwrap()).unwrap();
+        std::fs::write(artifact, binary).unwrap();
+    }
+    runtime.refresh_disk_usage().unwrap().await.unwrap();
+    let allocated: u64 = old_artifacts.iter().map(|path| path.metadata().unwrap().blocks() * 512).sum();
+    assert!(runtime.read_get(&workspace).unwrap()["disk_usage"]["waiting_build_bytes"].as_u64().unwrap() >= allocated);
+    for path in ["target/local-source.rs", "target/debug/deps/personal-notes", "target/debug/deps/local-source.rs"] {
+        std::fs::write(tree.join(path), b"person's work").unwrap();
+    }
+    let ignored = crate::git::git(&tree, &["check-ignore", "target/local-source.rs"]).await.unwrap();
+    assert!(ignored.ok);
     std::fs::write(tree.join("uncommitted.txt"), b"person's work").unwrap();
     let root = runtime.root.clone();
     let host = runtime.host.clone();
@@ -261,7 +276,10 @@ async fn waiting_adopted_worktree_releases_build_output_and_reclaims_older_outpu
     let mut runtime = Runtime::open(&root).unwrap();
     runtime.host = host;
     runtime.pump(100).await.unwrap();
-    assert!(!tree.join("target").exists());
+    assert!(old_artifacts.iter().all(|artifact| !artifact.exists()));
+    for path in ["target/local-source.rs", "target/debug/deps/personal-notes", "target/debug/deps/local-source.rs"] {
+        assert_eq!(std::fs::read(tree.join(path)).unwrap(), b"person's work");
+    }
     assert_eq!(std::fs::read(tree.join("uncommitted.txt")).unwrap(), b"person's work");
 }
 
@@ -272,15 +290,16 @@ async fn waiting_adopted_worktree_checks_source_readers_and_external_processes()
     let mut shell = tokio::process::Command::new("/bin/sleep").arg("120").current_dir(&tree)
         .kill_on_drop(true).spawn().unwrap();
     wait_for_adopted_review(&mut runtime, &workspace).await;
-    assert!(tree.join("target/built").exists());
+    assert!(tree.join("target/debug/deps/built").exists());
     shell.kill().await.unwrap();
-    assert!(runtime.release_builds(std::slice::from_ref(&workspace)).await.unwrap(), "a source reader still holds the tree");
+    assert!(runtime.release_builds(std::slice::from_ref(&workspace)).await.unwrap(),
+        "a source reader still holds the tree: {:?}", runtime.store.workflow_cleanups(&workspace).unwrap());
     drop(reader);
     let mut shell = tokio::process::Command::new("/bin/sleep").arg("120").current_dir(&tree)
         .kill_on_drop(true).spawn().unwrap();
     assert!(runtime.release_builds(std::slice::from_ref(&workspace)).await.unwrap(), "a process cwd holds the tree");
-    assert!(tree.join("target/built").exists());
+    assert!(tree.join("target/debug/deps/built").exists());
     shell.kill().await.unwrap();
     assert!(!runtime.release_builds(std::slice::from_ref(&workspace)).await.unwrap());
-    assert!(!tree.join("target").exists());
+    assert!(!tree.join("target/debug/deps/built").exists());
 }
