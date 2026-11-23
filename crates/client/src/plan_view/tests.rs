@@ -136,12 +136,7 @@ fn sections_match_the_shared_cases() {
             .collect();
         assert!(!expect.is_empty(), "{} has an outline", case["name"]);
         for style in ["apple", "material"] {
-            // These historical fixtures also exercise the internal card builder.
-            let mut raw_plan = case["plan"].clone();
-            drop_nulls(&mut raw_plan);
-            let plan: input::Plan = serde_json::from_value(raw_plan).unwrap();
-            let context: input::Context = serde_json::from_value(request(case, style)["context"].clone()).unwrap();
-            let got = outline(&build::build(&plan, &context, None));
+            let got = outline(&view_of(request(case, style)));
             assert_eq!(got, expect, "{} in {style}", case["name"]);
         }
     }
