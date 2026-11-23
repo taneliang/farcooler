@@ -27,7 +27,7 @@ async fn a_large_board_loads_in_plan_overview_and_detail_commands() {
     let now = farcooler_store::testing::now_millis();
     let mut tasks = Vec::new();
     for n in 0..1500 {
-        let title = format!("Ticket {n}. {}", "Keep the current board usable while the completed work accumulates. ".repeat(3));
+        let title = format!("Ticket {n}. {}", "Keep the current board usable while the completed work accumulates. ".repeat(4));
         let task = store.create_task(repo.workspace, title.trim_end(), Actor::Manager).unwrap();
         store.put_on_line(task.id, &NewTicketLine {
             reason: "Keep the evidence for the completed ticket available when reading its details. ".repeat(3),
@@ -52,9 +52,10 @@ async fn a_large_board_loads_in_plan_overview_and_detail_commands() {
             ..Default::default()
         }, Actor::Manager).unwrap();
     }
-    for (n, cards) in tasks.chunks(15).enumerate() {
+    for (n, cards) in tasks.chunks(15).take(99).enumerate() {
         old_landing(store, repo.workspace, n as u32 + 1, "landed", None, cards, now + n as i64);
     }
+    old_landing(store, repo.workspace, 100, "landed", None, &tasks[1200..], now + 99);
 
     seed_large_workflow_archive(store, repo.workspace);
     h.service.start_workflows().unwrap();
@@ -75,12 +76,12 @@ async fn a_large_board_loads_in_plan_overview_and_detail_commands() {
     assert_eq!(read.board_counts.unwrap().cancelled, 1450);
     assert!(read.lines.iter().any(|line| line.task_id == id(tasks[0])));
     assert_eq!(read.landings[0].number, 100);
+    assert!(!read.landings[0].summary.is_empty());
     assert!(read.landings.len() < 100, "landing history must be bounded");
     assert!(read.cards.len() < 1500, "closed cards must be summarized");
 
     // The released app reads the unpaged board, then sends workflow.get with no view marker.
-    let mut get_workflow = farcooler_client::plan_json::workflow_request(repo.workspace);
-    get_workflow.accepts.clear();
+    let get_workflow = farcooler_client::plan_json::workflow_request(repo.workspace);
     let mut get_full = get_workflow.clone();
     get_full.accepts.push("workflow_full_v1".into());
     let legacy = farcooler_client::plan_json::with_workflow(&read, repo.workspace, Some(async {
@@ -114,8 +115,6 @@ async fn a_large_board_loads_in_plan_overview_and_detail_commands() {
         assert!(rendered["error"].is_null(), "{rendered}");
         assert_eq!(rendered["view"]["themes"]["tiles"].as_array().unwrap().len(), 25);
     }
-    h.service.stop_workflows().await.unwrap();
-
     let waiting = store.get_task(tasks[0]).unwrap().key;
     let closed = store.get_task(tasks[300]).unwrap().key;
     let commands = [
@@ -125,6 +124,7 @@ async fn a_large_board_loads_in_plan_overview_and_detail_commands() {
         vec!["plan", "ticket", "show", &closed],
         vec!["plan", "ticket", "set", &waiting, "--reason", "Updated on the large board"],
         vec!["plan", "set", &waiting],
+        vec!["landing", "show", "100"],
     ];
     let mut failures = Vec::new();
     for (i, args) in commands.iter().enumerate() {
@@ -136,13 +136,19 @@ async fn a_large_board_loads_in_plan_overview_and_detail_commands() {
             .args(["--json", "--repo", &repo.id.to_string(), "--workspace", &repo.workspace.to_string()])
             .args(&args[1..])
             .output().await.unwrap();
+        if i == 0 {
+            h.service.stop_workflows().await.unwrap();
+        }
         if !output.status.success() {
             failures.push(format!("{args:?}: {}", String::from_utf8_lossy(&output.stderr)));
             continue;
         }
         let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         match i {
-            0 => assert_eq!(response["themes"].as_array().unwrap().len(), 25),
+            0 => {
+                assert_eq!(response["themes"].as_array().unwrap().len(), 25);
+                assert_eq!(response["workflow"]["runs"][0]["item"], "item");
+            }
             1 => {
                 let cards = response["cards"].as_array().unwrap();
                 assert_eq!(cards.len(), 300);
@@ -153,6 +159,10 @@ async fn a_large_board_loads_in_plan_overview_and_detail_commands() {
             3 => assert_eq!(response["key"], closed),
             4 => assert_eq!(response["reason"], "Updated on the large board"),
             5 => assert_eq!(store.ticket_line(tasks[0]).unwrap().plan_rank, Some(1)),
+            6 => {
+                assert_eq!(response["number"], 100);
+                assert!(response["summary"].as_str().unwrap().len() > 64 * 1024);
+            }
             _ => unreachable!(),
         }
     }

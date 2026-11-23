@@ -17,9 +17,13 @@ pub(super) fn summarize(plan: &mut pb::Plan) {
     retain_recent(&mut plan.lines, RECENT_LINES, |line| {
         matches!(line.stage(), pb::TicketStage::Landed | pb::TicketStage::Dropped).then_some(line.stage_since)
     });
-    retain_recent(&mut plan.landings, RECENT_LANDINGS, |landing| {
+    let closed_landing = |landing: &pb::Landing| {
         matches!(landing.phase(), pb::LandingPhase::Landed | pb::LandingPhase::Dropped).then_some(landing.phase_since)
-    });
+    };
+    for landing in plan.landings.iter_mut().filter(|landing| closed_landing(landing).is_some()) {
+        summarize_landing(landing, HISTORY_BYTES / RECENT_LANDINGS);
+    }
+    retain_recent(&mut plan.landings, RECENT_LANDINGS, closed_landing);
 
     // A closed card with no visible line, landing or agent is represented by
     // its theme and board counts. Keep the cards that those rows still name.
@@ -106,31 +110,39 @@ fn bound_landings(landings: &mut Vec<pb::Landing>, budget: usize) {
     // Reserve space for each landing before spending it on ticket references
     // and the preview assembled from ticket titles.
     let share = budget / landings.len();
-    for landing in landings.iter_mut().filter(|landing| row_bytes(*landing) > share) {
-        let mut summary = std::mem::take(&mut landing.summary);
-        let mut task_ids = std::mem::take(&mut landing.task_ids);
-        if row_bytes(landing) > share {
-            let text_budget = share / 12;
-            for text in [&mut landing.title, &mut landing.base, &mut landing.actor,
-                &mut landing.ci_subject] {
-                truncate_text(text, text_budget);
-            }
-            for text in [&mut landing.reason, &mut landing.pushed_sha].into_iter().flatten() {
-                truncate_text(text, text_budget);
-            }
-        }
-        let mut remaining = share.saturating_sub(row_bytes(landing));
-        task_ids.retain(|id| {
-            // Include room for the reference's tag and length.
-            let Some(next) = remaining.checked_sub(id.len() + 10) else { return false };
-            remaining = next;
-            true
-        });
-        landing.task_ids = task_ids;
-        truncate_text(&mut summary, remaining.saturating_sub(10));
-        landing.summary = summary;
+    for landing in landings.iter_mut() {
+        summarize_landing(landing, share);
     }
     bound_rows(landings, budget);
+}
+
+fn summarize_landing(landing: &mut pb::Landing, budget: usize) {
+    if row_bytes(landing) <= budget {
+        return;
+    }
+    let mut summary = std::mem::take(&mut landing.summary);
+    let mut task_ids = std::mem::take(&mut landing.task_ids);
+    if row_bytes(landing) > budget {
+        let text_budget = budget / 12;
+        for text in [&mut landing.title, &mut landing.base, &mut landing.actor,
+            &mut landing.ci_subject] {
+            truncate_text(text, text_budget);
+        }
+        for text in [&mut landing.reason, &mut landing.pushed_sha].into_iter().flatten() {
+            truncate_text(text, text_budget);
+        }
+    }
+    let available = budget.saturating_sub(row_bytes(landing));
+    truncate_text(&mut summary, (available / 2).saturating_sub(10));
+    landing.summary = summary;
+    let mut remaining = budget.saturating_sub(row_bytes(landing));
+    task_ids.retain(|id| {
+        // Include room for the reference's tag and length.
+        let Some(next) = remaining.checked_sub(id.len() + 10) else { return false };
+        remaining = next;
+        true
+    });
+    landing.task_ids = task_ids;
 }
 
 fn truncate_text(text: &mut String, limit: usize) {
