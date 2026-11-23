@@ -2,7 +2,7 @@
 
 ## Method
 
-I copied only the canary SQLite database into `FARCOOLER_SCRATCH` and ran `PRAGMA quick_check` on the copy. It contained 1,579 tickets across all boards, 30 themes, 135 worktrees, 11,687 agent turns, and 3,912 outbox rows. The workflow board's state was 915,076 bytes. The profile harness opens the copied store through a scratch service and calls the production RPC handler. Its effect owner stays stopped because the original adapter paths and remote bindings are still in the copy. It uses its own install ID and tmux socket. The recorded November 23 owner timings describe the installed runner under load. All new measurements here use scratch.
+I copied only the canary SQLite database into `FARCOOLER_SCRATCH` and ran `PRAGMA quick_check` on the copy. It contained 1,579 tickets across all boards, 30 themes, 135 worktrees, 11,687 agent turns, and 3,912 outbox rows. The workflow board's state was 915,076 bytes. The profile harness opens the copied store through a scratch service and calls the production RPC handler. Its effect owner stays stopped because the original adapter paths and remote bindings are still in the copy. It uses its own install ID and tmux socket. The recorded November 23 owner timings describe the installed runner under load. The profile and regression measurements use scratch.
 
 ## Findings
 
@@ -20,17 +20,31 @@ The profile excerpt records the baseline, the intermediate index-only capture, a
 
 The generated fixture has 1,500 tickets, 25 themes, at least 900 KB of engine state, and 4,000 settled effects in addition to the live dispatch rows. It runs four real fixture build subprocesses and the candidate's pre-landing check concurrently. All five subprocesses register their activity before the RPCs start. The fixture keeps a pane open on a private tmux server so a new inventory call is observable.
 
-| RPC behind the command | Measured | Budget |
-| --- | ---: | ---: |
-| Plan | 358–1,365 ms | < 2 s |
-| Plan theme list | 410–1,431 ms | < 2 s |
-| Workflow get | 168–391 ms | < 1 s |
-| Task list, first page | 24–26 ms | — |
-| Worktree list | 0.28 ms | < 2 s |
+| RPC behind the command | Base `81b30964c` | Fixed replay | Budget |
+| --- | ---: | ---: | ---: |
+| Plan | 16,128 ms | 388 ms | < 2 s |
+| Plan theme list | 15,720 ms | 356 ms | < 2 s |
+| Workflow get | 654 ms | 182 ms | < 1 s |
+| Task list, first page | 39 ms | 35 ms | — |
+| Worktree list | 13.79 ms | 0.24 ms | < 2 s |
 
-Both benchmark runs met the budgets. The benchmark also checked that the read sequence spawned zero tmux clients. To run the loaded fixture, set `CARGO_TARGET_DIR="$FARCOOLER_SCRATCH/target"` and run `cargo test -p farcooler-daemon --lib board_read_latency_with_engine_work -- --ignored --nocapture`. The enforced bounds cover RPC time. The copied-board profile and the benchmark use the daemon handler directly, so the results exclude socket and CLI rendering time.
+The test module was copied unchanged to an archive of base `81b30964c`. It reached all five reads and failed its two-second Plan assertion. The fixed replay met all four budgets and recorded zero tmux launches during the read sequence. Two earlier fixed runs also met the budgets, with Plan at 358–1,365 ms, theme list at 410–1,431 ms and Workflow Get at 168–391 ms. The Nightly workflow runs this benchmark and the idle census as individual checks in Daemon production timing. Each check expects exactly one passing test. For a local run, set `CARGO_TARGET_DIR="$FARCOOLER_SCRATCH/target"` and run `cargo test -p farcooler-daemon --lib board_read_latency_with_engine_work -- --ignored --nocapture`. The enforced bounds cover RPC time. The copied-board profile and the benchmark use the daemon handler directly, so the results exclude socket and CLI rendering time.
 
-In six passes over the copied board with the final SQL, median times were 228 ms for Plan, 345 ms for theme list, 84 ms for Workflow get, 55 ms for Task list, and 6 ms for Worktree list. One theme-list read took 4.14 s while the sampling and store-test processes were active. The capture did not resolve that spike. A registry 70 replay concurrent with compilation also had an 8.31 s Plan outlier. Its few samples reached the workflow state overlay but did not account for the whole outlier. Three actual `lsof +D` probes on a disposable 4,000-file tree took 537, 294 and 283 ms each. Those probes remain background work.
+In six passes over the copied board with the final SQL, median times were 228 ms for Plan, 345 ms for theme list, 84 ms for Workflow get, 55 ms for Task list, and 6 ms for Worktree list. One theme-list read took 4.14 s while the sampling and store-test processes were active. The capture did not resolve that spike. The read-latency follow-up tracks it together with the Plan outlier. A registry 70 replay concurrent with compilation also had an 8.31 s Plan outlier. Its few samples reached the workflow state overlay but did not account for the whole outlier. Three actual `lsof +D` probes on a disposable 4,000-file tree took 537, 294 and 283 ms each. Those probes remain background work.
+
+## Copied-board RPC and CLI replay
+
+The second read-only snapshot passed SQLite's quick check and contained 1,581 tickets, 30 themes, 64 worktrees, 11,725 turns, 3,983 outbox rows and 921,025 bytes of workflow state. I ran 35 passes against the production handler over 30 seconds, then sent all five CLI commands to that handler over a private Unix socket. The CLI sample includes startup, transport, pagination and rendering. It used the installed Canary CLI with the scratch daemon. The table uses nearest-rank p95 for the RPC timings.
+
+| Command | RPC median | RPC p95 | One full CLI run |
+| --- | ---: | ---: | ---: |
+| Plan | 227 ms | 577 ms | 376 ms |
+| Plan theme list | 350 ms | 893 ms | 652 ms |
+| Workflow Get | 89 ms | 129 ms | 94 ms |
+| Task List | 55 ms | 97 ms | 287 ms |
+| Worktree List | 3.3 ms | 6.7 ms | 42 ms |
+
+To repeat the full CLI measurement, set `FARCOOLER_PROFILE_ROOT` to the disposable copy under `FARCOOLER_SCRATCH`, `FARCOOLER_PROFILE_SECONDS=30` and `FARCOOLER_PROFILE_CLI` to an absolute CLI path. Run `cargo test -p farcooler-daemon --lib profile_copied_board -- --ignored --nocapture`.
 
 ## Changes and limits
 
@@ -39,18 +53,38 @@ In six passes over the copied board with the final SQL, median times were 228 ms
 - Cleanup starts when work changes, retries on its own timer, and keeps an hourly maintenance wake. It retains the live-writer, repository and path fences. Process-log pruning runs on the blocking pool during recovery. The service spaces recursive open-file probes at least five seconds apart and uses a 15-second cleanup retry interval. A deterministic minute with a backlog of probe attempts reached the spawn boundary 12 times.
 - Automatic waiting-join scans share each target head in a pass and run at most once every 30 seconds. Explicit queueing still verifies the head. The CI watcher coalesces repeated kicks, keeps completed SHA and run results while the subject remains named, and checks Main's head before re-reading its runs. A test observed zero eligible GitHub calls for finished fixed subjects over a simulated minute. Watcher inventory keeps its one-second background cadence and one-minute backstop.
 
-The owner observed active child commands in a 10-second sample, which measures concurrency and time spent alive. It cannot be converted to launch counts. The probe and CI tests count or gate the targeted spawn paths. The full Get reply for an unpublished workflow still generates starter settings with local Git probes. A full per-executable idle launch census of a daemon running all production jobs on the copied board remains unverified.
+- A full Get for an unpublished workflow reads a per-repository starter settings cache. Cold or invalidated entries return `suggested_adapter_pending`. A background task performs the Git probes, with one batch in flight across repositories. A local origin edit invalidates the entry immediately and the age limit refreshes the branch tip. CLI commands that prepare a draft poll for the result. The ordinary full Get returns the state immediately.
+
+## Idle spawn census
+
+`idle_board_spawn_budget` runs the workflow dispatcher, terminal watcher, CI watcher, PR watcher, review watcher and landing reader for 60 wall-clock seconds against a private service. The fixture has an idle pane, one landing candidate waiting on a remote head, blocked cleanup folders, and a completed CI run with a last observation older than ten minutes. All workflow items stay at rest. The `lsof`, Git, `gh` and tmux shims append a line per invocation. Git and tmux forward local commands to the real executables, and the remote and CI paths are simulated locally. The interval includes the jobs' first wakes and excludes fixture setup. A one-second wake signal exercises CI notification handling against the retained completed run.
+
+The owner's 10-second process sample reports how frequently children were alive. The census counts executable invocations.
+
+| Executable or command | Base `81b30964c` launches/min | Fixed launches/min | Bound |
+| --- | ---: | ---: | ---: |
+| `lsof`, all | 507 | 13–23 | ≤80 |
+| `lsof +D` | 496 | 12 | 1–12 |
+| Git, all | 1,355 | 57–77 | ≤100 |
+| `git ls-remote --refs` | 64 | 2 | 1–2 |
+| `gh`, all | 3 | 1 | ≤4 |
+| `gh` for completed run 73 | 2 | 0 | 0 |
+| tmux | 65 | 2–64 | 1–150 |
+
+The base archive carried the same fixture and the test-only executable substitution for macOS's absolute `/usr/sbin/lsof` path. Its recursive probe count failed the bound. The all-Git count includes the cleanup path's repository guards and tracked-file check. A local run uses `cargo test -p farcooler-daemon --lib idle_board_spawn_budget -- --ignored --nocapture`.
 
 ## Follow-up tickets
 
-These local ticket drafts cover the measured remaining costs over 100 ms and providers that can exceed that threshold. They are stored with this report because the live board was outside the measurement scope.
-
-| Ticket | Cost | Acceptance |
+| Remaining cost | Measurement | Board ticket |
 | --- | --- | --- |
-| [ov-1429 A](follow-ups.md#ov-1429-a--avoid-recursive-open-file-walks) | Recursive open-file checks and filesystem accounting | Bound the cost of one large-tree cleanup check and preserve every open-file and disk fence. |
-| [ov-1429 B](follow-ups.md#ov-1429-b--profile-the-full-cli-and-idle-runner) | Plan projection, Workflow get startup and loaded reads, Task list startup, whole-CLI time, and idle launch census | Measure and attribute endpoint and CLI time and count launches per executable on a self-contained replay. |
-| [ov-1429 C](follow-ups.md#ov-1429-c--keep-terminal-ci-observations-across-subjects) | GitHub and Git transport calls | Persist terminal run observations across changes to the watched subject set and measure provider time separately. |
+| Recursive open-file scan and filesystem accounting | `lsof +D` took 283–537 ms per probe on a disposable 4,000-file tree. The deletion accounting walk was not separately timed. | [ov-1438](farcooler://task/-/ov-1438) |
+| Plan and theme-list projection | On the 35-pass copied-board replay, Plan p95 was 577 ms and theme-list p95 was 893 ms. The earlier Plan outlier was 8.31 s during compilation and the theme-list outlier was 4.14 s during sampling and store tests. | [ov-1436](farcooler://task/-/ov-1436) |
+| Workflow Get and cold Task List | Copied-board Get p95 was 129 ms and loaded Get reached 391 ms in the first fixed runs. Cold Task List crossed 100 ms in the first copied-board profile. | [ov-1436](farcooler://task/-/ov-1436) |
+| Whole CLI path | The owner measured Plan 207 s, theme list 98 s, Plan JSON 71 s with no output, worktree list 56 s, task list 19 s and Workflow Get 0.6–70 s including timeouts, on the installed runner before these changes. With the scratch service, end-to-end Plan was 376 ms, theme list 652 ms and Task List 287 ms. The replay has one CLI sample per command. | [ov-1436](farcooler://task/-/ov-1436) |
+| Git and GitHub transport | In the owner's 40 quarter-second samples, Git was present in 25 samples and GitHub job queries in about 30. Per-call wall times were not isolated. The follow-up also covers CI results after subjects are removed and re-added, or a different subject looks up the same run after restart. | [ov-1437](farcooler://task/-/ov-1437) |
 
 ## Test results
 
-The full store suite passed with 674 tests and three ignored. The targeted daemon suites for cleanup, scheduling, effect observation, admission, process logs, CI watch, and task paging passed, including the scratch pane's five 100 ms echo deadlines. The daemon layer and file-size checks passed.
+The store suite passed 674 tests. The 132 targeted daemon tests covered cleanup, scheduling, effect observation, admission, log reads, CI watch and task paging. All nine draft-approval integration tests and 649 CLI tests passed. The daemon layer, file-size and nightly-dispatch checks passed.
+
+The private-pane test sent bytes through the real input channel while a cleanup sweep was held in preflight. Each key had its own 100 ms deadline. The five measured echoes took 9.1–10.4 ms and the resumed sweep released the output.

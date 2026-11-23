@@ -78,6 +78,16 @@ async fn call(link: &mut Link, workspace: Uuid, action: Action) -> serde_json::V
     let result::Value::WorkflowReply(reply) = link.call(req).await.unwrap().value.unwrap() else { panic!("wrong result") };
     serde_json::from_str(&reply.json).unwrap()
 }
+async fn starter_reply(link: &mut Link, workspace: Uuid) -> serde_json::Value {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let got = call(link, workspace, Action::Get).await;
+            if got["suggested_adapter_pending"] != true { return got; }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+    }).await.expect("the background starter settings became available")
+}
+
 /// A note on the card, as `actor` says it.
 async fn say(link: &mut Link, card: Uuid, kind: pb::TaskNoteKind, actor: &str, body: &str) {
     assert!(note(link, card, kind, actor, body, None).await, "the note was refused");
@@ -286,33 +296,35 @@ async fn a_workspace_with_no_workflow_drafts_its_first_on_the_runners_suggestion
     let (ws, mut link) = (host.workspace, host.connect().await);
 
     // With no GitHub origin there's no CI to wait on, and the runner says so instead of guessing.
-    let got = call(&mut link, ws, Action::Get).await;
+    let cold = call(&mut link, ws, Action::Get).await;
+    assert_eq!(cold["suggested_adapter_pending"], true, "{cold}");
+    let got = starter_reply(&mut link, ws).await;
     assert!(got["configuration"].is_null() && got.get("suggested_adapter").is_none(), "{got}");
     assert!(got["suggested_adapter_refused"].as_str().unwrap().contains("origin isn’t on GitHub"), "{got}");
 
     // On GitHub the suggestion lands on origin itself, over ssh for an ssh origin and https for an https one.
     git(&repo, &["remote", "add", "origin", "git@github.com:example/first-workflow.git"]).await;
-    let got = call(&mut link, ws, Action::Get).await;
+    let got = starter_reply(&mut link, ws).await;
     assert!(got.get("suggested_adapter_refused").is_none(), "{got}");
     let landing = &got["suggested_adapter"]["config"]["landing"];
     assert_eq!((landing["repository"].as_str(), landing["target"].as_str(), landing["config_digest"].as_str()),
         (Some("ssh://git@github.com/example/first-workflow.git"), Some("refs/heads/main"), Some("")), "{got}");
     git(&repo, &["remote", "set-url", "origin", "https://github.com/example/first-workflow"]).await;
-    let got = call(&mut link, ws, Action::Get).await;
+    let got = starter_reply(&mut link, ws).await;
     assert_eq!(got["suggested_adapter"]["config"]["landing"]["repository"], "https://github.com/example/first-workflow.git", "{got}");
     // A token in an https origin is never used, and never echoed: the sentence says what to do instead.
     git(&repo, &["remote", "set-url", "origin", "https://x-access-token:ghp_SECRET@github.com/example/first-workflow.git"]).await;
-    let got = call(&mut link, ws, Action::Get).await;
+    let got = starter_reply(&mut link, ws).await;
     let why = got["suggested_adapter_refused"].as_str().unwrap_or_default();
     assert!(why.contains("token") && why.contains("ssh") && !why.contains("ghp_SECRET") && got.get("suggested_adapter").is_none(), "{got}");
     // A separate push URL decides where it lands: its form and its owner/name, while CI stays on the fetch URL.
     git(&repo, &["remote", "set-url", "origin", "https://github.com/example/first-workflow"]).await;
     git(&repo, &["remote", "set-url", "--push", "origin", "git@github.com:example/pushes-here.git"]).await;
-    let got = call(&mut link, ws, Action::Get).await;
+    let got = starter_reply(&mut link, ws).await;
     assert_eq!(got["suggested_adapter"]["config"]["landing"]["repository"], "ssh://git@github.com/example/pushes-here.git", "{got}");
     assert_eq!(got["suggested_adapter"]["config"]["ci"]["repository"], "example/first-workflow", "{got}");
     git(&repo, &["remote", "set-url", "--push", "origin", "https://u:ghp_SECRET@github.com/example/pushes-here.git"]).await;
-    let got = call(&mut link, ws, Action::Get).await;
+    let got = starter_reply(&mut link, ws).await;
     assert!(got["suggested_adapter_refused"].as_str().is_some_and(|w| w.contains("token") && !w.contains("ghp_SECRET")), "{got}");
     git(&repo, &["config", "--unset", "remote.origin.pushurl"]).await;
     git(&repo, &["remote", "set-url", "origin", "git@github.com:example/first-workflow.git"]).await;

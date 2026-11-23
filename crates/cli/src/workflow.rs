@@ -344,12 +344,23 @@ pub async fn ask(link:&mut crate::Link, workspace:Uuid, action:&Action) -> Resul
     let result::Value::WorkflowReply(reply) = expect_value(reply.value)? else { return Err("unexpected workflow reply".into()) };
     Ok(serde_json::from_str(&reply.json)?)
 }
-/// The runner's `workflow get` reply, unprinted, for the commands that draft from it.
+/// The runner's full workflow reply, unprinted.
 pub async fn get(link:&mut crate::Link, workspace:Uuid) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     if !link.daemon_capabilities().iter().any(|c| c == capability::WORKFLOW_COMMANDS) { return Err("runner lacks workflow commands".into()); }
     let reply = read_deadline(link.call(full_request(workspace)?)).await??;
     let result::Value::WorkflowReply(reply) = expect_value(reply.value)? else { return Err("unexpected workflow reply".into()) };
     Ok(serde_json::from_str(&reply.json)?)
+}
+
+/// Draft commands can wait for the runner's background starter settings.
+pub async fn get_for_draft(link:&mut crate::Link, workspace:Uuid) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            let value = get(link, workspace).await?;
+            if value["suggested_adapter_pending"] != true { return Ok(value); }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    }).await.map_err(|_| "The runner is still reading local Git settings. Try the draft command again.")?
 }
 /// `get` for `workspace re-pin`: the published workflow only. A busy workspace's state and history can outgrow
 /// the daemon's 1 MiB reply cap, and re-pinning reads none of it (ov-1373).

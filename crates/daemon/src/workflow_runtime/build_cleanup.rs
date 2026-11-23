@@ -478,7 +478,12 @@ pub(super) fn folder_paths<'a>(tree: &'a Path, folder: &'a str) -> impl Iterator
 }
 async fn check_open_files(path: &Path) -> std::result::Result<(), String> {
     // macOS launch agents may run without /usr/sbin on PATH.
-    let mut command = tokio::process::Command::new(if cfg!(target_os = "macos") { "/usr/sbin/lsof" } else { "lsof" });
+    let program = if cfg!(target_os = "macos") { "/usr/sbin/lsof" } else { "lsof" };
+    #[cfg(test)]
+    let shim = std::env::var_os("FARCOOLER_TEST_IDLE_SHIMS").map(|root| PathBuf::from(root).join("lsof"));
+    #[cfg(test)]
+    let program = shim.as_deref().unwrap_or_else(|| Path::new(program));
+    let mut command = tokio::process::Command::new(program);
     command.args(["-nP", "-F", "p", "+D"]).arg(path).kill_on_drop(true);
     let output = tokio::time::timeout(Duration::from_secs(120), command.output()).await
         .map_err(|_| "open-file check timed out".to_string())?.map_err(|e| format!("open-file check unavailable: {e}"))?;

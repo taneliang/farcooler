@@ -1156,7 +1156,8 @@ async fn pane_echo_stays_under_100ms_during_cleanup() {
     let echo = svc.root_dir().join("echo.txt");
     let pipe = format!("cat > {}", farcooler_core::shell::shell_quote(echo.to_str().unwrap()));
     assert!(svc.tmux.run(&["pipe-pane", "-O", "-t", &pane, &pipe]).await.unwrap().ok());
-    let setup = "stty -icanon -echo; printf '\\nready-for-keys\\n'; cat\n";
+    // Use the byte echo program even when the foreground shell aliases cat to a pager.
+    let setup = "command stty -icanon -echo min 1 time 0; printf '\\nready-for-keys\\n'; exec /bin/cat\n";
     let hex = |text: &str| text.bytes().map(|byte| format!("{byte:02x}")).collect::<String>();
     runtime.send_bytes_hex(terminal.id, &hex(setup)).await.unwrap();
     let echoed = || std::fs::read_to_string(&echo).unwrap_or_default();
@@ -1169,18 +1170,22 @@ async fn pane_echo_stays_under_100ms_during_cleanup() {
     tokio::time::timeout(Duration::from_secs(15), check.0.notified()).await.unwrap();
     let (mut writer, reader) = tokio::io::duplex(256);
     let input = tokio::spawn(async move { runtime.input_from(terminal.id, reader).await });
-    let mut timely = true;
+    let mut samples = Vec::new();
     let mut expected = String::new();
+    let budget = Duration::from_millis(100);
     for key in ["a", "b", "c", "d", "e"] {
         expected.push_str(key);
-        let deadline = tokio::time::Instant::now() + Duration::from_millis(100);
+        let start = tokio::time::Instant::now();
         writer.write_all(format!("{}\n", hex(key)).as_bytes()).await.unwrap();
-        timely &= wait_until(deadline, Duration::from_millis(2), || echoed().ends_with(&expected)).await;
+        let seen = wait_until(start + budget, Duration::from_millis(2), || echoed().ends_with(&expected)).await;
+        samples.push((key, seen, start.elapsed()));
     }
     drop(writer);
     input.await.unwrap().unwrap();
     check.1.notify_one();
     worker.await.unwrap().unwrap();
-    assert!(timely, "each key must reach the real pane and echo within 100 ms");
+    println!("pane echo samples: {samples:?}");
+    assert!(samples.iter().all(|(_, seen, elapsed)| *seen && *elapsed <= budget),
+        "each key must echo within {budget:?}");
     assert!(!output.exists(), "the sweep still releases the output");
 }

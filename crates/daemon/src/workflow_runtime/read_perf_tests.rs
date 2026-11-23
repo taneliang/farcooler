@@ -65,10 +65,54 @@ async fn profile_copied_board() {
     println!("scratch runner pid: {}", std::process::id());
     let seconds = std::env::var("FARCOOLER_PROFILE_SECONDS").ok().map(|value| value.parse().unwrap()).unwrap_or(0);
     let until = std::time::Instant::now() + Duration::from_secs(seconds);
+    let handle = runtime.command_handle(&runtime.controller()).unwrap();
     loop {
-        read_requests(&svc, runtime.command_handle(&runtime.controller()).unwrap(), board).await;
+        read_requests(&svc, handle.clone(), board).await;
         if std::time::Instant::now() >= until { break; }
     }
+    if let Some(cli) = std::env::var_os("FARCOOLER_PROFILE_CLI") {
+        profile_cli(&svc, handle, board, Path::new(&cli)).await;
+    }
+}
+
+async fn profile_cli(
+    svc: &Arc<crate::service::Service>, handle: CommandHandle, board: Uuid, cli: &Path,
+) {
+    use farcooler_transport::{HandshakeConfig, UnixListenerServer};
+    use std::process::Stdio;
+
+    assert!(cli.is_absolute() && cli.is_file());
+    // The socket address must fit the short Unix socket path limit, even
+    // when the copied database lives under the engine's long scratch path.
+    let socket_root = tempfile::Builder::new().prefix("fc-1429-").tempdir_in("/tmp").unwrap();
+    let server = UnixListenerServer::bind(&socket_root.path().join("farcoolerd.sock")).unwrap();
+    let svc = svc.clone();
+    let watcher = crate::watch::Watcher::new(svc.clone());
+    let stop = Arc::new(tokio::sync::Notify::new());
+    let server = tokio::spawn(async move {
+        server.serve(move |_| {
+            let factory = crate::rpc::RpcFactory::new(svc.clone(), watcher.clone(), stop.clone(),
+                Peer { client_id: None, scope: Scope::Control }).with_workflow_fixture(handle.clone());
+            Some((HandshakeConfig { daemon_version: farcooler_protocol::BUILD.into() }, factory))
+        }).await.unwrap();
+    });
+    let board = board.to_string();
+    for (name, args) in [
+        ("plan", vec!["plan", "--workspace", &board]),
+        ("plan theme list", vec!["plan", "--workspace", &board, "theme", "list"]),
+        ("workflow get", vec!["workflow", "get", &board, "--json"]),
+        ("task list", vec!["task", "list", "--workspace", &board, "--json"]),
+        ("worktree list", vec!["worktree", "list", "--json"]),
+    ] {
+        let start = std::time::Instant::now();
+        let reply = tokio::process::Command::new(cli).env("FARCOOLER_HOME", socket_root.path())
+            .env("FARCOOLER_WORKSPACE", &board).args(&args).stdout(Stdio::null()).kill_on_drop(true)
+            .output().await.unwrap();
+        assert!(reply.status.success(), "{name}: {}", String::from_utf8_lossy(&reply.stderr));
+        println!("CLI {name}: {:.3} ms", start.elapsed().as_secs_f64() * 1000.0);
+    }
+    server.abort();
+    let _ = server.await;
 }
 
 // SQL seeds historical rows in one transaction, avoiding quadratic fixture
@@ -203,4 +247,68 @@ if stage in ('build', 'check'):
         assert!(elapsed < limit, "{name} took {elapsed:?} (budget {limit:?})");
     }
     assert_eq!(calls, svc.tmux.calls_total(), "board RPCs must reuse the inventory");
+}
+
+
+/// Seed an idle board with one held landing candidate and a blocked cleanup
+/// intent. The actual runtime owns every probe once the census starts.
+pub(crate) async fn idle_board_fixture(
+    svc: &crate::service::Service, ws: &str, repository: &Path, base: String, tree_root: &Path,
+) -> (tempfile::TempDir, Runtime) {
+    use super::{adapters, CodingLanding, RunTree};
+    use farcooler_protocol::workflow_config::AdapterConfiguration;
+
+    let (config_dir, mut fixture) = super::coding_tests::configured(false, "pass").await;
+    let config = fixture.coding.as_mut().unwrap();
+    config.repository = repository.to_path_buf();
+    config.base = base.clone();
+    config.landing_ref = "refs/heads/main".into();
+    config.landing = Some(CodingLanding {
+        job: "idle-landing".into(),
+        repository: "https://github.com/example/idle-fixture.git".into(),
+        target: config.landing_ref.clone(),
+        config_digest: String::new(),
+    });
+    let config = AdapterConfiguration::Coding(config.clone());
+    let definition = fixture.configured_definition().unwrap();
+    let mut runtime = Runtime::open_service(&svc.root_dir().join("workflow"), svc.store.clone()).unwrap();
+    runtime.user_home = Some(config_dir.path().to_path_buf());
+    runtime.host = Some(svc.worktree_host().unwrap());
+
+    // Seed a waiting candidate with its immutable adapter. The mock remote
+    // never answers, so the candidate stays at rest and there is no landing.
+    fixture.exec.store = svc.store.clone();
+    super::concurrency_tests::enqueue_item(&mut fixture, ws, "waiting", definition.clone());
+    let mut state = fixture.state(ws).unwrap().unwrap();
+    let waiting = state.items.get_mut("waiting").unwrap();
+    let bundle = farcooler_store::workflow_publication::configuration_pin(&definition, Some(&config));
+    waiting.policy_pin = bundle.clone();
+    waiting.phase = Phase::WaitingJoin;
+    waiting.candidate = Some(base.clone());
+    waiting.pending = None;
+    let db = rusqlite::Connection::open(svc.root_dir().join("farcooler.db")).unwrap();
+    db.execute("INSERT OR IGNORE INTO workflow_definitions(pin,definition) VALUES (?1,?2)",
+        (&definition.pin(), serde_json::to_string(&definition).unwrap())).unwrap();
+    db.execute("INSERT INTO workflow_bundles(pin,definition_pin,adapter) VALUES (?1,?2,?3)",
+        (&bundle, &definition.pin(), serde_json::to_string(&config).unwrap())).unwrap();
+    drop(db);
+    assert!(runtime.item_configuration(ws, "waiting", waiting).unwrap().is_some());
+    svc.store.workflow_state_for_tests(&state).unwrap();
+
+    // A finished build left folders with open files. Seed its durable intent
+    // and let the real dispatcher do preflight and retry the blocked sweep.
+    let tree = tree_root.canonicalize().unwrap().join("finished");
+    adapters::git(repository, &["worktree", "add", "-b", "finished", tree.to_str().unwrap()]).await.unwrap();
+    let folders: Vec<String> = (0..16).map(|n| format!("output-{n:02}")).collect();
+    for folder in &folders {
+        std::fs::create_dir(tree.join(folder)).unwrap();
+        std::fs::write(tree.join(folder).join("compiled"), b"fixture").unwrap();
+    }
+    svc.store.workflow_cleanup_enqueue(&farcooler_workflow::cleanup::CleanupEffect {
+        id: "idle-cleanup".into(), workspace: ws.into(), revision: state.revision,
+        item: "finished".into(), run: "finished-run".into(), restart: None,
+        tree: Some(RunTree { name: "finished".into(), branch: "finished".into(), path: tree.to_string_lossy().into_owned(), base, adopted: false }),
+        folders, uncertain: false, directory: None,
+    }).unwrap();
+    (config_dir, runtime)
 }

@@ -103,7 +103,8 @@ impl Rpc {
         let mut value = value;
         // `workspace re-pin` reads the published workflow and nothing else (ov-1373): the state, notices and
         // lists beside it grow without bound, and the reply may not pass the 1 MiB frame cap.
-        if action_is_get && req.accepts.iter().any(|v| v == "workflow_repin_v1") {
+        let published_only = action_is_get && req.accepts.iter().any(|v| v == "workflow_repin_v1");
+        if published_only {
             if let Some(o) = value.as_object_mut() {
                 o.retain(|k, _| matches!(k.as_str(), "schema" | "configuration" | "context"));
             }
@@ -117,7 +118,7 @@ impl Rpc {
                 },
             ));
         }
-        let value = crate::workflow_starter::add_to_get(svc, workspace, value).await;
+        let value = crate::workflow_starter::add_to_get(svc, workspace, value, !published_only);
         let json = if action_is_get && req.accepts.is_empty() {
             encode_legacy_get(value)
         } else {

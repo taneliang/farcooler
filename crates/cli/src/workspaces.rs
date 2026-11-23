@@ -677,7 +677,7 @@ async fn workspace_via(
 
         WorkspaceCmd::LandingTemplate { workspace, name, gate, batch, gates, routes, output, repo } => {
             let (ws, _) = named(&mut link, repo.as_deref(), &workspace, env).await?;
-            let held = crate::landing_templates::held(&crate::workflow::get(&mut link, uuid_of(&ws.id)).await?)?;
+            let held = crate::landing_templates::held(&crate::workflow::get_for_draft(&mut link, uuid_of(&ws.id)).await?)?;
             let bundle = crate::landing_templates::template(&name, &held, &gate, &gates, &routes, batch)?;
             crate::landing_templates::deliver(&bundle, &[], &held, uuid_of(&ws.id), &output)?;
         }
@@ -690,7 +690,7 @@ async fn workspace_via(
                 };
                 serde_json::from_str(&text)?
             } else {
-                let held = crate::landing_templates::held(&crate::workflow::get(&mut link, uuid_of(&ws.id)).await?)?;
+                let held = crate::landing_templates::held(&crate::workflow::get_for_draft(&mut link, uuid_of(&ws.id)).await?)?;
                 let bundle = crate::landing_templates::template(name.as_deref().expect("clap requires a template or file"), &held, &gate, &gates, &routes, batch)?;
                 if held.suggesting() { eprintln!("This workspace has no workflow yet, so the draft uses the settings this runner suggests. The card shows every one."); }
                 bundle
@@ -732,7 +732,7 @@ async fn workspace_via(
         WorkspaceCmd::ImportLanding { workspace, gates, output, repo } => {
             let (ws, _) = named(&mut link, repo.as_deref(), &workspace, env).await?;
             let charter = charter::read(&mut link, uuid_of(&ws.id)).await?;
-            let held = crate::landing_templates::held(&crate::workflow::get(&mut link, uuid_of(&ws.id)).await?)?;
+            let held = crate::landing_templates::held(&crate::workflow::get_for_draft(&mut link, uuid_of(&ws.id)).await?)?;
             let (bundle, notes) = crate::landing_templates::import(&charter.text, &held, &gates)?;
             crate::landing_templates::deliver(&bundle, &notes, &held, uuid_of(&ws.id), &output)?;
         }

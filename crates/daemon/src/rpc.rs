@@ -2359,3 +2359,7 @@ mod revision_tests;
 #[cfg(test)]
 #[path = "rpc_answer_tests.rs"]
 mod answer_tests;
+
+#[cfg(test)]
+#[path = "rpc/idle_spawn_tests.rs"]
+mod idle_spawn_tests;

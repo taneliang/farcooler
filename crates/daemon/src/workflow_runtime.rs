@@ -1375,4 +1375,4 @@ async fn wait_until(deadline: tokio::time::Instant, interval: std::time::Duratio
 }
 
 #[cfg(test)]
-mod read_perf_tests;
+pub(crate) mod read_perf_tests;

@@ -461,7 +461,7 @@ jobs:
         working-directory: apps/macos
         run: ../../scripts/swift-test-guard.sh <(echo 2) -- ../../scripts/test-leak-check.py -- swift test --filter 'NativeStreamingStallTests'
 
-  # The one daemon test that runs at the daemon's own timing, five minutes
+  # One daemon test runs at the daemon's own timing, five minutes
   # long (ov-816, ov-823): a message sent to a claude no hook is heard from,
   # whose turn runs five minutes and raises a permission dialog partway, is
   # sent when the turn ends. The six-second variant per push covers the
@@ -495,6 +495,7 @@ jobs:
         with:
           tool: cargo-nextest@0.9.148
       - name: Install tmux
+        id: daemon-tmux
         timeout-minutes: 10
         run: ./scripts/ci-install-tmux.sh
       - name: Five-minute turn with a dialog, at production timing
@@ -508,6 +509,25 @@ jobs:
           # between the words of the summary, and this grep missed a pass
           # (nightly 40543895510: the test passed in 302 s, the step failed).
           grep -q 'Summary.* 1 test run: 1 passed' "$RUNNER_TEMP/nextest.log"
+
+      - name: Board latency with four builds and a landing check
+        if: ${{ !cancelled() && steps.daemon-tmux.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- \
+            cargo nextest run --color never --profile ci -p farcooler-daemon --lib --run-ignored only --success-output immediate \
+            -E 'test(=workflow_runtime::read_perf_tests::board_read_latency_with_engine_work)' \
+            2>&1 | tee "$RUNNER_TEMP/board-read-latency.log"
+          grep -q 'Summary.* 1 test run: 1 passed' "$RUNNER_TEMP/board-read-latency.log"
+      - name: Idle board spawn census
+        if: ${{ !cancelled() && steps.daemon-tmux.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- \
+            cargo nextest run --color never --profile ci -p farcooler-daemon --lib --run-ignored only --success-output immediate \
+            -E 'test(=rpc::idle_spawn_tests::idle_board_spawn_budget)' \
+            2>&1 | tee "$RUNNER_TEMP/board-idle-spawns.log"
+          grep -q 'Summary.* 1 test run: 1 passed' "$RUNNER_TEMP/board-idle-spawns.log"
 
   # Always runs, and decides for itself from the run's jobs, so a cancelled or
   # timed-out job (no verdict from the tests) is reported too.

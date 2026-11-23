@@ -1814,7 +1814,22 @@ const SKIP_DIRS: &[&str] = &[
     "venv",
 ];
 
+pub(crate) type Suggestion = std::result::Result<serde_json::Value, String>;
+
+#[derive(Default)]
+pub(crate) struct StarterSettings {
+    pub(crate) by_repository: std::sync::Mutex<std::collections::HashMap<Uuid, StarterObservation>>,
+    // Across workspaces, at most one batch of local Git probes is in flight.
+    pub(crate) probe: tokio::sync::Mutex<()>,
+}
+
+pub(crate) struct StarterObservation {
+    pub(crate) git_config: Option<(std::time::SystemTime, u64, u64)>,
+    pub(crate) result: Option<(tokio::time::Instant, Suggestion)>,
+}
+
 pub struct Service {
+    pub(crate) starter_settings: StarterSettings,
     pub(crate) workflow_notice_wake: Arc<tokio::sync::Notify>,
     pub(crate) workflow_owner: std::sync::Mutex<Option<crate::workflow_service::Owner>>,
     /// Admission and join for every legacy-era writer (see `writer_gate`).
@@ -2058,6 +2073,7 @@ impl Service {
 
         let service = Self {
             workflow_owner: Default::default(),
+            starter_settings: Default::default(),
             writers: writers.clone(),
             workflow_notice_wake: Default::default(),
             store: store.clone(),

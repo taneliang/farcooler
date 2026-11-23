@@ -15,10 +15,12 @@
 //! `https://` one for an https origin, signed in with the runner user's own git and ssh (ov-1032). A workspace whose
 //! origin can't be read as a GitHub repository has no CI to wait on and nothing to land on, so the suggestion says that.
 use crate::landing_templates::GATE_PATH;
-use crate::service::Service;
+use crate::service::{Service, StarterObservation, Suggestion};
 use farcooler_protocol::workflow_config::CodingLanding;
 use crate::workflow_runtime::{CodingCi, CodingCommand, CodingConfig, CodingHarness, LaunchFile, MAX_COMMAND_MS};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
 
 pub use farcooler_daemon_contracts::landing_templates::{BUILD_MODELS, HARNESS, REVIEW_MODELS, default_models};
@@ -69,7 +71,9 @@ printf '%s,"failed_jobs":%s}\n' "${out%?}" "$jobs" > "$FARCOOLER_RECEIPT""#;
 /// `workflow get`'s reply, for a workspace that has never published: the settings this runner suggests for its first
 /// draft as `suggested_adapter`, or why it can't as `suggested_adapter_refused`. Only a `get` reply carries a
 /// `configuration`, and a published workspace's isn't null, so every other reply is left alone.
-pub(crate) async fn add_to_get(svc: &Service, workspace: Uuid, mut value: serde_json::Value) -> serde_json::Value {
+pub(crate) fn add_to_get(
+    svc: &Arc<Service>, workspace: Uuid, mut value: serde_json::Value, include_suggestion: bool,
+) -> serde_json::Value {
     // Every reply, a published workspace's too: Codex's hooks are what a published adapter pins to add Codex models (ov-1088).
     if value.get("configuration").is_some() {
         if let (Some(reply), Some(hooks)) = (value.as_object_mut(), engine_codex_hooks(svc.root_dir(), true)) {
@@ -89,13 +93,60 @@ pub(crate) async fn add_to_get(svc: &Service, workspace: Uuid, mut value: serde_
             reply.insert("repinned_definition".into(), serde_json::json!(definition));
         }
     }
-    if value.get("configuration").is_none_or(|c| !c.is_null()) { return value; }
-    let said = match settings(svc, workspace).await {
-        Ok(config) => ("suggested_adapter", serde_json::json!(farcooler_protocol::workflow_config::AdapterConfiguration::Coding(config))),
-        Err(why) => ("suggested_adapter_refused", why.into()),
+    if !include_suggestion || value.get("configuration").is_none_or(|c| !c.is_null()) { return value; }
+    let said = match suggestion(svc, workspace) {
+        Some(Ok(config)) => ("suggested_adapter", config),
+        Some(Err(why)) => ("suggested_adapter_refused", why.into()),
+        None => ("suggested_adapter_pending", true.into()),
     };
     if let Some(reply) = value.as_object_mut() { reply.insert(said.0.into(), said.1); }
     value
+}
+
+const SUGGESTION_TTL: Duration = Duration::from_secs(60);
+const SUGGESTION_TIMEOUT: Duration = Duration::from_secs(5);
+fn suggestion(svc: &Arc<Service>, workspace: Uuid) -> Option<Suggestion> {
+    let unavailable = || Some(Err("Far Cooler couldn’t read this workspace.".into()));
+    let Ok(ws) = svc.store.get_workspace(workspace) else { return unavailable() };
+    let Ok(repo) = svc.store.get_repository(ws.repository_id) else { return unavailable() };
+    let config_path = Path::new(&repo.canonical_git_dir).join("config");
+    let config_stamp = move || {
+        use std::os::unix::fs::MetadataExt;
+        let meta = config_path.metadata().ok()?;
+        Some((meta.modified().ok()?, meta.len(), meta.ino()))
+    };
+    // Refuse to reuse a suggestion after a local origin edit. The age limit
+    // also refreshes branch tips and config included from elsewhere.
+    let stamp = config_stamp();
+    let mut entries = svc.starter_settings.by_repository.lock().unwrap();
+    if let Some(existing) = entries.get(&repo.id) {
+        match &existing.result {
+            None => return None,
+            Some((at, result)) if existing.git_config == stamp && at.elapsed() < SUGGESTION_TTL => {
+                return Some(result.clone());
+            }
+            _ => {}
+        }
+    }
+    entries.insert(repo.id, StarterObservation { git_config: stamp, result: None });
+    let svc = svc.clone();
+    tokio::spawn(async move {
+        let permit = svc.starter_settings.probe.lock().await;
+        let resolved = tokio::time::timeout(SUGGESTION_TIMEOUT, settings(&svc, workspace)).await
+            .unwrap_or_else(|_| Err("Far Cooler timed out reading local Git settings for this workspace.".into()))
+            .map(|config| serde_json::json!(farcooler_protocol::workflow_config::AdapterConfiguration::Coding(config)));
+        drop(permit);
+        let unchanged = config_stamp() == stamp;
+        let mut entries = svc.starter_settings.by_repository.lock().unwrap();
+        if unchanged {
+            entries.insert(repo.id, StarterObservation {
+                git_config: stamp, result: Some((tokio::time::Instant::now(), resolved)),
+            });
+        } else {
+            entries.remove(&repo.id);
+        }
+    });
+    None
 }
 
 /// Everything a first draft pins to, landing on origin's default branch, or why there are none, in a sentence a person reads.
