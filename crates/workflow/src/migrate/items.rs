@@ -24,7 +24,7 @@ impl Migration<'_> {
             attempt: _, fence: _, phase, run: _, pending: _, candidate: _, last_evidence: _, stopping: _, rework_history: _,
             back_edges: _, retries: _, members, group_of, pushed, handed, since_ms: _, grouped_in: _, wait_since: _, models: _,
             tree: _, sent_back: _, brief: _, follows, followers, cancel_reason: _, closed: _, failure: _, ci_reruns: _,
-            ci_retry: _, deciding, hook_calls: _, hook_refused, group_failure: _, landed: _, restart: _, reuse_checkout, carried_progress: _, history: _, reason: _, stopped_from: _ } = item;
+            ci_retry: _, deciding, hook_calls: _, hook_refused, queue_hold: _, group_failure: _, landed: _, restart: _, reuse_checkout, carried_progress: _, history: _, reason: _, stopped_from: _ } = item;
         let before = self.refused.len();
         if *reuse_checkout { self.refuse(id, "it still needs to reuse its checkout after a workflow publication"); }
         if execution.is_some() { self.refuse(id, "it carries a read-time execution view, which is never stored"); }

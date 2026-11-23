@@ -96,6 +96,8 @@ pub enum Error {
     Encoding(#[from] serde_json::Error),
     #[error("runtime refused: {0}")]
     Refused(&'static str),
+    #[error("runtime refused: {0}")]
+    QueueHeld(String),
     /// The run stopped on changes in its named tree it can't show it made (ov-979), listed for the person.
     #[error("runtime stopped: {0}")]
     Kept(String),
@@ -445,10 +447,14 @@ impl Runtime {
         self.authorize(controller.instance)?;
         if let Command::Queue { item } = &request.command {
             let check = self.check_queue(&request.workspace, item, request.expected_revision, None, None).await;
-            if !self.apply_queue_check(&request.workspace, item, check, now_ms)?
-                && self.state(&request.workspace)?.is_some_and(|s| s.revision == request.expected_revision)
+            let held = matches!(check, waiting_join::QueueCheck::Held(_));
+            if let Some(reason) = self.apply_queue_check(&request.workspace, item, check, now_ms)?
+                && let Some(state) = self.state(&request.workspace)?.filter(|s| s.revision == request.expected_revision)
             {
-                return Err(Error::Refused("waiting candidate could not be applied to the landing head"));
+                if held && let Some(checked) = state.items.get(item) {
+                    self.record_queue_hold(&request.workspace, item, checked, &reason, now_ms)?;
+                }
+                return Err(Error::QueueHeld(reason));
             }
         }
         self.submit_now(controller, request, now_ms)
@@ -996,9 +1002,9 @@ impl Runtime {
                     admission.recheck().and_then(|()| admission.permits(&action))
                         .map_err(|_| Error::Refused("workflow caller authority changed"))?;
                     let deciders = admission.deciders().map_err(|_| Error::Refused("workflow caller authority changed"))?;
-                    let queue_held = if let farcooler_protocol::workflow_commands::Action::Queue { item, .. } = &*action {
-                        !self.apply_queue_check(&admission.workspace(), item, queue_check, now())?
-                    } else { false };
+                    let queue_hold = if let farcooler_protocol::workflow_commands::Action::Queue { item, .. } = &*action {
+                        self.apply_queue_check(&admission.workspace(), item, queue_check, now())?
+                    } else { None };
                     let get = matches!(*action, farcooler_protocol::workflow_commands::Action::Get);
                     let mut result = if let farcooler_protocol::workflow_commands::Action::Settle { mutation, item, run, pin, landed } = &*action {
                         self.settle_wire(&admission.workspace(), item, run, pin, *landed, mutation.epoch).await?
@@ -1007,7 +1013,7 @@ impl Runtime {
                     } else if let farcooler_protocol::workflow_commands::Action::Resolve { mutation, item, run, pin } = &*action {
                         self.resolve_wire(&admission.workspace(), item, run, pin, mutation.epoch).await?
                     } else {
-                        self.wire_command_with(&admission.workspace(), &admission.principal(), &deciders, Some(&admission.actor()), *action, wire_commands::Prepared { tree, close_verified, queue_held })?
+                        self.wire_command_with(&admission.workspace(), &admission.principal(), &deciders, Some(&admission.actor()), *action, wire_commands::Prepared { tree, close_verified, queue_hold })?
                     };
                     if get {
                         let epoch = result.pointer("/state/epoch").and_then(|v| v.as_u64()).unwrap_or(1);

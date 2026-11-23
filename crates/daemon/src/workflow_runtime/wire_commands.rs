@@ -35,7 +35,7 @@ pub(super) use crate::workflow_summary::HIDDEN;
 
 /// Runner-prepared inputs.
 #[derive(Default)]
-pub(super) struct Prepared { pub tree: Option<RunTree>, pub close_verified: bool, pub queue_held: bool }
+pub(super) struct Prepared { pub tree: Option<RunTree>, pub close_verified: bool, pub queue_hold: Option<String> }
 
 fn command_reply(receipt: Receipt) -> serde_json::Value {
     let reason = receipt.send_back_reason();
@@ -184,7 +184,7 @@ impl Runtime {
     pub(super) fn wire_command_with(&self, workspace: &str, principal: &str, deciders: &[String], actor: Option<&WorkflowActor>, action: Action,
         prepared: Prepared) -> Result<serde_json::Value>
     {
-        let Prepared { tree, close_verified, queue_held } = prepared;
+        let Prepared { tree, close_verified, queue_hold } = prepared;
         let payload = serde_json::to_string(&(principal, &action))?;
         if payload.len() > MAX_BYTES { return Err(Error::Refused("oversized command")); }
         // A proposal is filed and answered by the daemon before the engine is involved (`workflow_drafts`).
@@ -321,8 +321,13 @@ impl Runtime {
                 Action::Queue { item, run, pin, .. } | Action::Leave { item, run, pin, .. } => {
                     if !state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin) {
                         self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Stale))?
-                    } else if queue_held {
-                        self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Resource))?
+                    } else if let Some(reason) = queue_hold {
+                        let input = input(Command::HoldQueue { item: item.clone(), reason }, Grant::Controller);
+                        let receipt = self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?;
+                        if matches!(receipt.result, Err(Refusal::Held(_))) {
+                            self.defer_automatic_queue(workspace, item, now());
+                        }
+                        receipt
                     } else {
                         let command = if matches!(action, Action::Queue { .. }) { Command::Queue { item:item.clone() } }
                             else { Command::Leave { item:item.clone() } };

@@ -11,7 +11,7 @@ fn new_item(definition: &Definition, policy_pin: &str, resource: &str,
         dependencies: dependencies.clone(), resource: resource.into(), stage: 0, iteration: 0, attempt: 1, fence: 1,
         phase: Phase::Blocked, run: String::new(), pending: None, candidate: initial_candidate.clone(),
         restart: None, reuse_checkout: false, carried_progress: false, history: Vec::new(), reason: None, last_evidence: None, stopping: None, stopped_from: None,
-        cancel_reason: None, closed: None, failure: None, group_failure: None, deciding: None,
+        cancel_reason: None, closed: None, failure: None, queue_hold: None, group_failure: None, deciding: None,
         hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, landed: None,
         rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
         members: Vec::new(), handed: Vec::new(), since_ms: 0, group_of: None, grouped_in: None,
@@ -244,7 +244,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                 Command::Approve { item, .. } | Command::Review { item, .. }
                 | Command::Observe { item, .. } | Command::Cancel { item, .. } | Command::Retry { item }
                 | Command::Queue { item } | Command::Leave { item } | Command::RefreshJoin { item, .. }
-                | Command::Move { item, .. }
+                | Command::HoldQueue { item, .. } | Command::Move { item, .. }
                 | Command::Resolve { item, .. } | Command::SendBack { item, .. } | Command::Close { item, .. }
                 | Command::Land { item, .. } | Command::RepinPending { item, .. } => item,
                 Command::Decide { .. } | Command::Enqueue { .. } | Command::Advance | Command::RefreshGroups { .. } | Command::AdoptPublication { .. } | Command::Reopen { .. } | Command::Start { .. } => unreachable!(),
@@ -704,7 +704,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                                 policy_pin: policy_pin.clone(), dependencies: BTreeSet::new(), resource,
                                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked,
                                 run: String::new(), pending: None, candidate: None, last_evidence: None,
-                                stopping: None, stopped_from: None, cancel_reason: None, closed: None, failure: None, group_failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, landed: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
+                                stopping: None, stopped_from: None, cancel_reason: None, closed: None, failure: None, queue_hold: None, group_failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, landed: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                                 members: Vec::new(), handed: Vec::new(), since_ms: 0,
                                 group_of: Some(GroupOf { name: name.clone(), pin }),
                                 grouped_in: None, models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() });
@@ -714,6 +714,16 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     next.items.get_mut(&gid).ok_or(Refusal::Missing)?.members.push(Member { item: id.clone(), candidate });
                     item.grouped_in = Some(gid);
                     item.phase = Phase::Joined;
+                }
+                Command::HoldQueue { reason, .. } => {
+                    controller(input)?;
+                    if item.phase != Phase::WaitingJoin { return Err(Refusal::Phase); }
+                    if !valid_rework_reason(reason) { return Err(Refusal::Invalid); }
+                    let hold = item.queue_hold.get_or_insert_with(|| QueueHold {
+                        reason: reason.clone(), since_ms: input.now_ms, notified: false,
+                    });
+                    hold.reason.clone_from(reason);
+                    hold.notified |= input.now_ms.saturating_sub(hold.since_ms) >= QUEUE_HOLD_NOTICE_MS;
                 }
                 Command::RefreshJoin { previous, base, result, .. } => {
                     controller(input)?;
@@ -961,6 +971,14 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
     }
     // A group result can fail a member at its join, after the first failure pass.
     hook_reducer::failed(state, &mut next, input, &mut effects);
+    // A hold belongs to one waiting candidate and ends when it leaves that join.
+    for (id, item) in &mut next.items {
+        if item.phase != Phase::WaitingJoin || state.items.get(id).is_some_and(|old|
+            old.run != item.run || old.stage != item.stage || old.candidate != item.candidate)
+        {
+            item.queue_hold = None;
+        }
+    }
     // A group says when it reached the step and phase it is in now.
     for (id, item) in next.items.iter_mut().filter(|(_, i)| i.group_of.is_some()) {
         if state.items.get(id).is_none_or(|old| old.stage != item.stage || old.phase != item.phase) {
@@ -1402,6 +1420,7 @@ fn valid_state(state: &State) -> bool {
                 && item.sent_back.iter().all(|b| valid_id(&b.id) && valid_rework_reason(&b.reason))
                 && item.brief.as_deref().is_none_or(valid_rework_reason)
                 && item.failure.as_deref().is_none_or(valid_rework_reason)
+                && item.queue_hold.as_ref().is_none_or(|hold| item.phase == Phase::WaitingJoin && valid_rework_reason(&hold.reason))
                 && item.followers.len() <= usize::from(u8::MAX)
                 // A live lead's tickets follow it and no other; a closed one's list is history, as they've let go.
                 && (matches!(item.phase, Phase::Done | Phase::Cancelled)

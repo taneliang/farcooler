@@ -336,7 +336,8 @@ impl Projection<'_> {
         let failure = item.failure.clone().or_else(|| {
             self.stops.get(owner).filter(|stop| stop.run == item.run).map(|stop| stop.text.clone())
         }).or_else(|| item.reason.as_ref().filter(|_| phase == Phase::Failed).cloned());
-        let reason = reason(item, step, &phase, state, position, style)
+        let reason = item.queue_hold.as_ref().map(|hold| hold.reason.clone())
+            .or_else(|| reason(item, step, &phase, state, position, style))
             .filter(|reason| Some(reason) != failure.as_ref() && !(phase == Phase::Failed && failure.is_some()));
         let current_failure = matches!(phase, Phase::Failed | Phase::Uncertain | Phase::Blocked | Phase::WaitingSlot);
         let summary = failure.as_deref().filter(|_| current_failure).or(reason.as_deref())
@@ -533,6 +534,21 @@ mod tests {
         state.items.get_mut("ov-2").unwrap().stage = 1;
         let view = project(&state, None, &Places::default(), &BTreeMap::new(), None, Style::Apple);
         assert_eq!(view.stations.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["stage-1", "stage-3"]);
+    }
+
+    #[test]
+    fn landing_hold_is_visible_on_the_plan_ticket() {
+        let mut state = State::empty("w".into(), 1);
+        let definition = Definition::coding();
+        enqueue(&mut state, "ov-1", &definition);
+        let item = state.items.get_mut("ov-1").unwrap();
+        item.phase = Phase::WaitingJoin;
+        let why = "The landing target has no valid head commit.";
+        item.queue_hold = Some(farcooler_workflow::QueueHold { reason: why.into(), since_ms: 1, notified: false });
+        let view = project(&state, Some(&definition), &Places::default(), &BTreeMap::new(), None, Style::Apple);
+        let ticket = view.stations.iter().flat_map(|s| &s.tickets).find(|t| t.id == "ov-1").unwrap();
+        assert_eq!(ticket.summary.as_deref(), Some(why));
+        assert_eq!(ticket.reason.as_deref(), Some(why));
     }
 
     #[test]

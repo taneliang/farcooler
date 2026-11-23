@@ -237,3 +237,85 @@ async fn move_waiting_ticket_main(dir: &tempfile::TempDir, runtime: &Runtime, pa
         .args(["push", "-q", "origin", "HEAD:refs/heads/main"]).status().await.unwrap().success());
     adapters::git(&other, &["rev-parse", "HEAD"]).await.unwrap()
 }
+
+#[tokio::test]
+async fn a_stale_index_lock_in_the_reviewed_checkout_does_not_hold_queue() {
+    let (dir, mut runtime) = lander("pass").await;
+    let definition = waiting_definition(&runtime, false);
+    at_join(&mut runtime, "ticket", &definition).await;
+    let before = runtime.state("w").unwrap().unwrap();
+    let candidate = candidate_of(&before, "ticket").unwrap();
+    let main = move_waiting_ticket_main(&dir, &runtime, "independent.txt", "another landing changed this file").await;
+    let tree = runtime.item_tree("w", "ticket");
+    // Reproduce ov-1419: the worktree is clean, but an in-place rebase cannot write its index.
+    let lock = adapters::git(&tree, &["rev-parse", "--path-format=absolute", "--git-path", "index.lock"]).await.unwrap();
+    std::fs::write(&lock, b"").unwrap();
+    assert!(adapters::git(&tree, &["status", "--porcelain"]).await.unwrap().is_empty());
+
+    let receipt = runtime.submit(&runtime.controller(), Request {
+        id: "queue-with-locked-index".into(), workspace: "w".into(), expected_revision: before.revision,
+        sequence: 2, command: Command::Queue { item: "ticket".into() },
+    }, 10).await.unwrap();
+    assert!(receipt.result.is_ok(), "{receipt:?}");
+    let after = runtime.state("w").unwrap().unwrap();
+    assert_eq!(after.items["ticket"].phase, Phase::Joined);
+    assert_eq!(candidate_of(&after, "ticket"), Some(candidate));
+    assert_eq!(adapters::git(&tree, &["rev-parse", "HEAD"]).await.unwrap(), candidate);
+    assert_ne!(adapters::git(&tree, &["merge-base", &main, candidate]).await.unwrap(), main);
+    assert!(std::path::Path::new(&lock).is_file());
+}
+
+#[tokio::test]
+async fn a_held_queue_explains_its_missing_target_notifies_once_and_retries() {
+    use super::wire_commands::Prepared;
+    use farcooler_protocol::workflow_config::NoticePoint;
+
+    let (_dir, mut runtime) = lander("pass").await;
+    let definition = waiting_definition(&runtime, false);
+    at_join(&mut runtime, "ticket", &definition).await;
+    let head = remote_head(&runtime).await;
+    let landing = runtime.coding.as_ref().unwrap().landing.as_ref().unwrap().clone();
+    adapters::git(&landing.repository, &["update-ref", "-d", &landing.target, &head]).await.unwrap();
+    let before = runtime.state("w").unwrap().unwrap();
+    let item = &before.items["ticket"];
+    let action = Action::Queue {
+        mutation: Mutation { id: "queue-held".into(), epoch: before.epoch, revision: before.revision, sequence: 1 },
+        item: "ticket".into(), run: item.run.clone(), pin: item.pin.clone(),
+    };
+    let check = runtime.wire_queue_check("w", "orchestrator", &action).await.unwrap();
+    let queue_hold = runtime.apply_queue_check("w", "ticket", check, super::now()).unwrap();
+    let reply = runtime.wire_command_with("w", "orchestrator", &["orchestrator".into()], None, action.clone(),
+        Prepared { queue_hold, ..Prepared::default() }).unwrap();
+    let why = "Could not read or fetch the landing target head (local landing target could not be resolved).";
+    assert_eq!(reply.pointer("/receipt/result/Err/Held").and_then(|v| v.as_str()), Some(why), "{reply}");
+    assert_eq!(runtime.wire_command("w", "orchestrator", action).unwrap(), reply);
+    let get = runtime.wire_command("w", "orchestrator", Action::Get).unwrap();
+    assert_eq!(get.pointer("/state/items/ticket/queue_hold/reason").and_then(|v| v.as_str()), Some(why), "{get}");
+
+    let since = runtime.state("w").unwrap().unwrap().items["ticket"].queue_hold.as_ref().unwrap().since_ms;
+    let notices = |runtime: &Runtime| runtime.store.workflow_notice_deliveries("w").unwrap().into_iter()
+        .filter(|d| d.notice.point == NoticePoint::QueueHeld).collect::<Vec<_>>();
+    // Restart before retry to verify that the clock and requested queue survive the runner.
+    let root = runtime.root.clone();
+    drop(runtime);
+    let runtime = Runtime::open(&root).unwrap();
+    let workspaces = ["w".into()];
+    let deadline = since + farcooler_workflow::QUEUE_HOLD_NOTICE_MS;
+    assert!(runtime.check_auto_queues(&workspaces, deadline - 60_000).await.unwrap().is_empty());
+    assert!(notices(&runtime).is_empty());
+    for attempt in [deadline, deadline + 60_000] {
+        assert!(runtime.check_auto_queues(&workspaces, attempt).await.unwrap().is_empty());
+        let notices = notices(&runtime);
+        assert_eq!(notices.len(), 1);
+        assert_eq!(notices[0].notice.reason.as_deref(), Some(why));
+    }
+    adapters::git(&landing.repository, &["update-ref", &landing.target, &head]).await.unwrap();
+    let now_ms = deadline + 120_000;
+    let ready = runtime.check_auto_queues(&workspaces, now_ms).await.unwrap();
+    assert!(ready.contains(&("w".into(), "ticket".into())));
+    runtime.schedule_ready(&workspaces, now_ms, &ready).unwrap();
+    let state = runtime.state("w").unwrap().unwrap();
+    assert_eq!(state.items["ticket"].phase, Phase::Joined);
+    assert!(state.items["ticket"].queue_hold.is_none());
+    assert_eq!(candidate_of(&state, "ticket"), item.candidate.as_deref());
+}

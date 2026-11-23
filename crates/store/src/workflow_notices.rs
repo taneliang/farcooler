@@ -19,6 +19,8 @@ pub struct Notice {
     /// A landing group only: the tickets it holds, so the notice says whose landing it is.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tickets: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 /// The name a step's verb goes by in a notice.
@@ -74,7 +76,7 @@ pub(crate) fn select(tx: &Transaction<'_>, input: &Input, old: &State, new: &Sta
                 event: input.id.clone(), workspace: input.workspace.clone(), epoch: new.epoch, revision: new.revision,
                 item: first.clone(), run: item.run.clone(), stage: item.stage, iteration: item.iteration, attempt: item.attempt,
                 candidate: item.candidate.clone(), definition_pin: item.pin.clone(), execution_policy_pin: policy_pin.clone(),
-                notification_policy_pin: policy.pin(), point: NoticePoint::PublicationRestarted, verb: None, tickets,
+                notification_policy_pin: policy.pin(), point: NoticePoint::PublicationRestarted, verb: None, tickets, reason: None,
             };
             insert(tx, &notice)?;
         }
@@ -99,13 +101,17 @@ pub(crate) fn select(tx: &Transaction<'_>, input: &Input, old: &State, new: &Sta
             && previous.is_some_and(|i| (&i.run,i.stage,i.iteration) != (&item.run,item.stage,item.iteration)) {
             points.push(NoticePoint::StageChanged);
         }
-        for point in points.into_iter().filter(|p| policy.points.contains(p)) {
+        let hold_notice = item.queue_hold.as_ref().filter(|h| h.notified
+            && previous.and_then(|i| i.queue_hold.as_ref()).is_none_or(|old| !old.notified));
+        points.extend(hold_notice.map(|_| NoticePoint::QueueHeld));
+        for point in points.into_iter().filter(|p| *p == NoticePoint::QueueHeld || policy.points.contains(p)) {
             let notice = Notice { id:digest(&("workflow-notice/v1", &input.id, &input.workspace, new.epoch, new.revision, id, point)),
                 event:input.id.clone(),workspace:input.workspace.clone(),epoch:new.epoch,revision:new.revision,
                 item:id.clone(),run:item.run.clone(),stage:item.stage,iteration:item.iteration,attempt:item.attempt,
                 candidate:item.candidate.clone(),definition_pin:item.pin.clone(),execution_policy_pin:item.policy_pin.clone(),
                 notification_policy_pin:policy.pin(),point,
                 verb:item.definition.stages.get(item.stage).map(|s|verb_name(&s.kind)),
+                reason:hold_notice.filter(|_| point == NoticePoint::QueueHeld).map(|h| h.reason.clone()),
                 tickets:item.members.iter().map(|m|&m.item).chain(&item.handed).cloned().collect() };
             insert(tx, &notice)?;
         }

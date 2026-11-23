@@ -254,6 +254,7 @@ impl Store {
         if let Some(receipt) = cached(&tx, workspace, id, payload)? { return Ok(receipt); }
         let mut moved = Vec::new();
         let mut change = None;
+        let mut recorded_hold = false;
         let applied = if let Write::Apply(input) = &write { Some(input.workspace.clone()) } else { None };
         let mut receipt = match write {
             Write::PublicationGrant { enabled, revision } => {
@@ -273,7 +274,16 @@ impl Store {
                 };
                 Receipt { change:None,id:id.into(),result,effects:vec![],actor:None }
             }
-            Write::Apply(input) => apply_in(&tx, input, &serde_json::to_string(input)?, actor.map(WorkflowActor::board_actor).as_ref(), &mut moved)?,
+            Write::Apply(input) => {
+                let mut receipt = apply_in(&tx, input, &serde_json::to_string(input)?, actor.map(WorkflowActor::board_actor).as_ref(), &mut moved)?;
+                // Recording a preflight hold is an accepted event. The caller's Queue was refused.
+                if receipt.result.is_ok() && let farcooler_workflow::Command::HoldQueue { reason, .. } = &input.command {
+                    recorded_hold = true;
+                    receipt.result = Err(Refusal::Held(reason.clone()));
+                    receipt.effects.clear();
+                }
+                receipt
+            }
             Write::Refuse(reason) => Receipt { change:None, id: id.into(), result: Err(reason), effects: vec![], actor: None },
             Write::Publish { notifications, expected_pin, definition, adapter, revision } => {
                 let current: Option<String> = tx.query_row("SELECT pin FROM workflow_bundle_selections WHERE workspace=?1", [workspace], |r| r.get(0)).optional()?;
@@ -305,7 +315,7 @@ impl Store {
         // Open plans show both accepted run changes and committed send-back refusal reasons.
         // Cached receipts return before this point.
         match (applied, &receipt.result) {
-            (Some(workspace), Ok(_)) => self.announce_commit(&workspace),
+            (Some(workspace), _) if recorded_hold || receipt.result.is_ok() => self.announce_commit(&workspace),
             (_, Err(Refusal::SendBackRefused(_))) => self.announce_commit(workspace),
             _ => {}
         }

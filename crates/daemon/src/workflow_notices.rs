@@ -1,5 +1,6 @@
 //! One owned finite workflow-notice drain, independent of the engine's inbox.
-//! Codex queue exit0 is LOCAL HANDOFF only. Unknown is never retried; a queue slower than the bound is retried once first.
+//! Codex queue exit0 is LOCAL HANDOFF only. Unknown is never retried.
+//! A queue slower than the bound is retried once for notices other than landing holds.
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use farcooler_store::{Store, workflow_notices::{Notice, NativeTarget}};
 use farcooler_tmux::LiveInventory;
@@ -61,9 +62,13 @@ pub(crate) async fn discover(store:&Store,inventory:&LiveInventory, notice:&Noti
 pub(crate) async fn invoke(store:&Store,inventory:&LiveInventory, notice:&Notice, endpoint:Endpoint, stop:&mut watch::Receiver<bool>)->Result<()> {
     use std::os::unix::fs::MetadataExt;
     if stopping(stop) {return Ok(())}
-    let publication = notice.point == farcooler_protocol::workflow_config::NoticePoint::PublicationRestarted;
+    use farcooler_protocol::workflow_config::NoticePoint;
+    let publication = notice.point == NoticePoint::PublicationRestarted;
+    let queue_held = notice.point == NoticePoint::QueueHeld;
     let meaning = if publication {
         "The workflow publication restarted the listed tickets in their existing worktrees."
+    } else if queue_held {
+        "Landing preflight has been held for five minutes. The runner will keep checking once a minute."
     } else { "Informational workflow event. No approval or execution authority is granted." };
     let message=serde_json::to_string(&serde_json::json!({"schema":"workflow-notice/v1","notice":notice,
         "meaning":meaning}))?;
@@ -95,7 +100,7 @@ pub(crate) async fn invoke(store:&Store,inventory:&LiveInventory, notice:&Notice
         };
         let (state,evidence,timed_out)=own_queue(child,stop).await;
         tries+=1;
-        if !(timed_out && tries<2 && !stopping(stop)) {break (state,evidence)}
+        if !(timed_out && tries<2 && !queue_held && !stopping(stop)) {break (state,evidence)}
     };
     #[cfg(test)]
     if TEST_LOST_REPLY.try_with(|lost|*lost).unwrap_or(false) { return Ok(()); }

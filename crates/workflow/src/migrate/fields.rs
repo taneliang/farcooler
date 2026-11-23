@@ -61,6 +61,7 @@ pub const ITEM_FIELDS: &[(&str, Decision)] = &[
     ("deciding", Decision::Refused("a decision script is running for it, and the pipeline has no scripts")),
     ("hook_calls", Decision::Dropped("script call counts; the pipeline has no scripts")),
     ("hook_refused", Decision::Refused("a script refused its decision, and the pipeline has no scripts")),
+    ("queue_hold", Decision::Dropped("the new pipeline scheduler checks landing readiness itself")),
     ("group_failure", Decision::Mapped("coding data failure on the batch")),
     ("landed", Decision::Mapped("coding data pushed of the archived token")),
 ];

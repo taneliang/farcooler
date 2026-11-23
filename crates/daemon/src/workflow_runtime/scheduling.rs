@@ -97,7 +97,8 @@ impl Runtime {
                 let state = scan.boards[workspace].state.as_ref().unwrap();
                 let Some(item) = state.items.get(&key) else { continue };
                 // Queue follows the admitted policy, including after publication removal.
-                let queue = item.phase == Phase::WaitingJoin && item.definition.start_policy.as_ref().is_some_and(|p| p.auto_queue);
+                let queue = item.phase == Phase::WaitingJoin && (item.queue_hold.is_some()
+                    || item.definition.start_policy.as_ref().is_some_and(|p| p.auto_queue));
                 if queue && ready_queues.is_some_and(|ready| !ready.contains(&(workspace.clone(), key.clone()))) { continue; }
                 let retry_key = (workspace.clone(), key.clone(), queue);
                 if scan.refused.get(&retry_key).is_some_and(|until| now_ms < *until) { continue; }

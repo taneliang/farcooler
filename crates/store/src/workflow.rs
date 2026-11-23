@@ -348,7 +348,7 @@ fn apply_in_snapshot(tx: &Transaction<'_>, input: &Input, payload: &str, by: Opt
             Command::Approve {item,..}|Command::Review {item,..}|Command::Observe {item,..}|Command::Cancel {item,..}|Command::Retry {item}|Command::Queue {item}|Command::Leave {item}|Command::Move {item,..}|Command::Resolve {item,..}
                 |Command::Decide {item,..}|Command::SendBack {item,..}|Command::Close {item,..}|Command::Land {item,..}
                 |Command::RefreshJoin {item,..}|Command::RepinPending {item,..} => state.items.get(item).map(|i|i.resource.as_str()),
-            Command::Advance | Command::RefreshGroups { .. } | Command::AdoptPublication { .. } => None,
+            Command::HoldQueue { .. } | Command::Advance | Command::RefreshGroups { .. } | Command::AdoptPublication { .. } => None,
         };
         // A Start takes its followers with it (ov-970), so their quarantine holds it back as the lead's does.
         let followers:Vec<&str>=match &input.command { Command::Start {with,..} => with.iter().filter_map(|f|state.items.get(f)).map(|i|i.resource.as_str()).collect(), _ => Vec::new() };

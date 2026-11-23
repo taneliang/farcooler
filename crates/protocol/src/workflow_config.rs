@@ -165,7 +165,7 @@ impl AdapterConfiguration {
 /// Finite informational key points. Never an execution or decision grant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum NoticePoint { WaitingApproval, WaitingReview, Blocked, Uncertain, Done, Failed, Cancelled, StageChanged, PublicationRestarted }
+pub enum NoticePoint { WaitingApproval, WaitingReview, Blocked, Uncertain, Done, Failed, Cancelled, StageChanged, PublicationRestarted, QueueHeld }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NotificationPolicy { pub points: std::collections::BTreeSet<NoticePoint> }

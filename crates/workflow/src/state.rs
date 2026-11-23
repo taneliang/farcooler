@@ -14,6 +14,15 @@ pub enum Refusal {
     /// A `Resource` refusal said as a sentence: what holds the item, and the command that settles it (ov-1220).
     Held(String),
 }
+pub const QUEUE_HOLD_NOTICE_MS: i64 = 5 * 60_000;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueueHold {
+    pub reason: String,
+    pub since_ms: i64,
+    pub notified: bool,
+}
+
 #[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 // Retained reducer records use Running for scheduled intent for replay compatibility.
@@ -126,6 +135,9 @@ pub struct Item {
     /// remote's main couldn't be downloaded, say. Kept on a Failed run so the ticket reads why; the next answer clears it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure: Option<String>,
+    /// The current landing preflight hold, with a durable clock for escalation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_hold: Option<QueueHold>,
     /// Reruns spent on each CI step. Spent before dispatch and never refunded by a restart or Retry.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub ci_reruns: BTreeMap<String, u8>,
@@ -373,6 +385,8 @@ pub enum Command {
     Retry { item: String },
     /// The orchestrator queues a ticket waiting at its `Join` step into the open group.
     Queue { item: String },
+    /// Record why a landing preflight could not finish for a waiting ticket.
+    HoldQueue { item: String, reason: String },
     /// A conflict with the landing target returns a waiting candidate to build without spending a back edge.
     /// Older runners also recorded successful rebases here. Those events still replay.
     RefreshJoin { item: String, previous: String, base: String, result: JoinRefresh },

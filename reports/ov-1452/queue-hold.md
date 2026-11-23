@@ -1,0 +1,11 @@
+# Why ov-1419 stayed in WaitingJoin
+
+The Canary database showed ov-1419 in `WaitingJoin` with auto-queue enabled, candidate `a726b62d2`, and matching ticket, group, and published bundle pins. Its adopted checkout still pointed at that SHA on `ov-1330-quiesce-redesign`. Six retained Queue receipts returned `Resource`.
+
+The live Canary executable still uses the pre-ov-1423 in-place rebase check. At the incident's landing head, `6a02832c7`, ov-1419 was 16 commits ahead and three behind. The adopted checkout's Git metadata contained a zero-byte `index.lock` last modified at 19:32:19 on Nov 23, more than four hours before the first Queue refusal. No process had the lock open during inspection. The checkout reported clean and its reflog ended at the reviewed commit. The older check's clean-worktree probe can pass with the lock present, but its rebase must write the checkout's index.
+
+A scratch replay with the same candidate, target, and lock reproduced Git's `index.lock: File exists` and `could not detach HEAD` errors. HEAD stayed on the reviewed commit and Git left no rebase state or unmerged paths. The old runtime mapped this to `waiting branch rebase did not start` internally and wrote `Resource` to the wire receipt. Ov-1440's separate checkout successfully rebased onto the same target at 23:49. The runner recorded its newly signed SHA `72b40e6977` in a `RefreshJoin` event and queued it in the next revision.
+
+The detached fold check on this branch uses a separate index. All 16 picks applied in scratch against both the incident head and the observed later remote head `402409c0b`. A daemon regression also verifies that a diverged reviewed candidate can queue with its checkout's index locked. Live Canary still needs the updated runner for ov-1419 to proceed through this path.
+
+Future holds record the reason on the waiting item and return it in the Queue refusal. The plan shows it on the ticket. The runner retries once a minute, including after a manual Queue request on a board with auto-queue disabled. If the check is still held after five minutes, the runner queues one notice with the reason for delivery to a supported orchestrator. The hold and notice marker survive a restart and clear when the candidate leaves the join.
