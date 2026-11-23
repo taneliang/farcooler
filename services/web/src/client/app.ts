@@ -23,7 +23,7 @@
 
 import { openWorkflow, installWorkflowPort } from './workflow-view'
 import { WorkflowSessionPort } from './workflow-session'
-import init, { connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, needsYouView, openReply, passkeyKeyLine, planView, recoveryView, registrationData, registrationProof, rpId, type WebRunner } from 'fc-web'
+import init, { connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, needsYouView, openReply, passkeyKeyLine, planView, recoveryView, registrationData, registrationProof, rpId, workFailure, workView, type WebRunner } from 'fc-web'
 
 import { compareWords, connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, needsYouFailure, registerFailure, restoreFailure, runnerStopped, saveFailure, sealedRefusal, unreachable } from './copy'
 import { askForCopy, assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
@@ -32,9 +32,9 @@ import { type BoardView, buttonsFor, countLabel, countOf, isCounted, pageTitle }
 import { renderNeeds } from './needs-view'
 import { type PlanTab, startPlanTab } from './plan-tab'
 import { PlanList } from './plan-list'
-import { parseWorkspaces } from './plan'
-import { firstToOpen, type Listed, noTerminals, parseTerminals, pickSpace, scopeBoard, type Space, terminalsIn, waitingIn } from './scope'
+import { scopeBoard, type Space, waitingIn } from './scope'
 import { drawPicker, saveSpace, savedSpace } from './space-picker'
+import { linkedRunner, mountWork, type WorkError, type WorkTerminal } from './work-screen'
 import { AgentPane, type View } from './agent-pane'
 import { ChatView } from './chat'
 import { DetailBoard, type Subject } from './detail'
@@ -528,8 +528,8 @@ let others: Reconnector<WebRunner, TunnelConn>[] = []
 const retries = new Map<string, () => void>()
 let drawn = ''
 
-/// The terminal buttons by id, which is what an Open on an item can go to.
-const buttonFor = new Map<string, HTMLButtonElement>()
+/// The active runner’s work screen and its destination history.
+let workScreen: ReturnType<typeof mountWork> | null = null
 
 /// The workspace workflow sheet, preserving the panes behind it.
 let workflowSheet: ReturnType<typeof openWorkflow> | null = null
@@ -638,6 +638,8 @@ function stopNeeds(): void {
   planList?.close()
   planTab?.stop()
   planTab = null
+  workScreen?.dispose()
+  workScreen = null
   paneControls = null
   clearInterval(boardTimer)
   fleet?.stop()
@@ -656,7 +658,13 @@ function stopNeeds(): void {
 
 async function work(session: Session): Promise<void> {
   const runners = session.device.runners ?? []
-  const target = runners.find(r => r.why === '')
+  const wanted = linkedRunner()
+  const target = wanted ? runners.find(r => r.id === wanted && r.why === '') : runners.find(r => r.why === '')
+  if (wanted && !target) {
+    status('This runner is unavailable', 'Open this link in a browser paired with the runner.',
+      { label: 'Add Again', run: () => void addAgain(session) })
+    return
+  }
   if (!target) {
     const first = runners[0]
     status(
@@ -731,14 +739,16 @@ function showLink(view: LinkView, label: string): void {
 
 async function connectTo(session: Session, target: Granted): Promise<void> {
   status(`Connecting to ${target.label}…`)
-  let runner: WebRunner
+  let screen: ReturnType<typeof mountWork> | undefined
   let mineFleet: Fleet | null = null
   const reconnector = new Reconnector<WebRunner, TunnelConn>({
     dial: () => session.tailcat.dial(target.token, session.device.nodePriv),
     discard: conn => conn.close(),
     connect: (conn, onLost) => connect(conn, target.host_key, target.user, session.keyLine, signIn(session, target.label), onLost),
     resume: async next => {
-      await panes?.resume(next, () => ended(next))
+      // The runner can be back even if a pane exited independently.
+      await panes?.resume(next, () => ended(next)).catch(() => {})
+      await screen?.refresh(true)
     },
     show: view => {
       showLink(view, target.label)
@@ -756,8 +766,9 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     // Asked a moment later: the loss reaches the page as the pane's end and as
     // `onLost`, in either order. The reconnector remembers it; the wasm object
     // cannot be asked once it is freed.
+    const id = panes?.shown
     setTimeout(() => {
-      if (!reconnector.hasLost(from) && reconnector.current === from) paneNote('This terminal’s stream ended. Select it to open it again.')
+      if (id && !reconnector.hasLost(from) && reconnector.current === from) screen?.streamEnded(id)
     }, 100)
   }
   const workflowPort = new WorkflowSessionPort(() => {
@@ -769,7 +780,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   try {
     const conn = await session.tailcat.dial(target.token, session.device.nodePriv)
     dialed = conn
-    runner = await reconnector.open(conn)
+    await reconnector.open(conn)
   } catch (e) {
     dialed?.close()
     const word = (e as Error).message
@@ -781,40 +792,19 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     return
   }
 
-  let terminals: Listed[]
-  let boards: Space[] = []
-  try {
-    terminals = parseTerminals(await runner.terminals())
-    // A runner without workspaces answers with a refusal: it is listed as it
-    // always was, every terminal together.
-    boards = parseWorkspaces(await runner.workspaces().catch(() => '[]'))
-  } catch (e) {
-    status(`Can’t list ${target.label}’s terminals`, connectFailure((e as Error).message, target.label), {
-      label: 'Connect',
-      run: () => void connectTo(session, target),
-    })
-    return
-  }
-
   $('runner-name').textContent = target.label
-  const list = $('terminal-list')
-  list.replaceChildren()
   show('work')
 
   stopNeeds()
   installWorkflowPort(id => id === target.id && reconnector.current ? workflowPort : null)
   frontRunner = target.id
-  spaces = boards
-  chosenSpace = pickSpace(spaces, savedSpace(target.id))
-  $<HTMLButtonElement>('show-workflow').disabled = !chosenSpace
-  const opening = (id: string) => void buttonFor.get(id)?.click()
-  buttonFor.clear()
+  $<HTMLButtonElement>('show-workflow').disabled = true
   const mine = new Fleet(
     drawNeeds,
     (runner, terminal) => {
-      if (runner === target.id) opening(terminal)
+      if (runner === target.id) paneControls?.open(terminal)
     },
-    (runner, terminal) => runner === target.id && buttonFor.has(terminal),
+    (runner, terminal) => runner === target.id && !!screen?.hasTerminal(terminal),
   )
   mineFleet = mine
   fleet = mine
@@ -853,7 +843,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   // channel budget, their streams (panes.ts). An agent's terminal opens as
   // its conversation (chat.ts), which rides the control session and holds no
   // channel.
-  const agents = new Set(terminals.filter(t => t.agent).map(t => t.id))
+  let agentById = new Map<string, WorkTerminal>()
   const budget = paneBudgets.get(target.label) ?? { max: MAX_LIVE_PANES }
   paneBudgets.set(target.label, budget)
   const agentPanes = new Map<string, AgentPane<WebRunner>>()
@@ -863,9 +853,11 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     $('terminal').append(host)
     return host
   }
-  const shell = () => new PaneView(hostIn(), word => paneNote(connectFailure(word, target.label)))
+  const shell = () => new PaneView(hostIn(), (word, code, what) => {
+    paneNote(code === 'scope-denied' ? workFailure(word, code, what ?? '') : connectFailure(word, target.label))
+  })
   const set = new PaneSet<WebRunner>(id => {
-    if (!agents.has(id)) return shell()
+    if (!agentById.get(id)?.agent) return shell()
     // An agent opens as its conversation; the Mac's view switch (the bar over
     // the pane) shows the terminal it runs in.
     const agent = new AgentPane<WebRunner>(new ChatView(hostIn(), target.label), shell)
@@ -873,16 +865,19 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     return agent
   }, budget)
   panes = set
-  const open = async (id: string, button: HTMLButtonElement) => {
-    for (const b of list.querySelectorAll('button')) b.removeAttribute('aria-current')
-    button.setAttribute('aria-current', 'true')
-    paneNote('')
+  const open = async (id: string) => {
     const current = reconnector.current
     if (!current) return
     try {
-      await set.open(id, current, () => ended(current))
+      const opening = set.open(id, current, () => ended(current))
+      drawView()
+      await opening
     } catch (e) {
-      paneNote(connectFailure((e as Error).message, target.label))
+      if (set.shown === id) {
+        const error = e as WorkError
+        if (error.code === 'scope-denied') paneNote(workFailure(error.message, error.code, error.what ?? ''))
+        else screen?.streamEnded(id)
+      }
     }
     drawView()
   }
@@ -892,7 +887,6 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     const agent = id ? agentPanes.get(id) : undefined
     $('pane-bar').hidden = !agent
     if (!id || !agent) return
-    $('pane-title').textContent = terminals.find(t => t.id === id)?.title || 'Agent'
     $('view-conversation').setAttribute('aria-pressed', String(agent.mode === 'conversation'))
     $('view-terminal').setAttribute('aria-pressed', String(agent.mode === 'terminal'))
   }
@@ -906,67 +900,67 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     try {
       await set.open(id, current, () => ended(current))
     } catch (e) {
-      paneNote(connectFailure((e as Error).message, target.label))
+      const error = e as WorkError
+      paneNote(workFailure(error.message, error.code ?? '', error.what ?? ''))
     }
     drawView()
   }
   $('view-conversation').onclick = () => void viewAs('conversation')
   $('view-terminal').onclick = () => void viewAs('terminal')
-  /// The terminals of the workspace showing, as buttons; the first running
-  /// one opens. A workspace with none says so.
+  let pendingQuote: { id: string; text: string } | undefined
   paneControls = {
     open: id => {
-      const b = buttonFor.get(id)
-      if (!b) return false
+      if (!screen?.chooseTerminal(id)) return false
       showTab('terminals')
-      b.click()
       return true
     },
     quote: (id, text) => {
-      if (!paneControls?.open(id)) return false
-      const agent = agentPanes.get(id)
-      if (!agent) return false
-      // The Mac's input is the conversation's: the terminal's view goes back to it.
-      if (agent.mode !== 'conversation') void viewAs('conversation')
-      return agent.prefill(text)
+      const terminal = agentById.get(id)
+      if (!terminal?.agent || !terminal.attach || !paneControls?.open(id)) return false
+      pendingQuote = { id, text }
+      return true
     },
   }
-  const relist = () => {
-    list.replaceChildren()
-    buttonFor.clear()
-    const shown = terminalsIn(terminals, spaces, chosenSpace)
-    const buttons = shown.map(t => {
-      const button = document.createElement('button')
-      button.type = 'button'
-      button.className = 'terminal-choice'
-      button.textContent = t.title || 'Terminal'
-      button.title = t.state
-      if (t.agent) button.dataset.agent = 'true'
-      button.onclick = () => void open(t.id, button)
-      buttonFor.set(t.id, button)
-      list.append(button)
-      return button
-    })
-    const first = firstToOpen(shown)
-    if (!first) {
-      set.clear()
-      drawView()
-      paneNote(noTerminals(spaces.find(sp => sp.id === chosenSpace), target.label, spaces.length > 1))
-      return
-    }
-    paneNote('')
-    void open(first.id, buttons[shown.indexOf(first)])
-  }
-  $<HTMLSelectElement>('space-picker').onchange = event => {
-    chosenSpace = (event.target as HTMLSelectElement).value
-    saveSpace(target.id, chosenSpace)
-    planTab?.choose(chosenSpace)
-    relist()
-    if (lastView) drawNeeds(lastView)
-  }
-  relist()
-  if (lastView) drawNeeds(lastView)
-  else pickerDrawn = drawPicker($<HTMLSelectElement>('space-picker'), spaces, chosenSpace, waitingIn({ state: 'loading', items: [], busy: new Set(), notices: new Map(), banner: '' }, spaces, target.id))
+  screen = mountWork({
+    runner: target.id,
+    current: () => reconnector.current,
+    project: workView,
+    prefer: () => savedSpace(target.id),
+    failure: e => workFailure(e.message, e.code ?? '', e.what ?? ''),
+    started: () => showTab('terminals'),
+    note: paneNote,
+    select: (view, terminal, shouldOpen, replace) => {
+      const changed = view.workspace !== chosenSpace
+      spaces = view.workspaces
+      chosenSpace = view.workspace
+      if (chosenSpace) saveSpace(target.id, chosenSpace)
+      if (changed) planTab?.choose(chosenSpace)
+      $('show-workflow').toggleAttribute('disabled', !chosenSpace)
+      if (lastView) drawNeeds(lastView)
+      agentById = new Map(view.terminals.map(t => [t.id, t]))
+      if (replace) {
+        set.forget(replace)
+        agentPanes.delete(replace)
+      }
+      if (!terminal?.attach) {
+        set.clear()
+        drawView()
+      } else if (shouldOpen || set.shown !== terminal.id) {
+        void open(terminal.id)
+      }
+      if (pendingQuote && pendingQuote.id === terminal?.id) {
+        const quote = pendingQuote
+        pendingQuote = undefined
+        const agent = agentPanes.get(quote.id)
+        if (agent) {
+          if (agent.mode !== 'conversation') void viewAs('conversation')
+          agent.prefill(quote.text)
+        }
+      }
+    },
+  })
+  workScreen = screen
+  await screen.refresh(true, 'replaceState')
 }
 
 /// What reads and answers for the runner `rec` is connected to.

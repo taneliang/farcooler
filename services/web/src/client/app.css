@@ -52,7 +52,6 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .pane { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--term-bg); }
 .pane .note { margin: 8px; }
 .pane-bar { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 12px; border-bottom: 1px solid var(--rule); background: var(--bg-alt); }
-.pane-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; color: var(--text-2); }
 .view-switch { flex: none; display: flex; gap: 2px; padding: 2px; border-radius: 980px; background: var(--selected); }
 .view-switch button { border-radius: 980px; padding: 3px 12px; background: none; color: var(--text-2); font-size: 13px; }
 .view-switch button[aria-pressed="true"] { background: var(--seg-on); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / .14), 0 0 0 .5px var(--rule); }
@@ -290,3 +289,27 @@ button.danger { color: var(--danger); }
 
 .workflow-runs .workflow-action-secondary, .workflow-runs .workflow-action-destructive { background: transparent; color: var(--button-bg); box-shadow: inset 0 0 0 1px currentColor; }
 .workflow-runs .workflow-action-destructive { color: var(--danger); }
+
+/* Starting work and the selected terminal's lifecycle controls. */
+.work-launch { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 10px 0; }
+.work-launch a { color: var(--text-2); font-size: 13px; }
+.terminal-choice { box-sizing: border-box; font-size: 13px; text-decoration: none; }
+.terminal-choice:focus-visible { outline: 2px solid var(--button-bg); outline-offset: -2px; }
+.terminal-manage { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 8px 12px; border-bottom: 1px solid var(--rule); background: var(--bg-alt); }
+.terminal-identity { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 13px; color: var(--text-2); }
+.terminal-identity strong { color: var(--text); overflow-wrap: anywhere; }
+.terminal-access { padding: 1px 8px; border: 1px solid var(--rule); border-radius: 10px; }
+.terminal-actions, .work-commands { display: flex; flex-wrap: wrap; gap: 6px; }
+.terminal-actions button { padding: 5px 10px; font-size: 13px; }
+.start-work { width: min(460px, calc(100% - 32px)); max-width: none; box-sizing: border-box; border: 1px solid var(--rule); border-radius: 16px; padding: 16px; background: var(--bg); color: var(--text); }
+.start-work::backdrop { background: rgb(0 0 0 / .35); }
+.start-work header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 12px; }
+.start-work h2 { margin: 0; font-size: 18px; }
+.start-work label { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; margin: 10px 0; font-size: 13px; }
+.start-work select, .start-work input { min-width: 0; width: 100%; border: 1px solid var(--rule); border-radius: 8px; padding: 7px 9px; background: var(--card); color: var(--text); font: inherit; text-overflow: ellipsis; }
+.start-work form, #work-start-fields { border-top: 1px solid var(--rule); margin-top: 14px; padding-top: 4px; }
+#work-note { overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .terminal-choice { flex: 0 0 auto; max-width: min(78vw, 340px); }
+  .terminal-manage { padding: 6px 12px; }
+}

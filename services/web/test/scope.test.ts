@@ -1,5 +1,5 @@
-// One workspace at a time (src/client/scope.ts, ov-871): the terminals, the
-// Needs You items and the counts of the workspace in front, from lists the
+// One workspace at a time (src/client/scope.ts, ov-871): the Needs You
+// items and counts of the workspace in front, from lists the
 // runner wrote (test/fixtures/needs-you.json is the one every client decodes).
 
 import { describe, expect, it } from 'vitest'
@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import fixture from '../../../test/fixtures/needs-you.json'
 import { Fleet, type RunnerDeps } from '../src/client/fleet'
 import { type BoardView, countOf, parseList } from '../src/client/needs'
-import { firstToOpen, noTerminals, optionLabel, ownerOf, parseTerminals, pickSpace, scopeBoard, terminalsIn, waitingIn } from '../src/client/scope'
+import { optionLabel, ownerOf, scopeBoard, waitingIn } from '../src/client/scope'
 
 const BILLING = '01000000-0000-7000-8000-000000000001'
 const MAIN = '01000000-0000-7000-8000-000000000014'
@@ -15,16 +15,6 @@ const spaces = [
   { id: MAIN, name: 'Main', isMain: true },
   { id: BILLING, name: 'Billing', isMain: false },
 ]
-
-const terminals = parseTerminals(
-  JSON.stringify([
-    { id: 't1', title: 'shell 1', state: 'running', agent: false, workspace: MAIN },
-    { id: 't2', title: 'unclaimed', state: 'exited', agent: false },
-    { id: 't3', title: 'invoice agent', state: 'running', agent: true, workspace: BILLING },
-    { id: 't4', title: 'gone', state: 'running', agent: false, workspace: 'a-deleted-workspace' },
-    { id: 't5', title: 'invoice shell', state: 'exited', agent: false, workspace: BILLING },
-  ]),
-)
 
 const settle = () => new Promise(r => setTimeout(r, 0))
 const list = (name: string) => JSON.stringify((fixture.runners as any[]).find(r => r.runner === name).needs_you)
@@ -46,40 +36,13 @@ async function merged(): Promise<BoardView> {
 }
 
 describe('which workspace owns what', () => {
-  it('reads a terminal’s workspace, and none as none', () => {
-    expect(terminals.map(t => t.workspace)).toEqual([MAIN, null, BILLING, 'a-deleted-workspace', BILLING])
-    expect(parseTerminals('nonsense')).toEqual([])
-  })
-
-  it('gives a terminal with no workspace, or a gone one, to the main workspace', () => {
+  it('gives a Needs You item with no workspace, or a gone one, to the main workspace', () => {
     expect(ownerOf(null, spaces)).toBe(MAIN)
     expect(ownerOf('a-deleted-workspace', spaces)).toBe(MAIN)
     expect(ownerOf(BILLING, spaces)).toBe(BILLING)
     expect(ownerOf(null, [])).toBeNull()
   })
 
-  it('lists only the workspace in front’s terminals, in the runner’s order', () => {
-    expect(terminalsIn(terminals, spaces, MAIN).map(t => t.id)).toEqual(['t1', 't2', 't4'])
-    expect(terminalsIn(terminals, spaces, BILLING).map(t => t.id)).toEqual(['t3', 't5'])
-  })
-
-  it('lists every terminal when the runner has no workspaces', () => {
-    expect(terminalsIn(terminals, [], null).length).toBe(5)
-  })
-
-  it('picks the saved workspace, else the main one, else the first', () => {
-    expect(pickSpace(spaces, BILLING)).toBe(BILLING)
-    expect(pickSpace(spaces, 'gone')).toBe(MAIN)
-    expect(pickSpace(spaces, null)).toBe(MAIN)
-    expect(pickSpace([{ id: 'x', name: 'X', isMain: false }], null)).toBe('x')
-    expect(pickSpace([], 'x')).toBeNull()
-  })
-
-  it('opens the first running terminal, else the first', () => {
-    expect(firstToOpen(terminalsIn(terminals, spaces, BILLING))?.id).toBe('t3')
-    expect(firstToOpen([{ ...terminals[1] }])?.id).toBe('t2')
-    expect(firstToOpen([])).toBeUndefined()
-  })
 })
 
 describe('Needs You for one workspace', () => {
@@ -119,12 +82,5 @@ describe('Needs You for one workspace', () => {
     expect(counts.get(MAIN)).toBe(1)
     expect(optionLabel(spaces[1], counts.get(BILLING)!)).toBe(`Billing (${counts.get(BILLING)})`)
     expect(optionLabel(spaces[0], 0)).toBe('Main')
-  })
-})
-
-describe('words', () => {
-  it('names the workspace that has no terminals, when there are several', () => {
-    expect(noTerminals(spaces[1], 'studio', true)).toBe('Billing has no terminals yet. Open one in Far Cooler on your Mac or phone, then reload.')
-    expect(noTerminals(undefined, 'studio', false)).toBe('studio has no terminals yet. Open one in Far Cooler on your Mac or phone, then reload.')
   })
 })

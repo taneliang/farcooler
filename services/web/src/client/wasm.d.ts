@@ -53,7 +53,11 @@ declare module 'fc-web' {
   export function recoveryView(count: number, current: boolean): string
   export function planView(request: string): string
   export function needsYouView(request: string): string
+  export function workView(inventory: string, selection: string): string
+  export function workFailure(word: string, code: string, what: string): string
   export class WebRunner {
+    work_inventory(): Promise<string>
+    work_intent(intent: string): Promise<string | undefined>
     workflow_call(method: string, args: string): Promise<string>
     terminals(): Promise<string>
     attach(terminal: string, output: (bytes: Uint8Array) => void, ended: () => void): Promise<WebPane>

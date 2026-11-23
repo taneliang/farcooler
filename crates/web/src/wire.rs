@@ -23,8 +23,7 @@ use std::sync::Arc;
 use farcooler_client::session::{Session, SessionError};
 use farcooler_client::ssh::SshError;
 use farcooler_protocol::capability;
-use farcooler_protocol::v1::{ErrorCode, TerminalState};
-use serde::Serialize;
+use farcooler_protocol::v1::ErrorCode;
 use tokio::io::AsyncReadExt;
 use uuid::Uuid;
 
@@ -73,26 +72,6 @@ impl From<SessionError> for WebError {
             other => WebError::Protocol(other.to_string()),
         }
     }
-}
-
-/// One terminal, as the page lists them.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct TerminalSummary {
-    pub id: String,
-    pub title: String,
-    /// `running`, `exited` and so on: the daemon's word, lowercased. Clients
-    /// render the daemon's state and never derive their own.
-    pub state: String,
-    pub columns: u32,
-    pub rows: u32,
-    /// An agent's pane rather than a shell's: the runner's role for it, else
-    /// an agent's activity (the apps' `RunningAgents.isAgent`). The page opens
-    /// an agent as a conversation.
-    pub agent: bool,
-    /// The workspace whose work this terminal is doing (`Terminal.workspace_id`),
-    /// as a uuid; none for a terminal in an unclaimed worktree and from a
-    /// runner without `workstreams`. The page lists a workspace's own.
-    pub workspace: Option<String>,
 }
 
 /// A connected runner: the client core's session over one SSH connection.
@@ -182,25 +161,9 @@ impl Runner {
         self.session.capabilities()
     }
 
-    /// Every terminal this runner has, as `terminal.list` gives them.
-    pub async fn terminals(&self) -> Result<Vec<TerminalSummary>, WebError> {
-        Ok(self
-            .session
-            .terminals()
-            .await?
-            .into_iter()
-            .map(|t| TerminalSummary {
-                agent: is_agent(&t),
-                id: Uuid::from_slice(&t.id).map(|u| u.to_string()).unwrap_or_default(),
-                title: t.title,
-                state: TerminalState::try_from(t.state)
-                    .map(|s| s.as_str_name().trim_start_matches("TERMINAL_STATE_").to_ascii_lowercase())
-                    .unwrap_or_else(|_| "unknown".into()),
-                columns: t.columns,
-                rows: t.rows,
-                workspace: farcooler_client::workspaces_json::workspace_of(t.workspace_id.as_deref()),
-            })
-            .collect())
+    /// Terminal dimensions for the pane renderer.
+    pub async fn terminals(&self) -> Result<Vec<farcooler_client::work_view::Terminal>, WebError> {
+        Ok(self.session.terminals().await?.into_iter().filter_map(farcooler_client::work_view::terminal).collect())
     }
 
     /// What needs this person, in the phones' shape (`needs_you_json`).
@@ -350,12 +313,4 @@ impl Pane {
         }
         async {}
     }
-}
-
-/// Whether a terminal is an agent's: the runner's role for it, else an
-/// activity that is not a plain shell's.
-fn is_agent(t: &farcooler_protocol::v1::Terminal) -> bool {
-    use farcooler_protocol::v1::{AgentActivity, TerminalRole};
-    matches!(TerminalRole::try_from(t.role), Ok(TerminalRole::Agent | TerminalRole::Orchestrator))
-        || !matches!(AgentActivity::try_from(t.activity), Ok(AgentActivity::None | AgentActivity::Unspecified) | Err(_))
 }

@@ -24,6 +24,7 @@ use crate::changes_json::{stack_json, change_set_json, file_change_json, file_di
 use crate::ssh;
 
 mod board_reads;
+mod work;
 pub mod workflow;
 mod link;
 use link::{Reader, Writer};

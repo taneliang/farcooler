@@ -12,7 +12,7 @@ export interface PlanTab {
   /// The tab came to the front (true) or went behind (false).
   show(front: boolean): void
   /// Another workspace's plan.
-  choose(workspace: string): void
+  choose(workspace: string | null): void
   /// Needs You in this workspace, for the column's own list.
   setNeeds(items: NeedsItem[]): void
   /// The plan as last read with its view, and a footer count's size, for

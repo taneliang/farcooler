@@ -297,7 +297,18 @@ impl WebRunner {
         self.0.lost()
     }
 
-    /// `terminal.list`, as JSON (`wire::TerminalSummary`).
+    pub async fn work_inventory(&self) -> Result<String, JsValue> {
+        let inventory = self.0.session.work_inventory().await.map_err(|e| web_failure(e.into()))?;
+        serde_json::to_string(&inventory).map_err(|e| failure("protocol", &e.to_string()))
+    }
+
+    pub async fn work_intent(&self, intent: &str) -> Result<Option<String>, JsValue> {
+        let intent = serde_json::from_str(intent).map_err(|e| failure("protocol", &e.to_string()))?;
+        let id = self.0.session.work_intent(intent).await.map_err(|e| web_failure(e.into()))?;
+        Ok(id.map(|id| id.to_string()))
+    }
+
+    /// `terminal.list`, as JSON (`work_view::Terminal`).
     pub async fn terminals(&self) -> Result<String, JsValue> {
         let list = self.0.terminals().await.map_err(web_failure)?;
         serde_json::to_string(&list).map_err(|e| failure("protocol", &e.to_string()))
@@ -480,4 +491,17 @@ impl WebPane {
 #[wasm_bindgen]
 pub fn build() -> String {
     format!("{} {}", wire::CLIENT_NAME, farcooler_protocol::BUILD)
+}
+
+/// Pure projection of the runner inventory and the browser's destination.
+#[wasm_bindgen(js_name = workView)]
+pub fn work_view(inventory: &str, selection: &str) -> Result<String, JsValue> {
+    let inventory = serde_json::from_str(inventory).map_err(|e| failure("protocol", &e.to_string()))?;
+    let selection = serde_json::from_str(selection).map_err(|e| failure("protocol", &e.to_string()))?;
+    Ok(farcooler_client::work_view::view(&inventory, &selection).to_string())
+}
+
+#[wasm_bindgen(js_name = workFailure)]
+pub fn work_failure(word: &str, code: &str, what: &str) -> String {
+    farcooler_client::work_view::failure(word, code, what).into()
 }

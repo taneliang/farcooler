@@ -115,6 +115,14 @@ export class PaneSet<R> {
     }
   }
 
+  forget(terminal: string): void {
+    if (this.front === terminal) this.front = null
+    this.panes.get(terminal)?.dispose()
+    this.panes.delete(terminal)
+    this.letGo.delete(terminal)
+    this.recent = this.recent.filter(id => id !== terminal)
+  }
+
   dispose(): void {
     for (const pane of this.panes.values()) pane.dispose()
     this.panes.clear()

@@ -41,9 +41,10 @@ export class PaneView implements Pane<WebRunner> {
   private readonly lease = new SizeLease()
   private readonly claim = new Claim()
   private readonly encoder = new TextEncoder()
+  private readonly onPageHide = () => this.giveBack()
   private readonly watching = new ResizeObserver(() => this.refit())
 
-  constructor(private readonly host: HTMLElement, private readonly onProblem: (word: string) => void) {
+  constructor(private readonly host: HTMLElement, private readonly onProblem: (word: string, code?: string, what?: string) => void) {
     this.term = new Terminal({
       scrollback: SCROLLBACK,
       cursorBlink: true,
@@ -60,7 +61,7 @@ export class PaneView implements Pane<WebRunner> {
     this.watching.observe(host)
     this.term.textarea?.addEventListener('focus', () => this.claimSize(true))
     // Closing the tab is not a detach; hand the pane back as it goes.
-    window.addEventListener('pagehide', () => this.giveBack())
+    window.addEventListener('pagehide', this.onPageHide)
   }
 
   get active(): boolean {
@@ -85,6 +86,7 @@ export class PaneView implements Pane<WebRunner> {
   dispose(): void {
     this.detach()
     this.watching.disconnect()
+    window.removeEventListener('pagehide', this.onPageHide)
     this.term.dispose()
     this.host.remove()
   }
@@ -210,7 +212,7 @@ export class PaneView implements Pane<WebRunner> {
     this.claimSize(false)
     // Not awaited between keystrokes: each write is queued in call order
     // before this returns (crates/web, Control::call).
-    this.pane?.write(bytes).catch((e: Error) => this.onProblem(e.message))
+    this.pane?.write(bytes).catch((e: Error & { code?: string; what?: string }) => this.onProblem(e.message, e.code, e.what))
   }
 
   /// Fit to the window, and tell the runner the new size once it settles.

@@ -1,7 +1,6 @@
 /// The workspace picker in the sidebar (ov-871): a native select, so it works
 /// with a keyboard, a screen reader and a phone's wheel. Each option names its
-/// workspace and how many items wait in it. Hidden when the runner has fewer
-/// than two workspaces, so a runner without any looks as it always did.
+/// workspace and how many items wait in it. Hidden on runners without workspaces.
 
 import { optionLabel, type Space } from './scope'
 
@@ -11,7 +10,7 @@ import { optionLabel, type Space } from './scope'
 export function drawPicker(select: HTMLSelectElement, spaces: Space[], chosen: string | null, waiting: Map<string, number>, last = ''): string {
   const signature = JSON.stringify([spaces.map(s => [s.id, s.name]), chosen, [...waiting]])
   if (signature === last) return last
-  select.hidden = spaces.length < 2
+  select.hidden = spaces.length === 0
   select.replaceChildren(
     ...spaces.map(space => {
       const option = document.createElement('option')

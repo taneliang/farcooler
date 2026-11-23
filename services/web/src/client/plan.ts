@@ -338,7 +338,7 @@ export class PlanBoard {
   }
 
   /// Pick another board.
-  choose(workspace: string): void {
+  choose(workspace: string | null): void {
     if (this.dead || workspace === this.workspace) return
     this.workspace = workspace
     this.plan = null
