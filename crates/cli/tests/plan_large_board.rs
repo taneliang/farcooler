@@ -9,6 +9,8 @@ use farcooler_store::testing::old_landing;
 use in_process::*;
 use uuid::Uuid;
 
+const ARCHIVED_RUNS: usize = 1450;
+
 fn id(uuid: Uuid) -> bytes::Bytes {
     bytes::Bytes::copy_from_slice(uuid.as_bytes())
 }
@@ -54,6 +56,7 @@ async fn a_large_board_loads_in_plan_overview_and_detail_commands() {
         old_landing(store, repo.workspace, n as u32 + 1, "landed", None, cards, now + n as i64);
     }
 
+    seed_large_workflow_archive(store, repo.workspace);
     h.service.start_workflows().unwrap();
     let mut link = connect(&h).await;
     let request = payload::Payload::PlanGet(pb::PlanGetRequest {
@@ -75,17 +78,30 @@ async fn a_large_board_loads_in_plan_overview_and_detail_commands() {
     assert!(read.landings.len() < 100, "landing history must be bounded");
     assert!(read.cards.len() < 1500, "closed cards must be summarized");
 
-    // The released app reads the unpaged board, then requests a full workflow snapshot.
+    // The released app reads the unpaged board, then sends workflow.get with no view marker.
     let mut get_workflow = farcooler_client::plan_json::workflow_request(repo.workspace);
     get_workflow.accepts.clear();
+    let mut get_full = get_workflow.clone();
+    get_full.accepts.push("workflow_full_v1".into());
     let legacy = farcooler_client::plan_json::with_workflow(&read, repo.workspace, Some(async {
-        Ok(link.call(get_workflow).await.expect("released app workflow.get").value.unwrap())
-    })).await.unwrap();
+        let reply = link.call(get_workflow).await?.value.unwrap();
+        let result::Value::WorkflowReply(workflow) = &reply else {
+            panic!("wrong legacy workflow reply");
+        };
+        let wire: serde_json::Value = serde_json::from_str(&workflow.json).unwrap();
+        assert_eq!(wire["archive_omitted"], ARCHIVED_RUNS);
+        assert_eq!(wire["state"]["archive"], serde_json::json!({}));
+        Ok(reply)
+    })).await.expect("released app Plan load");
     assert_eq!(legacy["themes"][0]["counts"]["cancelled"], 250);
     assert_eq!(legacy["themes"][0]["story"], "Now on the board");
     assert_eq!(legacy["themes"][0]["next"], "Next on the board");
-    assert!(legacy["landings"].as_array().is_some_and(|rows| !rows.is_empty()));
-    assert!(legacy["workflow"].is_object());
+    assert_eq!(legacy["landings"][0]["number"], 100);
+    assert_eq!(legacy["workflow"]["runs"][0]["item"], "item");
+    assert!(matches!(
+        link.call(get_full).await,
+        Err(farcooler_transport::ClientError::Daemon { what, .. }) if what == "response_too_large"
+    ));
 
     let session = farcooler_client::session::Session::connect_local(&h.socket).await.unwrap();
     let json = session.plan_with_workflow(repo.workspace).await.unwrap();
@@ -236,6 +252,38 @@ fn live_story(n: usize) -> String {
     format!("Now {n}. {}", "計".repeat(3600))
 }
 
+fn seed_large_workflow_archive(store: &farcooler_store::Store, workspace: Uuid) {
+    use farcooler_workflow::{Archived, Phase, RunRecord, State};
+    use serde_json::{Value, json};
+
+    let fixture: Value = serde_json::from_str(include_str!("../../client/src/testdata/workflow-presentation.json")).unwrap();
+    let mut snapshot = fixture[0]["request"]["snapshot"].clone();
+    snapshot["workspace"] = json!(workspace);
+    let mut state: State = serde_json::from_value(snapshot).unwrap();
+    let archived = Archived {
+        start_load: None, closed: None, phase: Phase::Cancelled, candidate: None, group: None,
+        last_run: Some(RunRecord {
+            phase: Phase::Cancelled, run: "old-run".into(), stop_run: None, pin: "pin".into(),
+            fence: 1, candidate: None, tree: None, models: Default::default(),
+            reason: Some("build output ".repeat(100)), rework_history: Vec::new(),
+            sent_back: Vec::new(), back_edges: Default::default(),
+        }),
+        history: Vec::new(),
+    };
+    state.archive = (0..ARCHIVED_RUNS).map(|n| (format!("archived-{n}"), archived.clone())).collect();
+    let cap = farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES;
+    assert!(serde_json::to_vec(&state.archive).unwrap().len() > cap);
+    insert_workflow_state(store, &state);
+}
+
+fn insert_workflow_state(store: &farcooler_store::Store, state: &farcooler_workflow::State) {
+    let (workspace, revision, epoch) = (&state.workspace, state.revision, state.epoch);
+    let state = serde_json::to_string(state).unwrap().replace('\'', "''");
+    farcooler_store::testing::exec_for_tests(store, &format!(
+        "INSERT INTO workflow_states(workspace,revision,epoch,state) VALUES('{workspace}',{revision},{epoch},'{state}')"
+    ));
+}
+
 fn seed_active_landings(store: &farcooler_store::Store, workspace: Uuid, tasks: &[Uuid], keys: &[String], now: i64) {
     use farcooler_workflow::{Item, State};
     use serde_json::{Value, json};
@@ -252,10 +300,7 @@ fn seed_active_landings(store: &farcooler_store::Store, workspace: Uuid, tasks: 
         group["members"] = json!(keys.iter().map(|key| json!({"item": key, "candidate": "fixture"})).collect::<Vec<_>>());
         state.items.insert(format!("group-{n:020}-landing"), serde_json::from_value::<Item>(group).unwrap());
     }
-    let state = serde_json::to_string(&state).unwrap().replace('\'', "''");
-    farcooler_store::testing::exec_for_tests(store, &format!(
-        "INSERT INTO workflow_states(workspace,revision,epoch,state) VALUES('{workspace}',1,1,'{state}')"
-    ));
+    insert_workflow_state(store, &state);
     let values = tasks.iter().zip(keys).map(|(task, key)| format!("('{workspace}','{key}',X'{}')", task.simple()))
         .collect::<Vec<_>>().join(",");
     farcooler_store::testing::exec_for_tests(store, &format!(

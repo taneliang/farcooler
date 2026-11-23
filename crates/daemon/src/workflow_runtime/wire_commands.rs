@@ -69,8 +69,7 @@ fn summarize(mut value:serde_json::Value) -> serde_json::Value {
     value
 }
 
-/// Plan's workflow read only needs renderable runs, stops and admission context.
-/// Keep headroom for the protobuf envelope around the JSON string.
+/// Keep headroom for the protobuf envelope around a workflow reply's JSON.
 const PLAN_WORKFLOW_BYTES: usize = farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES - 1024;
 
 pub(crate) enum GetView {
@@ -85,6 +84,22 @@ fn retain_plan_items(state: &mut State) {
     state.grouping = None;
     state.items.retain(|_, item| !item.definition.is_ticket()
         && !(item.group_of.is_some() && matches!(item.phase, Phase::Done | Phase::Cancelled)));
+}
+
+/// Released Plan and workflow clients send the same unmarked get. If the
+/// reply outgrows its frame, summarize the archive and keep the live snapshot.
+pub(crate) fn encode_legacy_get(mut value: serde_json::Value) -> String {
+    let json = value.to_string();
+    if json.len() <= PLAN_WORKFLOW_BYTES {
+        return json;
+    }
+    let Some(archive) = value.pointer_mut("/state/archive").and_then(|v| v.as_object_mut()) else {
+        return json;
+    };
+    let omitted = archive.len();
+    archive.clear();
+    value["archive_omitted"] = omitted.into();
+    value.to_string()
 }
 
 pub(crate) fn encode_plan_get(mut value: serde_json::Value) -> String {
