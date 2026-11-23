@@ -22,7 +22,7 @@
 //! Part of the plan layer and as removable: only the real daemon runs it
 //! (`main.rs`), never a `--stdio` session.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -66,6 +66,7 @@ pub async fn run(svc: Arc<Service>, watcher: Arc<Watcher>) {
 pub struct Memo {
     shas: HashMap<String, String>,
     completed_jobs: HashMap<(Uuid, u64), Option<Vec<GhJob>>>,
+    completed_order: VecDeque<(Uuid, u64)>,
     last_attempt: HashMap<(Uuid, String), i64>,
     /// Subjects GitHub didn't answer for, or had no run for: how many reads
     /// in a row, and when to ask again (review train-1005c M2).
@@ -393,13 +394,27 @@ async fn with_jobs(
     let path = format!("repos/{{owner}}/{{repo}}/actions/runs/{}/jobs", run.id);
     let jobs = gh_get(svc, tree, &api_args(&path, &["per_page=100".into()], JOBS_JQ)).await.and_then(|b| parse_jobs(&b));
     if memo_holds(&run.status) {
-        memo.completed_jobs.insert(key, jobs.clone());
+        memo.remember_completed_jobs(key, jobs.clone());
     }
     (run, jobs)
 }
 
-/// The most runs, or short SHAs, the watch remembers before it starts over.
+/// The most completed runs or short SHAs the watch keeps in either cache.
 const MEMO_MAX: usize = 512;
+
+impl Memo {
+    fn remember_completed_jobs(&mut self, key: (Uuid, u64), jobs: Option<Vec<GhJob>>) {
+        // Only called on a cache miss. Evict a single oldest entry so a new
+        // completed run does not make the watch forget all the recent ones.
+        if self.completed_jobs.len() == MEMO_MAX
+            && let Some(oldest) = self.completed_order.pop_front()
+        {
+            self.completed_jobs.remove(&oldest);
+        }
+        self.completed_jobs.insert(key, jobs);
+        self.completed_order.push_back(key);
+    }
+}
 
 /// Whether a run's jobs, once read, can be reused while the run reads the
 /// same: only when it has finished. A run in progress is read again, so "9 of

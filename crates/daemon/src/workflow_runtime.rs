@@ -655,8 +655,7 @@ impl Runtime {
         let mut cleanup_requested = !continuous || recover_trees
             || self.next_cleanup.is_some_and(|due| tokio::time::Instant::now() >= due);
         let mut cleanup = None;
-        let maintenance = Duration::from_secs(3600);
-        let cleanup_interval = if continuous && self.service_mode { Duration::from_secs(15) } else { Duration::ZERO };
+        let cleanup_interval = if continuous && self.service_mode { build_cleanup::CLEANUP_RETRY_INTERVAL } else { Duration::ZERO };
         loop {
             // Ended groups' candidate branches leave the landing remote (ov-1269), off this loop.
             self.exec.sweep_candidate_branches();
@@ -744,7 +743,7 @@ impl Runtime {
                     let (deadline, orphans) = result?;
                     self.orphan_cleanup_retries = orphans;
                     self.next_cleanup = deadline.into_iter().chain(self.orphan_cleanup_retries.values().copied())
-                        .chain(continuous.then(|| tokio::time::Instant::now() + maintenance)).min();
+                        .chain(continuous.then(|| tokio::time::Instant::now() + build_cleanup::CLEANUP_MAINTENANCE_INTERVAL)).min();
                     // A pending effect may have been waiting for cleanup to release its tree.
                     scan = self.continuous && !stopping;
                 }

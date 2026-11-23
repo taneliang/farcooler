@@ -4,6 +4,18 @@
 
 use super::*;
 
+#[test]
+fn completed_job_memo_evicts_only_the_oldest_run() {
+    let mut memo = Memo::default();
+    let repository = Uuid::nil();
+    for run in 0..=MEMO_MAX as u64 {
+        memo.remember_completed_jobs((repository, run), None);
+    }
+    assert_eq!(memo.completed_jobs.len(), MEMO_MAX);
+    assert!(!memo.completed_jobs.contains_key(&(repository, 0)));
+    assert!((1..=MEMO_MAX as u64).all(|run| memo.completed_jobs.contains_key(&(repository, run))));
+}
+
 fn fixture(name: &str) -> Vec<u8> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test/fixtures/ci").join(name);
     std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))

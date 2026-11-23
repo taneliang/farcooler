@@ -62,23 +62,64 @@ pub(super) async fn wait_for_retry(deadline: Option<tokio::time::Instant>) {
 // Pace recursive probes across directories and retry rounds. A slow check
 // cannot leave another lsof queued or allow a burst once it finishes.
 const OPEN_FILE_CHECK_INTERVAL: Duration = Duration::from_secs(5);
+pub(super) const CLEANUP_RETRY_INTERVAL: Duration = Duration::from_secs(15);
+pub(super) const CLEANUP_MAINTENANCE_INTERVAL: Duration = Duration::from_secs(3600);
+
+#[derive(Default)]
+struct OpenFileCheckState {
+    last_finished: Option<tokio::time::Instant>,
+    blocked: BTreeMap<PathBuf, ProbeRetry>,
+}
+
+struct ProbeRetry {
+    after: Duration,
+    due: tokio::time::Instant,
+    reason: String,
+}
 
 #[derive(Clone, Default)]
-pub(super) struct OpenFileChecks(Arc<tokio::sync::Mutex<Option<tokio::time::Instant>>>);
+pub(super) struct OpenFileChecks(Arc<tokio::sync::Mutex<OpenFileCheckState>>);
 
 impl OpenFileChecks {
-    async fn run<T>(&self, check: impl std::future::Future<Output = T>) -> T {
-        let mut last = self.0.lock().await;
-        if let Some(at) = *last { tokio::time::sleep_until(at + OPEN_FILE_CHECK_INTERVAL).await; }
-        *last = Some(tokio::time::Instant::now());
-        check.await
+    async fn run(
+        &self,
+        path: &Path,
+        check: impl std::future::Future<Output = std::result::Result<(), String>>,
+    ) -> std::result::Result<(), String> {
+        let mut state = self.0.lock().await;
+        let now = tokio::time::Instant::now();
+        // Forget paths that no longer appear in cleanup, with an extra
+        // maintenance interval for a due retry to make it through a sweep.
+        state.blocked.retain(|_, retry| now < retry.due + CLEANUP_MAINTENANCE_INTERVAL);
+        if let Some(retry) = state.blocked.get(path)
+            && now < retry.due
+        {
+            return Err(retry.reason.clone());
+        }
+        if let Some(finished) = state.last_finished {
+            tokio::time::sleep_until(finished + OPEN_FILE_CHECK_INTERVAL).await;
+        }
+        let result = check.await;
+        let finished = tokio::time::Instant::now();
+        state.last_finished = Some(finished);
+        match &result {
+            Ok(()) => { state.blocked.remove(path); }
+            Err(reason) => {
+                let after = state.blocked.get(path).map_or(CLEANUP_RETRY_INTERVAL, |retry|
+                    (retry.after * 2).min(CLEANUP_MAINTENANCE_INTERVAL));
+                state.blocked.insert(path.to_path_buf(), ProbeRetry {
+                    after, due: finished + after, reason: reason.clone(),
+                });
+            }
+        }
+        result
     }
 }
 
 impl Exec {
     pub(super) async fn check_open_files(&self, path: &Path) -> std::result::Result<(), String> {
         match &self.open_file_checks {
-            Some(checks) => checks.run(check_open_files(path)).await,
+            Some(checks) => checks.run(path, check_open_files(path)).await,
             None => check_open_files(path).await,
         }
     }
@@ -532,10 +573,11 @@ async fn idle_cleanup_open_file_spawn_budget_per_minute() {
     let attempts = async {
         for _ in 0..100 {
             // Substitute the spawn, preserving the same dispatch path as lsof.
-            checks.run(async {
+            checks.run(Path::new("target"), async {
                 spawns += 1;
                 tokio::task::yield_now().await;
-            }).await;
+                Ok(())
+            }).await.unwrap();
         }
     };
     tokio::select! {
@@ -544,4 +586,78 @@ async fn idle_cleanup_open_file_spawn_budget_per_minute() {
         _ = attempts => panic!("all 100 idle retries reached the subprocess in a minute"),
     }
     assert_eq!(spawns, 12);
+}
+
+#[cfg(test)]
+#[tokio::test(start_paused = true)]
+async fn slow_open_file_probes_leave_a_gap_after_each_completion() {
+    let checks = OpenFileChecks::default();
+    let window = Duration::from_secs(100);
+    let end = tokio::time::Instant::now() + window;
+    let probe_time = Duration::from_secs(20);
+    let mut running = Duration::ZERO;
+    let sweep = async {
+        for n in 0..100 {
+            checks.run(Path::new(&format!("target-{n}")), async {
+                running += probe_time.min(end.saturating_duration_since(tokio::time::Instant::now()));
+                tokio::time::sleep(probe_time).await;
+                Ok(())
+            }).await.unwrap();
+        }
+    };
+    tokio::select! {
+        biased;
+        _ = tokio::time::sleep_until(end) => {}
+        _ = sweep => panic!("sweep finished before the observation window"),
+    }
+    assert_eq!(running.as_secs_f64() / window.as_secs_f64(), 0.8);
+}
+
+#[cfg(test)]
+#[tokio::test(start_paused = true)]
+async fn slow_blocked_open_file_probe_spends_most_of_its_time_idle() {
+    let checks = OpenFileChecks::default();
+    let path = Path::new("target");
+    let window = Duration::from_secs(600);
+    let end = tokio::time::Instant::now() + window;
+    let probe_time = Duration::from_secs(20);
+    let mut running = Duration::ZERO;
+    let sweeps = async {
+        loop {
+            let _ = checks.run(path, async {
+                running += probe_time.min(end.saturating_duration_since(tokio::time::Instant::now()));
+                tokio::time::sleep(probe_time).await;
+                Err("open files under folder".into())
+            }).await;
+            tokio::time::sleep(CLEANUP_RETRY_INTERVAL).await;
+        }
+    };
+    tokio::select! {
+        biased;
+        _ = tokio::time::sleep_until(end) => {}
+        _ = sweeps => unreachable!(),
+    }
+    assert_eq!(running.as_secs_f64() / window.as_secs_f64(), 0.2);
+}
+
+#[cfg(test)]
+#[tokio::test(start_paused = true)]
+async fn open_file_backoff_is_per_path_capped_and_cleared_by_success() {
+    let checks = OpenFileChecks::default();
+    let blocked = Path::new("target");
+    let other = Path::new("build");
+    for seconds in [15, 30, 60, 120, 240, 480, 960, 1920, 3600, 3600] {
+        assert_eq!(checks.run(blocked, async { Err("open files".into()) }).await.unwrap_err(), "open files");
+        let due = tokio::time::Instant::now() + Duration::from_secs(seconds);
+        if seconds == 15 {
+            checks.run(other, async { Ok(()) }).await.unwrap();
+        }
+        tokio::time::sleep_until(due - Duration::from_secs(1)).await;
+        assert_eq!(checks.run(blocked, async { panic!("probe started before deadline") }).await.unwrap_err(), "open files");
+        tokio::time::sleep_until(due).await;
+    }
+    checks.run(blocked, async { Ok(()) }).await.unwrap();
+    assert_eq!(checks.run(blocked, async { Err("new blocker".into()) }).await.unwrap_err(), "new blocker");
+    tokio::time::sleep(CLEANUP_RETRY_INTERVAL).await;
+    checks.run(blocked, async { Ok(()) }).await.unwrap();
 }
