@@ -5,7 +5,7 @@ import SwiftUI
 // (`WirePlanView`, ov-1016) decides what is where, every word, and what each says
 // empty; this lays it out. Wide, the work in motion
 // (Landing, In Review, Building) fills the left column and what is queued and
-// what it costs (Waiting, Waiting for the Next Landing, Agents) the right, the themes
+// what it costs (Waiting, Agents) the right, the themes
 // spanning both below; narrow, the same sections stack in the same order.
 
 /// Two columns when there's room for two, else one: the first subview left, the
@@ -59,7 +59,7 @@ struct PlanSectionsView: View {
     let onOpen: (PlanPage) -> Void
     /// The left column's sections: the work in motion.
     private static let left: [WireSectionKind] = [.landing, .inReview, .building]
-    private static let right: [WireSectionKind] = [.waiting, .onLandedLanding, .agents]
+    private static let right: [WireSectionKind] = [.waiting, .agents]
 
     var body: some View {
         VStack(alignment: .leading, spacing: NavigatorRhythm.section) {
@@ -87,9 +87,8 @@ struct PlanSectionsView: View {
         case .inReview: chrome(section, id: "plan-in-review") { cardRows(view.inReview) }
         case .building: chrome(section, id: "plan-building") { cardRows(view.building) }
         case .waiting: waiting(section)
-        case .onLandedLanding: chrome(section, id: "plan-on-landed-landing") { cardRows(view.onLandedLanding) }
         case .agents: agents(section)
-        case .needsYou, .themes, .landedToday: EmptyView()
+        case .needsYou, .onLandedLanding, .themes, .landedToday: EmptyView()
         }
     }
 
@@ -126,32 +125,11 @@ struct PlanSectionsView: View {
             VStack(alignment: .leading, spacing: Spacing.group) {
                 ForEach(view.landingGroups ?? [], id: \.id) { group in
                     PlanLandingGroupView(group: group)
-                    .identified("plan-landing-group-\(group.id)")
-                }
-                ForEach(view.landings) { card in
-                    PlanLandingCard(
-                        card: card, explanation: section.help, ci: ci(card), now: view.now,
-                        selected: selected, keyed: keyed, onOpen: onOpen
-                    )
-                    .changeWashed(card.id)
+                        .identified("plan-landing-group-\(group.id)")
                 }
             }
             .padding(.top, NavigatorRhythm.air)
-            .listChanges(
-                view.landings.map {
-                    ListChangeRow(
-                        id: $0.id,
-                        signature: [
-                            $0.phase.rawValue, PlanLandingCard.facts($0, ci: ci($0), now: 0),
-                            $0.tickets.map { "\($0.id)\($0.status)" }.joined(separator: ","),
-                        ].joined(separator: "\u{1}"))
-                })
         }
-    }
-
-    /// The CI read of a landing's pushed commit, the app's own.
-    private func ci(_ card: WireLandingCard) -> PlanCIRead? {
-        model.landings.first { $0.id == card.id }.flatMap { model.ci(of: $0) }
     }
 
     private func cardRows(_ cards: [WireTicketCard]) -> some View {

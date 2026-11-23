@@ -274,7 +274,7 @@ struct QuietInkTests {
         for _ in 0..<3 { root.deleteLastPathComponent() }
         let sources = root.appendingPathComponent("Sources/FarCooler")
         let files = [
-            "Plan/PlanPages", "Plan/PlanOverview", "Plan/PlanCardRow", "Plan/PlanRulings", "Plan/PlanLandingCard", "Plan/PlanThemeGridView",
+            "Plan/PlanPages", "Plan/PlanOverview", "Plan/PlanCardRow", "Plan/PlanRulings", "Plan/PlanThemeGridView",
             "Plan/PlanAgentsView", "Plan/PlanHome", "Plan/PlanColumnView", "Plan/PlanOutsideRow",
             "Plan/ContentView+OneTree", "TaskColumn", "TaskUsageView", "BoardHistoryView", "Components/TaskWorkers",
             "BoardSummaryStrip", "TaskNoteStyle", "TaskBoard",

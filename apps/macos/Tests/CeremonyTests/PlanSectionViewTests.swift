@@ -7,7 +7,7 @@ import Testing
 
 /// The Plan's sections on the Mac (ov-503, phase 5): each section drawn, what
 /// it says empty, the two columns from 960 pt and the one column below, no
-/// 680-pt cap, a landing's tickets inside its card, and the folded stranded section. The
+/// 680-pt cap, and engine landing groups. The
 /// rules and the words are the Rust core's view (`WirePlanView`, ov-1016), pinned
 /// by its tests; this holds the real views to it over `PlanScenario`'s plans,
 /// through the bridge the app calls.
@@ -46,6 +46,9 @@ struct PlanSectionViewTests {
             "Run gate · Running", "4 min in this step", "ov-1105 · \(title)",
             "Split after a gate failed", "Failed job: cargo test", "error: expected a passing gate",
         ])]
+        let landingIndex = try #require(view.sections.firstIndex { $0.kind == .landing })
+        view.sections[landingIndex].count = 1
+        view.sections[landingIndex].empty = nil
         let frames = await PlanThemePageTests.frames(PlanSectionsView(
             view: view, model: store.plan.plan, statuses: [:], plan: store.plan,
             selected: nil, keyed: false, defaults: PlanViewTests.defaults(), onOpen: { _ in }), width: 320, height: 3200)
