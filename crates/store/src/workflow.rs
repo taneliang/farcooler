@@ -239,12 +239,61 @@ impl Store {
         Ok(notices)
     }
     pub fn workflow_outbox(&self, workspace: &str) -> Result<Vec<StoredEffect>> {
-        let conn = self.conn();
-        let mut stmt = conn.prepare("SELECT payload, active, dispatch_state, resource_generation, lease_until FROM workflow_outbox WHERE workspace = ?1 ORDER BY revision, id")?;
-        let rows = stmt.query_map([workspace], |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<u64>>(3)?, r.get::<_, Option<i64>>(4)?)))?;
-        rows.map(|r| { let (payload, active, dispatch_state, resource_generation, lease_until) = r?;
-            Ok(StoredEffect { effect: serde_json::from_str(&payload)?, active, dispatch_state, resource_generation, lease_until }) }).collect()
+        self.read_outbox("workspace = ?1", rusqlite::params![workspace])
     }
+
+    /// Dispatch and slot positions need current effects, plus cancelled effects
+    /// that the runtime still owns until their workers have stopped.
+    pub fn workflow_dispatch_effects(&self, workspace: &str, running: &[&str]) -> Result<Vec<StoredEffect>> {
+        if running.is_empty() {
+            return self.read_outbox("workspace = ?1 AND active = 1", rusqlite::params![workspace]);
+        }
+        self.read_outbox(
+            "(workspace = ?1 AND active = 1) OR (workspace = ?1 AND id IN (SELECT value FROM json_each(?2)))",
+            rusqlite::params![workspace, serde_json::to_string(running)?],
+        )
+    }
+
+    /// Retained effects of the items a read displays. Archived items' logs
+    /// are looked up explicitly via workflow logs.
+    pub fn workflow_item_effects<'a>(&self, workspace: &str, items: impl IntoIterator<Item = &'a str>) -> Result<Vec<StoredEffect>> {
+        let items: Vec<_> = items.into_iter().collect();
+        self.read_outbox(
+            "workspace = ?1 AND CASE WHEN json_valid(payload) THEN json_extract(payload, '$.item') END
+                IN (SELECT value FROM json_each(?2))",
+            rusqlite::params![workspace, serde_json::to_string(&items)?],
+        )
+    }
+
+    fn read_outbox(&self, filter: &str, params: impl rusqlite::Params) -> Result<Vec<StoredEffect>> {
+        let raw = {
+            let conn = self.conn();
+            let mut stmt = conn.prepare_cached(&format!(
+                "SELECT payload, active, dispatch_state, resource_generation, lease_until FROM workflow_outbox WHERE {filter} ORDER BY revision, id"
+            ))?;
+            stmt.query_map(params, |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<u64>>(3)?, r.get::<_, Option<i64>>(4)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        raw.into_iter().map(|(payload, active, dispatch_state, resource_generation, lease_until)| {
+            Ok(StoredEffect { effect: serde_json::from_str(&payload)?, active, dispatch_state, resource_generation, lease_until })
+        }).collect()
+    }
+}
+
+/// Registry 70's derived read indexes. The cutover catalog recognizes
+/// exactly these declarations without changing the retained row manifest.
+pub(crate) const READ_INDEXES: [(&str, &str, &str); 3] = [
+    ("workflow_outbox_active", "workflow_outbox",
+        "CREATE INDEX workflow_outbox_active ON workflow_outbox(workspace, revision, id) WHERE active = 1"),
+    ("workflow_outbox_item", "workflow_outbox",
+        "CREATE INDEX workflow_outbox_item ON workflow_outbox(workspace, CASE WHEN json_valid(payload) THEN json_extract(payload, '$.item') END)"),
+    ("agent_turns_by_terminal", "agent_turns",
+        "CREATE INDEX agent_turns_by_terminal ON agent_turns(terminal_id)"),
+];
+
+pub(crate) fn migration_read_indexes(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    for (_, _, sql) in READ_INDEXES { tx.execute_batch(sql)?; }
+    Ok(())
 }
 
 // Registry position is the version. Refuse older writers even though the tables

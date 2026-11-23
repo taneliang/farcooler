@@ -566,6 +566,12 @@ fn spend_from(row: (i64, i64, i64, i64, i64, i64, i64), unmeasured: u32, shared:
     }
 }
 
+/// Materialize only the agents who worked this ticket and their ticket counts.
+pub(crate) const TICKET_AGENTS: &str = "WITH worked AS MATERIALIZED (
+    SELECT w.agent_id, (SELECT count(DISTINCT task_id) FROM ticket_work WHERE agent_id = w.agent_id) AS n
+    FROM (SELECT DISTINCT agent_id FROM ticket_work WHERE task_id = ?1) w
+)";
+
 /// What a ticket's agents spent on it (`TURNS_OF_AGENT`).
 ///
 /// An agent that worked several tickets (a reviewer given two, a builder with
@@ -575,25 +581,24 @@ fn spend_from(row: (i64, i64, i64, i64, i64, i64, i64), unmeasured: u32, shared:
 /// `shared_agents` says how many such agents a ticket holds, so the figure is
 /// labeled a split. Runs still count whole.
 pub(crate) fn spend_of_ticket(conn: &Connection, task: Uuid) -> Result<Spend> {
+    // Anchor the joins on the small set of agents who worked this ticket.
     let row = conn
-        .query_row(
-            &format!(
-                "WITH tickets_of AS (SELECT agent_id, count(DISTINCT task_id) AS n FROM ticket_work GROUP BY agent_id),
-                      worked AS (SELECT DISTINCT agent_id FROM ticket_work WHERE task_id = ?1)
-                 SELECT CAST(coalesce(round(sum(m.input_tokens * 1.0 / s.n)), 0) AS INTEGER),
-                        CAST(coalesce(round(sum(m.output_tokens * 1.0 / s.n)), 0) AS INTEGER),
-                        CAST(coalesce(round(sum(m.cache_read_tokens * 1.0 / s.n)), 0) AS INTEGER),
-                        CAST(coalesce(round(sum(m.cache_write_tokens * 1.0 / s.n)), 0) AS INTEGER),
-                        CAST(coalesce(round(sum(m.cost_micros * 1.0 / s.n)), 0) AS INTEGER),
+        .prepare_cached(&format!(
+                "{TICKET_AGENTS}
+                 SELECT CAST(coalesce(round(sum(m.input_tokens * 1.0 / w.n)), 0) AS INTEGER),
+                        CAST(coalesce(round(sum(m.output_tokens * 1.0 / w.n)), 0) AS INTEGER),
+                        CAST(coalesce(round(sum(m.cache_read_tokens * 1.0 / w.n)), 0) AS INTEGER),
+                        CAST(coalesce(round(sum(m.cache_write_tokens * 1.0 / w.n)), 0) AS INTEGER),
+                        CAST(coalesce(round(sum(m.cost_micros * 1.0 / w.n)), 0) AS INTEGER),
                         coalesce(sum(m.cost_micros IS NULL), 0),
                         count(DISTINCT t.id)
                    FROM worked w
                    JOIN agents a ON a.id = w.agent_id
-                   JOIN tickets_of s ON s.agent_id = a.id
-                   JOIN agent_turns t ON {TURNS_OF_AGENT}
-                   JOIN agent_turn_models m ON m.turn_id = t.id"
-            ),
-            params![uuid_blob(task)],
+                   CROSS JOIN agent_turns t ON {TURNS_OF_AGENT}
+                   CROSS JOIN agent_turn_models m ON m.turn_id = t.id"
+            ))
+        .map_err(map_err)?
+        .query_row(params![uuid_blob(task)],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
         )
         .map_err(map_err)?;

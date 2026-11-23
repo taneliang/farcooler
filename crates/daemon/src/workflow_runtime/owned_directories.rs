@@ -68,7 +68,7 @@ impl Exec {
                 Err(error) if error.kind() == std::io::ErrorKind::DirectoryNotEmpty => {}
                 Err(error) => return Err(error),
             }
-            if let Err(why) = super::build_cleanup::check_open_files(&path).await {
+            if let Err(why) = self.check_open_files(&path).await {
                 result.retry = true;
                 return Err(std::io::Error::other(why));
             }

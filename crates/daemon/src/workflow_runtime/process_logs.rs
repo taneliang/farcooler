@@ -20,20 +20,19 @@ impl Exec {
     /// `workflow.get` carries tails for live items only, and for each live item only its last effect
     /// per stage: the reply is read on every plan load, and the outbox keeps every finished run (ov-1298).
     /// An archived or removed item's tails, and a live item's older ones, are `workflow.get`'s `Logs`.
-    pub(super) fn failed_process_logs(&self, workspace: &str) -> Result<Vec<serde_json::Value>> {
-        let state = self.state(workspace)?;
-        let Some(live) = state.as_ref().map(|s| &s.items) else { return Ok(Vec::new()) };
-        let outbox = self.store.workflow_outbox(workspace)?;
+    pub(super) fn failed_process_logs(&self, workspace: &str, state: Option<&State>) -> Result<Vec<serde_json::Value>> {
+        let Some(live) = state.map(|s| &s.items) else { return Ok(Vec::new()) };
+        let outbox = self.store.workflow_item_effects(workspace, live.keys().map(String::as_str))?;
         // The outbox is ordered by revision, then id, so a later effect of the same stage replaces an earlier one.
         let mut last = std::collections::BTreeMap::new();
         for (n, stored) in outbox.iter().enumerate() {
-            if live.contains_key(&stored.effect.item) { last.insert((stored.effect.item.as_str(), stage_key(&stored.effect.kind)), n); }
+            last.insert((stored.effect.item.as_str(), stage_key(&stored.effect.kind)), n);
         }
         let mut chosen: Vec<_> = last.into_values().collect();
         chosen.sort_unstable();
         let mut logs = Vec::new();
         for n in chosen {
-            if let Some(log) = self.process_log_entry(state.as_ref(), &outbox[n].effect, false)? { logs.push(log); }
+            if let Some(log) = self.process_log_entry(state, &outbox[n].effect, false)? { logs.push(log); }
         }
         budget_tails(&mut logs)?;
         Ok(logs)
@@ -44,7 +43,7 @@ impl Exec {
     pub(super) fn item_process_logs(&self, workspace: &str, item: &str) -> Result<serde_json::Value> {
         let state = self.state(workspace)?;
         let mut logs = Vec::new();
-        for stored in self.store.workflow_outbox(workspace)?.iter().filter(|s| s.effect.item == item) {
+        for stored in self.store.workflow_item_effects(workspace, [item])?.iter() {
             if let Some(log) = self.process_log_entry(state.as_ref(), &stored.effect, true)? { logs.push(log); }
         }
         budget_tails(&mut logs)?;

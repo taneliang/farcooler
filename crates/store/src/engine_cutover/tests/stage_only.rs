@@ -277,13 +277,16 @@ fn a_released_install_at_67_carries_its_tickets_forward() {
 }
 
 /// Put the database at `path` back exactly as registry 67 left it: its guards, its stamps, no marker. Only the
-/// objects 68 changed are touched, and the result is checked against a database migrated to 67 and no further.
+/// objects later migrations changed are touched. Compare against a database migrated only to 67.
 fn roll_back_to_67(path: &std::path::Path) {
     let mut reference = Connection::open_in_memory().unwrap();
     reference.execute_batch("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT);").unwrap();
     crate::migrate::migrate_only_to(&mut reference, 67);
     let conn = Connection::open(path).unwrap();
     conn.execute_batch("DROP TRIGGER engine_task_wait_fence; DROP TABLE engine_stage_tickets; DROP TABLE engine_build_cleanup;").unwrap();
+    for (name, _, _) in crate::workflow::READ_INDEXES {
+        conn.execute_batch(&format!("DROP INDEX {name}")).unwrap();
+    }
     let mut names: Vec<String> = crate::engine_stage::EXCLUDES.iter().map(|(t, s, _)| format!("workflow_excludes_{t}_{s}")).collect();
     names.extend(["engine_fence_ticket_lines_d", "engine_fence_ticket_work_d", "engine_fence_task_blocks_d", "engine_fence_task_blocks_i",
         "engine_fence_task_blocks_u", "engine_task_execution_fence"].map(String::from));
@@ -420,7 +423,7 @@ fn a_legacy_67_file_prepares_and_commits_through_the_real_path() {
     roll_back_to_67(&path);
     let (store, plan) = transfer::begin(&path, join_db(&path, "a")).unwrap();
     assert_eq!(plan.registry, 67);
-    assert_eq!(store.schema().unwrap().version, crate::migrate::CURRENT_SCHEMA_VERSION, "the freeze took registry 68");
+    assert_eq!(store.schema().unwrap().version, crate::migrate::CURRENT_SCHEMA_VERSION, "the freeze migrated to the current registry");
     drop(store);
     closing::commit(&path, join_db(&path, "a")).expect("the commit conserves the source through the named delta");
     let owners = join_db(&path, "a");

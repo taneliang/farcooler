@@ -37,7 +37,7 @@ impl Admission {
         service: Arc<Service>, peer: Peer, session: Arc<Session>, caller_pid: Option<i32>,
         caller_pane: Arc<OnceLock<Uuid>>, workspace: Uuid,
     ) -> Result<Self> {
-        // Capture access/process generations BEFORE caller_seat can await tmux.
+        // Capture access and process generations before reading the caller's seat.
         let authority = Authority::read(&service.store, peer.client_id.as_deref())?;
         let owner_device = match peer.client_id.as_deref() {
             Some(id) => service.store.stored_access()?.owner_devices.into_iter()
@@ -48,7 +48,9 @@ impl Admission {
             Some(pid) => Some(crate::claude_registry::process_incarnation(pid).ok_or(DomainError::AuthRequired)?),
             None => None, // Existing trusted in-process/stdio construction.
         };
-        let seat = caller_seat::caller_seat(&service, caller_pid).await;
+        // The final recheck already requires this proof. A tmux fallback
+        // cannot admit a seat the inventory and process walk cannot prove.
+        let seat = caller_pid.map_or(Seat::Person, |pid| caller_seat::walk_seat(&service, pid));
         let terminal = match seat {
             Seat::Person => None,
             Seat::Agent(Some(id)) => {

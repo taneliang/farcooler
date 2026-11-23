@@ -264,6 +264,7 @@ pub struct Exec {
     pub(super) build_free_bytes: Option<u64>,
     #[cfg(test)]
     cleanup_check: Option<std::sync::Arc<(tokio::sync::Notify, tokio::sync::Notify)>>,
+    open_file_checks: Option<build_cleanup::OpenFileChecks>,
     /// Builders pause while a landing gate runs, in every copy (ov-1214).
     pub(crate) yielding: crate::yielding::Yielding,
 }
@@ -311,6 +312,8 @@ pub struct Runtime {
     last_occupancy: Option<String>,
     /// Whether a sweep has cleared the trees an earlier daemon left half deleted (ov-1084).
     trees_recovered: bool,
+    next_join_refresh: Option<tokio::time::Instant>,
+    cleanup_started: Option<tokio::time::Instant>,
     /// Runs on a deleted board whose cancel the engine refused, so the sweep asks once and not on every pass: each
     /// refusal is a permanent receipt (ov-1047 review).
     cancel_refused: std::collections::BTreeSet<(String, String)>,
@@ -438,8 +441,8 @@ impl Runtime {
         let runtime = Self { inbox, send, next_lease: None, next_cleanup: None, orphan_cleanup_retries: BTreeMap::new(), continuous: false,
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
             exec: Exec { yielding: crate::yielding::Yielding::at(&root), activities: Default::default(), places: std::sync::Arc::new(std::sync::Mutex::new(Places::load(&root)?)), root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, host: None,
-                seeding: Default::default(), tree_locks: Default::default(), disk_usage: Default::default(), #[cfg(test)] user_home: None, #[cfg(test)] build_free_bytes: Some(u64::MAX), #[cfg(test)] cleanup_check: None },
-            notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None, trees_recovered: false, cancel_refused: Default::default(), recovery: Default::default(), restart_pacing: Default::default(), scheduling: Default::default(),
+                seeding: Default::default(), tree_locks: Default::default(), disk_usage: Default::default(), #[cfg(test)] user_home: None, #[cfg(test)] build_free_bytes: Some(u64::MAX), #[cfg(test)] cleanup_check: None, open_file_checks: None },
+            notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None, trees_recovered: false, next_join_refresh: None, cleanup_started: None, cancel_refused: Default::default(), recovery: Default::default(), restart_pacing: Default::default(), scheduling: Default::default(),
             _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
         runtime.validate_native_host()?;
         Ok(runtime)
@@ -607,8 +610,13 @@ impl Runtime {
         }
         // A group that ended since the last sweep leaves its tree; the first sweep also clears what a stopped daemon left (ov-1084).
         let mut recover_trees = !self.trees_recovered;
-        self.exec.prune_trees(&workspaces, recover_trees);
-        self.trees_recovered = true;
+        if recover_trees {
+            let exec = self.exec.clone();
+            let boards = workspaces.clone();
+            tokio::task::spawn_blocking(move || exec.prune_trees(&boards, true))
+                .await.map_err(|_| Error::Refused("cleanup recovery worker failed"))?;
+            self.trees_recovered = true;
+        }
         let fingerprint = digest(&occupancy);
         let released_or_recovered = self.last_occupancy.as_ref() != Some(&fingerprint);
         self.last_occupancy = Some(fingerprint);
@@ -644,63 +652,71 @@ impl Runtime {
         }
         let mut stopping = false;
         let mut scan = true;
-        let mut cleanup_requested = true;
+        let mut cleanup_requested = !continuous || recover_trees
+            || self.next_cleanup.is_some_and(|due| tokio::time::Instant::now() >= due);
         let mut cleanup = None;
         let maintenance = Duration::from_secs(3600);
-        let mut next_maintenance = tokio::time::Instant::now() + maintenance;
+        let cleanup_interval = if continuous && self.service_mode { Duration::from_secs(15) } else { Duration::ZERO };
         loop {
             // Ended groups' candidate branches leave the landing remote (ov-1269), off this loop.
             self.exec.sweep_candidate_branches();
             if scan {
-                scan = self.continuous;
+                scan = false;
                 let current = self.store.workflow_workspaces()?;
                 let before = count;
                 let scan_at = clock();
                 // Idle polling is due one second after the latest scan. A long cleanup
                 // can leave this sweep open for several scans.
-                self.next_lease = Some(scan_at.saturating_add(1_000));
+                self.next_lease = self.service_mode.then_some(scan_at.saturating_add(1_000));
                 self.launch_ready(&current, scan_at, running, futures, &mut count).await?;
                 cleanup_requested |= count != before;
             }
             // A round may walk many trees (ov-1376). Coalesce requests while it is running
             // and keep dispatching commands and effects, even if cleanup is the only work left.
-            if cleanup_requested && cleanup.is_none() {
-                let exec = self.exec.clone();
-                let recover_trees = std::mem::take(&mut recover_trees);
-                let mut orphans = std::mem::take(&mut self.orphan_cleanup_retries);
-                let mut task = BackgroundTask::new(async move {
-                    let workspaces = exec.store.workflow_workspaces()?;
-                    let deadline = exec.release_builds(&workspaces).await?;
-                    let now = tokio::time::Instant::now();
-                    if recover_trees {
-                        match exec.private_trees() {
-                            Ok(trees) => orphans.extend(trees.into_iter().map(|tree| (tree, now))),
-                            Err(error) => tracing::warn!(%error, "could not list legacy workflow trees"),
+            if cleanup_requested && cleanup.is_none() && !stopping {
+                let at = tokio::time::Instant::now();
+                let eligible = self.cleanup_started.map_or(at, |last| last + cleanup_interval);
+                if at >= eligible {
+                    let exec = self.exec.clone();
+                    let recover_trees = std::mem::take(&mut recover_trees);
+                    let mut orphans = std::mem::take(&mut self.orphan_cleanup_retries);
+                    let mut task = BackgroundTask::new(async move {
+                        let workspaces = exec.store.workflow_workspaces()?;
+                        let deadline = exec.release_builds(&workspaces).await?;
+                        let now = tokio::time::Instant::now();
+                        if recover_trees {
+                            match exec.private_trees() {
+                                Ok(trees) => orphans.extend(trees.into_iter().map(|tree| (tree, now))),
+                                Err(error) => tracing::warn!(%error, "could not list legacy workflow trees"),
+                            }
                         }
-                    }
-                    let mut due = Vec::new();
-                    orphans.retain(|tree, retry_at| {
-                        if *retry_at > now { return true; }
-                        due.push(tree.clone());
-                        false
+                        let mut due = Vec::new();
+                        orphans.retain(|tree, retry_at| {
+                            if *retry_at > now { return true; }
+                            due.push(tree.clone());
+                            false
+                        });
+                        match exec.release_orphan_builds(&due).await {
+                            Ok(pending) => orphans.extend(pending),
+                            Err(error) => {
+                                tracing::warn!(%error, "could not sweep legacy build output");
+                                let retry_at = tokio::time::Instant::now() + build_cleanup::CLEANUP_RETRY;
+                                orphans.extend(due.iter().cloned().map(|tree| (tree, retry_at)));
+                            }
+                        }
+                        if (recover_trees || !due.is_empty()) && exec.service_mode {
+                            drop(exec.refresh_disk_usage());
+                        }
+                        Ok((deadline, orphans))
                     });
-                    match exec.release_orphan_builds(&due).await {
-                        Ok(pending) => orphans.extend(pending),
-                        Err(error) => {
-                            tracing::warn!(%error, "could not sweep legacy build output");
-                            let retry_at = tokio::time::Instant::now() + build_cleanup::CLEANUP_RETRY;
-                            orphans.extend(due.iter().cloned().map(|tree| (tree, retry_at)));
-                        }
-                    }
-                    if (recover_trees || !due.is_empty()) && exec.service_mode {
-                        drop(exec.refresh_disk_usage());
-                    }
-                    Ok((deadline, orphans))
-                });
-                task.start();
-                cleanup = Some(task);
-                cleanup_requested = false;
-                self.next_cleanup = None;
+                    task.start();
+                    cleanup = Some(task);
+                    cleanup_requested = false;
+                    self.cleanup_started = Some(at);
+                    self.next_cleanup = None;
+                } else {
+                    self.next_cleanup = Some(eligible);
+                }
             }
             if running.is_empty() && cleanup.is_none() { break; }
             let mut shutdown = self.shutdown.clone();
@@ -718,19 +734,17 @@ impl Runtime {
                 _ = build_cleanup::wait_for_retry(self.next_cleanup), if !stopping => Event::CleanupRetry,
             };
             match event {
-                Event::Tick => {
-                    scan = true;
-                    if tokio::time::Instant::now() >= next_maintenance {
-                        cleanup_requested = true;
-                        next_maintenance = tokio::time::Instant::now() + maintenance;
-                    }
+                Event::Tick => { scan = true; }
+                Event::CleanupRetry => {
+                    self.next_cleanup = None;
+                    cleanup_requested = true;
                 }
-                Event::CleanupRetry => { cleanup_requested = true; }
                 Event::CleanupFinished(result) => {
                     cleanup = None;
                     let (deadline, orphans) = result?;
                     self.orphan_cleanup_retries = orphans;
-                    self.next_cleanup = deadline.into_iter().chain(self.orphan_cleanup_retries.values().copied()).min();
+                    self.next_cleanup = deadline.into_iter().chain(self.orphan_cleanup_retries.values().copied())
+                        .chain(continuous.then(|| tokio::time::Instant::now() + maintenance)).min();
                     // A pending effect may have been waiting for cleanup to release its tree.
                     scan = self.continuous && !stopping;
                 }
@@ -743,11 +757,8 @@ impl Runtime {
                     if let Some(message) = message {
                         let read_only = matches!(message, Inbox::State(..) | Inbox::PublicationPreview(..));
                         self.receive(message).await;
-                        if !read_only {
-                            // A cancel may have ended a group.
-                            self.exec.prune_trees(&workspaces, false);
-                            cleanup_requested = true;
-                        }
+                        // A cancel may have ended a group.
+                        cleanup_requested |= !read_only;
                         // A command may have started work, and a long wait must not hold it back.
                         scan |= self.continuous && !stopping;
                         for job in running.iter() {
@@ -787,8 +798,7 @@ impl Runtime {
                     }
                     drop(job._landing);
                     count += 1;
-                    // Not at the end of the sweep, which a long gate elsewhere may hold for hours.
-                    self.exec.prune_trees(&workspaces, false);
+                    // Reclaim while other effects are still running.
                     cleanup_requested = true;
                     scan |= self.continuous && !stopping;
                 }
@@ -819,16 +829,23 @@ impl Runtime {
             if self.adopt_publication(workspace, now_ms)? { *count += 1; }
             self.refresh_groups(workspace, now_ms)?;
         }
-        let ready_queues = self.check_auto_queues(workspaces, now_ms).await?;
+        // Passive waiting branches used to ask the remote on every dispatch
+        // turn. An explicit Queue still verifies the current head immediately.
+        let at = tokio::time::Instant::now();
+        let ready_queues = if !self.continuous || self.next_join_refresh.is_none_or(|due| at >= due) {
+            self.next_join_refresh = Some(at + Duration::from_secs(30));
+            self.check_auto_queues(workspaces, now_ms).await?
+        } else {
+            BTreeSet::new()
+        };
         self.schedule_ready(workspaces, now_ms, &ready_queues)?;
         let started = std::time::Instant::now();
         let clock = || now_ms.saturating_add(i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX));
         for workspace in workspaces {
             let published = if self.service_mode { self.store.workflow_configuration(workspace)? } else { None };
             let mut uncertain = BTreeSet::new();
-            for stored in self.store.workflow_outbox(workspace)? {
+            for stored in self.store.workflow_dispatch_effects(workspace, &[])? {
                 if self.shutdown.as_ref().is_some_and(|s| *s.borrow()) { return Ok(()); }
-                if !stored.active { continue; }
                 let effect = stored.effect;
                 if running.iter().any(|j| j.effect.id == effect.id && &j.workspace == workspace) { continue; }
                 // An Uncertain effect that recovery couldn't settle waits before it is looked at again (ov-1301).
@@ -1143,11 +1160,18 @@ impl Runtime {
         self.shutdown = Some(shutdown.clone());
         self.continuous = true;
         self.retain_interrupted_runs()?;
+        self.next_cleanup = Some(tokio::time::Instant::now());
+        if self.service_mode {
+            self.exec.open_file_checks.get_or_insert_with(Default::default);
+        }
         loop {
             if *shutdown.borrow() { return Ok(()); }
             // Bounded drain prevents a busy sender from starving effects/shutdown.
             for _ in 0..32 {
                 let Ok(message) = self.inbox.try_recv() else { break; };
+                if !matches!(message, Inbox::State(..)) {
+                    self.next_cleanup = Some(tokio::time::Instant::now());
+                }
                 self.receive(message).await;
             }
             if self.pump(now()).await? > 0 { continue; }
@@ -1161,7 +1185,10 @@ impl Runtime {
                         let Some(message) = message else { return Ok(()); };
                         let read_only = matches!(message, Inbox::State(..) | Inbox::PublicationPreview(..));
                         self.receive(message).await;
-                        if !read_only { break; }
+                        if !read_only {
+                            self.next_cleanup = Some(tokio::time::Instant::now());
+                            break;
+                        }
                     }
                     _ = async {
                         match deadline {
@@ -1346,3 +1373,6 @@ async fn wait_until(deadline: tokio::time::Instant, interval: std::time::Duratio
         tokio::time::sleep_until((tokio::time::Instant::now() + interval).min(deadline)).await;
     }
 }
+
+#[cfg(test)]
+mod read_perf_tests;

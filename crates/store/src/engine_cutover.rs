@@ -224,11 +224,20 @@ fn uuid(value: &Cell) -> Result<String> {
 /// Capture before Store::open: no waits sweep or schema stamp can erase raw facts.
 pub fn preflight(conn: &Connection) -> Result<Preflight> {
     let registry = crate::migrate::read_schema_version(conn).map_err(|e| Error::Refused(e.to_string()))?;
-    if !matches!(registry,60|65..=69) { return refuse("expected exact raw schema60, composed schema65, cutover schema66, manual schema67 stage schema68 or cleanup schema69"); }
+    if !matches!(registry,60|65..=70) { return refuse("expected raw registry 60 or an exact composed registry from 65 through 70"); }
     let unsafe_generation:bool=registry>=65 && conn.query_row("SELECT EXISTS(SELECT 1 FROM workflow_resource_generations WHERE typeof(generation)!='integer' OR generation<0 OR generation=9223372036854775807)
         OR EXISTS(SELECT 1 FROM workflow_resources r LEFT JOIN workflow_resource_generations g ON g.resource=r.resource WHERE g.resource IS NULL OR typeof(r.generation)!='integer' OR r.generation!=g.generation)",[],|r|r.get(0))?;
     if unsafe_generation {return refuse("resource generation is invalid, exhausted or inconsistent; no authority transfer");}
     let mut raw = Manifest::capture(conn)?;
+    if registry >= 70 {
+        for (name, table, expected) in crate::workflow::READ_INDEXES {
+            if !raw.objects.get(name).is_some_and(|(kind, owner, sql)|
+                kind == "index" && owner == table && sql.as_deref() == Some(expected)) {
+                return refuse("read index catalog differs from the pinned registry");
+            }
+            raw.objects.remove(name);
+        }
+    }
     let cutover_objects:BTreeMap<_,_>=raw.objects.iter().filter(|(name,(_,owner,_))|name.starts_with("engine_")||owner.starts_with("engine_cutover_")).map(|(name,value)|(name.clone(),value.clone())).collect();
     let pinned=match registry {66=>CUTOVER_SCHEMA_HASH,67=>CUTOVER67_SCHEMA_HASH,68=>CUTOVER68_SCHEMA_HASH,_=>CUTOVER69_SCHEMA_HASH};
     if registry>=66 && farcooler_workflow::digest(&cutover_objects)!=pinned {return Err(Error::Refused(format!("cutover schema objects differ from the pinned schema; preserve and stop ({})",farcooler_workflow::digest(&cutover_objects))));}

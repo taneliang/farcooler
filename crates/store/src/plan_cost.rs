@@ -183,19 +183,20 @@ pub(crate) fn spread(tokens: f64, started: Option<i64>, ended: i64, window_start
 /// summing tickets counts it once.
 pub(crate) fn ticket_days(conn: &Connection, task: Uuid, start_ms: i64) -> Result<[f64; TREND_DAYS]> {
     let mut stmt = conn
-        .prepare(&format!(
-            "WITH tickets_of AS (SELECT agent_id, count(DISTINCT task_id) AS n FROM ticket_work GROUP BY agent_id),
-                  worked AS (SELECT DISTINCT agent_id FROM ticket_work WHERE task_id = ?1)
+        // Starting from the timestamp or GROUP BY index would scan turn
+        // history once per ticket, even with indexed terminal lookup.
+        .prepare_cached(&format!(
+            "{worked}
              SELECT t.started_at, t.ended_at,
-                    sum((m.input_tokens + m.output_tokens + m.cache_read_tokens + m.cache_write_tokens) * 1.0 / s.n)
+                    sum((m.input_tokens + m.output_tokens + m.cache_read_tokens + m.cache_write_tokens) * 1.0 / w.n)
                FROM worked w
                JOIN agents a ON a.id = w.agent_id
-               JOIN tickets_of s ON s.agent_id = a.id
-               JOIN agent_turns t ON {}
-               JOIN agent_turn_models m ON m.turn_id = t.id
+               CROSS JOIN agent_turns t ON {turns}
+               CROSS JOIN agent_turn_models m ON m.turn_id = t.id
               WHERE t.ended_at >= ?2
               GROUP BY t.id",
-            crate::plan_read::TURNS_OF_AGENT
+            worked = crate::plan_read::TICKET_AGENTS,
+            turns = crate::plan_read::TURNS_OF_AGENT,
         ))
         .map_err(map_err)?;
     let rows = stmt

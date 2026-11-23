@@ -5381,7 +5381,7 @@ impl Watcher {
     /// then converges on the next one instead of applying a delta to a state it
     /// may not have.
     async fn announce(&self, terminal: Uuid, observed: Observed, noticed: Option<Option<Uuid>>) {
-        let Ok(fleet) = self.service.fleet().await else { return };
+        let Ok(fleet) = self.service.fleet_as_inventoried().await else { return };
         for worktree in &fleet {
             let Some(view) = worktree.terminals.iter().find(|t| t.terminal.id == terminal) else {
                 continue;

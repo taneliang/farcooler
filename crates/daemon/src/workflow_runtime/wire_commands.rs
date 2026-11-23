@@ -323,7 +323,7 @@ impl Exec {
         let fields = reply.as_object_mut().expect("a JSON object");
         fields.insert("disk_usage".into(), self.disk_usage_reply(workspace));
         bound_recent(fields, "build_cleanup", self.store.workflow_cleanups(workspace)?);
-        bound_recent(fields, "process_logs", self.failed_process_logs(workspace)?);
+        bound_recent(fields, "process_logs", self.failed_process_logs(workspace, state.as_ref())?);
         Ok(reply)
     }
 }

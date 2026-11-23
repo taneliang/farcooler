@@ -1061,7 +1061,7 @@ impl Rpc {
 
             "worktree.list" => {
                 let items =
-                    svc.fleet().await?.iter().map(|view| wire::worktree(view, scope)).collect();
+                    svc.fleet_as_inventoried().await?.iter().map(|view| wire::worktree(view, scope)).collect();
                 Ok(result::Value::WorktreeList(farcooler_protocol::v1::WorktreeList { items }))
             }
 

@@ -4780,13 +4780,16 @@ impl Service {
 
     /// One worktree with every state derived fresh.
     pub async fn worktree_view(&self, ws: &models::Worktree) -> Result<WorktreeView> {
-        let snapshot = self.inventory.snapshot();
+        self.worktree_view_from(ws, &self.inventory.snapshot())
+    }
+
+    fn worktree_view_from(&self, ws: &models::Worktree, snapshot: &farcooler_core::inventory::RuntimeSnapshot) -> Result<WorktreeView> {
         let terminals = self.store.list_terminals_for_worktree(ws.id)?;
 
         let views: Vec<TerminalView> = terminals
             .into_iter()
             .map(|t| {
-                let derived = derive::derive_terminal(&to_record(&t), &snapshot);
+                let derived = derive::derive_terminal(&to_record(&t), snapshot);
                 TerminalView { terminal: t, derived }
             })
             .collect();
@@ -4914,11 +4917,8 @@ impl Service {
     /// again. For the sampling loop, which has just refreshed it and would
     /// otherwise spend a second `list-panes` a few microseconds later.
     pub async fn fleet_as_inventoried(&self) -> Result<Vec<WorktreeView>> {
-        let mut out = Vec::new();
-        for ws in self.list_worktrees()? {
-            out.push(self.worktree_view(&ws).await?);
-        }
-        Ok(out)
+        let snapshot = self.inventory.snapshot();
+        self.list_worktrees()?.iter().map(|ws| self.worktree_view_from(ws, &snapshot)).collect()
     }
 }
 

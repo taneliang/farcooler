@@ -52,7 +52,7 @@ impl Exec {
     /// Same launch order and slot holders across boards. A missing runtime owner never means Running.
     pub(super) fn execution_state(&self, workspace: &str) -> Result<Option<State>> {
         let Some(mut state) = self.state(workspace)? else { return Ok(None) };
-        let activities = self.activities.lock().map_err(|_| Error::Refused("execution observations unavailable"))?;
+        let activities = self.activities.lock().map_err(|_| Error::Refused("execution observations unavailable"))?.clone();
         let now_ms = self.clock_ms();
         let mut queued = Vec::new();
         let mut holders = Vec::new();
@@ -60,8 +60,13 @@ impl Exec {
         let mut landing_groups = std::collections::HashSet::new();
         let mut landing_processes = Vec::new();
         for board in self.store.workflow_workspaces()? {
-            let board_state = self.state(&board)?;
-            for stored in self.store.workflow_outbox(&board)? {
+            let running: Vec<_> = activities.keys().filter(|(workspace, _)| workspace == &board)
+                .map(|(_, effect)| effect.as_str()).collect();
+            let effects_in_board = self.store.workflow_dispatch_effects(&board, &running)?;
+            if effects_in_board.is_empty() { continue; }
+            let other = if board == workspace { None } else { self.state(&board)? };
+            let board_state = if board == workspace { Some(&state) } else { other.as_ref() };
+            for stored in effects_in_board {
                 let key = (board.clone(), stored.effect.id.clone());
                 let pool = board_state.as_ref().and_then(|s| s.items.get(&stored.effect.item))
                     .and_then(|item| Pool::of(&stored.effect, item));
@@ -121,7 +126,6 @@ impl Exec {
             item.phase = view.phase.clone();
             item.execution = Some(view);
         }
-        drop(activities);
         let mut waits = self.yielding.heavy_lock_waits(&landing_groups);
         for (id, group) in landing_processes {
             if let Some(view) = state.items.get_mut(&id).and_then(|item| item.execution.as_mut()) {

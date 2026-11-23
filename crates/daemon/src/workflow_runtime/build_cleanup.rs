@@ -59,7 +59,30 @@ pub(super) async fn wait_for_retry(deadline: Option<tokio::time::Instant>) {
     }
 }
 
+// Pace recursive probes across directories and retry rounds. A slow check
+// cannot leave another lsof queued or allow a burst once it finishes.
+const OPEN_FILE_CHECK_INTERVAL: Duration = Duration::from_secs(5);
+
+#[derive(Clone, Default)]
+pub(super) struct OpenFileChecks(Arc<tokio::sync::Mutex<Option<tokio::time::Instant>>>);
+
+impl OpenFileChecks {
+    async fn run<T>(&self, check: impl std::future::Future<Output = T>) -> T {
+        let mut last = self.0.lock().await;
+        if let Some(at) = *last { tokio::time::sleep_until(at + OPEN_FILE_CHECK_INTERVAL).await; }
+        *last = Some(tokio::time::Instant::now());
+        check.await
+    }
+}
+
 impl Exec {
+    pub(super) async fn check_open_files(&self, path: &Path) -> std::result::Result<(), String> {
+        match &self.open_file_checks {
+            Some(checks) => checks.run(check_open_files(path)).await,
+            None => check_open_files(path).await,
+        }
+    }
+
     pub(super) fn private_trees(&self) -> std::io::Result<Vec<PathBuf>> {
         let mut trees = Vec::new();
         for entry in std::fs::read_dir(&self.root)? {
@@ -225,29 +248,15 @@ impl Exec {
             Err(error) => return Err(error.into()),
         };
         if canonical != tree || !linked { return Ok(skip("worktree is not an exclusive linked tree")); }
-        for workspace in &self.store.workflow_workspaces()? {
-            let Some(state) = self.state(workspace)? else { continue };
-            for (id, item) in &state.items {
-                let path = item.tree.as_ref().map_or_else(|| self.item_tree_for(workspace, id, item.restart.as_deref()), |t| PathBuf::from(&t.path));
-                let same = path == tree || path.canonicalize().is_ok_and(|p| p == canonical);
-                if !same { continue; }
-                if item.phase == Phase::Uncertain { return Ok(skip("run is Uncertain")); }
-                if workspace == &effect.workspace && id == &effect.item {
-                    if item.definition.stages.get(item.stage).is_some_and(|s| matches!(s.kind, StageKind::Build | StageKind::Provision))
-                        && !matches!(item.phase, Phase::Done | Phase::Failed | Phase::Cancelled | Phase::WaitingApproval) {
-                        return Ok(skip("run is still building"));
-                    }
-                } else if !matches!(item.phase, Phase::Done | Phase::Failed | Phase::Cancelled) {
-                    return Ok(skip("worktree is shared with another live run"));
-                }
-            }
-            // A prior writer can survive daemon restart after its item has left live state.
-            for stored in self.store.workflow_unsettled_writers(workspace)? {
-                let path = self.effect_tree(workspace, &stored);
-                if path == tree || path.canonicalize().is_ok_and(|p| p == canonical) {
-                    return Ok(CleanupResult { retry: true, ..skip("worktree has an unsettled writer") });
-                }
-            }
+        let exec = self.clone();
+        let target = tree.to_path_buf();
+        let effect_state = effect.clone();
+        let fences = held.clone();
+        if let Some(refusal) = tokio::task::spawn_blocking(move || {
+            let _fences = fences;
+            exec.check_tree_usage(&effect_state, &target)
+        }).await.map_err(|_| Error::Refused("cleanup ownership worker failed"))?? {
+            return Ok(refusal);
         }
         if let Some(adopted) = adopted {
             // The cleanup records the stage that just ended. Entering the waiting
@@ -305,6 +314,36 @@ impl Exec {
         if result.skipped.iter().any(|s| s.contains(OUTPUT_INTERRUPTED)) { result.bytes_freed = 0; }
         Ok(result)
     }
+    fn check_tree_usage(&self, effect: &CleanupEffect, tree: &Path) -> Result<Option<CleanupResult>> {
+        let skip = |why: &str| CleanupResult { retry: false, bytes_freed: 0, skipped: vec![why.into()] };
+        for workspace in &self.store.workflow_workspaces()? {
+            let Some(state) = self.state(workspace)? else { continue };
+            for (id, item) in &state.items {
+                if item.tree.is_none() && item.definition.is_ticket() { continue; }
+                let path = item.tree.as_ref().map_or_else(|| self.item_tree_for(workspace, id, item.restart.as_deref()), |t| PathBuf::from(&t.path));
+                let same = path == tree || path.canonicalize().is_ok_and(|p| p == tree);
+                if !same { continue; }
+                if item.phase == Phase::Uncertain { return Ok(Some(skip("run is Uncertain"))); }
+                if workspace == &effect.workspace && id == &effect.item {
+                    if item.definition.stages.get(item.stage).is_some_and(|s| matches!(s.kind, StageKind::Build | StageKind::Provision))
+                        && !matches!(item.phase, Phase::Done | Phase::Failed | Phase::Cancelled | Phase::WaitingApproval) {
+                        return Ok(Some(skip("run is still building")));
+                    }
+                } else if !matches!(item.phase, Phase::Done | Phase::Failed | Phase::Cancelled) {
+                    return Ok(Some(skip("worktree is shared with another live run")));
+                }
+            }
+            // A prior writer can survive daemon restart after its item has left live state.
+            for stored in self.store.workflow_unsettled_writers(workspace)? {
+                let path = self.effect_tree(workspace, &stored);
+                if path == tree || path.canonicalize().is_ok_and(|p| p == tree) {
+                    return Ok(Some(CleanupResult { retry: true, ..skip("worktree has an unsettled writer") }));
+                }
+            }
+        }
+        Ok(None)
+    }
+
     async fn release_folder(&self, tree: &Path, path: &Path, held: Arc<CleanupFences>, retry: &mut Option<Duration>,
         check_whole_checkout: bool) -> std::result::Result<u64, String> {
         let relative = path.strip_prefix(tree).map_err(|e| e.to_string())?;
@@ -315,7 +354,7 @@ impl Exec {
         let artifacts = if check_whole_checkout {
             // A source reader or a shell's cwd can hold the tree. Check before
             // opening candidate files and walking potentially large outputs.
-            check_open_files(tree).await.inspect_err(|_| *retry = Some(CHECKOUT_RETRY))?;
+            self.check_open_files(tree).await.inspect_err(|_| *retry = Some(CHECKOUT_RETRY))?;
             let output = path.to_path_buf();
             let checkout = tree.to_path_buf();
             let plan = tokio::task::spawn_blocking(move || generated::ArtifactPlan::inspect(&checkout, &output, device))
@@ -333,7 +372,7 @@ impl Exec {
         // Recheck after inventory in case a process started using the tree
         // during the scan. Keep the short retry for output-folder checks.
         let (scope, delay) = if check_whole_checkout { (tree, CHECKOUT_RETRY) } else { (path, CLEANUP_RETRY) };
-        check_open_files(scope).await.inspect_err(|_| *retry = Some(delay))?;
+        self.check_open_files(scope).await.inspect_err(|_| *retry = Some(delay))?;
         // A completed git add can leave both the artifact inode and the
         // open-file check unchanged. Recheck the index before unlinking.
         check_output_index(tree, relative, check_whole_checkout).await?;
@@ -437,7 +476,7 @@ pub(super) fn folder_paths<'a>(tree: &'a Path, folder: &'a str) -> impl Iterator
         checked_folder(tree, folder)
     })
 }
-pub(super) async fn check_open_files(path: &Path) -> std::result::Result<(), String> {
+async fn check_open_files(path: &Path) -> std::result::Result<(), String> {
     // macOS launch agents may run without /usr/sbin on PATH.
     let mut command = tokio::process::Command::new(if cfg!(target_os = "macos") { "/usr/sbin/lsof" } else { "lsof" });
     command.args(["-nP", "-F", "p", "+D"]).arg(path).kill_on_drop(true);
@@ -478,4 +517,26 @@ fn size(path: &Path, device: u64, generated_reports: bool) -> std::io::Result<u6
     let mut bytes = 0u64;
     for entry in std::fs::read_dir(path)? { bytes = bytes.saturating_add(size(&entry?.path(), device, generated_reports)?); }
     Ok(bytes)
+}
+
+#[cfg(test)]
+#[tokio::test(start_paused = true)]
+async fn idle_cleanup_open_file_spawn_budget_per_minute() {
+    let checks = OpenFileChecks::default();
+    let mut spawns = 0;
+    let attempts = async {
+        for _ in 0..100 {
+            // Substitute the spawn, preserving the same dispatch path as lsof.
+            checks.run(async {
+                spawns += 1;
+                tokio::task::yield_now().await;
+            }).await;
+        }
+    };
+    tokio::select! {
+        biased;
+        _ = tokio::time::sleep(Duration::from_secs(60)) => {}
+        _ = attempts => panic!("all 100 idle retries reached the subprocess in a minute"),
+    }
+    assert_eq!(spawns, 12);
 }

@@ -3,9 +3,8 @@
 //! the store's `board_ci` (`farcooler_store::board_ci`).
 //!
 //! A board names a subject when an engine landing group pushes (`sha:<pushed
-//! sha>`, ov-958). The watch reads each one while it's
-//! named: every minute while any run is still going, and every ten minutes
-//! once everything it watches has finished, so a re-run is still seen. A read
+//! sha>`, ov-958). The watch reads each landing while CI is going and
+//! retains finished results. A read
 //! that changed what a board shows announces `plan_changed`. The old landings
 //! are history and aren't followed (ov-960).
 //!
@@ -66,17 +65,11 @@ pub async fn run(svc: Arc<Service>, watcher: Arc<Watcher>) {
 #[derive(Default)]
 pub struct Memo {
     shas: HashMap<String, String>,
-    jobs: HashMap<u64, CachedJobs>,
+    completed_jobs: HashMap<(Uuid, u64), Option<Vec<GhJob>>>,
+    last_attempt: HashMap<(Uuid, String), i64>,
     /// Subjects GitHub didn't answer for, or had no run for: how many reads
     /// in a row, and when to ask again (review train-1005c M2).
     misses: HashMap<(Uuid, String), (u32, i64)>,
-}
-
-struct CachedJobs {
-    status: String,
-    conclusion: Option<String>,
-    updated_at: String,
-    jobs: Vec<GhJob>,
 }
 
 /// How long after `misses` reads in a row that GitHub couldn't or didn't
@@ -385,30 +378,22 @@ async fn gh_output(svc: &Service, tree: &Path, args: &[String]) -> Option<std::p
 async fn with_jobs(
     svc: &Service,
     tree: &Path,
-    memo: &mut HashMap<u64, CachedJobs>,
+    repository: Uuid,
+    memo: &mut Memo,
     run: GhRun,
 ) -> (GhRun, Option<Vec<GhJob>>) {
     if run.id == 0 {
         // The placeholder for a Canary run that has not started (`ci_canary`).
         return (run, None);
     }
-    if let Some(cached) = memo.get(&run.id)
-        && memo_holds(&run.status) && cached.status == run.status
-        && cached.conclusion == run.conclusion && cached.updated_at == run.updated_at
-    {
-        return (run, Some(cached.jobs.clone()));
+    let key = (repository, run.id);
+    if let Some(jobs) = memo.completed_jobs.get(&key) {
+        return (run, jobs.clone());
     }
     let path = format!("repos/{{owner}}/{{repo}}/actions/runs/{}/jobs", run.id);
     let jobs = gh_get(svc, tree, &api_args(&path, &["per_page=100".into()], JOBS_JQ)).await.and_then(|b| parse_jobs(&b));
-    if let Some(jobs) = &jobs {
-        // A long-lived daemon's memo stays small: forget it all past a few
-        // hundred runs rather than keep every run it ever read.
-        if memo.len() >= MEMO_MAX {
-            memo.clear();
-        }
-        memo.insert(run.id, CachedJobs {
-            status: run.status.clone(), conclusion: run.conclusion.clone(), updated_at: run.updated_at.clone(), jobs: jobs.clone(),
-        });
+    if memo_holds(&run.status) {
+        memo.completed_jobs.insert(key, jobs.clone());
     }
     (run, jobs)
 }
@@ -449,7 +434,7 @@ async fn runs_on(svc: &Service, tree: &Path, sha: &str) -> Option<Vec<GhRun>> {
 }
 
 /// Read one subject now.
-async fn read_subject(svc: &Service, tree: &Path, subject: &str, memo: &mut Memo) -> CiRead {
+async fn read_subject(svc: &Service, repository: Uuid, tree: &Path, subject: &str, memo: &mut Memo) -> CiRead {
     let runs = if let Some(sha) = subject.strip_prefix("sha:") {
         let full = match memo.shas.get(sha) {
             Some(full) => Some(full.clone()),
@@ -476,7 +461,7 @@ async fn read_subject(svc: &Service, tree: &Path, subject: &str, memo: &mut Memo
     let mut read = Vec::new();
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
     for run in runs {
-        let (mut run, jobs) = with_jobs(svc, tree, &mut memo.jobs, run).await;
+        let (mut run, jobs) = with_jobs(svc, tree, repository, memo, run).await;
         if retry_pending(&run, None, now, |path| async move {
             match gh_output(svc, tree, &["api".into(), format!("repos/{{owner}}/{{repo}}/{path}")]).await {
                 Some(out) if out.status.success() => RetryRead::Data(out.stdout),
@@ -493,10 +478,10 @@ async fn read_subject(svc: &Service, tree: &Path, subject: &str, memo: &mut Memo
 }
 
 /// The main checkout `gh` runs in for a board's repository.
-fn tree_of(svc: &Service, workspace: Uuid) -> Option<PathBuf> {
+fn tree_of(svc: &Service, workspace: Uuid) -> Option<(Uuid, PathBuf)> {
     let ws = svc.store.get_workspace(workspace).ok()?;
     let repo = svc.store.get_repository(ws.repository_id).ok()?;
-    Some(svc.repository_worktree(&repo))
+    Some((repo.id, svc.repository_worktree(&repo)))
 }
 
 /// Every board's CI subjects from its engine landing groups.
@@ -509,10 +494,19 @@ pub fn wanted(svc: &Service) -> BTreeMap<Uuid, BTreeSet<String>> {
     wanted
 }
 
+fn poll_due(last: Option<&CiRead>, last_attempt: Option<i64>, now: i64) -> bool {
+    if last.is_some_and(|read| read.status.is_finished()) {
+        return false;
+    }
+    last_attempt.is_none_or(|at| now.saturating_sub(at) >= BUSY.as_millis() as i64)
+}
+
 /// One turn: read every subject that's due, forget those nothing names, and
 /// announce each board whose reads changed. How long to wait before the next.
 pub async fn read_all(svc: &Service, watcher: &Watcher, memo: &mut Memo) -> Duration {
     let wanted = wanted(svc);
+    memo.last_attempt.retain(|(workspace, subject), _| wanted.get(workspace).is_some_and(|subjects| subjects.contains(subject)));
+    memo.misses.retain(|(workspace, subject), _| wanted.get(workspace).is_some_and(|subjects| subjects.contains(subject)));
     for ws in svc.store.list_workspaces(None).unwrap_or_default() {
         let named: Vec<String> = wanted.get(&ws.id).map(|s| s.iter().cloned().collect()).unwrap_or_default();
         if svc.store.keep_ci(ws.id, &named).unwrap_or(0) > 0 {
@@ -522,18 +516,20 @@ pub async fn read_all(svc: &Service, watcher: &Watcher, memo: &mut Memo) -> Dura
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
     let mut busy = false;
     for (workspace, subjects) in wanted {
-        let Some(tree) = tree_of(svc, workspace) else { continue };
+        let Some((repository, tree)) = tree_of(svc, workspace) else { continue };
         let mut changed = false;
         for subject in subjects {
             let last = svc.store.ci_read(workspace, &subject).ok().flatten();
-            if last.as_ref().is_some_and(|l| l.status.is_finished() && now - l.fetched_at < QUIET.as_millis() as i64) {
+            let key = (workspace, subject.clone());
+            if !poll_due(last.as_ref(), memo.last_attempt.get(&key).copied(), now) {
+                busy |= last.as_ref().is_some_and(|read| keeps_busy(read.status));
                 continue;
             }
-            let key = (workspace, subject.clone());
             if memo.misses.get(&key).is_some_and(|(_, due)| now < *due) {
                 continue;
             }
-            let read = read_subject(svc, &tree, &subject, memo).await;
+            memo.last_attempt.insert(key.clone(), now);
+            let read = read_subject(svc, repository, &tree, &subject, memo).await;
             busy |= keeps_busy(read.status);
             if matches!(read.status, CiStatus::Unknown | CiStatus::None) {
                 let misses = memo.misses.get(&key).map_or(0, |(n, _)| *n) + 1;

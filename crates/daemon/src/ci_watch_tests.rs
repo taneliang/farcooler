@@ -245,3 +245,22 @@ fn the_nightly_run_is_not_a_trains_ci() {
     let running = latest_per_workflow(&[run(4, "Nightly", None), run(2, "CI", Some("success"))]);
     assert_eq!(summarize("sha:a", &running.into_iter().map(|r| (r, None)).collect::<Vec<_>>()).status, CiStatus::Passed);
 }
+
+#[test]
+fn completed_landing_is_not_polled_and_running_landing_is_rate_limited() {
+    let mut finished = unknown("sha:feed");
+    finished.status = CiStatus::Passed;
+    // A historical run is older than even the quiet refresh window.
+    let minute = BUSY.as_millis() as i64;
+    let now = 20 * minute;
+    let mut calls = 0;
+    for tick in now..now + minute {
+        calls += usize::from(poll_due(Some(&finished), None, tick));
+    }
+    assert_eq!(calls, 0, "an idle board's finished subjects must not reach gh");
+    let mut running = finished;
+    running.status = CiStatus::Running;
+    assert!(poll_due(Some(&running), None, now));
+    assert!(!poll_due(Some(&running), Some(now), now + minute - 1));
+    assert!(poll_due(Some(&running), Some(now), now + minute));
+}

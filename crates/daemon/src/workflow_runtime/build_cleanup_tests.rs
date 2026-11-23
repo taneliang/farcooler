@@ -1138,3 +1138,49 @@ async fn build_cleanup_partial_folder_failure_reports_unknown_bytes() {
     assert!(!result.retry && result.bytes_freed == 0, "a retry cannot reconstruct the total: {result:?}");
     assert!(result.skipped.iter().any(|s| s.contains("bytes freed unknown")), "{result:?}");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pane_echo_stays_under_100ms_during_cleanup() {
+    use tokio::io::AsyncWriteExt;
+    let (_dir, mut engine, tree) = building().await;
+    let output = tree.join("target/deep/output");
+    let open = File::open(&output).unwrap();
+    review(&mut engine).await;
+    drop(open);
+
+    let (_pane_dir, svc, _) = crate::test_support::fixture().await;
+    let worktree = svc.list_worktrees().unwrap().remove(0);
+    let terminal = svc.create_terminal(worktree.id, "Echo", "shell").await.unwrap();
+    let runtime = svc.runtime();
+    let pane = runtime.pane_id_of(terminal.id).unwrap();
+    let echo = svc.root_dir().join("echo.txt");
+    let pipe = format!("cat > {}", farcooler_core::shell::shell_quote(echo.to_str().unwrap()));
+    assert!(svc.tmux.run(&["pipe-pane", "-O", "-t", &pane, &pipe]).await.unwrap().ok());
+    let setup = "stty -icanon -echo; printf '\\nready-for-keys\\n'; cat\n";
+    let hex = |text: &str| text.bytes().map(|byte| format!("{byte:02x}")).collect::<String>();
+    runtime.send_bytes_hex(terminal.id, &hex(setup)).await.unwrap();
+    let echoed = || std::fs::read_to_string(&echo).unwrap_or_default();
+    assert!(wait_until(tokio::time::Instant::now() + Duration::from_secs(3), Duration::from_millis(5),
+        || echoed().contains("\r\nready-for-keys\r\n")).await);
+
+    let check = std::sync::Arc::new((tokio::sync::Notify::new(), tokio::sync::Notify::new()));
+    engine.cleanup_check = Some(check.clone());
+    let worker = tokio::spawn(async move { engine.pump(4).await });
+    tokio::time::timeout(Duration::from_secs(15), check.0.notified()).await.unwrap();
+    let (mut writer, reader) = tokio::io::duplex(256);
+    let input = tokio::spawn(async move { runtime.input_from(terminal.id, reader).await });
+    let mut timely = true;
+    let mut expected = String::new();
+    for key in ["a", "b", "c", "d", "e"] {
+        expected.push_str(key);
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(100);
+        writer.write_all(format!("{}\n", hex(key)).as_bytes()).await.unwrap();
+        timely &= wait_until(deadline, Duration::from_millis(2), || echoed().ends_with(&expected)).await;
+    }
+    drop(writer);
+    input.await.unwrap().unwrap();
+    check.1.notify_one();
+    worker.await.unwrap().unwrap();
+    assert!(timely, "each key must reach the real pane and echo within 100 ms");
+    assert!(!output.exists(), "the sweep still releases the output");
+}

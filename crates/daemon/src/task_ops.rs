@@ -389,10 +389,10 @@ fn fit_unpaged(mut list: pb::TaskList) -> pb::TaskList {
 /// `text` cut to at most `max` bytes at a character boundary, with an ellipsis when cut to something.
 fn shorten(text: &mut String, max: usize) {
     if text.len() <= max { return; }
-    let mut cut = max;
+    let mut cut = max.saturating_sub('…'.len_utf8());
     while !text.is_char_boundary(cut) { cut -= 1; }
     text.truncate(cut);
-    if max > 0 { text.push('…'); }
+    if max >= '…'.len_utf8() { text.push('…'); }
 }
 
 /// Whether a subagent is running and wrote a line within `window` of `now`.
