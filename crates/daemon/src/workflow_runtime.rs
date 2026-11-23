@@ -56,6 +56,7 @@ mod places;
 pub use places::{DEFAULT_EFFECT_CAP, DEFAULT_LANDING_PLACES, DEFAULT_WORK_PLACES};
 use places::{Placed, Places, Pool};
 mod build_cleanup;
+mod disk_usage;
 mod owned_directories;
 #[cfg(test)]
 mod repin_reply_tests;
@@ -250,6 +251,7 @@ pub struct Exec {
     launched: Option<(i64, std::time::Instant)>,
     /// Cleanup takes exclusive access to a tree. Dispatch only tries the lock, so other trees can proceed.
     tree_locks: build_cleanup::TreeLocks,
+    disk_usage: disk_usage::DiskUsage,
     /// Set by the Service: makes a run's named worktree one the app lists (ov-967).
     pub host: Option<WorktreeHost>,
     /// One first download of a landing remote's main at a time, per remote, shared by every copy (ov-1058 review 3):
@@ -435,7 +437,7 @@ impl Runtime {
         let runtime = Self { inbox, send, next_lease: None, next_cleanup: None, continuous: false,
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
             exec: Exec { yielding: crate::yielding::Yielding::at(&root), activities: Default::default(), places: std::sync::Arc::new(std::sync::Mutex::new(Places::load(&root)?)), root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, host: None,
-                seeding: Default::default(), tree_locks: Default::default(), #[cfg(test)] user_home: None, #[cfg(test)] build_free_bytes: Some(u64::MAX), #[cfg(test)] cleanup_check: None },
+                seeding: Default::default(), tree_locks: Default::default(), disk_usage: Default::default(), #[cfg(test)] user_home: None, #[cfg(test)] build_free_bytes: Some(u64::MAX), #[cfg(test)] cleanup_check: None },
             notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None, trees_recovered: false, cancel_refused: Default::default(), recovery: Default::default(), restart_pacing: Default::default(), scheduling: Default::default(),
             _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
         runtime.validate_native_host()?;
@@ -603,7 +605,8 @@ impl Runtime {
             }
         }
         // A group that ended since the last sweep leaves its tree; the first sweep also clears what a stopped daemon left (ov-1084).
-        self.exec.prune_trees(&workspaces, !self.trees_recovered);
+        let mut recover_trees = !self.trees_recovered;
+        self.exec.prune_trees(&workspaces, recover_trees);
         self.trees_recovered = true;
         let fingerprint = digest(&occupancy);
         let released_or_recovered = self.last_occupancy.as_ref() != Some(&fingerprint);
@@ -662,9 +665,20 @@ impl Runtime {
             // and keep dispatching commands and effects, even if cleanup is the only work left.
             if cleanup_requested && cleanup.is_none() {
                 let exec = self.exec.clone();
+                let recover_trees = std::mem::take(&mut recover_trees);
                 let mut task = BackgroundTask::new(async move {
                     let workspaces = exec.store.workflow_workspaces()?;
-                    exec.release_builds(&workspaces).await
+                    let retry = exec.release_builds(&workspaces).await?;
+                    if recover_trees {
+                        if let Err(error) = exec.release_orphan_builds().await {
+                            tracing::warn!(%error, "could not sweep legacy build output");
+                        }
+                        if exec.service_mode {
+                            // Warm the first workflow.get sample after startup cleanup.
+                            drop(exec.refresh_disk_usage());
+                        }
+                    }
+                    Ok(retry)
                 });
                 task.start();
                 cleanup = Some(task);

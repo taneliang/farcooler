@@ -55,12 +55,13 @@ impl Exec {
     }
 
     fn retain_idle_run_cleanups(&self, workspace: &str, records: &[farcooler_store::workflow_cleanup::CleanupRecord]) -> Result<()> {
-        use farcooler_workflow::cleanup::{CleanupEffect, valid_folder, waiting_at_rest};
+        use farcooler_workflow::cleanup::{CleanupEffect, waiting_at_rest};
         let Some(state) = self.state(workspace)? else { return Ok(()) };
         for (id, item) in &state.items {
+            let ended_owned_run = matches!(item.phase, Phase::Failed | Phase::Cancelled)
+                && !item.tree.as_ref().is_some_and(|tree| tree.adopted);
             if item.group_of.is_some() || item.definition.is_ticket() || item.follows.is_some()
-                || item.tree.as_ref().is_some_and(|tree| tree.adopted)
-                || !(waiting_at_rest(&item.phase) || matches!(item.phase, Phase::Failed | Phase::Cancelled)) {
+                || !(waiting_at_rest(&item.phase) || ended_owned_run) {
                 continue;
             }
             if records.iter().any(|r| r.effect.directory.is_none() && r.effect.item == *id
@@ -70,8 +71,8 @@ impl Exec {
             let tree = item.tree.as_ref().map_or_else(|| self.item_tree_for(workspace, id, item.restart.as_deref()),
                 |tree| PathBuf::from(&tree.path));
             let folders = item.definition.build_folders();
-            if !folders.iter().any(|folder| valid_folder(folder) && !folder.contains('*')
-                && build_cleanup::checked_folder(&tree, folder).is_ok_and(|p| p.is_some())) { continue; }
+            if !folders.iter().any(|folder| build_cleanup::folder_paths(&tree, folder)
+                .any(|path| matches!(path, Ok(Some(_))))) { continue; }
             self.store.workflow_cleanup_enqueue(&CleanupEffect {
                 id: digest(&("idle-build-release/v1", workspace, id, &item.run, item.fence)),
                 workspace: workspace.into(), revision: state.revision, item: id.clone(), run: item.run.clone(),

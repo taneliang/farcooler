@@ -835,6 +835,62 @@ async fn recovery_accounts_for_idle_output_left_by_an_older_engine() {
 }
 
 #[tokio::test]
+async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output() {
+    let (_dir, runtime, group, active_tree) = building_group(None).await;
+    let mut orphan_trees = Vec::new();
+    for separator in ['-', ':'] {
+        let tree = runtime.root.join(format!("tree-wf1{separator}{}", "a".repeat(64)));
+        adapters::git(&runtime.repository(), &["worktree", "add", "--detach", tree.to_str().unwrap(), "HEAD"]).await.unwrap();
+        std::fs::create_dir(tree.join("target")).unwrap();
+        std::fs::write(tree.join("target/binary"), b"old output").unwrap();
+        std::fs::write(tree.join("uncommitted.txt"), b"keep this").unwrap();
+        orphan_trees.push(tree);
+    }
+    assert_eq!(runtime.state("w").unwrap().unwrap().items[&group].phase, Phase::Running);
+    assert!(runtime.store.workflow_cleanups("w").unwrap().iter().all(|record|
+        record.effect.tree.as_ref().is_none_or(|tree| !orphan_trees.contains(&PathBuf::from(&tree.path)))));
+    let reader = File::open(orphan_trees[0].join("uncommitted.txt")).unwrap();
+    runtime.release_orphan_builds().await.unwrap();
+    assert!(active_tree.join("target/output").exists(), "the live state protects the group without a held process lock");
+    assert!(orphan_trees[0].join("target/binary").is_file(), "an open source file protects the tree");
+    drop(reader);
+    runtime.release_orphan_builds().await.unwrap();
+    for tree in &orphan_trees {
+        assert!(!tree.join("target").exists());
+        assert_eq!(std::fs::read(tree.join("uncommitted.txt")).unwrap(), b"keep this");
+        std::fs::create_dir(tree.join("target")).unwrap();
+        std::fs::write(tree.join("target/binary"), b"old output").unwrap();
+    }
+    // A second sweep is triggered by opening and pumping a new runtime.
+    let root = runtime.root.clone();
+    drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    runtime.pump(100).await.unwrap();
+    for tree in &orphan_trees {
+        assert!(!tree.join("target").exists());
+        assert!(tree.join(".git").is_file());
+        assert_eq!(std::fs::read(tree.join("uncommitted.txt")).unwrap(), b"keep this");
+    }
+}
+
+#[tokio::test]
+async fn workflow_get_samples_private_trees_and_waiting_build_folders() {
+    let (_dir, mut runtime, tree) = building_with(Some(vec!["target".into(), "target/deep".into()])).await;
+    review(&mut runtime).await;
+    let output = tree.join("target/deep/output");
+    std::fs::create_dir_all(output.parent().unwrap()).unwrap();
+    std::fs::write(&output, vec![0x5a; 8192]).unwrap();
+    let waiting = [tree.join("target"), tree.join("target/deep"), output].iter()
+        .map(|path| path.symlink_metadata().unwrap().blocks() * 512).sum::<u64>();
+    runtime.refresh_disk_usage().unwrap().await.unwrap();
+    let reply = runtime.read_get("w").unwrap();
+    assert_eq!(reply["disk_usage"]["waiting_build_bytes"], waiting);
+    assert!(reply["disk_usage"]["engine_tree_bytes"].as_u64().unwrap() >= waiting);
+    assert!(reply["disk_usage"]["sampled_at_ms"].as_i64().is_some());
+    assert_eq!(runtime.read_get("other").unwrap()["disk_usage"]["waiting_build_bytes"], 0);
+}
+
+#[tokio::test]
 async fn build_cleanup_partial_folder_failure_reports_unknown_bytes() {
     let (_dir, mut runtime, group, tree) = building_group(Some(vec!["custom-output".into(), "target".into()])).await;
     super::coding_verbs_tests::until(&mut runtime, |s| s.items[&group].phase == Phase::WaitingReview).await;

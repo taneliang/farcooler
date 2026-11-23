@@ -1,6 +1,6 @@
 //! Non-gating build output release, driven by the engine's durable cleanup outbox.
 use super::*;
-use farcooler_workflow::cleanup::{CleanupEffect, CleanupResult, valid_folder};
+use farcooler_workflow::cleanup::{CleanupEffect, CleanupResult, DEFAULT_BUILD_FOLDERS, valid_folder};
 use std::{collections::BTreeMap, sync::{Arc, Mutex, Weak}};
 use tokio::sync::{OwnedMutexGuard, OwnedRwLockWriteGuard, RwLock};
 
@@ -12,7 +12,7 @@ pub(super) const GROUP_INTERRUPTED: &str = "group tree cleanup interrupted; byte
 pub(super) struct TreeLocks(Arc<Mutex<BTreeMap<PathBuf, Weak<RwLock<()>>>>>);
 
 impl Exec {
-    pub(super) fn tree_lock(&self, tree: &Path) -> Arc<RwLock<()>> {
+    fn tree_key(&self, tree: &Path) -> PathBuf {
         let mut key = tree.canonicalize().unwrap_or_else(|_| tree.to_path_buf());
         // An old private checkout switches names once removed. Fence both names until pruning finishes.
         if key.parent() == Some(self.root.as_path())
@@ -20,6 +20,11 @@ impl Exec {
         {
             key = self.root.join(format!("tree-wf1-{legacy}"));
         }
+        key
+    }
+
+    pub(super) fn tree_lock(&self, tree: &Path) -> Arc<RwLock<()>> {
+        let key = self.tree_key(tree);
         let mut locks = self.tree_locks.0.lock().unwrap();
         locks.retain(|_, lock| lock.strong_count() > 0);
         let entry = locks.entry(key).or_default();
@@ -46,6 +51,73 @@ pub(super) async fn wait_for_retry(deadline: Option<tokio::time::Instant>) {
 }
 
 impl Exec {
+    pub(super) fn private_trees(&self) -> std::io::Result<Vec<PathBuf>> {
+        let mut trees = Vec::new();
+        for entry in std::fs::read_dir(&self.root)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let digest = name.to_str().and_then(|name|
+                name.strip_prefix("tree-wf1-").or_else(|| name.strip_prefix("tree-wf1:")));
+            if digest.is_some_and(|key| key.len() == 64 && key.bytes().all(|b| b.is_ascii_hexdigit()))
+                && entry.file_type()?.is_dir() {
+                trees.push(entry.path());
+            }
+        }
+        Ok(trees)
+    }
+
+    /// A legacy checkout can outlast all its run records. The private namespace
+    /// identifies candidates, but only linked checkouts with no live user qualify.
+    pub(super) async fn release_orphan_builds(&self) -> Result<()> {
+        let mut bytes_freed = 0u64;
+        for tree in self.private_trees()? {
+            if !DEFAULT_BUILD_FOLDERS.iter().any(|folder| matches!(checked_folder(&tree, folder), Ok(Some(_)))) {
+                continue;
+            }
+            let Ok(guard) = self.tree_lock(&tree).try_write_owned() else { continue };
+            if !self.store.workflow_cleanup_has_authority()? { return Ok(()); }
+            if self.private_tree_in_use(&tree)? || tree.canonicalize().ok().as_deref() != Some(tree.as_path())
+                || !tree.join(".git").symlink_metadata().is_ok_and(|m| m.is_file()) {
+                continue;
+            }
+            let Ok(top) = crate::git::git(&tree, &["rev-parse", "--show-toplevel"]).await else { continue };
+            if !top.ok || Path::new(top.stdout.trim_end()) != tree { continue; }
+            let held = Arc::new(CleanupFences { _tree: guard, _repository: None });
+            for folder in DEFAULT_BUILD_FOLDERS {
+                if let Ok(Some(path)) = checked_folder(&tree, folder) {
+                    let mut retry = false;
+                    match self.release_folder(&tree, &path, held.clone(), &mut retry, true).await {
+                        Ok(bytes) => bytes_freed = bytes_freed.saturating_add(bytes),
+                        Err(reason) => tracing::debug!(?path, %reason, "legacy build output retained"),
+                    }
+                    if retry { break; }
+                }
+            }
+        }
+        if bytes_freed > 0 {
+            tracing::info!(bytes_freed, "released legacy workflow build output");
+        }
+        Ok(())
+    }
+
+    fn private_tree_in_use(&self, tree: &Path) -> Result<bool> {
+        let key = self.tree_key(tree);
+        for workspace in self.store.workflow_workspaces()? {
+            if let Some(state) = self.state(&workspace)? {
+                for (id, item) in &state.items {
+                    if matches!(item.phase, Phase::Done | Phase::Failed | Phase::Cancelled) { continue; }
+                    let path = item.tree.as_ref().map_or_else(|| self.item_tree_for(&workspace, id, item.restart.as_deref()),
+                        |tree| PathBuf::from(&tree.path));
+                    if self.tree_key(&path) == key { return Ok(true); }
+                }
+            }
+            for effect in self.store.workflow_unsettled_writers(&workspace)? {
+                if self.tree_key(&self.effect_tree(&workspace, &effect)) == key { return Ok(true); }
+            }
+        }
+        Ok(false)
+    }
+
     /// True while a transient blocker still needs a later dispatch wakeup.
     pub(super) async fn release_builds(&self, workspaces: &[String]) -> Result<bool> {
         self.release_builds_checked(workspaces, || Ok(())).await
@@ -127,9 +199,7 @@ impl Exec {
             return Ok(skip("worktree provision/claim fence is unavailable"));
         } else { None };
         if effect.uncertain { return Ok(skip("run is Uncertain")); }
-        // An adopted worktree is a person's (ov-968): its build folders may hold their own output, which the run
-        // neither made nor may delete (ov-1263).
-        if effect.tree.as_ref().is_some_and(|t| t.adopted) { return Ok(skip("worktree is adopted; its output is a person's")); }
+        let adopted = effect.tree.as_ref().filter(|t| t.adopted);
         if let Some(why) = self.store.workflow_cleanup_skip(effect)? { return Ok(skip(&why)); }
         let held = Arc::new(CleanupFences { _tree: tree_guard, _repository: repository_guard });
         let group_recovery = reconcile && effect.tree.is_none() && self.ended_group(effect)?;
@@ -168,6 +238,19 @@ impl Exec {
                 }
             }
         }
+        if let Some(adopted) = adopted {
+            let waiting = self.state(&effect.workspace)?.is_some_and(|state| state.items.get(&effect.item).is_some_and(|item|
+                farcooler_workflow::cleanup::waiting_at_rest(&item.phase)
+                    && item.restart == effect.restart && item.tree.as_ref() == Some(adopted)));
+            if !waiting { return Ok(skip("adopted worktree has no waiting run")); }
+            if !effect.folders.iter().any(|folder| folder_paths(tree, folder).any(|path| matches!(path, Ok(Some(_))))) {
+                return Ok(skip("worktree has no build output"));
+            }
+            let branch = crate::git::git(tree, &["symbolic-ref", "--quiet", "HEAD"]).await.map_err(Error::Domain)?;
+            if !branch.ok || branch.stdout.trim_end() != format!("refs/heads/{}", adopted.branch) {
+                return Ok(skip("adopted worktree branch has changed"));
+            }
+        }
         after_check();
         if group_recovery || effect.tree.is_none() && self.finished_landing_group(effect)? {
             return Ok(match self.release_group_tree(tree, held, effect, group_recovery).await {
@@ -178,18 +261,8 @@ impl Exec {
         let mut result = CleanupResult { retry: false, bytes_freed: 0, skipped: Vec::new() };
         let mut paths = BTreeSet::new();
         for folder in &effect.folders {
-            // Older defaults stored a wildcard. Only its known literal replacements may be reclaimed.
-            let folders = if folder == "apps/*/build" {
-                &farcooler_workflow::cleanup::DEFAULT_BUILD_FOLDERS[2..6]
-            } else {
-                &[folder.as_str()][..]
-            };
-            for &folder in folders {
-                if !valid_folder(folder) || folder.contains('*') {
-                    result.skipped.push(format!("{folder}: cleanup requires a literal folder"));
-                    continue;
-                }
-                match checked_folder(tree, folder) {
+            for path in folder_paths(tree, folder) {
+                match path {
                     Ok(Some(path)) => { paths.insert(path); }
                     Ok(None) => {}
                     Err(error) => result.skipped.push(format!("{folder}: {error}")),
@@ -202,12 +275,13 @@ impl Exec {
             if removed.iter().any(|p| path.starts_with(p)) { continue; }
             let label = path.strip_prefix(tree).unwrap().to_string_lossy().into_owned();
             let mut retry = false;
-            let answer = self.release_folder(tree, &path, held.clone(), &mut retry).await;
+            let answer = self.release_folder(tree, &path, held.clone(), &mut retry, adopted.is_some()).await;
             result.retry |= retry;
             match answer {
                 Ok(bytes) => { result.bytes_freed = result.bytes_freed.saturating_add(bytes); removed.push(path); }
                 Err(why) => result.skipped.push(format!("{label}: {why}")),
             }
+            if retry && adopted.is_some() { break; }
         }
         if !result.retry && self.ended_group(effect)? && effect.tree.is_none() {
             let released = self.release_group_tree(tree, held, effect, false).await;
@@ -219,42 +293,73 @@ impl Exec {
         if result.skipped.iter().any(|s| s.contains(OUTPUT_INTERRUPTED)) { result.bytes_freed = 0; }
         Ok(result)
     }
-    async fn release_folder(&self, tree: &Path, path: &Path, held: Arc<CleanupFences>, retry: &mut bool) -> std::result::Result<u64, String> {
+    async fn release_folder(&self, tree: &Path, path: &Path, held: Arc<CleanupFences>, retry: &mut bool,
+        check_whole_checkout: bool) -> std::result::Result<u64, String> {
         // A configured output may have become source. Refuse tracked files, even inside a listed folder.
         let relative = path.strip_prefix(tree).map_err(|e| e.to_string())?;
-        let spec = format!(":(literal){}", relative.to_string_lossy());
-        let tracked = crate::git::git(tree, &["ls-files", "-z", "--", &spec]).await.map_err(|e| e.to_string())?;
-        if !tracked.ok || !tracked.stdout.is_empty() { return Err("contains tracked files or git could not check".into()); }
-        // No deletion has started: contention or an unavailable open-file check is safe to retry.
+        let spec = format!(":(icase,literal){}", relative.to_string_lossy());
+        let mut args = vec!["ls-files", "-z", "--cached"];
+        if check_whole_checkout { args.extend(["--others", "--exclude-standard"]); }
+        args.extend(["--", &spec]);
+        let tracked = crate::git::git(tree, &args).await.map_err(|e| e.to_string())?;
+        if !tracked.ok || !tracked.stdout.is_empty() {
+            return Err(if check_whole_checkout { "contains tracked or unignored files, or git could not check" }
+                else { "contains tracked files or git could not check" }.into());
+        }
+        if check_whole_checkout {
+            // A staged removal can hide still-present source from the index and
+            // the usual untracked listing if the folder is also ignored.
+            let staged = crate::git::git(tree, &["diff", "--cached", "--name-only", "-z", "HEAD", "--", &spec])
+                .await.map_err(|e| e.to_string())?;
+            if !staged.ok || !staged.stdout.is_empty() { return Err("contains staged changes or git could not check".into()); }
+        }
+        let metadata = path.symlink_metadata().map_err(|e| e.to_string())?;
+        let device = tree.symlink_metadata().map_err(|e| e.to_string())?.dev();
+        let generated_reports = relative.file_name().is_some_and(|n| n == "build");
+        let output = path.to_path_buf();
+        let bytes = tokio::task::spawn_blocking(move || size(&output, device, generated_reports))
+            .await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
+        // Check after the size walk, which can take seconds on a large target.
+        // No deletion has started: an unavailable check is safe to retry.
         *retry = true;
         #[cfg(test)]
         if let Some(check) = &self.cleanup_check {
             check.0.notify_one();
             check.1.notified().await;
         }
-        check_open_files(path).await?;
+        // An editor's source file or a shell's cwd can hold an adopted or
+        // legacy checkout even when the output folder itself has no readers.
+        check_open_files(if check_whole_checkout { tree } else { path }).await?;
         *retry = false;
-        // Recheck ancestors immediately before removal. remove_dir_all itself does not follow symlinks.
-        let mut parent = tree.to_path_buf();
-        for part in relative.components() {
-            parent.push(part);
-            let meta = parent.symlink_metadata().map_err(|e| e.to_string())?;
-            if !meta.file_type().is_dir() { return Err("folder or ancestor is a symlink or not a directory".into()); }
-        }
-        let device = tree.symlink_metadata().map_err(|e| e.to_string())?.dev();
-        // Gradle generates reports inside its selected build/ output. Those reports are
-        // disposable too; the workspace reports/ evidence and other output stay protected.
-        let generated_reports = relative.file_name().is_some_and(|n| n == "build");
+        let tree = tree.to_path_buf();
+        let relative = relative.to_string_lossy().into_owned();
         let path = path.to_path_buf();
         tokio::task::spawn_blocking(move || {
             // Blocking deletion can outlive a cancelled async caller; retain the fence here too.
             let _held = held;
-            let bytes = size(&path, device, generated_reports).map_err(|e| e.to_string())?;
+            let current = path.symlink_metadata().map_err(|e| e.to_string())?;
+            if (current.dev(), current.ino()) != (metadata.dev(), metadata.ino())
+                || checked_folder(&tree, &relative).map_err(|e| e.to_string())?.is_none()
+                || tree.canonicalize().map_err(|e| e.to_string())? != tree {
+                return Err("build output path has changed".into());
+            }
             // remove_dir_all can delete some entries before returning an error.
             std::fs::remove_dir_all(&path).map_err(|e| format!("{OUTPUT_INTERRUPTED}: {e}"))?;
             Ok(bytes)
         }).await.map_err(|e| e.to_string())?
     }
+}
+
+pub(super) fn folder_paths<'a>(tree: &'a Path, folder: &'a str) -> impl Iterator<Item = std::io::Result<Option<PathBuf>>> + 'a {
+    // Older defaults stored a wildcard. Only its known literal replacements may be reclaimed.
+    let legacy = folder == "apps/*/build";
+    let replacements = if legacy { &DEFAULT_BUILD_FOLDERS[2..6] } else { &[] };
+    replacements.iter().copied().chain(Some(folder).filter(|_| !legacy)).map(move |folder| {
+        if !valid_folder(folder) || folder.contains('*') {
+            return Err(std::io::Error::other("cleanup requires a literal folder"));
+        }
+        checked_folder(tree, folder)
+    })
 }
 pub(super) async fn check_open_files(path: &Path) -> std::result::Result<(), String> {
     // macOS launch agents may run without /usr/sbin on PATH.

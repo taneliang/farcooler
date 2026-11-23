@@ -290,7 +290,7 @@ impl Exec {
         Ok(serde_json::json!({"schema": 1, "state": state, "stops": stops}))
     }
 
-    /// Reads committed records and local stop receipts only; never executes git or drives effects.
+    /// Reads committed records, local stop receipts and the latest disk sample without driving effects.
     pub(super) fn read_get(&self, workspace:&str) -> Result<serde_json::Value> {
         let deliveries=self.store.workflow_notice_deliveries(workspace)?;
         let notices:Vec<_>=deliveries.iter().map(|d|farcooler_store::workflow::WorkflowNotice {
@@ -321,6 +321,7 @@ impl Exec {
             "orchestrator_publishes_workflow":self.store.orchestrator_publishes_workflow(workspace)?,
             "back_edge_budgets":budgets, "places":self.places().view(workspace), "state":view, "notices":notices,"notice_deliveries":deliveries, "stops":stops});
         let fields = reply.as_object_mut().expect("a JSON object");
+        fields.insert("disk_usage".into(), self.disk_usage_reply(workspace));
         bound_recent(fields, "build_cleanup", self.store.workflow_cleanups(workspace)?);
         bound_recent(fields, "process_logs", self.failed_process_logs(workspace)?);
         Ok(reply)
@@ -335,6 +336,11 @@ impl CommandHandle {
         admission.recheck().and_then(|()| admission.permits(&Action::Get)).map_err(Error::Domain)?;
         let reader = self.reader.clone();
         let workspace = admission.workspace();
+        if let Some(sample) = reader.refresh_disk_usage() {
+            // Let a small inventory complete for the first reply. Large inventories
+            // finish in the background, with the previous sample still available.
+            let _ = tokio::time::timeout(Duration::from_millis(200), sample).await;
+        }
         let mut value = tokio::task::spawn_blocking(move || {
             match view {
                 GetView::Plan => reader.read_plan_get(&workspace),

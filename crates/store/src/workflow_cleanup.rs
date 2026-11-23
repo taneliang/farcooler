@@ -20,6 +20,10 @@ pub(crate) fn select(tx: &Transaction<'_>, before: &State, after: &State) -> Res
     Ok(())
 }
 impl Store {
+    pub fn workflow_cleanup_has_authority(&self) -> Result<bool> {
+        Ok(crate::engine_cutover::engine_allowed(&self.conn(), self.engine_incarnation)?)
+    }
+
     /// A directory's creating process must have settled before it can be reclaimed.
     /// A missing, replaced or uncertain owner is never evidence of quiescence.
     pub fn workflow_cleanup_owner_settled(&self, effect: &CleanupEffect, owner: &str) -> Result<bool> {

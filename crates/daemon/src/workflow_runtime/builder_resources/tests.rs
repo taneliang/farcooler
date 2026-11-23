@@ -171,8 +171,8 @@ fn disk_space_probe_reads_available_bytes() {
     assert!(free_bytes(&dir.path().join("missing")).is_err());
 }
 
-async fn adopted() -> (tempfile::TempDir, Runtime, PathBuf, String) {
-    let (dir, mut runtime) = configured(false, "prose").await;
+async fn adopted(wait_for_review: bool) -> (tempfile::TempDir, Runtime, PathBuf, String) {
+    let (dir, mut runtime) = configured(wait_for_review, if wait_for_review { "pass" } else { "prose" }).await;
     let host = Uuid::now_v7();
     let repo = runtime.repository();
     let root = runtime.store.create_repository_root(host, repo.to_str().unwrap(), 0).unwrap();
@@ -192,9 +192,16 @@ async fn adopted() -> (tempfile::TempDir, Runtime, PathBuf, String) {
     runtime.store.create_worktree(repository.id, "adopted", tree.to_str().unwrap(), false).unwrap();
     let named = RunTree { name: "adopted".into(), branch: "adopted".into(), path: tree.to_str().unwrap().into(),
         base: runtime.base.clone(), adopted: true };
+    let mut definition = runtime.configured_definition().unwrap();
+    if wait_for_review {
+        definition.source = "adapted-local-policy/v1".into();
+        let review = definition.stages.iter_mut().find(|stage| matches!(stage.kind, StageKind::Review(_))).unwrap();
+        review.kind = StageKind::Review(Reviewer::Person("owner".into()));
+        local_output(dir.path());
+    }
     let state = runtime.state(&workspace).unwrap().unwrap();
     let receipt = runtime.apply(Request { id: "start".into(), workspace: workspace.clone(), expected_revision: state.revision, sequence: 2,
-        command: Command::Start { start_load: None, item: "one".into(), definition: runtime.configured_definition().unwrap(),
+        command: Command::Start { start_load: None, item: "one".into(), definition,
         policy_pin: "p".into(), resource: Exec::item_resource(&workspace, "one"), dependencies: BTreeSet::new(),
         initial_candidate: None, models: Default::default(), tree: Some(Box::new(named)), with: vec![] } }, "controller", Grant::Controller, 1).unwrap();
     assert!(receipt.result.is_ok(), "{receipt:?}");
@@ -204,7 +211,7 @@ async fn adopted() -> (tempfile::TempDir, Runtime, PathBuf, String) {
 #[tokio::test]
 async fn adopted_preexisting_output_is_preserved_through_build_and_cleanup() {
     for symlink in [false, true] {
-        let (dir, mut runtime, tree, workspace) = adopted().await;
+        let (dir, mut runtime, tree, workspace) = adopted(false).await;
         let output = if symlink { dir.path().join("personal-output") } else { tree.join("target") };
         std::fs::create_dir(&output).unwrap();
         std::fs::write(output.join("keep"), "personal output").unwrap();
@@ -219,10 +226,61 @@ async fn adopted_preexisting_output_is_preserved_through_build_and_cleanup() {
 
 #[tokio::test]
 async fn low_disk_refusal_never_touches_adopted_output() {
-    let (_dir, mut runtime, tree, workspace) = adopted().await;
+    let (_dir, mut runtime, tree, workspace) = adopted(false).await;
     std::fs::create_dir(tree.join("target")).unwrap();
     std::fs::write(tree.join("target/keep"), "personal output").unwrap();
     runtime.build_free_bytes = Some(MIN_FREE - 1);
     assert_eq!(finish(&mut runtime, &workspace).await.items["one"].failure.as_deref(), Some(LOW_DISK));
     assert_eq!(std::fs::read_to_string(tree.join("target/keep")).unwrap(), "personal output");
+}
+
+async fn wait_for_adopted_review(runtime: &mut Runtime, workspace: &str) {
+    for time in 2..20 {
+        runtime.pump(time).await.unwrap();
+        let state = runtime.state(workspace).unwrap().unwrap();
+        if state.items["one"].phase == Phase::WaitingReview { return; }
+        assert_eq!(state.items["one"].phase, Phase::Running, "{:?}", state.items["one"].failure);
+    }
+    panic!("adopted run did not reach review");
+}
+
+#[tokio::test]
+async fn waiting_adopted_worktree_releases_build_output_and_reclaims_older_output_on_startup() {
+    let (_dir, mut runtime, tree, workspace) = adopted(true).await;
+    wait_for_adopted_review(&mut runtime, &workspace).await;
+    assert!(!tree.join("target").exists());
+    assert!(tree.join("result.txt").is_file());
+    let records = runtime.store.workflow_cleanups(&workspace).unwrap();
+    assert!(records.iter().any(|record| record.result.as_ref().is_some_and(|r| r.bytes_freed == 12)));
+    std::fs::create_dir(tree.join("target")).unwrap();
+    std::fs::write(tree.join("target/from-old-engine"), b"old output").unwrap();
+    std::fs::write(tree.join("uncommitted.txt"), b"person's work").unwrap();
+    let root = runtime.root.clone();
+    let host = runtime.host.clone();
+    drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    runtime.host = host;
+    runtime.pump(100).await.unwrap();
+    assert!(!tree.join("target").exists());
+    assert_eq!(std::fs::read(tree.join("uncommitted.txt")).unwrap(), b"person's work");
+}
+
+#[tokio::test]
+async fn waiting_adopted_worktree_checks_source_readers_and_external_processes() {
+    let (_dir, mut runtime, tree, workspace) = adopted(true).await;
+    let reader = File::open(tree.join(".git")).unwrap();
+    let mut shell = tokio::process::Command::new("/bin/sleep").arg("120").current_dir(&tree)
+        .kill_on_drop(true).spawn().unwrap();
+    wait_for_adopted_review(&mut runtime, &workspace).await;
+    assert!(tree.join("target/built").exists());
+    shell.kill().await.unwrap();
+    assert!(runtime.release_builds(std::slice::from_ref(&workspace)).await.unwrap(), "a source reader still holds the tree");
+    drop(reader);
+    let mut shell = tokio::process::Command::new("/bin/sleep").arg("120").current_dir(&tree)
+        .kill_on_drop(true).spawn().unwrap();
+    assert!(runtime.release_builds(std::slice::from_ref(&workspace)).await.unwrap(), "a process cwd holds the tree");
+    assert!(tree.join("target/built").exists());
+    shell.kill().await.unwrap();
+    assert!(!runtime.release_builds(std::slice::from_ref(&workspace)).await.unwrap());
+    assert!(!tree.join("target").exists());
 }
