@@ -153,9 +153,6 @@ landlock = "0.4"
 [target.'cfg(target_os = "macos")'.dependencies]
 farcooler-ffi-guard.workspace = true
 
-[build-dependencies]
-cc = "1"
-
 [dev-dependencies]
 # Parses `rpc.rs` so `every_method_is_dispatched` reads the arms off the syntax
 # tree rather than scanning the text. Already in the lockfile through the

@@ -2,12 +2,6 @@
 // Only the named executable gets these linker arguments; libraries, build
 // scripts and the daemon's LFS filter must never embed the Go archive.
 fn main() {
-    println!("cargo:rerun-if-changed=src/native_hold_signal.c");
-    cc::Build::new()
-        .std("gnu11")
-        .file("src/native_hold_signal.c")
-        .compile("native_hold_signal");
-
     println!("cargo:rerun-if-env-changed=FARCOOLER_BUNDLE_TAILCAT_DIR");
     let Some(directory) = std::env::var_os("FARCOOLER_BUNDLE_TAILCAT_DIR") else {
         return;
