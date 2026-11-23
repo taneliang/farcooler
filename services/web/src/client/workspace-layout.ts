@@ -53,7 +53,10 @@ const node = <T extends HTMLElement = HTMLElement>(id: string) => document.getEl
 
 export class WorkspaceLayout {
   private workspace = ''
-  private context = { page: 'terminals' as Page, workspace: false, terminals: [] as WorkTerminal[], orchestrator: null as string | null }
+  private context = {
+    page: 'terminals' as Page, workspace: false, workspace_name: null as string | null,
+    workspace_count: 0, terminals: [] as WorkTerminal[], orchestrator: null as string | null,
+  }
   private view: LayoutView | undefined
   private bindings: unknown
   private readonly dialog = node<HTMLDialogElement>('workspace-commands')
@@ -61,6 +64,7 @@ export class WorkspaceLayout {
 
   constructor(
     private readonly scope: string,
+    private readonly runnerName: string,
     private readonly present: (request: string) => string,
     private readonly draw: (view: LayoutView, intent: Intent['kind']) => void,
     private readonly act: (effect: Effect) => void,
@@ -81,10 +85,10 @@ export class WorkspaceLayout {
   private get bindingKey(): string { return `${this.scope}:shortcuts` }
   private get layoutKey(): string { return `${this.scope}:layout:${this.workspace}` }
 
-  contextFor(workspace: string | null, page: Page, terminals: WorkTerminal[], orchestrator: string | null): void {
+  contextFor(workspace: string | null, workspaceName: string | null, workspaceCount: number, page: Page, terminals: WorkTerminal[], orchestrator: string | null): void {
     const changed = this.workspace !== JSON.stringify(workspace)
     this.workspace = JSON.stringify(workspace)
-    this.context = { workspace: workspace !== null, page, terminals, orchestrator }
+    this.context = { workspace: workspace !== null, workspace_name: workspaceName, workspace_count: workspaceCount, page, terminals, orchestrator }
     this.dispatch({ kind: 'present' }, changed ? readJson(this.layoutKey) ?? null : this.view?.layout)
   }
 
@@ -113,7 +117,8 @@ export class WorkspaceLayout {
   }
 
   private dispatch(intent: Intent, layout = this.view?.layout, event?: KeyboardEvent): void {
-    const view: LayoutView = JSON.parse(this.present(JSON.stringify({ layout, bindings: this.bindings, context: this.context, intent })))
+    const context = { ...this.context, runner_name: this.runnerName }
+    const view: LayoutView = JSON.parse(this.present(JSON.stringify({ layout, bindings: this.bindings, context, intent })))
     if (event && !view.handled) return
     event?.preventDefault()
     this.view = view

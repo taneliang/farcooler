@@ -27,9 +27,9 @@
 //! id and the option to `answers` beside the typed log, and the ask is gone
 //! from the next `needs_you.list`.
 //!
-//! **Two workspaces** (ov-871): terminals 1 to 12 work for Main, 13 (a shell)
+//! **Workspaces** (ov-871, ov-1445): terminals 1 to 12 work for Main, 13 (a shell)
 //! and 14 (an agent) for Billing, which has a plan of its own with a ticket on
-//! one card (`bil-7`, a task with notes). Each item Needs You lists names its
+//! one card (`bil-7`, a task with notes). Sandbox has no terminals. Each item Needs You lists names its
 //! workspace. A file called `billing` beside the typed log adds Billing's two
 //! items, an ask and a decision on that task; the decision's answer is a
 //! `task.note` and is appended to `notes` beside the typed log. `terminal.compose`
@@ -61,6 +61,7 @@ const BILLING_FROM: u8 = 13;
 /// Billing's id, and its decision's task.
 const BILLING: Uuid = Uuid::from_u128(0x0199_0000_0000_7000_8000_0000_0000_00a2);
 const REPOSITORY: Uuid = Uuid::from_u128(0x0199_0000_0000_7000_8000_0000_0000_00a3);
+const SANDBOX: Uuid = Uuid::from_u128(0x0199_0000_0000_7000_8000_0000_0000_00a4);
 const TASK: Uuid = Uuid::from_u128(0x0199_0000_0000_7000_8000_0000_0000_0d01);
 
 fn id_bytes(id: Uuid) -> Bytes {
@@ -263,6 +264,7 @@ fn main() {
         let out: Vec<Vec<u8>> = match env.body {
             Some(wire_envelope::Body::ClientHello(_)) => {
                 vec![support::envelope(wire_envelope::Body::ServerHello(ServerHello {
+                    granted_scope: farcooler_protocol::v1::Scope::Control as i32,
                     selected_protocol_version: farcooler_protocol::PROTOCOL_VERSION,
                     capabilities: vec![
                         capability::TERMINAL_STREAM.to_string(),
@@ -344,6 +346,13 @@ fn main() {
                                 id: id_bytes(BILLING),
                                 name: "Billing".into(),
                                 ordinal: 1,
+                                repository_id: id_bytes(REPOSITORY),
+                                ..Default::default()
+                            },
+                            farcooler_protocol::v1::Workspace {
+                                id: id_bytes(SANDBOX),
+                                name: "Sandbox".into(),
+                                ordinal: 2,
                                 repository_id: id_bytes(REPOSITORY),
                                 ..Default::default()
                             },

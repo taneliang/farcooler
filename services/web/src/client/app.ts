@@ -840,7 +840,11 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     else if (r.why !== '') mine.addUnreachable(r.id, r.label, unreachable(r.why, r.label, r.cause))
     else joinRunner(session, r, mine, !returning)
   }
-  planTab = startPlanTab($('plan'), target.label, () => reconnector.current, chosenSpace, {
+  const liveRunner = () => {
+    const current = reconnector.current
+    return current && !reconnector.hasLost(current) ? current : null
+  }
+  planTab = startPlanTab($('plan'), target.label, liveRunner, chosenSpace, {
     openCard: card => openCard(target.id, { id: card.task, key: card.key, title: '' }),
     quote: async text => {
       if (!orchestrator) return false
@@ -894,7 +898,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     }
   }
 
-  const controller = new WorkspaceLayout(scope, workspaceLayout, (view, intent) => {
+  const controller = new WorkspaceLayout(scope, target.label, workspaceLayout, (view, intent) => {
     mounted.render(view, intent === 'open' || view.effect.kind === 'refresh_pane')
     for (const [id, action] of [
       ['show-orchestrator', 'orchestrator'], ['show-workflow', 'workflow'], ['show-commands', 'commands'],
@@ -950,6 +954,11 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   }
   paneControls = { open: id => openTerminal(id, true) }
 
+  const presentLayout = (page: Route['page']) => {
+    const workspaceName = spaces.find(space => space.id === chosenSpace)?.name ?? null
+    controller.contextFor(chosenSpace, workspaceName, spaces.length, page, shown, orchestrator)
+  }
+
   screen = mountWork({
     runner: target.id,
     current: () => reconnector.current,
@@ -977,7 +986,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
       }
       shown = view.terminals
       inventoryWorkspace = route.space
-      controller.contextFor(chosenSpace, route.page, shown, orchestrator)
+      presentLayout(route.page)
       const pending = pendingTerminal
       pendingTerminal = undefined
       if (pending) {
@@ -998,17 +1007,17 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   const setOrchestrator = (id: string | null) => {
     if (id === orchestrator) return
     orchestrator = id
-    if (inventoryWorkspace === chosenSpace && navigation) controller.contextFor(chosenSpace, navigation.route.page, shown, orchestrator)
+    if (inventoryWorkspace === chosenSpace && navigation) presentLayout(navigation.route.page)
   }
 
   const discover = async () => {
-    const current = reconnector.current
+    const current = liveRunner()
     const space = chosenSpace
     if (!current || !space || layout !== controller || navigation?.route.page === 'plan') return
     const mine = ++discovery
     try {
       const id = workspaceOrchestrator(await current.plan(space)) ?? null
-      if (mine !== discovery || layout !== controller || space !== chosenSpace || current !== reconnector.current) return
+      if (mine !== discovery || layout !== controller || space !== chosenSpace || current !== liveRunner()) return
       setOrchestrator(id)
     } catch {}
   }
@@ -1050,7 +1059,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
       $(`show-${tab}`).setAttribute('aria-pressed', String(tab === route.page))
     }
     if (changedSpace || pendingTerminal) void screen?.show(route.space, pendingTerminal?.id)
-    else if (inventoryWorkspace === route.space) controller.contextFor(chosenSpace, route.page, shown, orchestrator)
+    else if (inventoryWorkspace === route.space) presentLayout(route.page)
     planTab?.show(route.page === 'plan')
     if (lastView) drawNeeds(lastView)
     else pickerDrawn = drawPicker($<HTMLSelectElement>('space-picker'), spaces, chosenSpace, new Map())

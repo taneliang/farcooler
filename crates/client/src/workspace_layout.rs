@@ -1,6 +1,7 @@
 //! The web workspace's two-leaf layout and command policy.
 
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -67,8 +68,24 @@ struct Terminal {
 struct Context {
     page: Page,
     workspace: bool,
+    workspace_name: Option<String>,
+    workspace_count: usize,
+    runner_name: String,
     terminals: Vec<Terminal>,
     orchestrator: Option<String>,
+}
+
+impl Context {
+    fn terminal_notice(&self) -> Cow<'static, str> {
+        if !self.terminals.is_empty() {
+            return "Select a terminal to open in this pane.".into();
+        }
+        let name = match &self.workspace_name {
+            Some(name) if self.workspace_count > 1 => name,
+            _ => &self.runner_name,
+        };
+        format!("{name} has no terminals yet. Use Start Work to open one.").into()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -161,7 +178,7 @@ struct Pane<'a> {
     mode: Mode,
     agent: bool,
     attach: bool,
-    notice: &'a str,
+    notice: Cow<'a, str>,
 }
 
 #[derive(Serialize)]
@@ -227,11 +244,11 @@ impl Layout {
             agent,
             attach: listed.is_some_and(|terminal| terminal.attach),
             notice: match (slot, listed, orchestrator) {
-                (_, Some(terminal), _) => &terminal.attach_note,
-                (Slot::Side, None, true) => "No orchestrator is available for this workspace yet.",
-                (Slot::Side, None, false) => "Select a terminal to open in this pane.",
-                (Slot::Main, None, _) if context.page == Page::Terminals => "Select a terminal to open in this pane.",
-                _ => "",
+                (_, Some(terminal), _) => terminal.attach_note.as_str().into(),
+                (Slot::Side, None, true) => "No orchestrator is available for this workspace yet.".into(),
+                (Slot::Side, None, false) => context.terminal_notice(),
+                (Slot::Main, None, _) if context.page == Page::Terminals => context.terminal_notice(),
+                _ => "".into(),
             },
         }
     }
@@ -390,6 +407,7 @@ mod tests {
     fn context(page: &str) -> Value {
         value!({
             "page": page, "workspace": true, "orchestrator": "orch",
+            "workspace_name": "Billing", "workspace_count": 2, "runner_name": "Build Mac",
             "terminals": [
                 {"id": "orch", "title": "Runner agent", "state": "Running", "agent": true, "attach": true, "attachNote": ""},
                 {"id": "shell", "title": "Build", "state": "Running", "agent": false, "attach": true, "attachNote": ""},
@@ -408,6 +426,41 @@ mod tests {
 
     fn run(before: &Value, context: &Value, command: &str) -> Value {
         step(before, context, value!({"kind": "run", "command": command}))
+    }
+
+    #[test]
+    fn empty_workspace_names_where_to_open_a_terminal() {
+        let mut page = context("terminals");
+        page["terminals"] = value!([]);
+        page["orchestrator"] = Value::Null;
+        let split = run(&Value::Null, &page, "split");
+        assert!(split["main"]["terminal"].is_null());
+        let notice = "Billing has no terminals yet. Use Start Work to open one.";
+        assert_eq!(split["main"]["notice"], notice);
+        assert_eq!(split["side"]["notice"], notice);
+
+        page["workspace_count"] = value!(1);
+        let single_workspace = step(&split, &page, value!({"kind": "present"}));
+        assert_eq!(single_workspace["main"]["notice"], "Build Mac has no terminals yet. Use Start Work to open one.");
+
+        page["page"] = value!("plan");
+        let plan = step(&single_workspace, &page, value!({"kind": "present"}));
+        assert_eq!(plan["main"]["notice"], "");
+    }
+
+    #[test]
+    fn main_pane_opens_the_first_running_terminal_or_the_first_listed() {
+        let mut page = context("terminals");
+        let terminals = page["terminals"].as_array_mut().unwrap();
+        terminals.rotate_right(1);
+        let selected = step(&Value::Null, &page, value!({"kind": "present"}));
+        assert_eq!(selected["main"]["terminal"], "orch");
+
+        for terminal in page["terminals"].as_array_mut().unwrap() {
+            terminal["state"] = value!("Exited");
+        }
+        let selected = step(&Value::Null, &page, value!({"kind": "present"}));
+        assert_eq!(selected["main"]["terminal"], "logs");
     }
 
     #[test]

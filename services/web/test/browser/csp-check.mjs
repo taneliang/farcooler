@@ -35,7 +35,7 @@
 //   is swapped, by this harness only, for a WebSocket spliced to that sshd;
 //   everything above the dial is the page's own: SSH in wasm, the passkey's
 //   assertion, the pinned host key, terminal.list, xterm;
-// - one runner with two workspaces (ov-871): a picker scopes the terminals,
+// - one runner with several workspaces (ov-871, ov-1445): a picker scopes the terminals,
 //   Needs You and the plan to one workspace at a time and remembers the pick;
 //   a card opens its detail from a Needs You item and from a plan card, where a
 //   decision is answered and a note is added; an agent's pane switches between
@@ -808,10 +808,10 @@ async function everyRunner(page) {
   console.log(`csp-check: with build-box unreachable, studio's ask stayed listed and the page said "${note.trim()}"`)
 }
 
-/// One runner, two workspaces (ov-871). The fake daemon's Main workspace has
+/// One runner, three workspaces (ov-871, ov-1445). The fake daemon's Main workspace has
 /// twelve shells, one ask and the plan's Frosted window plane; its Billing has
 /// a shell, an agent, an ask, a decision on a card, and a plan with a ticket and
-/// its builder on that card. Everything here is the page's own, through the real sshd.
+/// its builder on that card. Sandbox has no terminals. The page uses the real sshd.
 async function workspaceWalk(page) {
   writeFileSync(join(runner.dir, 'billing'), '')
   await edit(page, { runners: [{ id: 'r1', label: 'studio', user: me, host_key: runner.hostKey, token: 'test', why: '' }] })
@@ -827,9 +827,17 @@ async function workspaceWalk(page) {
 
   // Main is showing: its twelve shells, and nothing of Billing's.
   await page.waitForFunction(() => document.querySelector('#space-picker')?.textContent?.includes('Billing (2)'), null, { timeout: 60_000 })
-  if (!same(await picker(), ['Main (1)', 'Billing (2)'])) failures.push(`the picker says ${JSON.stringify(await picker())}`)
+  if (!same(await picker(), ['Main (1)', 'Billing (2)', 'Sandbox'])) failures.push(`the picker says ${JSON.stringify(await picker())}`)
   const main = await titles()
   if (main.length !== 12 || main.some(t => /billing/.test(t))) failures.push(`Main lists ${JSON.stringify(main)}`)
+
+  await page.selectOption('#space-picker', { label: 'Sandbox' })
+  await page.waitForSelector('#pane-note:not([hidden])')
+  const notice = await page.textContent('#pane-note')
+  if (notice !== 'Sandbox has no terminals yet. Use Start Work to open one.' || (await titles()).length) {
+    failures.push(`the empty workspace lists ${JSON.stringify(await titles())} and says ${JSON.stringify(notice)}`)
+  }
+  await page.selectOption('#space-picker', { label: 'Main (1)' })
   await page.click('#show-needs')
   await page.waitForFunction(() => document.querySelectorAll('#needs .need').length === 1, null, { timeout: 30_000 })
   if (!same(await rows(), ['Run the tests on studio?'])) failures.push(`Main's Needs You lists ${JSON.stringify(await rows())}`)
@@ -839,7 +847,7 @@ async function workspaceWalk(page) {
   // Main's one initiative has nothing moving, so the column folds it into its quiet line.
   await page.waitForFunction(() => document.getElementById('plan')?.textContent?.includes('Nothing moving: Visual language'), null, { timeout: 30_000 })
   if ((await page.textContent('#plan')).includes('Invoices')) failures.push("Main's plan shows Billing's theme")
-  console.log('csp-check: with two workspaces, Main showed its twelve terminals, its one ask and its plan, and nothing of Billing’s')
+  console.log('csp-check: Main showed its twelve terminals, its one ask and its plan. Sandbox showed the empty-workspace notice.')
   await shoot(page, 'workspace-main')
 
   // Billing: its own terminals, Needs You and plan.
