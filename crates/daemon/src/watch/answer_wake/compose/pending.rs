@@ -322,7 +322,11 @@ impl Watcher {
         }
         let agent = held::agent_name(&to.command_preset);
         let gone = |what| Some(held::why_not_sent(agent, &kept.echo, what));
-        let Ok((preset, tty, pid)) = self.proven_agent(&to).await else { return Err(gone("not_running")) };
+        let (preset, tty, pid) = match self.proven_agent(&to).await {
+            Ok(proven) => proven,
+            Err(super::super::Held::ProcessUnreadable) => return Err(gone(super::super::PROCESS_UNREADABLE)),
+            Err(_) => return Err(gone("not_running")),
+        };
         if pid != kept.pid {
             return Err(gone("agent_restarted"));
         }
@@ -331,7 +335,9 @@ impl Watcher {
         if now_millis() - kept.queued_at >= i64::try_from(self.timing().left_kept.as_millis()).unwrap_or(i64::MAX) {
             return Err(gone("runner_down"));
         }
-        let Some(config) = registry_turn::config_of(pid).await else { return Err(gone("not_running")) };
+        let config = registry_turn::config_of(pid).await
+            .map_err(|_| gone(super::super::PROCESS_UNREADABLE))?
+            .ok_or_else(|| gone("not_running"))?;
         // The pid can come round again; the session it's running can too
         // change (a /clear, a resume). Either way the transcript kept is
         // another conversation's (ov-823, N4).
@@ -413,7 +419,11 @@ impl Watcher {
     /// Whether `p`'s claude is no longer the pane's agent: a shell in front,
     /// or another process.
     async fn agent_gone(&self, p: &Pending) -> bool {
-        self.proven_agent(&p.to).await.map_or(true, |(_, _, pid)| pid != p.proven.pid)
+        match self.proven_agent(&p.to).await {
+            Ok((_, _, pid)) => pid != p.proven.pid,
+            Err(super::super::Held::ProcessUnreadable) => false,
+            Err(_) => true,
+        }
     }
 
     /// End every wait's task as a runner stopping does, its row kept in the

@@ -263,6 +263,7 @@ pub(crate) enum Held {
     Draft,
     Typing,
     NotAnAgent,
+    ProcessUnreadable,
     Unfamiliar,
     Unproven,
     /// A cursor pane takes a person's message by its stop hook's followup,
@@ -281,6 +282,7 @@ impl Held {
             Held::Draft => "there's a draft in its box",
             Held::Typing => "someone is typing there",
             Held::NotAnAgent => "no agent is running in its pane",
+            Held::ProcessUnreadable => "the runner can’t read the agent pane’s processes",
             Held::Unfamiliar => "its screen isn't one Far Cooler recognizes",
             // Only a tmux older than 3.7 leaves it unproven: say so now,
             // not first at the deadline.
@@ -302,6 +304,7 @@ impl Held {
             Held::Draft => "there was a draft in the agent's box",
             Held::Typing => "someone kept typing there",
             Held::NotAnAgent => "no agent was running in the pane",
+            Held::ProcessUnreadable => "the runner couldn’t read the agent pane’s processes",
             Held::Unfamiliar => "the agent's screen wasn't one Far Cooler recognizes",
             Held::Unproven => {
                 "Far Cooler couldn’t tell whether the agent accepts a paste. This runner’s tmux is older than \
@@ -538,6 +541,9 @@ impl Watcher {
         {
             return queued;
         }
+        if pass == Pass::Waiting(Held::ProcessUnreadable) {
+            return self.refuse_unreadable(wake, &task, wake.pasted_at.is_some());
+        }
         if let Pass::Waiting(held) = pass {
             self.say_waiting(wake, &task, &to, held);
         }
@@ -624,8 +630,9 @@ impl Watcher {
         let witness = match proven.turn {
             Turn::Between => None,
             Turn::During => match self.witness(&proven, to, text).await {
-                Some(witness) => Some(witness),
-                None => return Pass::Waiting(Held::Busy),
+                Ok(Some(witness)) => Some(witness),
+                Ok(None) => return Pass::Waiting(Held::Busy),
+                Err(held) => return Pass::Waiting(held),
             },
         };
         let (preset, tty) = (proven.preset, proven.tty.as_str());
@@ -644,6 +651,7 @@ impl Watcher {
                 DomainError::Conflict { what: "draft" } => Held::Draft,
                 DomainError::Conflict { what: "prompt" } => Held::Prompt,
                 DomainError::Conflict { what: "not_an_agent" } => Held::NotAnAgent,
+                DomainError::Conflict { what: PROCESS_UNREADABLE } => Held::ProcessUnreadable,
                 DomainError::Conflict { what: "unproven" } => Held::Unproven,
                 DomainError::Conflict { what: "unfamiliar" } => Held::Unfamiliar,
                 _ => Held::Busy,
@@ -691,8 +699,10 @@ impl Watcher {
         if !held_exactly {
             // The agent may have gone, and a shell taken the pane: say where
             // the text really is.
-            if foreground_agent(tty).await != Some(preset) {
-                return self.settle(wake, Some(task), Some(LEFT_AT_A_SHELL.into()));
+            match foreground_agent(tty).await {
+                Ok(Some(agent)) if agent == preset => {}
+                Ok(_) => return self.settle(wake, Some(task), Some(LEFT_AT_A_SHELL.into())),
+                Err(_) => return self.refuse_unreadable(wake, task, true),
             }
             if dialog && !typed {
                 return self.paste_waits(wake, task, started);
@@ -712,8 +722,11 @@ impl Watcher {
         // and settles it as left only if the key changed it (ov-827).
         if preset == "claude"
             && witness.is_none()
-            && self.still_between(to, &proven, started, &composer::drawn::Expected::plain(text), true).await.is_err()
+            && let Err(e) = self.still_between(to, &proven, started, &composer::drawn::Expected::plain(text), true).await
         {
+            if matches!(e, DomainError::Conflict { what: PROCESS_UNREADABLE }) {
+                return self.refuse_unreadable(wake, task, true);
+            }
             return self.paste_waits(wake, task, started);
         }
         let entered = match &witness {
@@ -768,8 +781,13 @@ impl Watcher {
         // shells alone it says `shell`, so `busy` there is a turn (ov-795).
         // A torn registry is not proof of idle either: the Enter goes in
         // only under the fence, and an answer waits (`paste_waits`).
-        let not_idle = || async { matches!(registry_turn::said_beside_of(pid, background).await, registry_turn::Said::NotIdle | registry_turn::Said::Torn) };
-        let turn = if preset == "claude" && turn == Turn::Between && not_idle().await { Turn::During } else { turn };
+        let turn = if preset == "claude" && turn == Turn::Between
+            && matches!(registry_turn::said_beside_of(pid, background).await?, registry_turn::Said::NotIdle | registry_turn::Said::Torn)
+        {
+            Turn::During
+        } else {
+            turn
+        };
         // codex's rollout likewise (ov-378): mid-turn, and codex waits.
         let turn = if preset == "codex" && turn == Turn::Between && said == registry_turn::Said::NotIdle { Turn::During } else { turn };
         Ok(Proven { preset, tty, pid, turn, held, background })
@@ -807,7 +825,7 @@ impl Watcher {
         // The agent in front, proven by its process. A pane launched as an
         // agent must be running that one. An adopted orchestrator launched
         // as anything else is read as the agent its process proves.
-        let Some((preset, pid)) = foreground(&tty).await else { return Err(Held::NotAnAgent) };
+        let (preset, pid) = foreground(&tty).await?.ok_or(Held::NotAnAgent)?;
         if launched != preset && (is_an_agent_preset(launched) || to.role != TerminalRole::Orchestrator) {
             return Err(Held::NotAnAgent);
         }
@@ -938,6 +956,15 @@ impl Watcher {
 
     fn mark_told(&self, terminal: Uuid) {
         self.told.lock().unwrap_or_else(|e| e.into_inner()).insert(terminal, now_millis());
+    }
+
+    fn refuse_unreadable(&self, wake: &PendingWake, task: &Task, pasted: bool) -> Pass {
+        let why = Held::ProcessUnreadable.why();
+        let mut note = format!("Not delivered: {why}.");
+        if pasted {
+            note.push_str(" Check the terminal for text left in the pane.");
+        }
+        self.settle(wake, Some(task), Some(note))
     }
 
     /// Mark `wake` done, with the note that says how, and announce the task
@@ -1117,8 +1144,8 @@ pub(crate) fn agent_of_process(exe: &str, args: &str) -> Option<&'static str> {
 }
 
 /// The agent the foreground process of `tty` (`/dev/ttys012`) is, proven by
-/// its executable and arguments (`agent_of_process`). `None` for a shell, for
-/// anything else, and when it can't be read.
+/// its executable and arguments (`agent_of_process`). `None` for a shell or
+/// another program. An unreadable process is a separate refusal.
 ///
 /// The foreground process group can hold the shell that launched the agent
 /// (fish runs `-c` without job control, so the agent joins its group) and
@@ -1126,31 +1153,58 @@ pub(crate) fn agent_of_process(exe: &str, args: &str) -> Option<&'static str> {
 /// group whose parent is outside it or is a shell, not counting a shell
 /// that is only waiting on a child in it. A background job isn't in the
 /// foreground group, so a shell claude backgrounded doesn't count.
-pub(crate) async fn foreground_agent(tty: &str) -> Option<&'static str> {
-    foreground(tty).await.map(|(agent, _)| agent)
+async fn foreground_agent(tty: &str) -> std::result::Result<Option<&'static str>, Held> {
+    Ok(foreground(tty).await?.map(|(agent, _)| agent))
+}
+
+const PROCESS_UNREADABLE: &str = "process_unreadable";
+const PROCESS_READ_DEADLINE: Duration = Duration::from_millis(500);
+
+#[cfg(test)]
+tokio::task_local! {
+    static STALLED_PS: (&'static str, std::path::PathBuf);
+}
+
+/// On macOS even `ps -o comm` can wait in KERN_PROCARGS2 for a process
+/// still in exec. Drop the child with a kill request at the deadline and
+/// let Tokio reap it without making the delivery wait.
+async fn pane_ps(args: &[&str]) -> std::result::Result<std::process::Output, Held> {
+    #[cfg(test)]
+    let stalled = STALLED_PS.try_with(|(field, pid_file)| {
+        args.contains(field).then(|| pid_file.clone())
+    }).ok().flatten();
+    let mut command = tokio::process::Command::new("ps");
+    command.args(args);
+    #[cfg(test)]
+    if let Some(pid_file) = stalled {
+        command = tokio::process::Command::new("/bin/sh");
+        command.args(["-c", "echo $$ > \"$1\"; exec /bin/sleep 30", "ps"]).arg(pid_file);
+    }
+    command.stdin(std::process::Stdio::null()).kill_on_drop(true);
+    tokio::time::timeout(PROCESS_READ_DEADLINE, async { command.output().await })
+        .await
+        .map_err(|_| Held::ProcessUnreadable)?
+        .map_err(|_| Held::ProcessUnreadable)
 }
 
 /// `foreground_agent`, with the agent's pid.
-pub(crate) async fn foreground(tty: &str) -> Option<(&'static str, i32)> {
+async fn foreground(tty: &str) -> std::result::Result<Option<(&'static str, i32)>, Held> {
     let name = tty.strip_prefix("/dev/").unwrap_or(tty);
-    let out = tokio::process::Command::new("ps")
-        .args(["-t", name, "-o", "pid=,ppid=,stat=,comm="])
-        .stdin(std::process::Stdio::null())
-        .output()
-        .await
-        .ok()?;
-    let (pid, comm) = in_front(&String::from_utf8_lossy(&out.stdout))?;
+    let out = pane_ps(&["-t", name, "-o", "pid=,ppid=,stat=,comm="]).await?;
+    let Some((pid, exe)) = in_front(&String::from_utf8_lossy(&out.stdout)) else { return Ok(None) };
     // Linux's `comm` is a fifteen-byte name; the executable is the link.
-    let exe = std::fs::read_link(format!("/proc/{pid}/exe"))
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or(comm);
-    let args = tokio::process::Command::new("ps")
-        .args(["-o", "args=", "-p", &pid.to_string()])
-        .stdin(std::process::Stdio::null())
-        .output()
+    #[cfg(target_os = "linux")]
+    let exe = crate::process_reads::DETAILS
+        .read_async(move || std::fs::read_link(format!("/proc/{pid}/exe")))
         .await
-        .ok()?;
-    agent_of_process(&exe, String::from_utf8_lossy(&args.stdout).trim()).map(|agent| (agent, pid))
+        .ok_or(Held::ProcessUnreadable)?
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or(exe);
+    let args = pane_ps(&["-o", "args=", "-p", &pid.to_string()]).await?;
+    if !args.status.success() {
+        return Ok(None);
+    }
+    Ok(agent_of_process(&exe, String::from_utf8_lossy(&args.stdout).trim()).map(|agent| (agent, pid)))
 }
 
 /// The process in front, from `ps -o pid=,ppid=,stat=,comm=` for one tty,

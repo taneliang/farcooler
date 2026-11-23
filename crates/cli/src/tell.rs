@@ -50,6 +50,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "draft" => "there's a draft in the orchestrator's box. send or clear it first",
         "typing" => "someone typed in the orchestrator's pane in the last 15 seconds. try again once they stop",
         "not_an_agent" => "no agent is running in the orchestrator's pane",
+        "process_unreadable" => "the runner couldn’t read the agent pane’s processes, so the message wasn’t sent. check the terminal",
         "unfamiliar" => "the orchestrator's screen isn't one Far Cooler recognizes, so nothing was typed",
         "unproven" => {
             "this runner's tmux is older than 3.7, so Far Cooler can't tell whether the agent takes a paste. restart the agent in its pane"
@@ -104,7 +105,7 @@ mod tests {
     #[test]
     fn every_refusal_has_a_line() {
         for what in [
-            "busy", "prompt", "draft", "typing", "not_an_agent", "unfamiliar", "unproven", "too_long", "command",
+            "busy", "prompt", "draft", "typing", "not_an_agent", "process_unreadable", "unfamiliar", "unproven", "too_long", "command",
             "not_running", "paste_left", "left_at_shell", "dialog", "unconfirmed", "handoff", "unconfirmable",
             "backslash", "unsupported", "in_pane", "typing_off", "no_task", "flood",
         ] {

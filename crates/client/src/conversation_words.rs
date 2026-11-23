@@ -79,6 +79,7 @@ pub fn words(style: Style, agent: &str) -> Words {
         ("unconfirmed", said(format!("{agent} didn’t confirm it took the message. Check the terminal before sending it again."))),
         ("not_running", said(format!("{agent} isn’t running in this pane."))),
         ("not_an_agent", said(format!("{agent} isn’t running in this pane."))),
+        ("process_unreadable", said("The runner couldn’t read the agent pane’s processes, so the message wasn’t sent. Check the terminal.")),
         ("unfamiliar", said("Far Cooler can’t read this terminal’s box, so nothing was typed.")),
         ("unproven", said("Far Cooler can’t read this terminal’s box, so nothing was typed.")),
         ("unconfirmable", said(format!("Far Cooler can’t find {agent}’s session to confirm a send, so nothing was typed."))),

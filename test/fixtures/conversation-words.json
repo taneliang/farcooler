@@ -188,6 +188,10 @@
           "kind": "said",
           "text": "Claude would open a picker for a last word that starts with @ or $, so the message wasn’t sent. Add a word after it, or use the terminal."
         },
+        "process_unreadable": {
+          "kind": "said",
+          "text": "The runner couldn’t read the agent pane’s processes, so the message wasn’t sent. Check the terminal."
+        },
         "prompt": {
           "kind": "handoff",
           "text": null
@@ -517,6 +521,10 @@
         "picker": {
           "kind": "said",
           "text": "Codex would open a picker for a last word that starts with @ or $, so the message wasn’t sent. Add a word after it, or use the terminal."
+        },
+        "process_unreadable": {
+          "kind": "said",
+          "text": "The runner couldn’t read the agent pane’s processes, so the message wasn’t sent. Check the terminal."
         },
         "prompt": {
           "kind": "handoff",
@@ -848,6 +856,10 @@
           "kind": "said",
           "text": "Claude would open a picker for a last word that starts with @ or $, so the message wasn’t sent. Add a word after it, or use the terminal."
         },
+        "process_unreadable": {
+          "kind": "said",
+          "text": "The runner couldn’t read the agent pane’s processes, so the message wasn’t sent. Check the terminal."
+        },
         "prompt": {
           "kind": "handoff",
           "text": null
@@ -1177,6 +1189,10 @@
         "picker": {
           "kind": "said",
           "text": "Codex would open a picker for a last word that starts with @ or $, so the message wasn’t sent. Add a word after it, or use the terminal."
+        },
+        "process_unreadable": {
+          "kind": "said",
+          "text": "The runner couldn’t read the agent pane’s processes, so the message wasn’t sent. Check the terminal."
         },
         "prompt": {
           "kind": "handoff",

@@ -96,13 +96,21 @@ impl Watcher {
         let (runtime, pane) = crate::watch_view::lookup(&task.workspace_id.to_string(), &task.key)?;
         if wake.to != Some(pane.terminal_id) { return None; }
         let waiting = || Some(Pass::Waiting(Held::Busy));
-        let Some((preset, pid)) = foreground(&pane.tty).await else { return waiting() };
+        let (preset, pid) = match foreground(&pane.tty).await {
+            Ok(Some(agent)) => agent,
+            Ok(None) => return waiting(),
+            Err(_) => return Some(self.refuse_unreadable(wake, task, false)),
+        };
         if runtime.tmux.pane_life(&pane.pane_id, pane.terminal_id).await.ok()
             != Some(farcooler_tmux::PaneLife::Live) { return waiting(); }
         let text = self.message_text(wake, task);
         // A busy Claude takes context on its next tool call. No Enter, draft modification or
         // permission decision: the native host owns and authenticates this run's hook connection.
-        if preset == "claude" && !between(preset, pid).await {
+        let idle = match between(preset, pid).await {
+            Ok(idle) => idle,
+            Err(_) => return Some(self.refuse_unreadable(wake, task, false)),
+        };
+        if !idle {
             let mut queue = CONTEXT.lock().unwrap();
             if !queue.iter().any(|q| q.wake.note == wake.note) {
                 queue.push(QueuedContext { terminal: pane.terminal_id, watcher: self.me.clone(),
@@ -139,7 +147,12 @@ impl Watcher {
         let rules = Registry::built_in();
         let Ok(screen) = runtime.tmux.capture_screen(&pane.pane_id).await else { return waiting() };
         // Other agents wait for an empty box between turns. Never paste into a shell, dialog or draft.
-        if !between(preset, pid).await || rules.classify(preset, &screen) != AgentActivity::Idle
+        match between(preset, pid).await {
+            Ok(true) => {}
+            Ok(false) => return waiting(),
+            Err(_) => return Some(self.refuse_unreadable(wake, task, false)),
+        }
+        if rules.classify(preset, &screen) != AgentActivity::Idle
             || composer::read(preset, &screen) != composer::Composer::Empty
             || bracketed(&runtime, &pane).await != Some(true) {
             return waiting();
@@ -160,10 +173,20 @@ impl Watcher {
                 tokio::time::sleep(Duration::from_millis(20)).await;
                 let Ok(screen) = runtime.tmux.capture_screen(&pane.pane_id).await else { break };
                 if expected.shown_by(&composer::read(preset, &screen)) {
-                    if between(preset, pid).await && rules.classify(preset, &screen) == AgentActivity::Idle
-                        && foreground(&pane.tty).await == Some((preset, pid))
-                        && runtime.tmux.send_bytes_hex(&pane.pane_id, "0d").await.is_ok() {
-                        return Some(self.settle(wake, Some(task), None));
+                    let idle = match between(preset, pid).await {
+                        Ok(idle) => idle,
+                        Err(_) => return Some(self.refuse_unreadable(wake, task, true)),
+                    };
+                    if idle && rules.classify(preset, &screen) == AgentActivity::Idle {
+                        match foreground(&pane.tty).await {
+                            Ok(Some(agent)) if agent == (preset, pid) => {
+                                if runtime.tmux.send_bytes_hex(&pane.pane_id, "0d").await.is_ok() {
+                                    return Some(self.settle(wake, Some(task), None));
+                                }
+                            }
+                            Ok(_) => {}
+                            Err(_) => return Some(self.refuse_unreadable(wake, task, true)),
+                        }
                     }
                     break;
                 }
@@ -194,10 +217,10 @@ async fn bracketed(runtime: &crate::runtime::Runtime, pane: &farcooler_core::inv
 }
 
 // Claude's spinner can disappear before its turn does. Its live session registry wins over the screen.
-async fn between(preset: &str, pid: i32) -> bool {
-    if preset != "claude" { return true; }
-    let Some(config) = super::registry_turn::config_of(pid).await else { return false };
-    super::registry_turn::said(&config, pid) == super::registry_turn::Said::Idle
+async fn between(preset: &str, pid: i32) -> Result<bool, Held> {
+    if preset != "claude" { return Ok(true); }
+    let Some(config) = super::registry_turn::config_of(pid).await? else { return Ok(false) };
+    Ok(super::registry_turn::said(&config, pid) == super::registry_turn::Said::Idle)
 }
 
 #[cfg(not(test))]

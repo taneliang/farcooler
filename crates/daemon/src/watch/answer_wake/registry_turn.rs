@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use farcooler_core::activity::Background;
 use farcooler_core::session_log::projector::Activity;
 
-use super::mid_turn;
+use super::{Held, mid_turn};
 use crate::claude_registry::{self, Kernel};
 
 /// What claude's registry says of the live process `pid`.
@@ -98,8 +98,8 @@ pub(crate) fn status(config: &Path, pid: i32) -> Status {
 }
 
 /// claude's config directory, from its process's environment (`mid_turn`).
-pub(crate) async fn config_of(pid: i32) -> Option<PathBuf> {
-    mid_turn::config_dir(&mid_turn::process_env(pid).await?)
+pub(crate) async fn config_of(pid: i32) -> Result<Option<PathBuf>, Held> {
+    Ok(mid_turn::process_env(pid).await?.as_deref().and_then(mid_turn::config_dir))
 }
 
 /// `said`, for a main loop the screen shows between turns with background
@@ -117,11 +117,11 @@ pub(crate) fn said_beside(config: &Path, pid: i32, background: Background) -> Sa
 
 /// `said_beside`, for the process `pid`, its config found from its
 /// environment: `said`'s, when `background` is `None`.
-pub(crate) async fn said_beside_of(pid: i32, background: Background) -> Said {
-    match config_of(pid).await {
+pub(crate) async fn said_beside_of(pid: i32, background: Background) -> Result<Said, Held> {
+    Ok(match config_of(pid).await? {
         Some(config) => said_beside(&config, pid, background),
         None => Said::Nothing,
-    }
+    })
 }
 
 #[cfg(test)]

@@ -77,6 +77,58 @@ async fn multi_line_text_is_sent_once_the_hook_names_it() {
     assert_eq!(si.submitted(), ["fix the flaky test\\nin tests.rs\\n\\nthen land it"], "{}", si.log());
 }
 
+/// A stuck process query must refuse a send before it reaches the pane.
+#[tokio::test]
+async fn a_send_to_a_pane_with_an_unreadable_process_is_refused_promptly() {
+    let b = board().await;
+    let (agent, si) = idle_claude(&b).await;
+    let pid_file = si.control.with_extension("ps-pid");
+    let fields = [
+        "pid=,ppid=,stat=,comm=",
+        "args=",
+        #[cfg(target_os = "macos")]
+        "command=",
+    ];
+    for field in fields {
+        let send = b.watcher.compose_into(agent.id, "check the build", &[]);
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            super::STALLED_PS.scope((field, pid_file.clone()), send),
+        ).await.expect("send must return while the process query is stalled");
+        assert_eq!(refused(result), "process_unreadable", "{field}");
+        let pid: i32 = std::fs::read_to_string(&pid_file).unwrap().trim().parse().unwrap();
+        std::fs::remove_file(&pid_file).unwrap();
+        // kill_on_drop requests termination without waiting for a stuck kernel call.
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while unsafe { libc::kill(pid, 0) } == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }).await.expect("timed-out ps was killed and reaped");
+        nothing_typed(&si);
+    }
+}
+
+/// A task answer has already been recorded when the wake tries to deliver it.
+#[tokio::test]
+async fn a_task_answer_records_refusal_when_the_agent_process_cannot_be_read() {
+    let b = board().await;
+    let (_, si) = idle_claude(&b).await;
+    // Queue it through the current store transaction, and pump under the
+    // stalled query below instead of spawning an unscoped delivery task.
+    let (_, queued) = b.svc.store.add_note_waking(
+        b.task.id, NoteKind::Answer, Actor::User, "Drill in", serde_json::json!({}), None, false,
+    ).unwrap();
+    assert!(queued);
+    let pid_file = si.control.with_extension("ps-pid");
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        super::STALLED_PS.scope(("args=", pid_file), b.pump()),
+    ).await.expect("delivery pass must finish while ps is stalled");
+    assert!(b.pending().is_empty());
+    assert_eq!(b.settled(), ["Not delivered: the runner couldn’t read the agent pane’s processes."]);
+    nothing_typed(&si);
+}
+
 /// The same, with no hook ever saying claude took it: no Sent.
 #[tokio::test]
 async fn a_send_no_hook_confirms_is_unconfirmed() {

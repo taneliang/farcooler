@@ -33,6 +33,7 @@ pub(crate) fn held_word(held: Held) -> &'static str {
         Held::Draft => "draft",
         Held::Typing => "typing",
         Held::NotAnAgent => "not_an_agent",
+        Held::ProcessUnreadable => super::PROCESS_UNREADABLE,
         Held::Unfamiliar => "unfamiliar",
         Held::Unproven => "unproven",
         Held::Followup => "followup",

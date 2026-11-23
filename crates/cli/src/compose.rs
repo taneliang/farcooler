@@ -188,7 +188,7 @@ mod tests {
     #[test]
     fn every_refusal_has_a_line() {
         for what in [
-            "busy", "prompt", "draft", "typing", "not_an_agent", "unfamiliar", "unproven", "too_long", "command",
+            "busy", "prompt", "draft", "typing", "not_an_agent", "process_unreadable", "unfamiliar", "unproven", "too_long", "command",
             "not_running", "paste_left", "left_at_shell", "dialog", "unconfirmed", "handoff", "unsupported", "unconfirmable",
             "images_too_large", "image_too_large", "images", "image", "files", "file", "backslash", "picker", "too_tall",
         ] {

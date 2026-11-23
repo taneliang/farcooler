@@ -69,7 +69,7 @@ use std::time::{Duration, Instant};
 use farcooler_core::composer;
 use farcooler_store::models::Terminal;
 
-use super::{PASTE_POLL, Proven};
+use super::{Held, PASTE_POLL, Proven};
 use crate::runtime::{Runtime, last_input};
 use crate::watch::Watcher;
 
@@ -189,12 +189,12 @@ impl Watcher {
     /// anything is claimed or typed, so a message then waits, or is refused
     /// as busy, with nothing left in the box; the same checks under the
     /// fence (`enter`) are the last guard, for the race.
-    pub(super) async fn witness(&self, proven: &Proven, to: &Terminal, text: &str) -> Option<Witness> {
+    pub(super) async fn witness(&self, proven: &Proven, to: &Terminal, text: &str) -> Result<Option<Witness>, Held> {
         if proven.preset != "claude" {
-            return None;
+            return Ok(None);
         }
-        let config = config_dir(&process_env(proven.pid).await?)?;
-        self.witness_in(&config, proven, to, text)
+        let config = super::registry_turn::config_of(proven.pid).await?;
+        Ok(config.and_then(|config| self.witness_in(&config, proven, to, text)))
     }
 
     /// `witness`, with claude's config directory already found: a wait that
@@ -344,23 +344,23 @@ pub(crate) fn config_dir(env: &[(String, String)]) -> Option<PathBuf> {
 /// macOS, which writes it after the command, space-separated. A value with
 /// a space in it is read only up to the space there, so a config directory
 /// named that way isn't found, and the agent isn't typed into mid-turn.
-pub(super) async fn process_env(pid: i32) -> Option<Vec<(String, String)>> {
+pub(super) async fn process_env(pid: i32) -> Result<Option<Vec<(String, String)>>, Held> {
     #[cfg(test)]
     env_read(pid);
-    if let Ok(raw) = std::fs::read(format!("/proc/{pid}/environ")) {
-        return Some(pairs(raw.split(|b| *b == 0).map(|v| String::from_utf8_lossy(v).into_owned())));
-    }
-    let out = tokio::process::Command::new("ps")
-        .args(["-E", "-ww", "-o", "command=", "-p", &pid.to_string()])
-        .stdin(std::process::Stdio::null())
-        .output()
+    #[cfg(target_os = "linux")]
+    if let Ok(raw) = crate::process_reads::ARGUMENTS
+        .read_async(move || std::fs::read(format!("/proc/{pid}/environ")))
         .await
-        .ok()?;
-    if !out.status.success() {
-        return None;
+        .ok_or(Held::ProcessUnreadable)?
+    {
+        return Ok(Some(pairs(raw.split(|b| *b == 0).map(|v| String::from_utf8_lossy(v).into_owned()))));
     }
-    let line = String::from_utf8_lossy(&out.stdout).into_owned();
-    Some(pairs(line.split_whitespace().map(str::to_string)))
+    let out = super::pane_ps(&["-E", "-ww", "-o", "command=", "-p", &pid.to_string()]).await?;
+    if !out.status.success() {
+        return Ok(None);
+    }
+    let line = String::from_utf8_lossy(&out.stdout);
+    Ok(Some(pairs(line.split_whitespace().map(str::to_string))))
 }
 
 /// How many times each pid's environment was read, for a test that a wait

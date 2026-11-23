@@ -113,19 +113,20 @@ impl Watcher {
         let proven = super::Proven { preset, tty: String::new(), pid, turn, held: false, background: farcooler_core::activity::Background::None };
         let witness = match (super::queues_mid_turn(preset), turn) {
             (true, _) => match self.witness(&proven, to, text).await {
-                Some(witness) => Some(witness.pasted_at(since)),
+                Ok(Some(witness)) => Some(witness.pasted_at(since)),
+                Err(held) => return Pass::Waiting(held),
                 // No hook was ever heard from it (ov-711): claude's own
                 // registry may still say it's between turns, read so twice
                 // `idle_twice` apart, as a waiting compose's plain Enter is:
                 // one stray frame read idle mid-turn sends no key (ov-827).
-                None if turn == Turn::Between && self.between_unhooked(to, &proven, since, text).await => {
+                Ok(None) if turn == Turn::Between && self.between_unhooked(to, &proven, since, text).await => {
                     tokio::time::sleep(self.timing().idle_twice).await;
                     if !self.between_unhooked(to, &proven, since, text).await {
                         return Pass::Waiting(Held::Busy);
                     }
                     None
                 }
-                None => return Pass::Waiting(Held::Busy),
+                Ok(None) => return Pass::Waiting(Held::Busy),
             },
             (false, Turn::Between) => None,
             (false, Turn::During) => return Pass::Waiting(Held::Busy),
@@ -193,7 +194,7 @@ impl Watcher {
             Some(read) => read,
             None => {
                 let Ok(("claude", _, pid)) = self.proven_agent(to).await else { return false };
-                let found = super::registry_turn::config_of(pid).await.and_then(|config| mid_turn::transcript_in(&config, pid));
+                let found = super::registry_turn::config_of(pid).await.ok().flatten().and_then(|config| mid_turn::transcript_in(&config, pid));
                 let Some((_, transcript)) = found else { return false };
                 (transcript, 0, false)
             }
@@ -289,7 +290,7 @@ impl Watcher {
     /// later notice out (`Held::Draft`).
     async fn between_unhooked(&self, to: &Terminal, proven: &super::Proven, pasted: i64, text: &str) -> bool {
         let pid = proven.pid;
-        let session = super::registry_turn::config_of(pid).await.and_then(|config| super::mid_turn::transcript_in(&config, pid));
+        let session = super::registry_turn::config_of(pid).await.ok().flatten().and_then(|config| super::mid_turn::transcript_in(&config, pid));
         let Some((session, _)) = session else { return false };
         let asks = self.service.hooks().asks();
         if asks.hooked(&session) || asks.is_holding(to.id) {

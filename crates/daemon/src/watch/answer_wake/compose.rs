@@ -361,6 +361,7 @@ impl Watcher {
             // Nothing is typed yet: a held message tries again (`held::TORN`).
             Err(Gone::Torn) => return Err(DomainError::Conflict { what: held::TORN }),
             Err(Gone::Nothing) => return Err(DomainError::Conflict { what: "unconfirmable" }),
+            Err(Gone::Unreadable) => return Err(DomainError::Conflict { what: super::PROCESS_UNREADABLE }),
         };
         // From here, what can't be typed now is held, not refused (`held`).
         if ready.is_err() && (!busy || self.typed_by_hand_lately(to.id, now_millis())) {
@@ -374,7 +375,7 @@ impl Watcher {
         let witness = match proven.turn {
             Turn::Between => None,
             Turn::During => Some(
-                self.witness(&proven, to, &composed.submitted(&[])).await.ok_or(DomainError::Conflict { what: held::HOLD })?,
+                self.witness(&proven, to, &composed.submitted(&[])).await.map_err(refusal)?.ok_or(DomainError::Conflict { what: held::HOLD })?,
             ),
         };
         let from = std::fs::metadata(&transcript).map(|m| m.len()).unwrap_or(0);
@@ -467,7 +468,7 @@ impl Watcher {
         if first {
             self.proven_again(to, tty, preset).await?;
         } else {
-            let agent = foreground_agent(tty).await == Some(preset);
+            let agent = foreground_agent(tty).await.map_err(refusal)? == Some(preset);
             if !agent || self.bracketed(to.id).await.is_err() {
                 return Err(DomainError::Conflict { what: if agent { "paste_left" } else { "left_at_shell" } });
             }
@@ -485,7 +486,7 @@ impl Watcher {
     /// (`held::STILL_HELD`). A queued Prompt makes the same checks
     /// (`type_into`, ov-620).
     pub(super) async fn proven_again(&self, to: &Terminal, tty: &str, preset: &str) -> Result<()> {
-        if foreground_agent(tty).await != Some(preset) {
+        if foreground_agent(tty).await.map_err(refusal)? != Some(preset) {
             return Err(DomainError::Conflict { what: held_word(super::Held::NotAnAgent) });
         }
         self.bracketed(to.id).await.map_err(|held| DomainError::Conflict { what: held_word(held) })?;
@@ -576,7 +577,7 @@ impl Watcher {
         } else {
             let said = match config {
                 Some(config) => registry_turn::said_beside(config, pid, background),
-                None => registry_turn::said_beside_of(pid, background).await,
+                None => registry_turn::said_beside_of(pid, background).await.map_err(refusal)?,
             };
             match said {
                 registry_turn::Said::Idle => return Ok(None),
@@ -615,7 +616,7 @@ impl Watcher {
         if !left.turn {
             return Err(left.logged(&self.service.registry(), to, proven));
         }
-        match self.witness(proven, to, submitted).await {
+        match self.witness(proven, to, submitted).await.map_err(refusal)? {
             Some(witness) => match self.enter_fenced_for(to, proven, started, &witness, expected).await {
                 Ok(()) => Ok(Entered::Now),
                 // Nothing pressed: waited out, not left (ov-827).
@@ -725,7 +726,7 @@ impl Shown {
         match self {
             Shown::Yes(held) => Ok(held),
             Shown::Typed | Shown::No => {
-                if foreground_agent(tty).await != Some(preset) {
+                if foreground_agent(tty).await.map_err(refusal)? != Some(preset) {
                     return Err(DomainError::Conflict { what: "left_at_shell" });
                 }
                 Err(DomainError::Conflict { what: "paste_left" })
@@ -837,7 +838,7 @@ struct Confirm {
 /// there but doesn't parse, which is claude mid-write more often than gone
 /// (ov-645).
 async fn session_of(pid: i32, background: Background) -> std::result::Result<(String, PathBuf, bool, PathBuf), Gone> {
-    let config = registry_turn::config_of(pid).await.ok_or(Gone::Nothing)?;
+    let config = registry_turn::config_of(pid).await.map_err(|_| Gone::Unreadable)?.ok_or(Gone::Nothing)?;
     let not_idle = match registry_turn::said_beside(&config, pid, background) {
         registry_turn::Said::Idle => false,
         registry_turn::Said::NotIdle => true,
@@ -854,6 +855,12 @@ enum Gone {
     Nothing,
     /// A registry file that doesn't parse.
     Torn,
+    /// The process environment could not be read.
+    Unreadable,
+}
+
+fn refusal(held: super::Held) -> DomainError {
+    DomainError::Conflict { what: held_word(held) }
 }
 
 /// An image's path as pasted: as is, or in single quotes when it has a

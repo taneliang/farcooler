@@ -232,7 +232,7 @@ impl Watcher {
         if preset != "claude" {
             return Err(conflict("unsupported"));
         }
-        let config = registry_turn::config_of(pid).await.ok_or(conflict("unconfirmable"))?;
+        let config = registry_turn::config_of(pid).await.map_err(|held| conflict(held_word(held)))?.ok_or(conflict("unconfirmable"))?;
         match registry_turn::status(&config, pid) {
             Status::Busy => {}
             Status::Idle => return Err(conflict("idle")),

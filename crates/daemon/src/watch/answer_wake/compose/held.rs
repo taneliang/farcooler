@@ -342,6 +342,7 @@ pub(crate) fn why_not_sent(agent: &str, text: &str, what: &str) -> String {
         "expired" => format!("Not sent: “{quoted}”. {agent} didn’t take it within 4 hours."),
         "not_running" | "not_an_agent" => format!("Not sent: “{quoted}”. {agent} isn’t running in this pane anymore."),
         "paste_left" | "dialog" => format!("Not sent: “{quoted}”. It didn’t land as typed, so it was left in {agent}’s box."),
+        super::super::PROCESS_UNREADABLE => format!("Not sent: “{quoted}”. The runner couldn’t read the agent pane’s processes. Check the terminal."),
         "left_at_shell" => format!("Not sent: “{quoted}”. {agent} quit as it was typed."),
         "stopped" => format!("Not sent: “{quoted}”. You stopped {agent}, so it’s still in {agent}’s box."),
         "stayed_busy" => format!("Not sent: “{quoted}”. {agent} stayed busy, so it’s still in {agent}’s box."),
