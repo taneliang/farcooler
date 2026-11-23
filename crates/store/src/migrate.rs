@@ -962,7 +962,7 @@ pub(crate) fn migrate_only_to(conn: &mut Connection, version: u32) {
     tx.commit().unwrap();
 }
 
-// Preserve the retired tables and their original migration for existing databases.
+// Preserve the retired tables and their exact SQL text for the schema-60 catalog hash.
 fn migration_0025_pages(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch(include_str!("migrate/0025_pages.sql"))
 }
