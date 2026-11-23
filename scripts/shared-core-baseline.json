@@ -282,7 +282,7 @@
   "apps/android/app/src/main/java/com/farcooler/ui/ChangesSheets.kt": 41,
   "apps/android/app/src/main/java/com/farcooler/ui/DeviceKeysSection.kt": 9,
   "apps/android/app/src/main/java/com/farcooler/ui/FilesScreen.kt": 3,
-  "apps/android/app/src/main/java/com/farcooler/ui/FleetScreen.kt": 42,
+  "apps/android/app/src/main/java/com/farcooler/ui/FleetScreen.kt": 41,
   "apps/android/app/src/main/java/com/farcooler/ui/ImagePaste.kt": 7,
   "apps/android/app/src/main/java/com/farcooler/ui/JoinScreen.kt": 12,
   "apps/android/app/src/main/java/com/farcooler/ui/NativeAgentView.kt": 20,

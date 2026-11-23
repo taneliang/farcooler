@@ -56,17 +56,15 @@
 # Recorded, because the DEX will not match this file and that is correct.
 #
 # `-keepclasseswithmembernames` pins the NAMES of what survives; it does not
-# make anything survive. Three of the thirty-four bindings declared in `Native.kt`
+# make anything survive. Two of the forty-nine bindings declared in `Native.kt`
 # are reachable from no Kotlin at all, so R8 drops them and a release APK has
-# thirty-one:
+# forty-seven:
 #
-#   NativeVt.nativeAltScreen
-#       Declared and never called from anywhere in the app.
 #   NativeClient.nativeConnected, NativeVt.nativeTitle
 #       Called, but only by `ClientCore.isConnected()` and `VtCore.title()`,
 #       which nothing calls in turn — so the whole chain is dead.
 #
-# All three are live exports on the Rust side (`crates/android/src/lib.rs`), so
+# Both are live exports on the Rust side (`crates/android/src/lib.rs`), so
 # this is the Kotlin binding layer having drifted ahead of its callers rather
 # than a rule that is too weak. Left alone deliberately: they are the cheap half
 # of a two-sided ABI, and deleting them makes the next screen that wants a
