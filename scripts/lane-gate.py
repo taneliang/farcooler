@@ -19,11 +19,12 @@ swift-test-guard, nextest --profile ci). That used to be recalled by hand from
 
     scripts/lane-gate.py                      # this worktree against origin/main
     scripts/lane-gate.py --dry-run            # the plan only: nothing runs
+    scripts/lane-gate.py --quick-only         # pre-review checks; no build or landing verdict
     scripts/lane-gate.py --only wire,relay    # or --skip relay
     scripts/lane-gate.py --base main --log-dir /tmp/gate-logs
     scripts/lane-gate.py --self-test
 
-Each real run also saves its summary, with the full HEAD sha it gated, to
+Each full gate also saves its summary, with the full HEAD sha it gated, to
 `<git-dir>/lane-gate-summary.txt` (one per worktree); scripts/gate-summary-check.py
 reads it, and the push guard calls that before a single-lane push (ov-822).
 
@@ -699,14 +700,14 @@ def job_env(job):
     return env
 
 
-def run_step(step, repo, env, logdir, tmp, fail_fast=False):
+def run_step(step, repo, env, logdir, tmp, fail_fast=False, *, quick=False):
     gh_env, gh_path = tmp / "github_env", tmp / "github_path"
     gh_output = tmp / "github_output"
     gh_env.write_text("")
     gh_path.write_text("")
     gh_output.write_text("")
     e = {**env, **step.env, "GITHUB_ENV": str(gh_env), "GITHUB_PATH": str(gh_path), "GITHUB_OUTPUT": str(gh_output)}
-    if os.environ.get("FARCOOLER_GATE_SCCACHE") == "1":
+    if not quick and os.environ.get("FARCOOLER_GATE_SCCACHE") == "1":
         import gate_sccache
         # Apply last: CI step env and previous GITHUB_ENV writes cannot bypass
         # the gate cache or re-enable incremental compilation (ov-1333).
@@ -797,7 +798,7 @@ def is_shallow(repo):
     return out.returncode == 0 and out.stdout.strip() == "true"
 
 
-def run_step_safely(step, repo, env, logdir, tmp, fail_fast=False):
+def run_step_safely(step, repo, env, logdir, tmp, fail_fast=False, *, quick=False):
     """(result, seconds, counts, ok, log, output) for one step; never raises.
 
     A tool the host lacks, a directory a failed step never made, or anything
@@ -808,7 +809,7 @@ def run_step_safely(step, repo, env, logdir, tmp, fail_fast=False):
         return f"FAIL: {reason}", 0.0, "", False, None, reason
     was_shallow = is_shallow(repo)
     try:
-        code, secs, output, log = run_step(step, repo, env, logdir, tmp, fail_fast)
+        code, secs, output, log = run_step(step, repo, env, logdir, tmp, fail_fast, quick=quick)
     except Exception as e:  # noqa: BLE001 -- any crash is this step's failure
         reason = DISK_FULL if hl.disk_full(e) else f"lane-gate could not run it: {type(e).__name__}: {e}"
         return f"FAIL: {reason}", 0.0, "", False, None, reason
@@ -907,9 +908,13 @@ def main(argv):
     ap.add_argument("--strict-leaks", action="store_true", help="a new system temp entry or plist fails the run, even though sibling lanes share this Mac")
     ap.add_argument("--keep-target", action="store_true", help="keep the worktree's target/ after a fully green gate (by default a lane worktree's is removed then)")
     ap.add_argument("--fail-fast", action="store_true", help="stop at the first failed step (for landing gates)")
+    ap.add_argument("--quick-only", action="store_true", help="run just the build-free landing checks before review")
+    ap.add_argument("--wait-for-unlock", action="store_true", help="wait for an unlocked screen before Mac builds")
     ap.add_argument("--disk-preflight", action="store_true", help="landing disk admission only; no builds or lock wait")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args(argv)
+    if args.quick_only:
+        args.landing = args.fail_fast = True
     if args.self_test:
         return self_test()
     hl.survive_dead_output()  # a waiting gate outlives the terminal or pipe that started it (ov-839)
@@ -931,7 +936,7 @@ def gate(args):
         landing_policy.readonly_git(os.environ)
     repo = pathlib.Path(args.worktree).resolve()
     validate_base(repo, args.base)
-    if args.landing:
+    if args.landing and not args.quick_only:
         args.base = landing_policy.fold_base(repo, args.base)
     workflows = {"ci": (repo / ".github/workflows/ci.yml").read_text(),
                  "ios-ui-build": (repo / ".github/actions/ios-ui-build/action.yml").read_text()}
@@ -957,7 +962,7 @@ def gate(args):
             raise SystemExit(f"lane-gate: no job {j}; jobs are {', '.join(JOBS)}")
     chosen = [j for j in JOBS if j in reach and (not only or j in only) and j not in skip]
 
-    if args.landing and not args.dry_run:
+    if args.landing and not args.dry_run and not args.quick_only:
         try:
             gate_disk.admit(repo, chosen)
         except gate_disk.ResourceRefusal as e:
@@ -965,69 +970,56 @@ def gate(args):
             return gate_disk.RESOURCE_REFUSAL
     if args.disk_preflight:
         return 0
-    tmp = pathlib.Path(tempfile.mkdtemp(prefix="lane-gate-"))  # ENOSPC is caught by main
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="lane-gate-", dir=os.environ.get("FARCOOLER_SCRATCH") or None))
     ctx = make_ctx(repo, tmp, args.base)
     plans = {j: steps_for(j, workflows, ctx) for j in JOBS}
     landing_policy.workflow_checks(plans, files, Step)
 
-    if not args.dry_run:
-        try:
-            args.toolchain_env = toolchain_preflight(chosen, repo, os.environ)
-            if "CAPTURE_JDK" in args.toolchain_env:
-                ctx["steps.jdk21.outputs.path"] = args.toolchain_env["CAPTURE_JDK"]
-                plans["android"] = steps_for("android", workflows, ctx)
-        except ValueError as e:
-            shutil.rmtree(tmp, ignore_errors=True)
-            print_summary([("lane-gate", "toolchain preflight", f"FAIL: {e}", "", "")],
-                          repo, args.base, "", True, [], summary_path(repo))
-            return 1
-
-    proposal = None
+    quick = {}
     if args.landing:
-        import landing_policy  # optional local policy; plain runners stay self-contained
-        proposal = rust_proposal(repo, args, chosen, landing_policy)
-        landing_policy.apply(plans, proposal)
-        print("lane-gate: local landing Rust selection: " + "; ".join(proposal["reasons"]))
-        print(f"lane-gate: landing families: {landing_policy.families(chosen)}; workers: {args.workers}")
-    else:
-        import landing_policy
-        proposal = rust_proposal(repo, args, chosen, landing_policy)
-        for step in (plans["rust"] if "rust" in chosen else []):
-            if not step.skip:
-                landing_policy.apply_rust("rust", step, proposal)
+        landing_policy.apply_local(plans)
+        # Review is read-only and expects the runner's pinned typeshare to be
+        # installed. Landing can still install it on a cold runner as before.
+        typeshare = shutil.which("typeshare", path=os.path.expanduser("~/.cargo/bin") + os.pathsep + os.environ.get("PATH", ""))
+        ready = False
+        if typeshare and not args.quick_only and not args.dry_run:
+            version = subprocess.run([typeshare, "--version"], capture_output=True, text=True)
+            ready = version.returncode == 0 and version.stdout.strip() == "typeshare 1.13.4"
+        quick, plans = landing_policy.split_quick(
+            plans, chosen, args.base, Step, typeshare_ready=ready or args.quick_only or args.dry_run,
+            review=args.quick_only)
 
     # --only (or --skip) leaves out jobs the diff reaches. Say so here, and again in the summary, which is
     # what gets pasted into a report: a summary that reads "all steps passed" must not stand for a gate it skipped.
     left_out = [j for j in JOBS if j in reach and j not in chosen]
     partial = bool(left_out) and bool(only or skip)
-    if partial:
-        print(f"lane-gate: PARTIAL GATE: --only/--skip leaves out {', '.join(left_out)}, which this diff reaches")
-    print(f"lane-gate: {len(files)} changed file(s) against {args.base}; jobs: {', '.join(chosen) or 'none'}")
-    for j in chosen:
-        why = reach[j][:3]
-        more = f" and {len(reach[j]) - 3} more" if len(reach[j]) > 3 else ""
-        print(f"  {j}: {', '.join(why) if why else 'always'}{more}")
-    if "rust" in chosen:
-        print(f"lane-gate: Rust impact: {rust_impact(repo, inputs)}")
-        if proposal is None:
-            print("lane-gate: Rust coverage: full suite (selection unavailable)")
-        elif proposal["full"]:
-            print("lane-gate: Rust coverage: full suite (" + "; ".join(proposal["reasons"]) + ")")
-        elif not proposal["packages"]:
-            print(f"lane-gate: Rust coverage: no tests selected ({'; '.join(proposal['reasons'])}); "
-                  f"{len(proposal['skipped_binaries'])} test binaries skipped; CI on main runs the full suite")
-        else:
-            print(f"lane-gate: Rust coverage: nextest runs only {', '.join(proposal['packages'])}; "
-                  f"{len(proposal['skipped_binaries'])} test binaries skipped (rust-selection.json); CI on main runs the full suite (ov-1278)")
-    if not any(j in HEAVY for j in chosen):
-        print("lane-gate: no builds selected")
-    if args.dry_run:
-        shutil.rmtree(tmp, ignore_errors=True)
+    if not args.quick_only:
+        if partial:
+            print(f"lane-gate: PARTIAL GATE: --only/--skip leaves out {', '.join(left_out)}, which this diff reaches")
+        print(f"lane-gate: {len(files)} changed file(s) against {args.base}; jobs: {', '.join(chosen) or 'none'}")
         for j in chosen:
-            print(f"\n[{j}]")
-            for s in plans[j]:
-                where = f" (in {s.cwd})" if s.cwd else ""
-                print(f"  {'SKIP' if s.skip else 'run '} {s.label()}{where}" + (f"  -- {s.skip}" if s.skip else ""))
+            why = reach[j][:3]
+            more = f" and {len(reach[j]) - 3} more" if len(reach[j]) > 3 else ""
+            print(f"  {j}: {', '.join(why) if why else 'always'}{more}")
+        if not any(j in HEAVY for j in chosen):
+            print("lane-gate: no builds selected")
+    if args.dry_run:
+        if not args.quick_only:
+            prepare_build_plan(repo, args, chosen, plans, inputs, ctx, workflows)
+        shutil.rmtree(tmp, ignore_errors=True)
+        phases = [("quick checks", quick)] if quick else []
+        if not args.quick_only:
+            phases.append(("", plans))
+        for phase, phase_plans in phases:
+            if phase:
+                print(f"\n{phase}:")
+            for j in chosen:
+                if not phase_plans[j]:
+                    continue
+                print(f"\n[{j}]")
+                for s in phase_plans[j]:
+                    where = f" (in {s.cwd})" if s.cwd else ""
+                    print(f"  {'SKIP' if s.skip else 'run '} {s.label()}{where}" + (f"  -- {s.skip}" if s.skip else ""))
         return 0
 
     managed_logs = os.environ.get("FARCOOLER_LANE_GATE_LOG_DIR")
@@ -1035,14 +1027,24 @@ def gate(args):
     logdir = pathlib.Path(log_path) if log_path else pathlib.Path(tempfile.mkdtemp(
         prefix="lane-gate-logs-", dir=os.environ.get("FARCOOLER_SCRATCH") or None))
     logdir.mkdir(parents=True, exist_ok=True)
-    write_rust_evidence(logdir, proposal)
     tracked_before = tracked_state(repo)
     rows, failed = [], True  # until run_jobs says otherwise: an exception is a failure
     try:
-        failed = run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args)
+        failed = run_quick(quick, rows, repo, tmp, ctx, logdir, args)
+        if not failed and not args.quick_only:
+            try:
+                proposal = prepare_build_plan(repo, args, chosen, plans, inputs, ctx, workflows)
+            except ValueError as e:
+                rows.append(("lane-gate", "toolchain or build planning", f"FAIL: {e}", "", ""))
+                failed = True
+            else:
+                write_rust_evidence(logdir, proposal)
+                failed = run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args)
         row = tracked_change_row(tracked_before, repo)
         if row:
             rows.append(row)
+            if args.quick_only:
+                print(row[2], flush=True)
             failed = True
     except gate_disk.ResourceRefusal as e:
         print(f"lane-gate: resource hold: {e}", flush=True)
@@ -1055,13 +1057,46 @@ def gate(args):
             raise
     finally:
         try:
-            print_summary(rows, repo, args.base, logdir, failed, left_out if partial else [], summary_path(repo))
+            if not args.quick_only:
+                print_summary(rows, repo, args.base, logdir, failed, left_out if partial else [], summary_path(repo))
+            elif not failed:
+                print("lane-gate: quick checks passed", flush=True)
         except OSError as e:  # the table is on screen; only the saved copy needs room
             print(f"lane-gate: could not save the summary file: {e.strerror or e}", flush=True)
         shutil.rmtree(tmp, ignore_errors=True)
     if not failed and not partial and not args.keep_target and not args.landing and not args.dry_run:
         clean_target_after_pass(repo)
     return 1 if failed else 0
+
+
+def prepare_build_plan(repo, args, chosen, plans, inputs, ctx, workflows):
+    if not args.dry_run:
+        args.toolchain_env = toolchain_preflight(chosen, repo, os.environ)
+        if "CAPTURE_JDK" in args.toolchain_env:
+            ctx["steps.jdk21.outputs.path"] = args.toolchain_env["CAPTURE_JDK"]
+            plans["android"] = steps_for("android", workflows, ctx)
+    import landing_policy
+    proposal = rust_proposal(repo, args, chosen, landing_policy)
+    for step in plans["rust"] if "rust" in chosen else ():
+        if not step.skip:
+            landing_policy.apply_rust("rust", step, proposal)
+    if args.landing:
+        print("lane-gate: local landing Rust selection: " + "; ".join(proposal["reasons"]))
+        print(f"lane-gate: landing families: {landing_policy.families(chosen)}; workers: {args.workers}")
+
+    if "rust" in chosen:
+        print(f"lane-gate: Rust impact: {rust_impact(repo, inputs)}")
+        if proposal is None:
+            print("lane-gate: Rust coverage: full suite (selection unavailable)")
+        elif proposal["full"]:
+            print("lane-gate: Rust coverage: full suite (" + "; ".join(proposal["reasons"]) + ")")
+        elif not proposal["packages"]:
+            print(f"lane-gate: Rust coverage: no tests selected ({'; '.join(proposal['reasons'])}); "
+                  f"{len(proposal['skipped_binaries'])} test binaries skipped; CI on main runs the full suite")
+        else:
+            print(f"lane-gate: Rust coverage: nextest runs only {', '.join(proposal['packages'])}; "
+                  f"{len(proposal['skipped_binaries'])} test binaries skipped (rust-selection.json); CI on main runs the full suite (ov-1278)")
+    return proposal
 
 
 def tracked_state(repo):
@@ -1105,11 +1140,34 @@ def clean_target_after_pass(repo, say=print):
         say(f"lane-gate: removed {target} (the gate passed; --keep-target keeps it)", flush=True)
 
 
+def run_quick(quick, rows, repo, tmp, ctx, logdir, args):
+    import copy
+
+    settings = copy.copy(args)
+    settings.no_load_wait = True
+    for job, steps in quick.items():
+        if not steps:
+            continue
+        job_tmp = tmp / ("quick-" + job)
+        job_tmp.mkdir()
+        if run_one_job(job, quick, rows, repo, job_tmp, ctx, logdir, settings, quick=True):
+            return True
+    return False
+
+
 def run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args):
     """Run every chosen job's steps, appending a row per step to `rows`. True if any failed."""
     failed = False
     heavy = [j for j in chosen if j in HEAVY] and hl.lock_wanted(getattr(args, "no_lock", False))
     between = getattr(args, "release_between_jobs", False)
+    if getattr(args, "wait_for_unlock", False):
+        if {"swift-tests", "swift"} & set(chosen):
+            result = process_guard.run([str(repo / "scripts/wait-for-unlock")], cwd=repo)
+            if result.returncode:
+                rows.append(("landing", "wait-for-unlock", "FAIL: the screen stayed locked", "", ""))
+                return True
+        if heavy and not args.no_load_wait and not os.environ.get(hl.HELD_ENV):
+            hl.wait_for_load(float(os.environ.get("HEAVY_LOAD_LIMIT", hl.LOAD_LIMIT)), load=hl.load5)
     cache_session = contextlib.nullcontext()
     if os.environ.get("FARCOOLER_GATE_SCCACHE") == "1":
         import gate_sccache
@@ -1118,8 +1176,7 @@ def run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args):
         cache_session = gate_sccache.session(logdir)
     # By default one place in line covers all of this gate's heavy jobs, so gates finish one after
     # another, oldest first; releasing between jobs made nine gates each take nine times as long (ov-836).
-    # Always acquire heavy before cache: landing-gate's outer scripts/heavy
-    # already holds heavy. Reversing that order here can deadlock two gates.
+    # Always acquire heavy before cache. Reversing the order can deadlock gates.
     with (machine_lock(repo, "gate: " + ", ".join(j for j in chosen if j in HEAVY)) if heavy and not between else contextlib.nullcontext()), cache_session:
         if getattr(args, "landing", False):
             import landing_policy
@@ -1146,7 +1203,7 @@ def run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args):
     return failed
 
 
-def run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args):
+def run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args, *, quick=False):
     if getattr(args, "landing", False):
         import landing_policy
     failed = False
@@ -1154,7 +1211,8 @@ def run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args):
         wait_for_load()
     env = base_env(repo, tmp, ctx, args.strict_leaks)
     selected = getattr(args, "toolchain_env", None)
-    env.update(selected if selected is not None else job_env(j))
+    if not quick:
+        env.update(selected if selected is not None else job_env(j))
     if selected and "PATH" in selected:
         env["PATH"] = os.path.expanduser("~/.cargo/bin") + os.pathsep + env["PATH"]
     if getattr(args, "landing", False):
@@ -1165,10 +1223,11 @@ def run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args):
         env.update(hl.lean_cargo_env(repo))
     elif j in {"rust", "rust-lints"}:
         env.update(hl.prepare_lane_build(repo))
-    if j == "android" and ctx["steps.jdk21.outputs.path"]:
+    if j == "android" and not quick and ctx["steps.jdk21.outputs.path"]:
         env["CAPTURE_JDK"] = ctx["steps.jdk21.outputs.path"]
     env.update(flaky_env(logdir))
-    print(f"\n[{j}]", flush=True)
+    if not getattr(args, "quick_only", False):
+        print(f"\n[{j}]", flush=True)
     for s in plans[j]:
         stop_event = getattr(args, "stop_event", None)
         if stop_event and stop_event.is_set():
@@ -1180,15 +1239,19 @@ def run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args):
                 landing_policy.record_timing(logdir, j, s, f"skipped: {s.skip}", started, started)
             print(f"  skip {s.label()}  ({s.skip})")
             continue
-        print(f"  run  {s.label()}", flush=True)
+        if not getattr(args, "quick_only", False):
+            print(f"  run  {s.label()}", flush=True)
         # `env` itself, not a copy: what a step writes to $GITHUB_ENV (the
         # swift job's APP_NAME) is read back into it for the steps after
         # (ov-812). The step's own `env:` is laid over it inside run_step.
-        result, secs, counts, ok, log, output = run_step_safely(s, repo, env, logdir, tmp, getattr(args, "fail_fast", False))
+        result, secs, counts, ok, log, output = run_step_safely(
+            s, repo, env, logdir, tmp, getattr(args, "fail_fast", False), quick=quick)
         rows.append((j, s.label(), result, f"{secs:.0f}", counts))
         if getattr(args, "landing", False):
             landing_policy.record_timing(logdir, j, s, result, started, time.monotonic())
         if not ok:
+            if getattr(args, "quick_only", False):
+                print(f"  run  {s.label()}", flush=True)
             failed = True
             if stop_event:
                 stop_event.set()
@@ -1832,7 +1895,7 @@ def _self_test():
         expect("a plain fetch step stays green", row[3], True)
         global run_step
         real_run_step = run_step
-        run_step = lambda *a: (_ for _ in ()).throw(OSError("boom"))
+        run_step = lambda *a, **k: (_ for _ in ()).throw(OSError("boom"))
         try:
             row = run_step_safely(Step("x", "boom", "true\n"), t, {"PATH": "/usr/bin:/bin"}, logs, t)
         finally:

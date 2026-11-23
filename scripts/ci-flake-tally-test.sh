@@ -83,7 +83,7 @@ check "a failure with nothing to read is not dropped" \
   "$($TALLY --parse-log /dev/null)"
 
 report="$($TALLY --report $FX/manifest.tsv)"
-first="$(printf '%s\n' "$report" | grep -m1 -E '^ +1\.')"
+first="$(awk '/^ +1\./ && !seen++' <<< "$report")"
 check "the test that failed twice ranks first, with its count" \
   "  1. 2x  farcooler-daemon watch::answer_wake::tests::compose_codex_tests::the_screen_is_read_after_the_rollout_check  [nextest]" \
   "$first"

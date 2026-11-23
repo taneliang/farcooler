@@ -271,6 +271,84 @@ def workflow_checks(plans, files, step_type):
         ])
 
 
+# Wire is mostly source checks. These steps can compile tools or fixtures, or
+# have taken more than a minute on the landing runner (see reports/ov-1443).
+DEFERRED_WIRE = {
+    "python3 scripts/rust-select-test.py",
+    "HEAVY_LOCK_HELD=1 ./scripts/lane-gate.py --self-test",
+    "python3 scripts/lane-gate-lifetime-test.py",
+    "python3 scripts/gate-evidence-test.py",
+    "python3 scripts/engine-gate-test.py",
+    "./scripts/ios-ui-retry-test.sh",
+    "./scripts/ios-ui-lease-test.sh",
+    "./scripts/actionlint.sh",
+}
+QUICK_COMMANDS = {
+    "rust": {"./scripts/tmux-leak-check.py --self-test",
+             "./scripts/tmux-stale-sockets.py --self-test", "./scripts/test-leak-check.py --self-test"},
+    "swift-tests": {"./scripts/macos-test-wrapper-test.sh"},
+    "swift": {"./scripts/gh-download-test.sh", "./scripts/macos-entitlements-test.sh",
+              "./scripts/wait-for-unlock-test.sh", "./scripts/swift-test-guard-test.sh",
+              "./scripts/test-leak-check.py --self-test",
+              "./scripts/mac-capture-stop-test.sh", "./scripts/capture-duplicates-test.sh"},
+    "ios": {"./scripts/ios-ui-shards.py --check", "./scripts/ios-ui-shards.py --self-test",
+            "./scripts/ios-ui-pick-simulator.py --self-test", "./scripts/ios-ui-plan.py --self-test",
+            "./scripts/import-ios-certificate-test.sh"},
+    "web": {"./scripts/web-client-tree-check.py --self-test", "./scripts/web-client-tree-check.py",
+            "node scripts/size-gate.mjs --self-test"},
+}
+
+
+def split_quick(plans, chosen, base, step_type, *, typeshare_ready, review):
+    """Split build-free checks from the expanded local landing plan."""
+    quick, remaining = {}, dict(plans)
+    for job in chosen:
+        early, later, origin_checks = [], [], []
+        quick[job], remaining[job] = early, later
+        for step in plans[job]:
+            first = step.label().removesuffix(" ...")
+            def with_run(run):
+                return step_type(job, step.name, run, step.cwd, step.env)
+
+            if step.skip:
+                later.append(step)
+            elif job == "wire" and step.name in {"Baseline did not grow", "Daemon layers"}:
+                # Review can compare against its pinned base without fetching.
+                # The landing still compares against the freshly fetched main.
+                local, fetch, remote = step.run.partition("git fetch --no-tags origin main\n")
+                if not fetch:
+                    raise ValueError(f"cannot split the base comparison in {step.name}")
+                if review:
+                    early.append(with_run(local + remote.replace("FETCH_HEAD", shlex.quote(base))))
+                else:
+                    if local.strip() and not all(line.startswith("#") for line in local.strip().splitlines()):
+                        early.append(with_run(local))
+                    origin_checks.append(with_run(fetch + remote))
+            elif job == "wire" and step.name == "The generated wire types are current" and typeshare_ready:
+                early.append(with_run(step.run.replace("./scripts/gen-wire-types.sh\n",
+                                                       "./scripts/gen-wire-types.sh --check\n", 1)))
+            elif job == "wire" and step.name.startswith("Install typeshare") and typeshare_ready:
+                # A pinned executable was already verified. Retain the install
+                # and generation path below when the tool is cold.
+                continue
+            elif job == "wire" and (first in DEFERRED_WIRE or step.name.startswith("Install typeshare")
+                                    or step.name == "The generated wire types are current"):
+                later.append(step)
+            elif job in {"wire", "doc-comments"} or first in QUICK_COMMANDS.get(job, ()) or (
+                    job == "tunnel" and step.name == "Check gofmt"):
+                early.append(step)
+            elif first == "python3 scripts/swift-build-cache.py self-test":
+                early.append(with_run(first + "\n"))
+                later.append(with_run(step.run.replace(first + "\n", "", 1)))
+            else:
+                later.append(step)
+        # Scan the tree first so a source violation returns in seconds.
+        if job == "wire":
+            early.sort(key=lambda step: step.run.strip() != "./scripts/shared-core-lint.py")
+            early.extend(origin_checks)
+    return quick, remaining
+
+
 def fold_base(repo, given):
     """Read the same exact workspace/item/candidate index as daemon process_base.
 
@@ -426,8 +504,8 @@ def forced_full(repo, load_module, reason):
         return proposal
 
 
-def apply(plans, proposal):
-    """Change only the local default-host nextest; keep features/lints/docs full."""
+def apply_local(plans):
+    """Apply local platform setup and retain the release-only skips."""
     for job, steps in plans.items():
         for step in steps:
             if step.skip:
@@ -445,7 +523,14 @@ def apply(plans, proposal):
                     step.run = "./scripts/macos-entitlements-test.sh\n"
                 else:
                     step.skip = "local landing: release bundle and its consumers run in CI"
-            apply_rust(job, step, proposal)
+
+
+def apply(plans, proposal):
+    """Keep features/lints/docs full and narrow only the default-host nextest."""
+    apply_local(plans)
+    for step in plans.get("rust", ()):
+        if not step.skip:
+            apply_rust("rust", step, proposal)
 
 
 def apply_rust(job, step, proposal):

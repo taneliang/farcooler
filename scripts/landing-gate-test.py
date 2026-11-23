@@ -2,6 +2,7 @@
 """ov-1189: combined group selection, CI coverage floor and build-free reports."""
 import importlib.util
 import io
+import json
 import os
 import re
 from pathlib import Path
@@ -694,6 +695,47 @@ class LandingTests(unittest.TestCase):
             self.assertNotIn("android", selected(lane.changed_files(repo, "HEAD")))
             with self.assertRaises(SystemExit):
                 lane.changed_files(repo, "missing-base")
+
+            # Use the command wired into Main, and a real lint violation on a
+            # committed candidate that would also select platform builds.
+            bundle = json.loads((ROOT / ".claude/agent/reports/ov-1071/workflow-main.json").read_text())
+            stages = bundle["definition"]["stages"]
+            quick = next((s for s in stages if s["id"] == "quick-checks"), None)
+            self.assertIsNotNone(quick, "Main needs a quick-check stage before review")
+            self.assertLess(stages.index(quick), next(i for i, s in enumerate(stages) if isinstance(s["kind"], dict)))
+            self.assertEqual(stages[stages.index(quick) - 1]["id"], "build")
+            self.assertEqual(quick["routes"]["rejected"], {"Step": "build"})
+            command = bundle["adapter"]["config"]["checks"][int(quick["operation"]["arguments"][1])]
+            for name in ("shared-core-lint.py", "shared-core-baseline.json"):
+                shutil.copy(ROOT / "scripts" / name, repo / "scripts" / name)
+            for name in ("crates/core/src/usage_words.rs", "crates/core/src/phrase.rs"):
+                write(name, "")
+            write("crates/client/src/testdata/workflow-labels.json", "{}\n")
+            ci = repo / ".github/workflows/ci.yml"
+            ci.write_text(ci.read_text().replace("- run: true", "- run: ./scripts/shared-core-lint.py", 1))
+            git("add", ".")
+            git("commit", "-qm", "install lint in fixture")
+            base = git("rev-parse", "HEAD")
+            candidate_env = {**engine, **command["environment"], "FARCOOLER_BASE": base}
+            path = "apps/macos/Sources/FarCooler/Planted.swift"
+            write(path, 'let title = "Something went wrong here"\n')
+            git("add", "--", path)
+            git("commit", "-qm", "build introduces a shared-core violation")
+            check = subprocess.run(command["argv"], cwd=repo, env=candidate_env, capture_output=True, text=True)
+            landing = subprocess.run(["bash", "scripts/landing-gate"], cwd=repo, env=candidate_env,
+                                     capture_output=True, text=True)
+            for result in (check, landing):
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("ratchet: " + path, result.stdout)
+                self.assertNotIn("unexpected-build", result.stdout + result.stderr)
+                self.assertNotIn("local landing Rust selection", result.stdout)
+
+            write(path, 'let title = "Ready"\n')
+            git("add", "--", path)
+            git("commit", "-qm", "builder repairs the violation")
+            check = subprocess.run(command["argv"], cwd=repo, env=candidate_env, capture_output=True, text=True)
+            self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
+            self.assertIn("quick checks passed", check.stdout)
 
 
 if __name__ == "__main__":

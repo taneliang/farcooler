@@ -110,6 +110,20 @@ class LandingTests(unittest.TestCase):
         self.assertEqual([s.run.strip() for s in plans["wire"]],
                          ["./scripts/actionlint.sh", "./scripts/ios-ui-shards.py --check"])
 
+    def test_quick_checks_precede_fixture_compilation(self):
+        workflows = {"ci": (ROOT / ".github/workflows/ci.yml").read_text()}
+        ctx = lane.make_ctx(ROOT, ROOT, "HEAD")
+        plans = {"wire": lane.steps_for("wire", workflows, ctx)}
+        fixture = next(step for step in plans["wire"]
+                       if step.run.strip() == "python3 scripts/rust-select-test.py")
+        for review in (False, True):
+            with self.subTest(review=review):
+                quick, remaining = policy.split_quick(plans, ["wire"], "HEAD", lane.Step,
+                                                      typeshare_ready=True, review=review)
+                self.assertEqual(quick["wire"][0].run.strip(), "./scripts/shared-core-lint.py")
+                self.assertNotIn(fixture, quick["wire"])
+                self.assertIn(fixture, remaining["wire"])
+
     def test_gate_script_consumers_and_unknowns_stay_covered(self):
         for path, required in (("scripts/lane-gate.py", set(lane.JOBS)),
                                ("apps/macos/test.sh", {"swift-tests"}),
@@ -134,16 +148,7 @@ class LandingTests(unittest.TestCase):
                 'import json, os, sys\n'
                 'with open(os.environ["EVENTS"], "a") as f: '
                 'f.write(json.dumps(sys.argv[1:]) + "\\n")\n'
-                'if "--disk-preflight" in sys.argv: sys.exit(0)\n'
-                'if "--dry-run" in sys.argv: print("lane-gate: 1 changed file(s); jobs: rust, swift-tests")\n'
-                'else: sys.exit(int(os.environ["GATE_EXIT"]))\n')
-            for name, body in (
-                ("wait-for-unlock", 'echo unlock >> "$EVENTS"\n'),
-                ("heavy", 'echo heavy >> "$EVENTS"\nshift\nexec "$@"\n'),
-            ):
-                path = scripts / name
-                path.write_text("#!/bin/sh\n" + body)
-                path.chmod(0o755)
+                'sys.exit(int(os.environ["GATE_EXIT"]))\n')
             for code in (0, 7):
                 events.write_text("")
                 done = subprocess.run(["/bin/sh", "-c", "scripts/landing-gate --base main --log-dir logs"],
@@ -151,12 +156,34 @@ class LandingTests(unittest.TestCase):
                                       capture_output=True, text=True)
                 self.assertEqual(done.returncode, code, done.stdout + done.stderr)
                 calls = events.read_text().splitlines()
-                self.assertEqual(calls[2:4], ["unlock", "heavy"])
-                args = ["--fail-fast", "--landing", "--keep-target", "--base", "main", "--log-dir", "logs"]
-                self.assertEqual(json.loads(calls[0]), [*args[:3], "--disk-preflight", *args[3:]])
-                self.assertEqual(json.loads(calls[1]), [*args[:3], "--dry-run", *args[3:]])
-                self.assertEqual(json.loads(calls[4]), args)
+                args = ["--fail-fast", "--landing", "--keep-target", "--wait-for-unlock",
+                        "--base", "main", "--log-dir", "logs"]
+                self.assertEqual([json.loads(call) for call in calls], [args])
                 self.assertIn("landing-gate: PASS" if code == 0 else "landing-gate: FAIL", done.stdout)
+
+    def test_mac_build_admission_waits_for_screen_and_takes_the_heavy_lock(self):
+        import gate_disk
+        events = []
+
+        @contextlib.contextmanager
+        def lock(*_):
+            events.append("lock")
+            yield
+            events.append("release")
+
+        def unlock(command, **_):
+            self.assertEqual(command, [str(ROOT / "scripts/wait-for-unlock")])
+            events.append("unlock")
+            return subprocess.CompletedProcess(command, 0)
+
+        args = argparse.Namespace(landing=True, wait_for_unlock=True, no_load_wait=True)
+        with patch.dict(os.environ, {}, clear=True), \
+                patch.object(lane.process_guard, "run", side_effect=unlock), \
+                patch.object(lane, "machine_lock", side_effect=lock), \
+                patch.object(gate_disk, "admit", side_effect=lambda *_: events.append("disk")), \
+                patch.object(policy, "run", side_effect=lambda *_: events.append("build") or False):
+            self.assertFalse(lane.run_jobs(["swift-tests"], {}, [], ROOT, ROOT, {}, ROOT, args))
+        self.assertEqual(events, ["unlock", "lock", "disk", "build", "release"])
 
     def test_fixture_hooks_do_not_inherit_the_agents_private_route(self):
         with tempfile.TemporaryDirectory() as temporary, \
@@ -245,7 +272,7 @@ class LandingTests(unittest.TestCase):
                         patch.object(lane.tempfile, "mkdtemp", return_value=str(repo / ".git/run")):
                     os.environ.pop("GIT_OPTIONAL_LOCKS", None)
                     with self.assertRaisesRegex(RuntimeError, "first planning read"):
-                        lane.gate(argparse.Namespace(worktree=str(ROOT), base="HEAD", landing=landing))
+                        lane.gate(argparse.Namespace(worktree=str(ROOT), base="HEAD", landing=landing, quick_only=False))
                 self.assertEqual(index.stat().st_mtime_ns == before, landing)
 
     def test_plain_runner_can_be_loaded_without_optional_landing_policy(self):
