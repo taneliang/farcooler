@@ -859,9 +859,29 @@ fn seed_nextest_archive(tree: &Path) {
     archive.into_inner().unwrap().finish().unwrap();
 }
 
+pub(super) fn incremental_cargo_output(package: &Path, target: &Path) -> Vec<PathBuf> {
+    std::fs::create_dir_all(package.join("src")).unwrap();
+    std::fs::write(package.join("Cargo.toml"), concat!(
+        "[package]\nname = \"cleanup_fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        "[lib]\ncrate-type = [\"rlib\", \"staticlib\"]\n",
+    )).unwrap();
+    std::fs::write(package.join("src/lib.rs"), "pub fn built() -> u64 { 1428 }").unwrap();
+    let output = std::process::Command::new(env!("CARGO")).current_dir(package)
+        .args(["build", "--offline", "--manifest-path"]).arg(package.join("Cargo.toml"))
+        .env("CARGO_TARGET_DIR", target).env("CARGO_INCREMENTAL", "1")
+        .env_remove("CARGO_BUILD_BUILD_DIR").env_remove("CARGO_BUILD_TARGET")
+        .output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let incremental = target.join("debug/incremental");
+    let unit = std::fs::read_dir(incremental).unwrap().next().unwrap().unwrap().path();
+    let session = std::fs::read_dir(unit).unwrap().map(|entry| entry.unwrap().path())
+        .find(|path| path.is_dir()).unwrap();
+    ["dep-graph.bin", "query-cache.bin", "work-products.bin"].map(|file| session.join(file)).to_vec()
+}
+
 #[tokio::test]
 async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output() {
-    let (_dir, runtime, group, active_tree) = building_group(None).await;
+    let (dir, runtime, group, active_tree) = building_group(None).await;
     let layouts = [
         ("target/debug/deps/runner", b"\x7fELFtest".as_slice()),
         ("crates/web/target/wasm32-unknown-unknown/debug/deps/site.wasm", b"\0asm\x01\0\0\0"),
@@ -871,6 +891,7 @@ async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output(
     std::fs::write(runtime.repository().join(".git/info/exclude"),
         "/target/\n/crates/web/target/\n/apps/macos/.build/\n/apps/shared/AgentKit/.build/\n").unwrap();
     let mut orphan_trees = Vec::new();
+    let mut orphan_caches = Vec::new();
     for (separator, digit) in [('-', "a"), (':', "b")] {
         let tree = runtime.root.join(format!("tree-wf1{separator}{}", digit.repeat(64)));
         adapters::git(&runtime.repository(), &["worktree", "add", "--detach", tree.to_str().unwrap(), "HEAD"]).await.unwrap();
@@ -891,6 +912,11 @@ async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output(
             std::fs::write(output_map, serde_json::to_vec(&serde_json::json!({"src": {"object": path}})).unwrap()).unwrap();
         }
         seed_nextest_archive(&tree);
+        // Cargo cannot compile into a path containing the PATH separator.
+        // The old colon spelling is still covered by the other artifacts.
+        if separator == '-' {
+            orphan_caches.extend(incremental_cargo_output(&dir.path().join("cargo-fixture"), &tree.join("target")));
+        }
         std::fs::write(tree.join("uncommitted.txt"), b"keep this").unwrap();
         orphan_trees.push(tree);
     }
@@ -903,9 +929,11 @@ async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output(
     std::fs::write(&dep, format!("{}: src/lib.rs\n\n{}: src/lib.rs\n",
         dep.display(), live_output.display())).unwrap();
     seed_nextest_archive(&active_tree);
+    let active_caches = incremental_cargo_output(&dir.path().join("cargo-fixture"), &active_tree.join("target"));
     runtime.release_orphan_builds(std::slice::from_ref(&active_tree)).await.unwrap();
     assert!(live_output.is_file());
     assert!(active_tree.join("target/rust-tests.tar.zst").is_file());
+    assert!(active_caches.iter().all(|path| path.is_file()));
 
     let root = runtime.root.clone();
     drop(runtime);
@@ -919,13 +947,15 @@ async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output(
     for tree in &orphan_trees {
         assert!(tree.join(layouts[0].0).is_file());
     }
+    assert!(orphan_caches.iter().all(|path| path.is_file()));
     drop(reader);
     drop(lock);
     let (stop, shutdown) = tokio::sync::watch::channel(false);
     let task = tokio::spawn(async move { runtime.run(shutdown).await.unwrap(); });
     tokio::time::timeout(Duration::from_secs(30), async {
-        while orphan_trees.iter().any(|tree| tree.join("target/rust-tests.tar.zst").exists()
-            || layouts.iter().any(|(file, _)| tree.join(file).exists())) {
+        while orphan_caches.iter().any(|path| path.exists())
+            || orphan_trees.iter().any(|tree| tree.join("target/rust-tests.tar.zst").exists()
+                || layouts.iter().any(|(file, _)| tree.join(file).exists())) {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }).await.unwrap();

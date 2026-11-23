@@ -1,9 +1,9 @@
 //! Legacy and adopted trees can contain a person's files even inside ignored
 //! build directories. Inventory recognized compiler artifacts individually.
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, Metadata, OpenOptions};
-use std::io::{self, Read};
+use std::io::{self, Read, Seek, SeekFrom};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
@@ -31,19 +31,20 @@ impl ArtifactPlan {
         let mut plan = Self(Vec::new());
         let gate_archive = tree.join("target/rust-tests.tar.zst");
         for (path, meta) in inventory.files {
-            let layout = if inventory.cargo.contains(&path) {
+            let layout = if inventory.cargo.get(&path).is_some_and(|window| window.contains(&meta)) {
                 Some(Layout::Cargo)
-            } else if inventory.swift.contains(&path) {
+            } else if inventory.swift.get(&path).is_some_and(|window| window.contains(&meta)) {
                 Some(Layout::Swift)
             } else {
                 None
             };
-            let recognized = match layout {
+            let recognized = inventory.incremental.get(&path).is_some_and(|original| same_file(&meta, original)) || match layout {
                 Some(layout) => layout.recognizes(&path)?,
                 None => path == gate_archive && nextest_archive(&path, tree, &tree.join("target")).unwrap_or(false),
             };
             if recognized { plan.0.push((path, meta)); }
         }
+        plan.0.sort_by_key(|(path, _)| path.file_name().is_some_and(|name| name == "work-products.bin"));
         Ok(plan)
     }
 
@@ -52,15 +53,36 @@ impl ArtifactPlan {
     pub(super) fn release(self, folder: &Path) -> io::Result<u64> {
         let mut bytes = 0u64;
         let mut directories = BTreeSet::new();
+        let mut unlinked = BTreeMap::new();
         for (path, original) in self.0 {
             let parent = path.parent().expect("artifact has a parent");
+            let key = (original.dev(), original.ino());
             let current = path.symlink_metadata()?;
+            let expected = unlinked.get(&key).unwrap_or(&original);
             if !current.is_file() || parent.canonicalize()? != parent
-                || (current.dev(), current.ino(), current.len(), current.mtime(), current.mtime_nsec())
-                    != (original.dev(), original.ino(), original.len(), original.mtime(), original.mtime_nsec()) {
+                || !same_file(&current, expected) {
                 return Err(io::Error::other("generated artifact changed during cleanup"));
             }
+            // Removing one link changes the shared inode's ctime. Keep the
+            // inode open so we can revalidate any other names in this plan.
+            let shared = if current.nlink() > 1 {
+                let file = open_regular(&path)?;
+                if !same_file(&file.metadata()?, &current) {
+                    return Err(io::Error::other("generated artifact changed during cleanup"));
+                }
+                Some(file)
+            } else {
+                None
+            };
             fs::remove_file(&path)?;
+            if let Some(file) = shared {
+                let after = file.metadata()?;
+                if after.nlink() != current.nlink() - 1 || after.len() != current.len()
+                    || after.modified()? != current.modified()? {
+                    return Err(io::Error::other("generated artifact changed during cleanup"));
+                }
+                unlinked.insert(key, after);
+            }
             bytes = bytes.saturating_add(original.len());
             for dir in parent.ancestors().take_while(|p| p.starts_with(folder)) {
                 if !directories.insert(dir.to_owned()) { break; }
@@ -76,10 +98,35 @@ impl ArtifactPlan {
     }
 }
 
+fn changed(meta: &Metadata) -> (i64, i64) { (meta.ctime(), meta.ctime_nsec()) }
+
+fn same_file(current: &Metadata, original: &Metadata) -> bool {
+    (current.dev(), current.ino(), current.len(), changed(current))
+        == (original.dev(), original.ino(), original.len(), changed(original))
+        && (current.mtime(), current.mtime_nsec()) == (original.mtime(), original.mtime_nsec())
+}
+
+type ChangeTime = (i64, i64);
+
+#[derive(Clone, Copy)]
+struct BuildWindow {
+    start: Option<ChangeTime>,
+    end: ChangeTime,
+}
+
+impl BuildWindow {
+    fn contains(self, meta: &Metadata) -> bool {
+        let time = changed(meta);
+        self.start.is_none_or(|start| start <= time) && time <= self.end
+    }
+}
+
 #[derive(Default)]
 struct Inventory {
-    cargo: BTreeSet<PathBuf>,
-    swift: BTreeSet<PathBuf>,
+    cargo: BTreeMap<PathBuf, BuildWindow>,
+    swift: BTreeMap<PathBuf, BuildWindow>,
+    incremental: BTreeMap<PathBuf, Metadata>,
+    fingerprints: BTreeMap<PathBuf, BTreeMap<String, PathBuf>>,
     files: Vec<(PathBuf, Metadata)>,
 }
 
@@ -91,22 +138,25 @@ impl Inventory {
             return Ok(());
         }
         if meta.is_dir() && !is_repository(path) {
+            if incremental_session(path) {
+                incremental_outputs(path, &mut self.incremental);
+            }
             for entry in fs::read_dir(path)? {
                 self.scan(tree, &entry?.path(), device)?;
             }
         } else if meta.is_file() {
             let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
             if let Some(stem) = name.strip_suffix(".d") {
-                self.cargo_outputs(tree, path, stem);
+                self.cargo_outputs(tree, path, stem, &meta);
             } else if name == "output-file-map.json" || name.ends_with("-OutputFileMap.json") {
-                self.swift_outputs(tree, path);
+                self.swift_outputs(tree, path, &meta);
             }
             self.files.push((path.to_owned(), meta));
         }
         Ok(())
     }
 
-    fn cargo_outputs(&mut self, tree: &Path, path: &Path, stem: &str) {
+    fn cargo_outputs(&mut self, tree: &Path, path: &Path, stem: &str, meta: &Metadata) {
         let Some(data) = read_metadata(path) else { return };
         let Some(parent) = path.parent() else { return };
         let mut rules = data.lines().filter_map(|line| line.split_once(": "));
@@ -121,26 +171,157 @@ impl Inventory {
                 .is_some_and(|name| name == stem || name.strip_prefix("lib") == Some(stem))
         };
         if first != path && !same_target(&first) { return; }
-        if first != path { self.cargo.insert(first); }
+        // A stale pathname and matching binary magic do not identify the
+        // original inode. ctime detects renames, copies, and in-place writes
+        // even when a replacement preserves or restores its mtime.
+        let window = cargo_build_window(path, stem, meta, &mut self.fingerprints)
+            .unwrap_or(BuildWindow { start: None, end: changed(meta) });
+        if first != path { self.cargo.insert(first, window); }
         for (name, deps) in rules {
             let output = resolve(name);
             if deps == dependencies && output != path && same_target(&output) {
-                self.cargo.insert(output);
+                self.cargo.insert(output, window);
             }
         }
     }
 
-    fn swift_outputs(&mut self, tree: &Path, path: &Path) {
+    fn swift_outputs(&mut self, tree: &Path, path: &Path, meta: &Metadata) {
         let Some(map) = read_metadata(path).and_then(|data| serde_json::from_str::<Value>(&data).ok()) else { return };
         let Some(sources) = map.as_object() else { return };
         for source in sources.values().filter_map(Value::as_object) {
             for (kind, output) in source {
                 if matches!(kind.as_str(), "object" | "swiftmodule" | "swift-dependencies" | "diagnostics") {
-                    if let Some(output) = output.as_str() { self.swift.insert(tree.join(output)); }
+                    if let Some(output) = output.as_str() {
+                        self.swift.insert(tree.join(output), BuildWindow { start: None, end: changed(meta) });
+                    }
                 }
             }
         }
     }
+}
+
+// Rustc emits dep-info before linking. A matching Cargo fingerprint brackets
+// that rustc invocation so its later outputs can also be identified.
+fn cargo_build_window(dep_info: &Path, stem: &str, dep: &Metadata,
+    by_profile: &mut BTreeMap<PathBuf, BTreeMap<String, PathBuf>>) -> Option<BuildWindow>
+{
+    let deps = dep_info.parent()?;
+    if deps.file_name()? != "deps" { return None; }
+    let (name, hash) = stem.rsplit_once('-')?;
+    if hash.len() != 16 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) { return None; }
+    // Cargo uses the package name for the directory and rustc normalizes its
+    // crate name. The hash identifies the unit even when the names differ.
+    let fingerprints = by_profile.entry(deps.parent()?.join(".fingerprint")).or_insert_with_key(|dir| {
+        if !dir.symlink_metadata().is_ok_and(|meta| meta.is_dir()) { return BTreeMap::new(); }
+        fs::read_dir(dir).into_iter().flatten().filter_map(Result::ok).filter_map(|entry| {
+            if !entry.file_type().ok()?.is_dir() { return None; }
+            let filename = entry.file_name();
+            let (_, hash) = filename.to_str()?.rsplit_once('-')?;
+            Some((hash.to_owned(), entry.path()))
+        }).collect()
+    });
+    let fingerprint = fingerprints.get(hash)?;
+    if fingerprint.canonicalize().ok()? != *fingerprint { return None; }
+    let start = changed(&open_regular(&fingerprint.join("invoked.timestamp")).ok()?.metadata().ok()?);
+    if changed(dep) < start { return None; }
+    for entry in fs::read_dir(&fingerprint).ok()?.filter_map(Result::ok) {
+        let filename = entry.file_name();
+        let Some(marker) = filename.to_str().and_then(|name| name.strip_suffix(".json")) else { continue };
+        if !marker.ends_with(&format!("-{name}")) { continue; }
+        let mut stamp_file = open_regular(&fingerprint.join(marker)).ok()?;
+        let stamp = stamp_file.metadata().ok()?;
+        let mut digest = [0; 16];
+        if stamp.len() != 16 || stamp_file.read_exact(&mut digest).is_err()
+            || !digest.iter().all(u8::is_ascii_hexdigit)
+            || open_regular(&fingerprint.join(format!("dep-{marker}"))).is_err() { continue; }
+        let completion = open_regular(&entry.path()).ok()?;
+        let end = changed(&completion.metadata().ok()?);
+        if changed(dep) <= changed(&stamp) && changed(&stamp) <= end {
+            return Some(BuildWindow { start: Some(changed(dep)), end });
+        }
+    }
+    None
+}
+
+fn base36(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+}
+
+fn incremental_session(path: &Path) -> bool {
+    let Some((unit, incremental)) = path.parent().and_then(|unit| Some((unit, unit.parent()?))) else { return false };
+    if incremental.file_name().is_none_or(|name| name != "incremental") { return false; }
+    let Some((_, hash)) = unit.file_name().and_then(|name| name.to_str()).and_then(|name| name.rsplit_once('-'))
+    else { return false };
+    let Some(session) = path.file_name().and_then(|name| name.to_str()).and_then(|name| name.strip_prefix("s-"))
+    else { return false };
+    // Finalized rustc session directories carry a timestamp, a disambiguator
+    // and a hash. A session ending in "-working" was never finalized.
+    let Some((timestamp, rest)) = session.split_once('-') else { return false };
+    let Some((disambiguator, session_hash)) = rest.split_once('-') else { return false };
+    base36(hash) && base36(timestamp) && base36(disambiguator) && base36(session_hash)
+        && session_hash != "working"
+        && incremental.parent().is_some_and(|profile|
+            profile.join(".fingerprint").symlink_metadata().is_ok_and(|meta| meta.is_dir()))
+}
+
+const RUSTC_END: &[u8] = b"rust-end-file";
+
+fn rustc_cache_header(file: &mut File) -> Option<Vec<u8>> {
+    let mut prefix = [0; 7];
+    file.read_exact(&mut prefix).ok()?;
+    if &prefix[..4] != b"RSIC" || prefix[6] == 0 { return None; }
+    let mut version = vec![0; usize::from(prefix[6])];
+    file.read_exact(&mut version).ok()?;
+    if !version.first()?.is_ascii_digit() || !version.iter().all(|b| b.is_ascii_graphic() || *b == b' ') {
+        return None;
+    }
+    let mut end = [0; RUSTC_END.len()];
+    file.seek(SeekFrom::End(-(end.len() as i64))).ok()?;
+    file.read_exact(&mut end).ok()?;
+    (&end == RUSTC_END).then(|| [prefix.as_slice(), &version].concat())
+}
+
+fn incremental_outputs(session: &Path, outputs: &mut BTreeMap<PathBuf, Metadata>) {
+    let index = session.join("work-products.bin");
+    let Some((mut file, meta, header)) = open_regular(&index).ok().and_then(|mut file| {
+        let meta = file.metadata().ok()?;
+        let header = rustc_cache_header(&mut file)?;
+        Some((file, meta, header))
+    }) else { return };
+    if meta.len() > METADATA_LIMIT { return; }
+    let mut products = Vec::new();
+    if file.seek(SeekFrom::Start(header.len() as u64)).is_err()
+        || file.take(METADATA_LIMIT).read_to_end(&mut products).is_err() { return; }
+    let Ok(entries) = fs::read_dir(session) else { return };
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        let Some(candidate) = open_regular(&path).ok().and_then(|mut file| {
+            let candidate = file.metadata().ok()?;
+            if candidate.dev() != meta.dev() || changed(&candidate) > changed(&meta) { return None; }
+            let filename = entry.file_name();
+            let name = filename.to_str()?;
+            let verified = match name {
+                "dep-graph.bin" | "query-cache.bin" => rustc_cache_header(&mut file)? == header,
+                // Rustc's opaque encoder writes the saved filename as its
+                // length, UTF-8 bytes and a 0xc1 string terminator. Only the
+                // formats rustc saves here are eligible, even if named by
+                // the index. Unknown formats and user files are retained.
+                _ => {
+                    let (stem, ext) = name.split_once('.')?;
+                    if !base36(stem) || !matches!(ext, "o" | "rmeta") { return None; }
+                    let length = u8::try_from(name.len()).ok().filter(|n| *n < 128)?;
+                    let encoded = [&[length], name.as_bytes(), &[0xc1]].concat();
+                    products.windows(encoded.len()).any(|bytes| bytes == encoded)
+                        && Layout::Cargo.recognizes(&path).ok()?
+                }
+            };
+            verified.then_some(candidate)
+        }) else { continue };
+        outputs.insert(path, candidate);
+    }
+    // Leave the index until all other planned files in the session have been
+    // processed. A later sweep can still verify the remainder after an error.
+    outputs.insert(index, meta);
 }
 
 fn read_metadata(path: &Path) -> Option<String> {

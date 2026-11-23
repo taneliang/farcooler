@@ -263,26 +263,23 @@ async fn waiting_adopted_worktree_releases_build_output_and_reclaims_older_outpu
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, contents).unwrap();
     }
+    let package = dir.path().join("cargo-fixture");
+    let current_caches = super::super::build_cleanup_tests::incremental_cargo_output(&package, &tree.join("target"));
     wait_for_adopted_review(&mut runtime, &workspace).await;
+    assert!(current_caches.iter().all(|path| !path.exists()));
+    assert!(!tree.join("target/debug/libcleanup_fixture.rlib").exists());
     for (path, contents) in personal {
         assert_eq!(std::fs::read(tree.join(path)).unwrap(), contents);
     }
     let records = runtime.store.workflow_cleanups(&workspace).unwrap();
     assert!(!tree.join("target/debug/deps/built").exists(), "{records:?}");
     assert!(tree.join("result.txt").is_file());
-    assert!(records.iter().any(|record| record.result.as_ref().is_some_and(|r| r.bytes_freed == 12)));
+    assert!(records.iter().any(|record| record.result.as_ref().is_some_and(|r| r.bytes_freed > 12)));
     // Exercise Cargo's actual cache tag and dep-info, including when the
     // target directory is selected only through CARGO_TARGET_DIR.
-    let package = dir.path().join("cargo-fixture");
-    std::fs::create_dir_all(package.join("src")).unwrap();
-    std::fs::write(package.join("Cargo.toml"), "[package]\nname = \"previous\"\nversion = \"0.1.0\"\n").unwrap();
-    std::fs::write(package.join("src/lib.rs"), "pub fn built() {}").unwrap();
-    let output = std::process::Command::new(env!("CARGO"))
-        .args(["build", "--offline", "--manifest-path"]).arg(package.join("Cargo.toml"))
-        .env("CARGO_TARGET_DIR", tree.join(".artifacts"))
-        .output().unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    let rlib = std::fs::read_dir(tree.join(".artifacts/debug/deps")).unwrap()
+    let target = tree.join(".artifacts");
+    let mut old_artifacts = super::super::build_cleanup_tests::incremental_cargo_output(&package, &target);
+    let rlib = std::fs::read_dir(target.join("debug/deps")).unwrap()
         .map(|entry| entry.unwrap().path())
         .find(|path| path.extension().is_some_and(|ext| ext == "rlib")).unwrap();
     let old_binary = tree.join("target/debug/deps/from-old-engine");
@@ -290,7 +287,26 @@ async fn waiting_adopted_worktree_releases_build_output_and_reclaims_older_outpu
     let dep = old_binary.with_extension("d");
     std::fs::write(&dep, format!("{}: src/lib.rs\n\n{}: src/lib.rs\n",
         dep.display(), old_binary.display())).unwrap();
-    let old_artifacts = [old_binary, rlib, tree.join(".artifacts/debug/libprevious.rlib")];
+    old_artifacts.push(old_binary);
+    // Cargo still names both archives in dep-info. Replace one inode and
+    // overwrite the other in place, preserving the original mtimes.
+    let linked = rlib.with_extension("a");
+    let exported = target.join("debug/libcleanup_fixture.rlib");
+    let personal_archive = std::fs::read(&rlib).unwrap();
+    let stem = linked.file_stem().unwrap().to_str().unwrap().strip_prefix("lib").unwrap();
+    let deps_info = std::fs::read_to_string(target.join("debug/deps").join(format!("{stem}.d"))).unwrap();
+    let export_info = std::fs::read_to_string(exported.with_extension("d")).unwrap();
+    for (dep_info, archive) in [(&deps_info, &linked), (&export_info, &exported)] {
+        assert!(dep_info.contains(&archive.to_str().unwrap().replace(' ', "\\ ")));
+    }
+    let temporary = dir.path().join("personal-prebuilt.a");
+    let mtime = exported.metadata().unwrap().modified().unwrap();
+    std::fs::write(&temporary, &personal_archive).unwrap();
+    std::fs::rename(&temporary, &exported).unwrap();
+    std::fs::File::open(&exported).unwrap().set_modified(mtime).unwrap();
+    let mtime = linked.metadata().unwrap().modified().unwrap();
+    std::fs::write(&linked, &personal_archive).unwrap();
+    std::fs::File::open(&linked).unwrap().set_modified(mtime).unwrap();
     let unrelated_archive = zstd::stream::encode_all(b"personal archive".as_slice(), 1).unwrap();
     std::fs::write(tree.join("target/rust-tests.tar.zst"), &unrelated_archive).unwrap();
     runtime.refresh_disk_usage().unwrap().await.unwrap();
@@ -310,6 +326,9 @@ async fn waiting_adopted_worktree_releases_build_output_and_reclaims_older_outpu
     runtime.pump(100).await.unwrap();
     for artifact in old_artifacts {
         assert!(!artifact.exists(), "retained {}", artifact.display());
+    }
+    for path in [linked, exported] {
+        assert_eq!(std::fs::read(path).unwrap(), personal_archive);
     }
     assert_eq!(std::fs::read(tree.join("target/rust-tests.tar.zst")).unwrap(), unrelated_archive);
     for (path, contents) in personal {
