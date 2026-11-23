@@ -71,7 +71,6 @@ pub(super) fn bound_legacy(plan: &mut pb::Plan) {
     let share = PLAN_BUDGET / 16;
     bound_rows(&mut plan.lines, 4 * share);
     bound_rows(&mut plan.cards, 3 * share);
-    bound_rows(&mut plan.landings, 2 * share);
     bound_rows(&mut plan.agents, share);
     bound_rows(&mut plan.rulings, share / 2);
     bound_rows(&mut plan.ci, share / 2);
@@ -83,7 +82,10 @@ pub(super) fn bound_legacy(plan: &mut pb::Plan) {
     }
     let cards: HashSet<_> = plan.cards.iter().map(|card| &card.task_id).collect();
     plan.lines.retain(|line| cards.contains(&line.task_id));
-    plan.landings.retain(|landing| landing.task_ids.iter().all(|id| cards.contains(id)));
+    for landing in &mut plan.landings {
+        landing.task_ids.retain(|id| cards.contains(id));
+    }
+    bound_landings(&mut plan.landings, 2 * share);
     for agent in &mut plan.agents {
         agent.tickets.retain(|ticket| cards.contains(&ticket.task_id));
     }
@@ -95,6 +97,51 @@ pub(super) fn bound_legacy(plan: &mut pb::Plan) {
     let mut themes = std::mem::take(&mut plan.themes);
     bound_rows(&mut themes, PLAN_BUDGET.saturating_sub(plan.encoded_len()));
     plan.themes = themes;
+}
+
+fn bound_landings(landings: &mut Vec<pb::Landing>, budget: usize) {
+    if landings.iter().map(row_bytes).sum::<usize>() <= budget {
+        return;
+    }
+    // Reserve space for each landing before spending it on ticket references
+    // and the preview assembled from ticket titles.
+    let share = budget / landings.len();
+    for landing in landings.iter_mut().filter(|landing| row_bytes(*landing) > share) {
+        let mut summary = std::mem::take(&mut landing.summary);
+        let mut task_ids = std::mem::take(&mut landing.task_ids);
+        if row_bytes(landing) > share {
+            let text_budget = share / 12;
+            for text in [&mut landing.title, &mut landing.base, &mut landing.actor,
+                &mut landing.ci_subject] {
+                truncate_text(text, text_budget);
+            }
+            for text in [&mut landing.reason, &mut landing.pushed_sha].into_iter().flatten() {
+                truncate_text(text, text_budget);
+            }
+        }
+        let mut remaining = share.saturating_sub(row_bytes(landing));
+        task_ids.retain(|id| {
+            // Include room for the reference's tag and length.
+            let Some(next) = remaining.checked_sub(id.len() + 10) else { return false };
+            remaining = next;
+            true
+        });
+        landing.task_ids = task_ids;
+        truncate_text(&mut summary, remaining.saturating_sub(10));
+        landing.summary = summary;
+    }
+    bound_rows(landings, budget);
+}
+
+fn truncate_text(text: &mut String, limit: usize) {
+    if text.len() <= limit {
+        return;
+    }
+    let mut end = limit;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text.truncate(end);
 }
 
 // Include a conservative allowance for the repeated field's tag and length.

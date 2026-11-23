@@ -228,8 +228,10 @@ async fn a_large_live_board_keeps_its_lines_cards_and_active_landings() {
         assert_eq!(view.counts.unwrap().backlog, 60);
     }
     assert!(!legacy.lines.is_empty());
-    assert!(!legacy.landings.is_empty());
     let legacy_cards: std::collections::HashSet<_> = legacy.cards.iter().map(|card| &card.task_id).collect();
+    assert!(plan.landings.iter().all(|landing| landing.task_ids.iter().any(|id| !legacy_cards.contains(id))));
+    assert_eq!(legacy.landings.len(), 100);
+    assert!(legacy.landings.iter().all(|landing| landing.phase() == pb::LandingPhase::ReadyToLand));
     assert!(legacy.lines.iter().all(|line| legacy_cards.contains(&line.task_id)));
     assert!(legacy.landings.iter().flat_map(|landing| &landing.task_ids).all(|id| legacy_cards.contains(id)));
 
@@ -292,12 +294,18 @@ fn seed_active_landings(store: &farcooler_store::Store, workspace: Uuid, tasks: 
     let template = &fixture[0]["request"]["snapshot"]["items"]["item"];
     let mut state = State::empty(workspace.to_string(), 1);
     state.revision = 1;
-    for (n, keys) in keys.chunks(15).enumerate() {
+    // Each group holds one of the last 100 cards in the Plan's ID order,
+    // past the legacy card allowance.
+    let mut sorted: Vec<_> = tasks.iter().zip(keys).collect();
+    sorted.sort_unstable_by_key(|(task, _)| *task);
+    let (early, late) = sorted.split_at(1400);
+    for (n, (keys, last)) in early.chunks(14).zip(late).enumerate() {
         let mut group = template.clone();
         group["group_of"] = json!({"name": "landing", "pin": "fixture"});
         group["phase"] = json!("WaitingApproval");
         group["since_ms"] = json!(now + n as i64);
-        group["members"] = json!(keys.iter().map(|key| json!({"item": key, "candidate": "fixture"})).collect::<Vec<_>>());
+        group["members"] = json!(keys.iter().chain(std::iter::once(last)).map(|(_, key)| key)
+            .map(|key| json!({"item": key, "candidate": "fixture"})).collect::<Vec<_>>());
         state.items.insert(format!("group-{n:020}-landing"), serde_json::from_value::<Item>(group).unwrap());
     }
     insert_workflow_state(store, &state);
