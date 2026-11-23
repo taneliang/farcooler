@@ -34,7 +34,8 @@ cache = load("gate_sccache")
 
 class CompilerCacheTests(unittest.TestCase):
     def test_socket_cleanup_preserves_live_servers_and_unexpected_files(self):
-        with tempfile.TemporaryDirectory() as temporary:
+        # This socket-only fixture needs a short absolute path for sockaddr_un.
+        with tempfile.TemporaryDirectory(dir="/tmp") as temporary:
             path = Path(temporary).resolve() / "server.sock"
             with socket.socket(socket.AF_UNIX) as server:
                 server.bind(str(path))
@@ -464,8 +465,8 @@ class LandingTests(unittest.TestCase):
 
     def test_ci_families_are_the_minimum_for_every_path_rule(self):
         # Independent mapping: dropping any family-to-job edge must go red.
-        jobs = {"rust": {"rust"}, "apple": {"swift", "swift-tests", "ios"},
-                "android": {"android"}, "web": {"web"}, "relay": {"relay"}}
+        jobs = {"rust": {"rust"}, "apple": {"swift", "swift-tests"},
+                "web": {"web"}, "relay": {"relay"}}
         paths = ["apps/macos/a.swift", "apps/ios/a.swift", "apps/shared/a.swift",
                  "apps/android/a.kt", "services/relay/a.ts", "services/relay/test/fixtures/a.json",
                  "services/common/a.ts", "services/web/a.ts", "services/site/a.ts",
@@ -499,33 +500,14 @@ class LandingTests(unittest.TestCase):
                 if condition is None or condition == "${{ !cancelled() && needs.changes.outputs.proven != 'true' }}":
                     required.add(job)
                     continue
-                if condition == "${{ always() }}":
-                    # An aggregate status job (the android gate): it must run the
-                    # moment any job it waits on does, so follow their conditions.
-                    needed = re.search(r"    needs: \[([^]]+)\]", "\n".join(block))
-                    self.assertIsNotNone(needed, f"{job}: always() without needs")
-                    upstream = []
-                    for dep in (d.strip() for d in needed[1].split(",")):
-                        if dep == "changes":
-                            continue
-                        cond = next((l.strip()[4:] for l in lane.job_block(workflow, dep)
-                                     if l.startswith("    if:")), "")
-                        m = re.fullmatch(r"\$\{\{ !cancelled\(\) && needs.changes.outputs.([a-z_]+) != 'false' \}\}", cond)
-                        self.assertIsNotNone(m, f"unrecognized CI condition for {dep}: {cond}")
-                        upstream.append(m[1])
-                    self.assertTrue(upstream, f"{job}: aggregates no conditional job")
-                    if any(flags[f] for f in upstream):
-                        required.add(job)
-                    continue
                 match = re.fullmatch(
                     r"\$\{\{ !cancelled\(\) && needs.changes.outputs.([a-z_]+) != 'false' \}\}",
                     condition)
                 self.assertIsNotNone(match, f"unrecognized CI condition for {job}: {condition}")
-                if job != "ios":
-                    needs = next((l.strip()[len("needs:"):].strip() for l in block
-                                  if l.startswith("    needs:")), "")
-                    self.assertIn("changes", [d.strip() for d in needs.strip("[]").split(",")],
-                                  f"{job}: must need changes")
+                needs = next((l.strip()[len("needs:"):].strip() for l in block
+                              if l.startswith("    needs:")), "")
+                self.assertIn("changes", [d.strip() for d in needs.strip("[]").split(",")],
+                              f"{job}: must need changes")
                 if flags[match[1]]:
                     required.add(job)
             with self.subTest(path=path):
@@ -544,9 +526,34 @@ class LandingTests(unittest.TestCase):
 
     def test_mixed_group_unions_families(self):
         self.assertEqual(selected(["apps/android/a.kt", "apps/macos/a.swift", "docs/spike.md"]),
-                         {"wire", "doc-comments", "site", "tunnel", "android", "relay", "swift", "swift-tests", "ios"})
+                         {"wire", "doc-comments", "site", "tunnel", "relay", "swift", "swift-tests"})
         for path in ["docs/spike.md", "docs/second.md", ".claude/agent/reports/ov-1189/result.md", "reports/ov-1189/run.txt"]:
             self.assertEqual(selected([path]), {"wire", "doc-comments"})
+
+    def test_mobile_jobs_are_never_selected(self):
+        mobile_and_mac = [
+            "apps/ios/FarCooler/App.swift", "apps/ios/FarCoolerWatch/App.swift",
+            "apps/android/app/src/A.kt", "apps/shared/AgentKit/Sources/a.swift",
+            "apps/macos/Sources/a.swift",
+        ]
+        self.assertEqual(selected(mobile_and_mac),
+                         {"wire", "doc-comments", "site", "tunnel", "swift", "swift-tests", "relay"})
+        for path in [*mobile_and_mac, "scripts/build-android-libs.sh",
+                     ".github/actions/ios-ui-build/action.yml", "Cargo.lock"]:
+            with self.subTest(path=path):
+                self.assertTrue(selected([path]).isdisjoint({"ios", "android"}))
+
+    def test_mobile_workflow_jobs_are_paused(self):
+        for workflow, jobs in {
+            "ci": ("ios", "ios-ui-plan", "ios-ui", "android-build", "android-ui", "android"),
+            "nightly": ("ios", "ios-ui", "captures", "budget", "yield-ios", "yield-ui", "yield-captures"),
+        }.items():
+            text = (ROOT / f".github/workflows/{workflow}.yml").read_text()
+            for job in jobs:
+                with self.subTest(workflow=workflow, job=job):
+                    block = lane.job_block(text, job)
+                    self.assertIsNotNone(block)
+                    self.assertRegex("\n".join(block), r"(?m)^    if: \$\{\{ false(?: && \(.*\))? \}\}$")
 
     def test_crate_selector_is_used_and_never_filters_ci_rust_steps(self):
         shadow = load("rust-select")
@@ -636,6 +643,16 @@ class LandingTests(unittest.TestCase):
             agent_logs, = scratch.iterdir()
             self.assertIn(f"logs in {agent_logs}", agent.stdout)
             self.assertTrue(any(agent_logs.iterdir()), "the agent's gate output lives in its scratch directory")
+            workflow = repo / ".github/workflows/ci.yml"
+            original = workflow.read_text()
+            workflow.write_text(original.replace("- run: true", "- run: exit 42", 1))
+            red = subprocess.run(["bash", str(repo / "scripts/landing-gate"), "--worktree", tmp,
+                                  "--only", "wire", "--keep-target", "--no-load-wait"], env=env,
+                                 capture_output=True, text=True)
+            self.assertEqual(red.returncode, 1, red.stdout + red.stderr)
+            self.assertIn("landing-gate: FAIL (exit 1)", red.stdout)
+            self.assertIn("exit 42", red.stdout)
+            workflow.write_text(original)
             engine = {**env, "FARCOOLER_OPERATION_BINDING": "fixture-engine"}
             for bad_env, flags, message in (
                 ({k: v for k, v in engine.items() if k != "FARCOOLER_BASE"}, [], "engine requires FARCOOLER_BASE"),
@@ -668,12 +685,13 @@ class LandingTests(unittest.TestCase):
                                   "--base", "HEAD", "--dry-run"], env=env,
                                  capture_output=True, text=True)
             self.assertEqual(dry.returncode, 0, dry.stderr)
-            self.assertIn("1 changed file(s) against HEAD; jobs: wire, doc-comments, site, tunnel, swift-tests, swift, ios", dry.stdout)
+            self.assertIn("1 changed file(s) against HEAD; jobs: wire, doc-comments, site, tunnel, swift-tests, swift", dry.stdout)
             git("add", ".")
             git("commit", "-qm", "fourth ticket")
             git("mv", "apps/android/a.kt", "docs/moved.kt")
             self.assertIn(("D", "apps/android/a.kt"), lane.changed_inputs(repo, "HEAD"))
-            self.assertIn("android", selected(lane.changed_files(repo, "HEAD")))
+            self.assertIn("relay", selected(lane.changed_files(repo, "HEAD")))
+            self.assertNotIn("android", selected(lane.changed_files(repo, "HEAD")))
             with self.assertRaises(SystemExit):
                 lane.changed_files(repo, "missing-base")
 

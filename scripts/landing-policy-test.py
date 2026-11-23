@@ -47,7 +47,7 @@ class LandingTests(unittest.TestCase):
         self.assert_script_map_complete(ROOT)
         for path, users in policy.SCRIPT_USERS.items():
             with self.subTest(path=path):
-                self.assertTrue(users is None or (isinstance(users, set) and users and users <= set(lane.JOBS)))
+                self.assertTrue(users is None or (isinstance(users, set) and users and users <= set(lane.ALL_JOBS)))
 
     def test_new_script_or_workflow_fails_coverage_and_defaults_full(self):
         for path in ("scripts/new-unknown.py", ".github/workflows/new-unknown.yml"):
@@ -76,7 +76,7 @@ class LandingTests(unittest.TestCase):
             "scripts/doc-comment-check.py": always,
             "scripts/web-client-tree-check.py": always | {"web"},
             "scripts/swift-build-cache.py": always | {"swift", "swift-tests"},
-            "scripts/generator-test.sh": always | {"ios"},
+            "scripts/generator-test.sh": always,
             "scripts/quarantine-test.py": always | {"rust"},
             "scripts/lane-gate.py": set(lane.JOBS),
             "scripts/landing_policy.py": set(lane.JOBS),
@@ -502,7 +502,7 @@ class LandingTests(unittest.TestCase):
                    "CANDIDATES": str(candidates)}
             out = subprocess.run(["bash", "scripts/landing-gate", "--dry-run"], cwd=repo, env=env, capture_output=True, text=True)
             self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
-            self.assertIn(f"3 changed file(s) against {base}; jobs: wire, doc-comments, site, tunnel, rust, android", out.stdout)
+            self.assertIn(f"3 changed file(s) against {base}; jobs: wire, doc-comments, site, tunnel, rust\n", out.stdout)
             self.assertIn("Rust coverage: nextest runs only consumer, leaf; 1 test binaries skipped", out.stdout)
             self.assertNotIn("nextest runs only consumer, leaf, unrelated", out.stdout)
             # ov-1318: the installed daemon still supplies its startup base.
@@ -525,7 +525,7 @@ class LandingTests(unittest.TestCase):
                                       env={**env, "FARCOOLER_BASE": given}, capture_output=True, text=True)
             corrected = plan(stale)
             self.assertEqual(corrected.returncode, 0, corrected.stdout + corrected.stderr)
-            self.assertIn(f"3 changed file(s) against {base}; jobs: wire, doc-comments, site, tunnel, rust, android",
+            self.assertIn(f"3 changed file(s) against {base}; jobs: wire, doc-comments, site, tunnel, rust\n",
                           corrected.stdout)
             self.assertIn("using fold base", corrected.stdout)
             correct = plan(base)

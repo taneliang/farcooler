@@ -19,7 +19,7 @@ swift-test-guard, nextest --profile ci). That used to be recalled by hand from
 
     scripts/lane-gate.py                      # this worktree against origin/main
     scripts/lane-gate.py --dry-run            # the plan only: nothing runs
-    scripts/lane-gate.py --only wire,relay    # or --skip android
+    scripts/lane-gate.py --only wire,relay    # or --skip relay
     scripts/lane-gate.py --base main --log-dir /tmp/gate-logs
     scripts/lane-gate.py --self-test
 
@@ -46,7 +46,7 @@ inputs (Cargo.lock, the protocol crate, workflows, unknown paths) run everything
 The ov-1116 reverse crate closure narrows the default-host nextest run (ov-1268). Doctests, feature checks and
 clippy stay full, and CI on main still runs the whole Rust suite, so a miss is caught within one CI run.
 
-The ios job runs the steps of .github/actions/ios-ui-build that compile: the
+When enabled, the ios job runs the steps of .github/actions/ios-ui-build that compile: the
 Rust xcframeworks, the generated project, and `xcodebuild build-for-testing` of
 the FarCooler scheme, so a compile error in the app or FarCoolerUITests is red
 here as it is in CI (ov-812).
@@ -95,9 +95,13 @@ from heavy_lock import LOCK_POLL, machine_lock  # noqa: E402
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # Order is the order they run in: cheap and fast to fail first.
-JOBS = ["wire", "doc-comments", "relay", "site", "tunnel", "rust", "swift-tests", "swift", "ios", "android", "web"]
+ALL_JOBS = ["wire", "doc-comments", "relay", "site", "tunnel", "rust", "swift-tests", "swift", "ios", "android", "web"]
+# ov-1440: Remove ios and android from this set to restore local mobile checks.
+# Their CI definitions and local replay code are kept for that switch.
+DISABLED_JOBS = {"ios", "android"}
+JOBS = [job for job in ALL_JOBS if job not in DISABLED_JOBS]
 HEAVY = {"tunnel", "rust", "swift-tests", "swift", "ios", "android", "web"}
-APP_JOBS = {"rust", "swift-tests", "swift", "ios", "android", "tunnel"}
+APP_JOBS = {"rust", "swift-tests", "swift", "ios", "android", "tunnel"} - DISABLED_JOBS
 # ci.yml jobs this script covers under another name, or on purpose does not.
 CI_JOB_ALIASES = {
     "wire": "wire", "tunnel": "tunnel", "tunnel-helper": "tunnel", "rust": "rust", "swift": "swift", "swift-tests": "swift-tests",
@@ -435,8 +439,8 @@ def changed_files(repo, base):
     return sorted({f for _, f in changed_inputs(repo, base)})
 
 
-# CI's apple condition covers all three jobs, including the iOS build even when
-# ios-ui-plan skips simulator smoke. Never narrow below that condition.
+# Keep the family mapping for dormant jobs so restoring them only needs the
+# switch above. jobs_for filters this mapping and reviewed script users alike.
 FAMILY_JOBS = {"rust": {"rust"}, "apple": {"swift", "swift-tests", "ios"},
                "android": {"android"}, "web": {"web"}, "relay": {"relay"}}
 
@@ -450,7 +454,7 @@ def jobs_for(files, site, ios_relevant, commands, families):
     reach = {"wire": [], "doc-comments": []}
 
     def add(jobs, f):
-        for j in jobs:
+        for j in set(jobs).intersection(JOBS):
             reach.setdefault(j, [])
             if f not in reach[j]:
                 reach[j].append(f)
@@ -1286,7 +1290,8 @@ def _self_test():
     for job in set(CI_JOB_ALIASES) | set(CI_JOBS_NOT_RUN):
         expect(f"lane-gate's {job} is still in ci.yml", job in job_ids(text), True)
 
-    plans = {j: steps_for(j, wf, ctx) for j in JOBS}
+    # Keep the dormant mobile recipes testable without selecting or running them.
+    plans = {j: steps_for(j, wf, ctx) for j in ALL_JOBS}
     for j in JOBS:
         expect(f"{j} has steps", len([s for s in plans[j] if not s.skip]) > 0, True)
 
@@ -1619,22 +1624,21 @@ def _self_test():
     expect("reviewed site-proof feeds only wire", reaches("scripts/site-proof.py"), always)
     expect("an unknown script: full fallback", reaches("scripts/nonexistent-lane-script.sh"), set(JOBS))
     expect("a script a job names reaches that job", "swift-tests" in reaches("scripts/swift-test-guard.sh"), True)
-    expect("scripts retain CI coverage", "android" in reaches("scripts/swift-test-guard.sh"), True)
+    expect("scripts cannot restore paused coverage", "android" in reaches("scripts/swift-test-guard.sh"), False)
     expect("the nextest wrapper reaches rust", "rust" in reaches("scripts/tmux-leak-check.py"), True)
     expect("relay", reaches("services/relay/src/index.ts"), non_docs | {"relay"})
     expect("site", reaches("services/site/src/index.ts"), non_docs | {"site"})
     expect("common reaches web, site and relay", reaches("services/common/session.ts"), non_docs | {"web", "site", "relay"})
     expect("web", reaches("services/web/src/a.ts"), non_docs | {"web", "site"})
-    expect("android", reaches("apps/android/app/src/A.kt"), non_docs | {"android", "relay"})
-    expect("ios retains the Apple family", reaches("apps/ios/FarCooler/App.swift"), non_docs | FAMILY_JOBS["apple"])
-    expect("macos retains the Apple family", reaches("apps/macos/Sources/x.swift"), non_docs | FAMILY_JOBS["apple"])
-    expect("agentkit reaches the iOS app and the Android tests that read it", reaches("apps/shared/AgentKit/Sources/a.swift"), non_docs | {"swift", "swift-tests", "ios", "android"})
+    expect("Android Kotlin still reaches relay", reaches("apps/android/app/src/A.kt"), non_docs | {"relay"})
+    expect("iOS retains the Mac jobs", reaches("apps/ios/FarCooler/App.swift"), non_docs | {"swift", "swift-tests"})
+    expect("macOS retains the Mac jobs", reaches("apps/macos/Sources/x.swift"), non_docs | {"swift", "swift-tests"})
+    expect("AgentKit retains the Mac jobs", reaches("apps/shared/AgentKit/Sources/a.swift"), non_docs | {"swift", "swift-tests"})
     expect("tailcat reaches the tunnel", "tunnel" in reaches("crates/tailcat/go/a.go"), True)
     expect("a daemon change reaches every family (ci-changes.py)",
            reaches("crates/daemon/src/git.rs"), set(JOBS))
-    expect("the JNI crate reaches Android and Rust, not the Mac", reaches("crates/android/src/lib.rs"), non_docs | {"rust", "android"})
-    expect("the CLI crate reaches the Mac and Rust, not Android", reaches("crates/cli/src/main.rs"), non_docs | {"rust", "swift", "swift-tests", "ios"})
-    expect("core reaches iOS", "ios" in reaches("crates/core/src/lib.rs"), True)
+    expect("the JNI crate retains Rust", reaches("crates/android/src/lib.rs"), non_docs | {"rust"})
+    expect("the CLI crate reaches the Mac and Rust", reaches("crates/cli/src/main.rs"), non_docs | {"rust", "swift", "swift-tests"})
     expect("the lockfile reaches every app job", reaches("Cargo.lock") >= non_docs | APP_JOBS - {"tunnel"}, True)
     expect("ci.yml reaches every job", reaches(".github/workflows/ci.yml"), set(JOBS))
     expect("another workflow: full fallback", reaches(".github/workflows/canary.yml"), set(JOBS))
@@ -1757,6 +1761,7 @@ def _self_test():
             from unittest import mock
             with mock.patch.dict(os.environ, {"JAVA_HOME": jdk17, "ANDROID_HOME": str(sdk)}), \
                  mock.patch.object(sys.modules[__name__], "jdk_candidates", return_value=[jdk17]), \
+                 mock.patch.object(sys.modules[__name__], "JOBS", ALL_JOBS), \
                  mock.patch.object(sys.modules[__name__], "jobs_for", return_value={"android": []}), \
                  mock.patch.object(sys.modules[__name__], "run_jobs") as jobs, \
                  mock.patch.object(sys.modules[__name__], "print_summary"):

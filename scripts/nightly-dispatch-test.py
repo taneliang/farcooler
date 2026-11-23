@@ -25,8 +25,10 @@ assert "inputs.shard == '' || inputs.shard == 'all' || !startsWith(inputs.shard,
 assert "inputs.shard == '' || inputs.shard == 'all' || startsWith(inputs.shard, 'captures')" in jobs['captures']
 for job in ('budget', 'claude-rewake', 'daemon-production-timing', 'mac-perf', 'report'):
     assert "inputs.shard == '' || inputs.shard == 'all'" in jobs[job]
+paused = ('yield-ios', 'yield-ui', 'yield-captures', 'ios', 'ios-ui', 'captures', 'budget')
+assert all(re.search(r"(?m)^    if: \$\{\{ false(?: && \(.*\))? \}\}$", jobs[job]) for job in paused)
 for choice in ['', *options]:
     full = choice in ('', 'all')
     selected = [s for shards in matrices.values() for s in shards if full or s == choice]
     assert selected == (options[1:] if full else [choice]), (choice, selected)
-    print(f"{choice or 'schedule'}: iOS -> {', '.join(selected)}" + (' -> Mac perf' if full else '') + '; peak macOS runners: 1')
+    print(f"{choice or 'schedule'}: iOS paused" + ("; Mac perf selected" if full else ""))

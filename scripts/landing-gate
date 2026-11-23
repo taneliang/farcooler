@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Local landing gate: parallel families and affected Rust tests (ov-1185).
-# CI on main retains full suites, release bundle checks, and iOS UI smoke.
+# CI on main retains full Rust suites and release bundle checks.
 #
 #     scripts/landing-gate                 # this worktree against origin/main
 #     scripts/landing-gate --base main     # any scripts/lane-gate.py option passes through
@@ -13,7 +13,7 @@
 # corrects stale daemon values: all folded tickets count even if origin/main moves.
 # The ov-1116 crate impact is reported without skipping CI's full Rust coverage. This adds
 # the engine's contract: exit 0 only if every step passed, non-zero otherwise, and a
-# run whose plan has a heavy job (Rust, Swift, Android, iOS, tunnel, web) goes
+# run whose plan has a heavy job (Rust, Swift, tunnel, web) goes
 # through scripts/heavy, so it waits for the load and the machine-wide lock like any
 # other build. A plan of cheap jobs only never queues. Nothing here changes how a
 # plain terminal runs lane-gate.py or scripts/heavy.
