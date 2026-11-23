@@ -23,6 +23,7 @@ mod scope;
 mod status_work;
 mod task_create;
 mod terminal_view;
+mod workflow_command;
 use error_response::error_response;
 use scope::{satisfies, scope_name};
 use screen_revision::screen_revision;
@@ -101,17 +102,6 @@ pub struct Rpc {
 }
 
 impl Rpc {
-    /// Every successful publication path announces the receipt's owner-facing review card.
-    pub(crate) fn announce_workflow_publication(&self, value: &serde_json::Value) {
-        if let Some(id) = value.pointer("/receipt/change/notice_task").and_then(|v| v.as_str()).and_then(|s| Uuid::parse_str(s).ok())
-            && let Ok(task) = self.service.store.get_task(id)
-        {
-            self.watcher.announce_task_changed(&task, None, farcooler_store::models::Actor::Manager);
-            self.watcher.task_event(&task, crate::watch::task_notice::TaskEvent::Created, farcooler_store::models::Actor::Manager);
-            self.watcher.announce_needs_you();
-        }
-    }
-
     /// Private, and it has to be: the attachment guard it takes is this
     /// module's own, and `RpcFactory` is the only thing that should be building
     /// one anyway — a handler constructed anywhere else is a connection
@@ -769,73 +759,7 @@ impl Rpc {
         let scope = self.peer.scope;
 
         match req.method.as_str() {
-            "workspace.set_workflow" | "workflow.enqueue" | "workflow.get" | "workflow.approve" | "workflow.cancel" | "workflow.resolve_cancellation" | "workflow.resolve" | "workflow.retry" | "workflow.queue" | "workflow.leave" | "workflow.settle" | "workflow.track" | "workflow.move" | "workflow.start" | "workflow.send_back" | "workflow.close" | "workflow.reopen" | "workflow.landed" | "workflow.propose" | "workflow.drafts" | "workflow.review" => {
-                use farcooler_protocol::workflow_commands::{Action, MAX_BYTES};
-                let workspace = Self::target(&req)?;
-                svc.store.get_workspace(workspace)?;
-                self.engine_caller(workspace, &req.method)?;
-                let Some(request::Payload::WorkflowCommand(p)) = req.payload else { return Err(DomainError::NotFound) };
-                if p.schema != 1 || p.json.len() > MAX_BYTES { return Err(DomainError::NotFound); }
-                let action: Action = farcooler_protocol::workflow_commands::parse(&p.json).map_err(|_| DomainError::NotFound)?;
-                if action.method() != req.method { return Err(DomainError::NotFound); }
-                let handle = self.workflow.as_ref().ok_or(DomainError::CapabilityUnsupported { needed: "workflow execution service" })?;
-                let admission = self.admit(workspace).await?;
-                // A Maintainer may publish a draft they approved through workflow_drafts. The direct
-                // command is still the owner's or, with a grant, this workspace's orchestrator's.
-                if matches!(action, Action::Publish { .. } | Action::PreviewPublication { .. }) && !admission.is_owner() && admission.orchestrator().is_none() {
-                    return Err(DomainError::ScopeDenied { needed: "owner" });
-                }
-                if let Action::PreviewPublication { publication } = action {
-                    return Self::workflow_publication_preview(handle, admission, *publication).await;
-                }
-                admission.permits(&action)?;
-                if matches!(action, Action::Propose { .. } | Action::Drafts { .. }) { return crate::workflow_drafts::handle(svc, &self.watcher, workspace, &action); }  // filed and asked of a person here, never the engine (ov-971)
-                // Every read bypasses the effect inbox and its per-message git/tree cleanup.
-                use crate::workflow_runtime::{GetView, encode_legacy_get, encode_plan_get};
-                let plan_view = req.accepts.iter().any(|v| v == farcooler_protocol::accepts::WORKFLOW_PLAN);
-                let summary = req.accepts.iter().any(|v| v == "workflow_summary_v1");
-                let full = req.accepts.iter().any(|v| v == "workflow_full_v1");
-                if let Action::Logs { item } = action {
-                    let value = handle.read_logs(admission, item).await
-                        .map_err(|e| match e { crate::workflow_runtime::Error::Domain(said) => said, _ => DomainError::NotFound })?;
-                    return Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema:1, json:value.to_string() }));
-                }
-                let action_is_get = matches!(action, Action::Get);
-                if action_is_get && req.accepts.iter().any(|v| v == farcooler_protocol::workflow_commands::BUNDLE_VIEW) {
-                    let json = handle.read_bundle(admission).await.map_err(|error| match error {
-                        crate::workflow_runtime::Error::Domain(refusal) => refusal,
-                        _ => DomainError::OperationFailed,
-                    })?;
-                    return Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema: 1, json }));
-                }
-                let value = if action_is_get {
-                    let view = if plan_view { GetView::Plan }
-                        else if summary && !full { GetView::Summary }
-                        else { GetView::Full };
-                    handle.read_get(admission, view).await
-                } else { handle.wire_command(admission, action).await }
-                    .map_err(|e| match e { crate::workflow_runtime::Error::Domain(said) => said, _ => DomainError::NotFound })?;
-                if action_is_get && plan_view {
-                    return Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema: 1, json: encode_plan_get(value) }));
-                }
-                let mut value = value;
-                // `workspace re-pin` reads the published workflow and nothing else (ov-1373): the state, notices and
-                // lists beside it grow without bound, and the reply may not pass the 1 MiB frame cap.
-                if action_is_get && req.accepts.iter().any(|v| v == "workflow_repin_v1") {
-                    if let Some(o) = value.as_object_mut() { o.retain(|k, _| matches!(k.as_str(), "schema" | "configuration" | "context")); }
-                }
-                self.announce_workflow_publication(&value);
-                if summary && !full {
-                    return Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema:1, json:value.to_string() }));
-                }
-                let value = crate::workflow_starter::add_to_get(svc, workspace, value).await;
-                let json = if action_is_get && req.accepts.is_empty() {
-                    encode_legacy_get(value)
-                } else {
-                    value.to_string()
-                };
-                Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema: 1, json }))
-            }
+            "workspace.set_workflow" | "workflow.enqueue" | "workflow.get" | "workflow.approve" | "workflow.cancel" | "workflow.resolve_cancellation" | "workflow.resolve" | "workflow.retry" | "workflow.queue" | "workflow.leave" | "workflow.settle" | "workflow.track" | "workflow.move" | "workflow.start" | "workflow.send_back" | "workflow.close" | "workflow.reopen" | "workflow.landed" | "workflow.propose" | "workflow.drafts" | "workflow.review" => self.workflow_command(req).await,
             // Watch a running engine agent's terminal, read-only (ov-972). Addressed by workspace and
             // item, never by terminal id: the engine's pane is in a tmux server the daemon's inventory
             // does not list, so `terminal.write` and the rest cannot name it. This only attaches.
