@@ -49,11 +49,13 @@ enum ProcessRunner {
     ///   - discardStderr: for tools whose stderr is an ordinary answer.
     ///   - killAfter: how long a terminated child gets before SIGKILL; a test
     ///     shortens it so the escalation is observed, not waited for.
+    ///   - stderrLine: observes complete stderr lines as they arrive, off the main actor.
     static func run(
         _ executable: String, _ arguments: [String],
         environment: [String: String]? = nil, stdin: Data? = nil,
         deadline: TimeInterval? = nil, discardStderr: Bool = false,
-        killAfter: TimeInterval = ProcessRunner.killAfter
+        killAfter: TimeInterval = ProcessRunner.killAfter,
+        stderrLine: (@Sendable (String) -> Void)? = nil
     ) async -> Result {
         let handle = Handle(killAfter: killAfter)
         return await withTaskCancellationHandler {
@@ -62,7 +64,7 @@ enum ProcessRunner {
                     continuation.resume(
                         returning: Self.runBlocking(
                             handle, executable, arguments, environment, stdin, deadline,
-                            discardStderr))
+                            discardStderr, stderrLine))
                 }
             }
         } onCancel: {
@@ -75,7 +77,7 @@ enum ProcessRunner {
     private static func runBlocking(
         _ handle: Handle, _ executable: String, _ arguments: [String],
         _ environment: [String: String]?, _ stdin: Data?, _ deadline: TimeInterval?,
-        _ discardStderr: Bool
+        _ discardStderr: Bool, _ stderrLine: (@Sendable (String) -> Void)?
     ) -> Result {
         var result = Result()
         let process = Process()
@@ -109,7 +111,7 @@ enum ProcessRunner {
             try? err.fileHandleForWriting.close()
             try? err.fileHandleForReading.close()
         } else {
-            drain(err.fileHandleForReading, into: stderrBuffer, group: drained)
+            drain(err.fileHandleForReading, into: stderrBuffer, group: drained, line: stderrLine)
         }
         if let input, let stdin {
             // The throwing spellings: `write(_:)` raises an Objective-C
@@ -149,13 +151,40 @@ enum ProcessRunner {
         return result
     }
 
-    private static func drain(_ reader: FileHandle, into buffer: Buffer, group: DispatchGroup) {
+    private static func drain(
+        _ reader: FileHandle, into buffer: Buffer, group: DispatchGroup,
+        line: (@Sendable (String) -> Void)? = nil
+    ) {
         group.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            while let chunk = try? reader.read(upToCount: 65536), !chunk.isEmpty {
-                buffer.append(chunk)
+        if let line {
+            // AsyncBytes yields pipe data as it arrives. A large synchronous
+            // FileHandle read can wait until the requested count or EOF.
+            Task.detached(priority: .userInitiated) {
+                var pending = Data()
+                defer {
+                    buffer.append(pending)
+                    group.leave()
+                }
+                do {
+                    for try await byte in reader.bytes {
+                        pending.append(byte)
+                        if byte == 0x0A {
+                            buffer.append(pending)
+                            line(String(decoding: pending.dropLast(), as: UTF8.self))
+                            pending.removeAll(keepingCapacity: true)
+                        }
+                    }
+                } catch {
+                    // The pipe may be closed after the drain grace expires.
+                }
             }
-            group.leave()
+        } else {
+            DispatchQueue.global(qos: .userInitiated).async {
+                defer { group.leave() }
+                while let chunk = try? reader.read(upToCount: 65536), !chunk.isEmpty {
+                    buffer.append(chunk)
+                }
+            }
         }
     }
 

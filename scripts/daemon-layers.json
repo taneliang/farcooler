@@ -137,6 +137,7 @@
    "engine_steering",
    "engine_stuck",
    "landing_templates",
+   "landing_update",
    "native_hold",
    "path_routes",
    "ticket_moves",

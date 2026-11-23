@@ -278,7 +278,9 @@ async fn ensure_in(
     // at the point that actually stops the old runner.
     drop(link);
     let home = database.parent().expect("database has a runtime directory");
-    let _landing = wait_for_landing(home).await?;
+    let _landing = wait_for_landing(home, || {
+        eprintln!("Waiting for in-flight landing checks or pushes to finish before replacing the local runner.");
+    }).await?;
     // The runner may have changed while we waited.
     let mut link = dial(socket).await?;
     let running = link.daemon_build().to_string();
@@ -320,12 +322,19 @@ fn keep_running(build: &str, database: &Path) -> Option<Ensured> {
     }
 }
 
-pub(crate) async fn wait_for_landing(home: &Path) -> std::io::Result<std::fs::File> {
+pub(crate) async fn wait_for_landing(home: &Path, on_wait: impl FnOnce()) -> std::io::Result<std::fs::File> {
+    use farcooler_daemon::landing_update::{announce_update, try_update};
+
+    let _waiting = announce_update(home)?;
+    if let Some(hold) = try_update(home)? {
+        return Ok(hold);
+    }
+    on_wait();
     loop {
-        if let Some(hold) = farcooler_daemon::landing_update::try_update(home)? {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        if let Some(hold) = try_update(home)? {
             return Ok(hold);
         }
-        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
 

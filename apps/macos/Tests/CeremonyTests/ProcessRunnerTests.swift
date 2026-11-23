@@ -42,6 +42,28 @@ struct ProcessRunnerTests {
         #expect(String(decoding: ran.stdout, as: UTF8.self) == "done")
     }
 
+    @Test func aStderrLineArrivesWhileTheChildIsStillWaiting() async {
+        let release = NSTemporaryDirectory() + "pr-release-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: release) }
+        let ran = await ProcessRunner.run(
+            Self.sh,
+            ["-c", """
+                printf 'waiting for ' >&2
+                printf 'landing\n' >&2
+                while [ ! -f "$1" ]; do sleep 0.01; done
+                printf 'ready'
+                """, "child", release],
+            deadline: 10,
+            stderrLine: { line in
+                if line == "waiting for landing" {
+                    FileManager.default.createFile(atPath: release, contents: Data())
+                }
+            })
+        #expect(ran.succeeded)
+        #expect(String(decoding: ran.stderr, as: UTF8.self) == "waiting for landing\n")
+        #expect(String(decoding: ran.stdout, as: UTF8.self) == "ready")
+    }
+
     /// The outcome, not the clock: a child that is still sleeping when it is
     /// stopped ends by the signal (15), not by finishing its 30 s (status 0).
     /// Elapsed time is not asserted, so a loaded runner cannot fail it.

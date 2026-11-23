@@ -269,6 +269,10 @@ struct ContentView: View {
     @State var startingReps: Set<String> = []
     @State var repRefusals: [String: String] = [:]
 
+    private var detailWithDaemonStatus: some View {
+        detailOpeningNotices
+            .safeAreaInset(edge: .top, spacing: 0) { LocalDaemonWaitBanner() }
+    }
 
     var body: some View {
         // The title bar's values, worked out once a pass (ov-229): each
@@ -280,7 +284,7 @@ struct ContentView: View {
         let statusSource = titleStatusSource ?? Self.noWorkspaceSource
         // The detail is the window: the old Fleet sidebar is gone, and the
         // navigator inside a workspace is its one sidebar (ov-178).
-        detailOpeningNotices
+        detailWithDaemonStatus
         // Task keys in its text open their tasks (ov-196).
         .environment(\.taskKeyLinker, taskKeyLinker)
         // The window's toolbar, inner to outer, so its items are
@@ -885,6 +889,22 @@ struct ContentView: View {
             Text(
                 "\(pending.old.terminal.label) keeps running as an ordinary terminal, and "
                     + "\(pending.pane.terminal.label) runs \(pending.workspace.name)’s board.")
+        }
+    }
+}
+
+private struct LocalDaemonWaitBanner: View {
+    @ObservedObject private var daemon = LocalDaemon.shared
+
+    var body: some View {
+        if case .waitingForLanding(let message) = daemon.state {
+            HStack(spacing: Spacing.tight) {
+                ProgressView().controlSize(.small)
+                Text(message)
+            }
+            .padding(Spacing.tight)
+            .frame(maxWidth: .infinity)
+            .background(.regularMaterial)
         }
     }
 }

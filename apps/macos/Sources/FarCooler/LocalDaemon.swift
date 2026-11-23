@@ -45,6 +45,7 @@ final class LocalDaemon: ObservableObject {
 
     enum State: Equatable {
         case unknown
+        case waitingForLanding(String)
         /// A daemon built from this app's source is running.
         case running(build: String)
         /// The app could not put one there. The message is the CLI's own.
@@ -59,7 +60,7 @@ final class LocalDaemon: ObservableObject {
 
     @Published private(set) var state: State = .unknown
 
-    private var inFlight = false
+    private var inFlight: UUID?
 
     /// Leave this machine running the daemon from this bundle.
     ///
@@ -71,11 +72,19 @@ final class LocalDaemon: ObservableObject {
         // The window's `.task` and an event-stream reconnect can both arrive at
         // once. Two ensures racing would each see the other's half-replaced
         // daemon, so the second waits for nothing and takes the first's word.
-        guard !inFlight else { return state }
-        inFlight = true
-        defer { inFlight = false }
+        guard inFlight == nil else { return state }
+        let attempt = UUID()
+        inFlight = attempt
+        defer { inFlight = nil }
 
-        let result = await CLI.run(["--json", "daemon", "ensure"])
+        let result = await CLI.run(["--json", "daemon", "ensure"], stderrLine: { [weak self] line in
+            // This line comes from daemon_link.rs while ensure holds off replacement.
+            guard line.hasPrefix("Waiting for in-flight landing checks or pushes to finish") else { return }
+            Task { @MainActor in
+                guard let self, self.inFlight == attempt else { return }
+                self.state = .waitingForLanding(line)
+            }
+        })
         guard result.ok, let data = result.output.data(using: .utf8),
             let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let build = body["daemonVersion"] as? String

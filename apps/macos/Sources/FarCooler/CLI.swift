@@ -194,14 +194,15 @@ enum CLI {
     ///   (ov-551, ov-566).
     static func run(
         _ args: [String], stdin: String? = nil, executable: String? = nil,
-        interpreter: String? = nil, deadline: TimeInterval? = nil
+        interpreter: String? = nil, deadline: TimeInterval? = nil,
+        stderrLine: (@Sendable (String) -> Void)? = nil
     ) async -> Result {
         guard let binary = executable ?? binary else {
             return Result(ok: false, output: "Far Cooler’s command-line tool isn’t installed.", errors: "")
         }
         let ran = await ProcessRunner.run(
             interpreter ?? binary, (interpreter == nil ? [] : [binary]) + args, environment: environment,
-            stdin: stdin.map { Data($0.utf8) }, deadline: deadline)
+            stdin: stdin.map { Data($0.utf8) }, deadline: deadline, stderrLine: stderrLine)
         if let why = ran.launchFailure {
             return Result(ok: false, output: why, errors: "")
         }

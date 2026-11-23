@@ -115,8 +115,9 @@ async fn request_update(
                 names.app, names.cli
             ).into());
         }
-        eprintln!("Waiting for in-flight landing checks or pushes to finish before updating {}.", names.app);
-        drop(crate::daemon_link::wait_for_landing(home).await?);
+        drop(crate::daemon_link::wait_for_landing(home, || {
+            eprintln!("Waiting for in-flight landing checks or pushes to finish before updating {}.", names.app);
+        }).await?);
     }
     let conn = reach(socket, names, launch).await?;
     update(conn, socket, names, relaunch).await

@@ -56,46 +56,53 @@ async fn a_failing_command_gate_keeps_the_batch_from_ever_pushing() {
 
 #[tokio::test]
 async fn an_update_waits_for_a_started_landing_check_to_record_its_result() {
-    use crate::landing_update::try_update;
+    use crate::landing_update::{announce_update, try_update};
 
     let (dir, mut runtime) = lander("update-wait").await;
     let mut landing = plan(Template::BatchedPush, vec![Gate::Command(1)]);
     landing.ci = false;
     let definition = built(&runtime, &landing);
     at_join(&mut runtime, "one", &definition).await;
+    at_join(&mut runtime, "two", &definition).await;
     assert!(command(&runtime, Command::Queue { item: "one".into() }).result.is_ok());
     until(&mut runtime, |state| state.items.values().any(|item| {
         item.group_of.is_some() && item.definition.stages[item.stage].kind == StageKind::Run
     })).await;
 
     let home = runtime.root.clone();
-    let store = runtime.store.clone();
     let marker = dir.path().join("marker");
-    let update = async {
-        let hold = tokio::time::timeout(Duration::from_secs(10), async {
+    let announce = async {
+        tokio::time::timeout(Duration::from_secs(10), async {
             while !marker.exists() {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
+            let waiting = announce_update(&home).unwrap();
             assert!(try_update(&home).unwrap().is_none(), "the started check holds off the update");
             std::fs::write(marker.with_extension("release"), b"").unwrap();
-            loop {
-                if let Some(hold) = try_update(&home).unwrap() { break hold; }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        }).await.unwrap();
-        let gate = store.workflow_outbox("w").unwrap().into_iter()
-            .find(|entry| entry.effect.kind == EffectKind::Execute(StageKind::Run)).unwrap();
-        assert_eq!(gate.dispatch_state, "settled", "the result was recorded before the update got in");
-        hold
+            waiting
+        }).await.unwrap()
     };
-    let (result, update_hold) = tokio::join!(runtime.pump(3), update);
+    let (result, waiting) = tokio::join!(runtime.pump(3), announce);
     result.unwrap();
     assert_eq!(outbox(&runtime, StageKind::Push), 1, "the passing check queued a push");
+    assert!(command(&runtime, Command::Queue { item: "two".into() }).result.is_ok());
     let first = remote_head(&runtime).await;
+    // Let the runtime scan before the waiter next tries the effect lock.
     runtime.pump(4).await.unwrap();
+    assert_eq!(remote_head(&runtime).await, first, "a waiting update keeps the next push queued");
+    let update_hold = try_update(&home).unwrap().expect("admitted effects have drained");
+    drop(waiting);
+    let gate = runtime.store.workflow_outbox("w").unwrap().into_iter()
+        .find(|entry| entry.effect.kind == EffectKind::Execute(StageKind::Run)).unwrap();
+    assert_eq!(gate.dispatch_state, "settled", "the result was recorded before the update got in");
+    runtime.pump(5).await.unwrap();
+    assert_eq!(outbox(&runtime, StageKind::Run), 1, "the second landing has not started its check");
     assert_eq!(remote_head(&runtime).await, first, "no push can start during replacement");
     drop(update_hold);
-    until(&mut runtime, |state| phase_of(state, "one") == Some(Phase::Done)).await;
+    until(&mut runtime, |state| {
+        phase_of(state, "one") == Some(Phase::Done) && phase_of(state, "two") == Some(Phase::Done)
+    }).await;
+    assert_eq!(outbox(&runtime, StageKind::Run), 2);
     assert_ne!(remote_head(&runtime).await, first);
 }
 
