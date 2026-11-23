@@ -66,9 +66,8 @@ pub const CONNECTORS_FILE_MAX: u64 = 64 * 1024;
 /// until it's named here.
 ///
 /// The reads are the ones a `read`-scoped device gets, less
-/// `client.set_node_key`, which writes, and the pages, which the board's
-/// layers never name (ov-269) and a rep's skill never reads. Not the
-/// screens, files and diffs that sit at `control` (`terminal.screen`,
+/// `client.set_node_key`, which writes. Screens, files and diffs sit at
+/// `control` (`terminal.screen`,
 /// `worktree.read_file`, `changes.file_diff` and the like): a rep carries
 /// words, and reads code with Claude Code's Read and Grep, inside its
 /// checkout, which its gate allows (`rep_gate`). A note is a comment only; `refuse_rep_answer`
@@ -130,7 +129,7 @@ pub fn rep_may(req: &Request) -> bool {
 /// budget; a ticket's reason, and its stage only to waiting or dropped, never
 /// its commit, checkout, branch, stack, pull request or budget; a ruling
 /// recorded, or reversed with no commit. Never a ruling kept, which is its
-/// person's own mark, a landing, a page, or an agent: those start work or are
+/// person's own mark, a landing, or an agent: those start work or are
 /// the orchestrator's record.
 fn rep_plan_change(method: farcooler_protocol::method::Method, req: &Request) -> bool {
     use farcooler_protocol::method::Method as M;
