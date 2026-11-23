@@ -14,7 +14,7 @@ fn phone(id: &str) -> Peer {
     Peer { client_id: Some(id.into()), scope: Scope::Control }
 }
 
-fn no_walk(_: i32) -> Option<Uuid> {
+fn no_walk(_: i32) -> Result<Option<Uuid>> {
     panic!("walked for a pane on a runner where no pane is anyone else's")
 }
 
@@ -36,7 +36,7 @@ fn on_login(svc: &Service, pane: Uuid, handle: &str) {
 
 /// Whose a local caller in `pane` is (`None`: in no pane).
 fn in_pane(svc: &Service, pane: Option<Uuid>) -> Person {
-    caller_person_with(svc, &LOCAL, Some(4242), &OnceLock::new(), |_| pane).unwrap()
+    caller_person_with(svc, &LOCAL, Some(4242), &OnceLock::new(), |_| Ok(pane)).unwrap()
 }
 
 /// ov-740/743/744's solo-runner guard, kept: a runner where no pane can be
@@ -95,7 +95,7 @@ async fn a_walk_that_finds_no_pane_is_made_again() {
     on_login(&svc, bobs, "bob");
     let walked = OnceLock::new();
     let walks = std::sync::atomic::AtomicUsize::new(0);
-    let walk = |_: i32| (walks.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0).then_some(bobs);
+    let walk = |_: i32| Ok((walks.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0).then_some(bobs));
     assert_eq!(caller_person_with(&svc, &LOCAL, Some(4242), &walked, walk).unwrap(), Person::Owner, "not found yet");
     assert_eq!(walked.get(), None, "nothing kept");
     for _ in 0..2 {
@@ -128,7 +128,7 @@ async fn a_connection_walks_for_its_pane_once() {
     let walks = std::sync::atomic::AtomicUsize::new(0);
     let walk = |_: i32| {
         walks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Some(rep)
+        Ok(Some(rep))
     };
     let walked = OnceLock::new();
     for _ in 0..3 {

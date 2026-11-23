@@ -89,22 +89,17 @@ enum ProcessRunner {
         let input = stdin.map { _ in Pipe() }
         if let input { process.standardInput = input }
 
-        // Started under the handle's lock, so a cancel that raced ahead of the
-        // launch is seen here and a cancel that follows finds a live process.
-        let started: String? = handle.lock.withLock {
-            if handle.cancelled { return nil }
-            do { try process.run() } catch { return error.localizedDescription }
-            handle.process = process
-            return nil
-        }
-        if let started {
-            result.launchFailure = started
-            return result
-        }
-        if handle.lock.withLock({ handle.process == nil }) {
+        if handle.lock.withLock({ handle.cancelled }) {
             result.cancelled = true
             return result
         }
+        // Launch itself can wait in the kernel. Keep cancellation independent
+        // of that wait and terminate a late child as soon as its PID is known.
+        do { try process.run() } catch {
+            result.launchFailure = error.localizedDescription
+            return result
+        }
+        handle.didLaunch(process)
 
         let stdoutBuffer = Buffer()
         let stderrBuffer = Buffer()
@@ -189,6 +184,13 @@ enum ProcessRunner {
 
         var flags: (timedOut: Bool, cancelled: Bool) {
             lock.withLock { (timedOut, cancelled) }
+        }
+
+        func didLaunch(_ child: Process) {
+            lock.withLock {
+                process = child
+                if cancelled { terminateLocked() }
+            }
         }
 
         func cancel() {

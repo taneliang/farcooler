@@ -1,5 +1,5 @@
 //! Read the ticket format shared by scripts/heavy and lane-gate.py.
-pub(super) use crate::proc_table::snapshot;
+pub(super) use crate::proc_table::topology as snapshot;
 use crate::proc_table::{ProcessState, process_state, stopped_or_gone};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs::{File, OpenOptions};
@@ -28,7 +28,7 @@ impl LegacyLatches {
         groups: impl Iterator<Item = i32>) -> io::Result<HashSet<i32>> {
         let raw = snapshot().ok_or_else(|| io::Error::other("process table unavailable"))?;
         let table = crate::foreground::parse(&raw);
-        for old in legacy_queues(queue, groups.flat_map(|group| table.in_group(group))) {
+        for old in legacy_queues(queue, groups.flat_map(|group| table.in_group(group)))? {
             if let std::collections::btree_map::Entry::Vacant(slot) = self.0.entry(old) {
                 let latch = try_enter(slot.key())?;
                 slot.insert(latch);
@@ -42,15 +42,18 @@ impl LegacyLatches {
     }
 }
 
-pub(super) fn legacy_queues(queue: &Path, pids: impl IntoIterator<Item = i32>) -> BTreeSet<PathBuf> {
-    let Ok(canonical) = queue.canonicalize() else { return BTreeSet::new() };
-    let roots = [PathBuf::from("/var/tmp"), PathBuf::from("/usr/tmp")].into_iter()
-        .chain(pids.into_iter().flat_map(crate::proc_table::python_temp_roots));
-    roots.filter_map(|root| root.join(NAME).canonicalize().ok())
+pub(super) fn legacy_queues(queue: &Path, pids: impl IntoIterator<Item = i32>) -> io::Result<BTreeSet<PathBuf>> {
+    let canonical = queue.canonicalize()?;
+    let mut roots = vec![PathBuf::from("/var/tmp"), PathBuf::from("/usr/tmp")];
+    for pid in pids {
+        roots.extend(crate::proc_table::python_temp_roots(pid)
+            .ok_or_else(|| io::Error::other("could not inspect legacy heavy-job queue owner"))?);
+    }
+    Ok(roots.into_iter().filter_map(|root| root.join(NAME).canonicalize().ok())
         .filter(|path| path != &canonical && path.is_dir())
         // Fixtures have private machine and legacy queues under the same test root.
         .filter(|path| !cfg!(test) || canonical.parent().is_some_and(|root| path.starts_with(root)))
-        .collect()
+        .collect())
 }
 
 /// Hold the same admission latch the Python queue takes before publishing a
@@ -105,9 +108,9 @@ pub(super) fn waiting(queue: &Path, tickets: &[Ticket], candidate_groups: &HashS
         return Default::default();
     }
     // An older queue can block the canonical head itself during the transition.
-    let legacy = crate::proc_table::snapshot().and_then(|raw| {
+    let legacy = snapshot().and_then(|raw| {
         let pids = raw.lines().filter_map(|row| row.split_whitespace().next()?.parse().ok());
-        legacy_queues(queue, pids).into_iter()
+        legacy_queues(queue, pids).ok()?.into_iter()
             .filter_map(|old| live_tickets(&old).ok()?.into_iter().next())
             .min_by_key(|ticket| ticket.arrived)
     });

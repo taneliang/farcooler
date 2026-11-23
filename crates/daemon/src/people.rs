@@ -828,7 +828,7 @@ pub fn rep_pane_of(svc: &crate::service::Service, pid: i32) -> Option<Uuid> {
     if reps.is_empty() {
         return None;
     }
-    pane_running(svc, pid, |_, terminal| reps.contains(&terminal))
+    pane_running(svc, pid, |_, terminal| reps.contains(&terminal)).flatten()
 }
 
 /// The agent or orchestrator pane `pid` runs in, if any (ov-580): the same
@@ -837,17 +837,22 @@ pub fn rep_pane_of(svc: &crate::service::Service, pid: i32) -> Option<Uuid> {
 pub fn agent_pane_of(svc: &crate::service::Service, pid: i32) -> Option<Uuid> {
     pane_running(svc, pid, |svc, terminal| {
         svc.store.get_terminal(terminal).is_ok_and(|t| t.role != TerminalRole::Shell)
-    })
+    }).flatten()
 }
 
 /// The pane `pid` runs in, whatever it runs (ov-583): the same walk, failing
 /// open the same way, for whose Claude login a pane it opens runs on
 /// (`claude_logins`).
 pub fn pane_of(svc: &crate::service::Service, pid: i32) -> Option<Uuid> {
-    pane_running(svc, pid, |_, _| true)
+    pane_running(svc, pid, |_, _| true).flatten()
 }
 
-fn pane_running(svc: &crate::service::Service, pid: i32, wanted: impl Fn(&crate::service::Service, Uuid) -> bool) -> Option<Uuid> {
+/// Identity-sensitive walks distinguish "no pane" from an unavailable table.
+pub(crate) fn caller_pane_of(svc: &crate::service::Service, pid: i32) -> Result<Option<Uuid>> {
+    pane_running(svc, pid, |_, _| true).ok_or(DomainError::OperationFailed)
+}
+
+fn pane_running(svc: &crate::service::Service, pid: i32, wanted: impl Fn(&crate::service::Service, Uuid) -> bool) -> Option<Option<Uuid>> {
     let panes: std::collections::HashMap<i32, Uuid> = svc
         .inventory_snapshot()
         .panes
@@ -856,9 +861,9 @@ fn pane_running(svc: &crate::service::Service, pid: i32, wanted: impl Fn(&crate:
         .map(|p| (p.stamp.pid as i32, p.terminal_id))
         .collect();
     if panes.is_empty() {
-        return None;
+        return Some(None);
     }
-    let table = crate::proc_table::snapshot()?;
+    let table = crate::proc_table::topology()?;
     let parents: std::collections::HashMap<i32, i32> = table
         .lines()
         .filter_map(|l| {
@@ -866,7 +871,7 @@ fn pane_running(svc: &crate::service::Service, pid: i32, wanted: impl Fn(&crate:
             Some((f.next()?.parse().ok()?, f.next()?.parse().ok()?))
         })
         .collect();
-    pane_among(pid, &parents, &panes)
+    Some(pane_among(pid, &parents, &panes))
 }
 
 /// The pane in `panes` (by its process's pid) that `pid` descends from,

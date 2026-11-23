@@ -287,12 +287,15 @@ impl Handler for RpcFactory {
 
     fn handle(&self, req: Request) -> impl std::future::Future<Output = Response> + Send {
         let session = self.session.clone();
-        let mut rpc = Rpc::new(self.service.clone(), self.watcher.clone(), crate::person_access::live_peer(&self.service.store, &self.peer), session.clone(), self.stop.clone(), self.push.clone(), self.attachment.clone());
-        rpc.workflow = self.workflow.clone();
-        rpc.caller_pid = self.caller_pid;
-        rpc.caller_pane = self.caller_pane.clone();
-        let vouched = self.device_vouched.clone();
         async move {
+            let method = farcooler_protocol::method::Method::parse(&req.method)
+                .map_or("unknown", farcooler_protocol::method::Method::name);
+            let _request = crate::request_watchdog::Request::begin(method);
+            let mut rpc = Rpc::new(self.service.clone(), self.watcher.clone(), crate::person_access::live_peer(&self.service.store, &self.peer), session.clone(), self.stop.clone(), self.push.clone(), self.attachment.clone());
+            rpc.workflow = self.workflow.clone();
+            rpc.caller_pid = self.caller_pid;
+            rpc.caller_pane = self.caller_pane.clone();
+            let vouched = self.device_vouched.clone();
             // The one request a closed connection could still serve.
             //
             // `serve_connection` returns the moment a session is closed and

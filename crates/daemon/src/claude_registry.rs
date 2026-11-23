@@ -167,6 +167,11 @@ pub(crate) fn process_incarnation(_: i32) -> Option<i64> { None }
 
 #[cfg(target_os = "macos")]
 fn bsd_info(pid: i32) -> Option<libc::proc_bsdinfo> {
+    crate::process_reads::DETAILS.read(move || read_bsd_info(pid)).flatten()
+}
+
+#[cfg(target_os = "macos")]
+fn read_bsd_info(pid: i32) -> Option<libc::proc_bsdinfo> {
     let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
     let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
     // SAFETY: the buffer is a zeroed `proc_bsdinfo` of exactly the size passed,
@@ -178,6 +183,11 @@ fn bsd_info(pid: i32) -> Option<libc::proc_bsdinfo> {
 
 #[cfg(target_os = "linux")]
 fn linux_stat(pid: i32) -> Option<Vec<String>> {
+    crate::process_reads::DETAILS.read(move || read_linux_stat(pid)).flatten()
+}
+
+#[cfg(target_os = "linux")]
+fn read_linux_stat(pid: i32) -> Option<Vec<String>> {
     let text = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     // The command name is parenthesized and may hold spaces; fields resume
     // after its closing parenthesis, at field 3 (state).

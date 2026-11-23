@@ -204,7 +204,7 @@ final class FleetStore: ObservableObject {
             // `reconnectNow()`. Skipped for a remote target: only this
             // Mac bundles and starts its own daemon.
             if target.isEmpty {
-                await LocalDaemon.shared.ensure()
+                await client.prepareLocalRunner()
                 // The native view's one connection to this runner (ov-372).
                 NativeAgents.shared.start()
             }
@@ -268,6 +268,7 @@ final class FleetStore: ObservableObject {
         /// No runner is connected, and at least one has been lost or
         /// refused. Neither a count nor a failure — see above.
         case unsaid
+        case notResponding
         /// No runner is connected, and every one that has answered at all
         /// said Far Cooler isn't installed there: the runners, by name, "" for
         /// this Mac. Said, because it is the one reason here with something
@@ -282,6 +283,7 @@ final class FleetStore: ObservableObject {
             case .runtimeDown: return "tmux unavailable"
             case .connecting: return "Connecting…"
             case .unsaid: return "Not connected"
+            case .notResponding: return HostState.runnerNotRespondingReason
             case .notInstalled(let runners) where runners.count == 1:
                 let runner = runners[0].isEmpty ? "this Mac" : runners[0]
                 return "Far Cooler isn’t installed on \(runner)"
@@ -291,7 +293,7 @@ final class FleetStore: ObservableObject {
         }
 
         /// Red only for the one reading that is a failure someone saw.
-        var isTrouble: Bool { self == .runtimeDown }
+        var isTrouble: Bool { self == .runtimeDown || self == .notResponding }
     }
 
     /// The reading from each runner's state and the last fleet it read.
@@ -317,6 +319,9 @@ final class FleetStore: ObservableObject {
         }
         let answered = runners.filter { $0.state != .connecting }
         if answered.isEmpty { return .connecting }
+        if answered.contains(where: { $0.state == .unreachable(reason: HostState.runnerNotRespondingReason) }) {
+            return .notResponding
+        }
         // Neutral like `.unsaid`, not red: a runner without Far Cooler has
         // lost nothing, and the trouble dot paints it `.secondary` too.
         if answered.allSatisfy({ $0.state == .notInstalled }) {
@@ -455,7 +460,7 @@ final class FleetStore: ObservableObject {
         let healthy: Bool, live: Int
         switch reading {
         case .live(let count): (healthy, live) = (true, count)
-        case .runtimeDown, .connecting, .unsaid, .notInstalled: (healthy, live) = (false, 0)
+        case .runtimeDown, .connecting, .unsaid, .notResponding, .notInstalled: (healthy, live) = (false, 0)
         }
         var fleet = Fleet(
             runtimeHealthy: healthy, livePanes: live,

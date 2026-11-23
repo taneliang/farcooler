@@ -71,7 +71,7 @@ enum EngineFocus: Hashable {
 /// Reads through the Mac's authenticated CLI link, like Plan. The JSON only
 /// contains the presentation; pinned definitions and raw receipts stay in Rust.
 struct EnginePage: View {
-    let client: DaemonClient
+    @ObservedObject var client: DaemonClient
     let workspace: WorkspaceSummary
     let focus: EngineFocus?
     let visible: Bool
@@ -82,12 +82,19 @@ struct EnginePage: View {
     @State private var problem: String?
     @State private var refreshRequest = 0
 
+    private var readProblem: String? {
+        if client.state == .unreachable(reason: HostState.runnerNotRespondingReason) {
+            return HostState.runnerNotRespondingReason
+        }
+        return problem
+    }
+
     var body: some View {
         Group {
             if let snapshot, let observedAt {
-                EngineView(snapshot: snapshot, observedAt: observedAt, stale: problem != nil,
+                EngineView(snapshot: snapshot, observedAt: observedAt, stale: readProblem != nil,
                            focus: focus, refresh: refresh, openTicket: openTicket)
-            } else if let problem {
+            } else if let problem = readProblem {
                 ContentUnavailableView {
                     Label(EngineCopy.unavailableTitle.text, systemImage: "gearshape.2")
                 } description: {
@@ -115,10 +122,9 @@ struct EnginePage: View {
 
     private func read() async {
         let repository = workspace.repository ?? workspace.id
-        let (data, message) = await client.runRaw(
+        let (data, message) = await client.runnerRead(
             ["plan", "engine", "--repo", repository]
-                + (workspace.boardWorkspace.map { ["--workspace", $0] } ?? []) + ["--json"],
-            background: true)
+                + (workspace.boardWorkspace.map { ["--workspace", $0] } ?? []) + ["--json"])
         guard !Task.isCancelled else { return }
         guard let data, let next = try? JSONDecoder().decode(EngineSnapshot.self, from: data) else {
             problem = message ?? EngineCopy.invalidResponse.text

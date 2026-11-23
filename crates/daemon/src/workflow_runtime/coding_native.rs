@@ -147,8 +147,8 @@ fn server(root: &Path, binding: &Binding) -> TmuxServer {
     let id = terminal(binding);
     TmuxServer::in_dir(&format!("workflow-{id}"), id, root)
 }
-pub(super) fn snapshot() -> Result<crate::foreground::Foreground> {
-    let raw = crate::proc_table::snapshot().ok_or(Error::Refused("native process table unavailable"))?;
+pub(super) async fn snapshot() -> Result<crate::foreground::Foreground> {
+    let raw = crate::proc_table::topology_async().await.ok_or(Error::Refused("native process table unavailable"))?;
     // Unlike display/label reads, an empty/partial fallback is never quiescence.
     if !raw.lines().any(|line| line.split_whitespace().next() == Some(std::process::id().to_string().as_str())) {
         return Err(Error::Refused("native process table incomplete"));
@@ -725,7 +725,7 @@ impl Exec {
         if owner.hold {
             return Ok(self.native_hold_socket(binding).try_exists()?.then_some("its agent's hold has not confirmed exit"));
         }
-        let table = tokio::task::spawn_blocking(snapshot).await.map_err(|_| Error::Refused("native process read failed"))??;
+        let table = snapshot().await?;
         Ok((!owner.processes(&table)?.is_empty()).then_some("processes are still running on its agent's terminal"))
     }
     /// Whether a native agent the runner no longer runs has provably ended (ov-1301): its pane is gone or dead and

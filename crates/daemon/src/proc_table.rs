@@ -15,8 +15,8 @@
 //! keeps tmux's `pane_current_command` for it instead of a label.
 //!
 //! `None` means this system has no in-process answer, or the walk found
-//! nothing at all (a sandbox hiding the table). The caller then falls back to
-//! `ps`, which is slower and always right.
+//! nothing at all (a sandbox hiding the table). A timed-out read also returns
+//! no data.
 
 /// One row in `ps`'s column order. `foreground` is `ps`'s `+`: in the
 /// foreground process group of the controlling terminal.
@@ -32,8 +32,30 @@ fn line(pid: i32, ppid: i32, pgid: i32, tty: &str, foreground: bool, args: &str)
 /// Every process on the host as `ps -axo pid=,ppid=,pgid=,tty=,stat=,args=`
 /// would print it, or `None` when this system can't be read in-process.
 pub fn snapshot() -> Option<String> {
-    let text = walk()?;
+    crate::process_reads::LABELS.read(|| sample(true)).flatten()
+}
+
+pub(crate) async fn foreground_snapshot() -> Option<Option<String>> {
+    crate::process_reads::LABELS.read_async(|| sample(true)).await
+}
+
+/// Process relationships for authorization and signal delivery. Even a
+/// foreground process contributes only its topology here.
+pub(crate) fn topology() -> Option<String> {
+    crate::process_reads::TOPOLOGY.read(|| sample(false)).flatten()
+}
+
+pub(crate) async fn topology_async() -> Option<String> {
+    crate::process_reads::TOPOLOGY.read_async(|| sample(false)).await.flatten()
+}
+
+fn sample(arguments: bool) -> Option<String> {
+    let text = walk(arguments)?;
     (!text.is_empty()).then_some(text)
+}
+
+pub(crate) fn process_state(pid: i32) -> ProcessState {
+    crate::process_reads::DETAILS.read(move || read_state(pid)).unwrap_or(ProcessState::Unknown)
 }
 
 // A successful signal only requests a stop. Confirm the kernel observed it before acknowledging a
@@ -46,7 +68,7 @@ pub(crate) fn stopped_or_gone(pid: i32) -> bool {
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn process_state(pid: i32) -> ProcessState {
+fn read_state(pid: i32) -> ProcessState {
     let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
     let size = std::mem::size_of_val(&info) as i32;
     let got = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) };
@@ -62,7 +84,7 @@ pub(crate) fn process_state(pid: i32) -> ProcessState {
     } else { ProcessState::Unknown }
 }
 #[cfg(not(target_os = "macos"))]
-pub(crate) fn process_state(pid: i32) -> ProcessState {
+fn read_state(pid: i32) -> ProcessState {
     match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
         Ok(stat) => stat.rsplit_once(')').and_then(|(_, s)| s.trim_start().chars().next())
             .map_or(ProcessState::Unknown, |state| match state {
@@ -127,7 +149,7 @@ fn tty_name(tdev: i32) -> String {
 /// with. Per-pid `proc_pidinfo` costs about ten times as much per process on
 /// a loaded host; this is a single call.
 #[cfg(target_os = "macos")]
-fn walk() -> Option<String> {
+fn walk(arguments: bool) -> Option<String> {
     const NODEV: i32 = -1;
 
     let mut mib = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_ALL];
@@ -174,7 +196,11 @@ fn walk() -> Option<String> {
         let foreground = tty != "??" && int(rec, kinfo::P_FLAG) & kinfo::P_CONTROLT != 0 && pgid == tpgid;
         // Arguments only where they are read: `foreground::parse` labels a pane
         // from its foreground rows and from nothing else.
-        let args = if foreground { procargs(pid).unwrap_or_default() } else { String::new() };
+        let args = if foreground && arguments {
+            #[cfg(test)]
+            stall_foreground_read(pid);
+            procargs(pid).unwrap_or_default()
+        } else { String::new() };
         out.push_str(&line(pid, ppid, pgid, &tty, foreground, &args));
     }
     // This process must be in the table, under its own parent: if it isn't,
@@ -186,8 +212,12 @@ fn walk() -> Option<String> {
 /// its terminal (ov-620, `caller_seat`): the snapshot reads a command line
 /// only for a foreground process, and a caller's ancestors seldom are. `None`
 /// when it can't be read (gone, or another user's).
-#[cfg(target_os = "macos")]
 pub fn command_of(pid: i32) -> Option<(String, String)> {
+    crate::process_reads::ARGUMENTS.read(move || read_command_of(pid)).flatten()
+}
+
+#[cfg(target_os = "macos")]
+fn read_command_of(pid: i32) -> Option<(String, String)> {
     let buf = procargs2(pid)?;
     let path = buf.get(4..)?.split(|&b| b == 0).next().map(|p| String::from_utf8_lossy(p).into_owned()).unwrap_or_default();
     Some((path, parse_procargs2(&buf)?))
@@ -197,7 +227,7 @@ pub fn command_of(pid: i32) -> Option<(String, String)> {
 /// rewrite its `cmdline` (`process.title`); the executable link still names
 /// the binary.
 #[cfg(target_os = "linux")]
-pub fn command_of(pid: i32) -> Option<(String, String)> {
+fn read_command_of(pid: i32) -> Option<(String, String)> {
     let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
     let args: Vec<String> = raw.split(|&b| b == 0).filter(|a| !a.is_empty()).map(|a| String::from_utf8_lossy(a).into_owned()).collect();
     let args = args.join(" ");
@@ -207,15 +237,19 @@ pub fn command_of(pid: i32) -> Option<(String, String)> {
 
 /// No in-process reader elsewhere: never known.
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-pub fn command_of(_pid: i32) -> Option<(String, String)> {
+fn read_command_of(_pid: i32) -> Option<(String, String)> {
     None
 }
 
 /// One process's executable, by path, for `caller_seat` (ov-649). macOS
 /// answers for any user's process, root's `sshd` included; Linux only for
 /// this user's, whose `/proc/<pid>/exe` it may read.
-#[cfg(target_os = "macos")]
 pub fn path_of(pid: i32) -> Option<String> {
+    crate::process_reads::DETAILS.read(move || read_path_of(pid)).flatten()
+}
+
+#[cfg(target_os = "macos")]
+fn read_path_of(pid: i32) -> Option<String> {
     let mut buf = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
     // SAFETY: `buf` holds the size passed, and the kernel writes at most that.
     let len = unsafe { libc::proc_pidpath(pid, buf.as_mut_ptr().cast(), buf.len() as u32) };
@@ -224,20 +258,24 @@ pub fn path_of(pid: i32) -> Option<String> {
 
 /// The same on Linux.
 #[cfg(target_os = "linux")]
-pub fn path_of(pid: i32) -> Option<String> {
+fn read_path_of(pid: i32) -> Option<String> {
     std::fs::read_link(format!("/proc/{pid}/exe")).ok().map(|p| p.to_string_lossy().into_owned())
 }
 
 /// No in-process reader elsewhere: never known.
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-pub fn path_of(_pid: i32) -> Option<String> {
+fn read_path_of(_pid: i32) -> Option<String> {
     None
 }
 
 /// The user one process runs as, whoever's it is: `proc_pidinfo`'s short
 /// BSD record, which it gives for root's processes too.
-#[cfg(target_os = "macos")]
 pub fn uid_of(pid: i32) -> Option<u32> {
+    crate::process_reads::DETAILS.read(move || read_uid_of(pid)).flatten()
+}
+
+#[cfg(target_os = "macos")]
+fn read_uid_of(pid: i32) -> Option<u32> {
     // SAFETY: a plain C struct of integers, for which all zeroes is valid.
     let mut info: libc::proc_bsdshortinfo = unsafe { std::mem::zeroed() };
     let size = std::mem::size_of::<libc::proc_bsdshortinfo>() as libc::c_int;
@@ -248,14 +286,14 @@ pub fn uid_of(pid: i32) -> Option<u32> {
 
 /// The same on Linux: the owner of `/proc/<pid>`, which is its effective uid.
 #[cfg(target_os = "linux")]
-pub fn uid_of(pid: i32) -> Option<u32> {
+fn read_uid_of(pid: i32) -> Option<u32> {
     use std::os::unix::fs::MetadataExt as _;
     std::fs::metadata(format!("/proc/{pid}")).ok().map(|m| m.uid())
 }
 
 /// No in-process reader elsewhere: never known.
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-pub fn uid_of(_pid: i32) -> Option<u32> {
+fn read_uid_of(_pid: i32) -> Option<u32> {
     None
 }
 
@@ -270,6 +308,11 @@ pub fn name_of(pid: i32) -> Option<String> {
 /// The same on Linux.
 #[cfg(target_os = "linux")]
 pub fn name_of(pid: i32) -> Option<String> {
+    crate::process_reads::DETAILS.read(move || read_name_of(pid)).flatten()
+}
+
+#[cfg(target_os = "linux")]
+fn read_name_of(pid: i32) -> Option<String> {
     std::fs::read_to_string(format!("/proc/{pid}/comm")).ok().map(|c| c.trim_end().to_string()).filter(|c| !c.is_empty())
 }
 
@@ -309,11 +352,15 @@ fn procargs2(pid: i32) -> Option<Vec<u8>> {
 
 /// Temp roots an older Python heavy taker could have selected. Read only the
 /// three tempfile settings and resolve relative paths against the taker's cwd.
-pub(crate) fn python_temp_roots(pid: i32) -> Vec<std::path::PathBuf> {
+pub(crate) fn python_temp_roots(pid: i32) -> Option<Vec<std::path::PathBuf>> {
+    crate::process_reads::ARGUMENTS.read(move || read_python_temp_roots(pid))
+}
+
+fn read_python_temp_roots(pid: i32) -> Vec<std::path::PathBuf> {
     use std::os::unix::ffi::OsStrExt;
     use std::path::Path;
 
-    let Some(exe) = path_of(pid) else { return Vec::new() };
+    let Some(exe) = read_path_of(pid) else { return Vec::new() };
     if !Path::new(&exe).file_name().and_then(|s| s.to_str()).is_some_and(|s| s.to_ascii_lowercase().starts_with("python")) {
         return Vec::new();
     }
@@ -393,7 +440,7 @@ fn parse_procargs2(buf: &[u8]) -> Option<String> {
 }
 
 #[cfg(target_os = "linux")]
-fn walk() -> Option<String> {
+fn walk(arguments: bool) -> Option<String> {
     let mut out = String::new();
     for entry in std::fs::read_dir("/proc").ok()?.flatten() {
         let Some(pid) = entry.file_name().to_str().and_then(|n| n.parse::<i32>().ok()) else { continue };
@@ -402,7 +449,9 @@ fn walk() -> Option<String> {
         let Some(s) = parse_linux_stat(&stat) else { continue };
         let tty = linux_tty(s.tty_nr);
         let foreground = tty != "??" && s.tpgid > 0 && s.tpgid == s.pgrp;
-        let args = if foreground {
+        let args = if foreground && arguments {
+            #[cfg(test)]
+            stall_foreground_read(pid);
             std::fs::read(format!("/proc/{pid}/cmdline"))
                 .ok()
                 .map(|raw| {
@@ -421,7 +470,7 @@ fn walk() -> Option<String> {
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn walk() -> Option<String> {
+fn walk(_arguments: bool) -> Option<String> {
     None
 }
 
@@ -464,6 +513,41 @@ fn linux_tty(tty_nr: u32) -> String {
         136..=143 => format!("pts/{}", minor + (major - 136) * 256),
         4 => format!("tty{minor}"),
         _ => "??".to_string(),
+    }
+}
+
+#[cfg(test)]
+pub(crate) struct StalledRead {
+    pid: i32,
+    pub entered: tokio::sync::Notify,
+    release: std::sync::Condvar,
+    released: std::sync::Mutex<bool>,
+}
+
+#[cfg(test)]
+static STALLED_READ: std::sync::Mutex<Option<std::sync::Arc<StalledRead>>> = std::sync::Mutex::new(None);
+
+#[cfg(test)]
+impl StalledRead {
+    pub(crate) fn install(pid: i32) -> std::sync::Arc<Self> {
+        let read = std::sync::Arc::new(Self { pid, entered: Default::default(), release: Default::default(), released: Default::default() });
+        *STALLED_READ.lock().unwrap() = Some(read.clone());
+        read
+    }
+
+    pub(crate) fn release(&self) {
+        *STALLED_READ.lock().unwrap() = None;
+        *self.released.lock().unwrap() = true;
+        self.release.notify_all();
+    }
+}
+
+#[cfg(test)]
+fn stall_foreground_read(pid: i32) {
+    let read = STALLED_READ.lock().unwrap().clone();
+    if let Some(read) = read.filter(|read| read.pid == pid) {
+        read.entered.notify_one();
+        let _guard = read.release.wait_while(read.released.lock().unwrap(), |released| !*released).unwrap();
     }
 }
 

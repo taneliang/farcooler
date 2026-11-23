@@ -27,6 +27,25 @@ struct CancelledReadTests {
         #expect(client.fleetError == nil)
     }
 
+    @Test func aStalledReadReportsThatTheRunnerIsNotResponding() async {
+        let client = DaemonClient(target: "", notifications: NotificationCenter())
+        client.runnerResponseTimeout = 0.05
+        client.commandRunnerForTesting = { _ in
+            try? await Task.sleep(for: .seconds(30))
+            return (nil, nil)
+        }
+        let read = Task { await client.refresh() }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while client.state == .connecting, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(client.state == .unreachable(reason: "Runner not responding"))
+        #expect(client.fleetError == "Runner not responding")
+        read.cancel()
+        await read.value
+        client.stopEvents()
+    }
+
     @Test func aRealFailureStillSaysSo() async {
         let client = DaemonClient(target: "", notifications: NotificationCenter())
         client.commandRunnerForTesting = { _ in (nil, "ssh: connect to host box port 22: Connection refused") }

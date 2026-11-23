@@ -55,7 +55,7 @@ use crate::service::Service;
 /// Whose `peer`, a local caller at `caller_pid`, is (the module's rule).
 /// `pane` holds the pane the connection's walk found, once it found one.
 pub fn caller_person(svc: &Service, peer: &Peer, caller_pid: Option<i32>, pane: &OnceLock<Uuid>) -> Result<Person> {
-    caller_person_with(svc, peer, caller_pid, pane, |pid| crate::people::pane_of(svc, pid))
+    caller_person_with(svc, peer, caller_pid, pane, |pid| crate::people::caller_pane_of(svc, pid))
 }
 
 /// Who `peer`, a local caller at `caller_pid`, is, as the people log writes
@@ -76,7 +76,7 @@ pub(crate) fn caller_person_with(
     peer: &Peer,
     caller_pid: Option<i32>,
     pane: &OnceLock<Uuid>,
-    walk: impl FnOnce(i32) -> Option<Uuid>,
+    walk: impl FnOnce(i32) -> Result<Option<Uuid>>,
 ) -> Result<Person> {
     if peer.client_id.is_some() {
         return person_of(&svc.store, peer);
@@ -88,7 +88,7 @@ pub(crate) fn caller_person_with(
     // Only a pane found is kept: none found is asked again next time.
     let found = match pane.get() {
         Some(kept) => Some(*kept),
-        None => walk(pid).inspect(|found| {
+        None => walk(pid)?.inspect(|found| {
             let _ = pane.set(*found);
         }),
     };

@@ -258,6 +258,7 @@ async fn run(selected: &paths::RuntimeSelection) -> Result<(), i32> {
         }
     };
 
+    farcooler_daemon::request_watchdog::start();
     service.start_workflows().map_err(|error| {
         eprintln!("cannot start workflow service: {error}"); 1
     })?;

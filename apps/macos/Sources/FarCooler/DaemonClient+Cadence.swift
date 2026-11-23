@@ -64,6 +64,10 @@ extension DaemonClient {
     /// failed login for the same answer (ov-821). The next check is armed
     /// here instead; the stream starts once a read gets in.
     func afterRecheck() {
-        if awaitingRecheck { scheduleRetry() } else { startEvents() }
+        if awaitingRecheck || state == .unreachable(reason: HostState.runnerNotRespondingReason) {
+            scheduleRetry()
+        } else {
+            startEvents()
+        }
     }
 }

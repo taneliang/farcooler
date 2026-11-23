@@ -17,7 +17,7 @@ async fn owned_pane(script: &str, ready: bool) -> (tempfile::TempDir, Runtime, H
     (dir, runtime, host, owner)
 }
 fn on_tty(tty: &str) -> Vec<i32> {
-    snapshot().unwrap().under_tty(tty.trim_start_matches("/dev/"))
+    crate::foreground::parse(&crate::proc_table::topology().unwrap()).under_tty(tty.trim_start_matches("/dev/"))
 }
 fn alive(pid: i32) -> bool { unsafe { libc::kill(pid, 0) == 0 } }
 async fn closed(host: &Host, owner: &NativeOwner) -> bool {

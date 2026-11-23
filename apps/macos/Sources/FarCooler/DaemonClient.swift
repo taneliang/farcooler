@@ -84,6 +84,7 @@ final class DaemonClient: ObservableObject {
     /// shows anywhere, invisible except in `ps`.
     deinit {
         retryTask?.cancel()
+        runnerHealthTask?.cancel()
         // For the same reason, one clock over: `reportWatching`'s renewal
         // re-arms itself, so a client nobody holds anymore would go on
         // spawning a `farcooler terminal watching` every three seconds against
@@ -300,7 +301,7 @@ final class DaemonClient: ObservableObject {
             // take the socket, so the app claims it back before reading
             // anything through it.
             if self.target.isEmpty {
-                await LocalDaemon.shared.ensure()
+                await self.prepareLocalRunner()
                 // A new daemon is a new connection for the native view.
                 NativeAgents.shared.start()
             }
@@ -347,7 +348,7 @@ final class DaemonClient: ObservableObject {
         retryTask = Task { @MainActor [weak self] in
             guard let self else { return }
             if self.target.isEmpty {
-                await LocalDaemon.shared.ensure()
+                await self.prepareLocalRunner()
                 NativeAgents.shared.start()
             }
             guard !Task.isCancelled else { return }
@@ -390,6 +391,59 @@ final class DaemonClient: ObservableObject {
     // MARK: - Live updates
 
     private(set) var eventStream: EventStream?
+    private var runnerHealthTask: Task<Void, Never>?
+    private var fleetReads = 0
+    private var runnerReadGeneration = 0
+    var runnerResponseTimeout: TimeInterval = 10
+
+    private func startRunnerHealthChecks() {
+        guard runnerHealthTask == nil else { return }
+        runnerHealthTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                guard !Task.isCancelled, let self else { return }
+                if self.state == .connected {
+                    // The event stream can stay open and silent through a runner stall.
+                    _ = await self.runnerRead(["root", "list", "--json"])
+                }
+            }
+        }
+    }
+
+    private func runnerDidNotRespond() {
+        guard !isStopped, !awaitingRecheck else { return }
+        let reason = HostState.runnerNotRespondingReason
+        fleetError = reason
+        state = .unreachable(reason: reason)
+        scheduleRetry()
+    }
+
+    func prepareLocalRunner() async {
+        let timer = runnerDeadline()
+        defer { timer.cancel() }
+        await LocalDaemon.shared.ensure()
+    }
+
+    private func runnerDeadline() -> Task<Void, Never> {
+        let limit = runnerResponseTimeout
+        let generation = runnerReadGeneration
+        // The UI timer also covers a launch that has not returned from the kernel yet.
+        return Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(limit))
+            if !Task.isCancelled, self?.runnerReadGeneration == generation { self?.runnerDidNotRespond() }
+        }
+    }
+
+    func runnerRead(_ args: [String]) async -> (data: Data?, message: String?) {
+        let generation = runnerReadGeneration
+        let timer = runnerDeadline()
+        defer { timer.cancel() }
+        let result = await runRaw(args, background: true, deadline: runnerResponseTimeout)
+        if !Task.isCancelled, runnerReadGeneration == generation, result.message == HostState.runnerNotRespondingReason {
+            runnerDidNotRespond()
+        }
+        return result
+    }
     /// Which stream is current, so a terminated one's `onEnd` can tell
     /// whether it still is.
     ///
@@ -421,6 +475,10 @@ final class DaemonClient: ObservableObject {
         // is armed correctly regardless of which of those paths is calling.
         isStopped = false
         guard eventStream == nil else { return }
+        if state == .unreachable(reason: HostState.runnerNotRespondingReason) {
+            scheduleRetry()
+            return
+        }
         guard let binary else {
             // No CLI to run means no stream can ever start on its own, so
             // without arming a retry here this state never has a way out.
@@ -429,6 +487,7 @@ final class DaemonClient: ObservableObject {
             return
         }
 
+        startRunnerHealthChecks()
         streamGeneration += 1
         let generation = streamGeneration
         let stream = EventStream(
@@ -537,7 +596,8 @@ final class DaemonClient: ObservableObject {
                     // "reconnecting" over that whole span would say less
                     // than what `refresh()` already determined.
                     if [.notInstalled, .removed, .noAccess].contains(self.state) { return }
-                    if case .unreachable(let reason) = self.state, self.looksVersionMismatch(reason) {
+                    if case .unreachable(let reason) = self.state,
+                        self.looksVersionMismatch(reason) || reason == HostState.runnerNotRespondingReason {
                         return
                     }
                     self.state = .reconnecting(attempt: self.attempt)
@@ -611,6 +671,9 @@ final class DaemonClient: ObservableObject {
         // alone leaves that guard reading "idempotent" instead of "stopped".
         // See `isStopped`'s own doc comment.
         isStopped = true
+        runnerReadGeneration += 1
+        runnerHealthTask?.cancel()
+        runnerHealthTask = nil
         retryTask?.cancel()
         retryTask = nil
         eventStream?.stop()
@@ -773,19 +836,25 @@ final class DaemonClient: ObservableObject {
     /// (`awaitingRecheck`, ov-821): each would be a failed login on its address.
     func refresh(recheck: Bool = false) async {
         if !recheck, awaitingRecheck { return }
+        if fleetReads > 0, state == .unreachable(reason: HostState.runnerNotRespondingReason) {
+            scheduleRetry()
+            return
+        }
+        fleetReads += 1
+        defer { fleetReads -= 1 }
         keyRefusals.dialing(at: now())
         // `runRaw`, not `run`: the failure message comes back from THIS
         // call directly, and a refresh inside an action is not that action's
         // failure — a Stop the runner refused is not undone by the fleet
         // reading fine afterwards.
-        let (maybeData, failureMessage) = await runRaw(
-            ["worktree", "list", "--json"], background: true)
+        let (maybeData, failureMessage) = await runnerRead(["worktree", "list", "--json"])
         guard let data = maybeData else {
             // Cancelled, not failed: whoever cancelled has already set the state
             // it wants (`reconnect` sets `.connecting`), and writing
             // `.unreachable` over it would show the runner as down.
             if Task.isCancelled { return }
             let reason = failureMessage ?? "Couldn’t reach this runner."
+            if reason == HostState.runnerNotRespondingReason { return }
             fleetError = reason
             let removed = looksNotInstalled(reason) ? nil : await removal(after: reason)  // ov-784
             state = looksNotInstalled(reason) ? .notInstalled : removed ?? .unreachable(reason: reason)
@@ -2946,7 +3015,7 @@ final class DaemonClient: ObservableObject {
     /// `.unreachable(reason:)` — rather than leaving it to the action it
     /// runs inside.
     func runRaw(
-        _ args: [String], background: Bool = false
+        _ args: [String], background: Bool = false, deadline: TimeInterval? = nil
     ) async -> (data: Data?, message: String?) {
         // A background poll must not toggle `busy`. That is a @Published change,
         // and every one of them re-evaluates the whole view tree including the
@@ -2964,7 +3033,8 @@ final class DaemonClient: ObservableObject {
         }
 
         let ran = await ProcessRunner.run(
-            bin, cliHostArguments + args, environment: environment)
+            bin, cliHostArguments + args, environment: environment, deadline: deadline)
+        if ran.timedOut { return (nil, HostState.runnerNotRespondingReason) }
         if let why = ran.launchFailure { return (nil, why) }
         // A cancel somebody asked for (a reconnect abandoning its bring-up) is
         // not the runner failing, and ssh's "Killed by signal 15." is not

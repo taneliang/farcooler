@@ -63,8 +63,7 @@ impl Exec {
         for round in 0..100 {
             let life = tmux.pane_life(&owner.pane, owner.terminal).await
                 .map_err(|_| Error::Refused("native pane ownership unavailable"))?;
-            let table = tokio::task::spawn_blocking(snapshot).await
-                .map_err(|_| Error::Refused("native process read failed"))??;
+            let table = snapshot().await?;
             let busy = !owner.processes(&table)?.is_empty();
             match life {
                 farcooler_tmux::PaneLife::Gone if !busy => return Ok(()),

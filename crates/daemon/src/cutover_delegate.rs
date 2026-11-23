@@ -128,7 +128,7 @@ pub(crate) fn lapsed_at(root: &Path, pid: i32, now_ms: i64) -> bool {
 /// and the database still says that pane is the owner's orchestrator.
 fn pinned_for(root: &Path, pid: i32) -> Option<Delegate> {
     let delegate = read(root)?;
-    let table = crate::proc_table::snapshot()?;
+    let table = crate::proc_table::topology()?;
     let procs = crate::caller_seat::procs(&table);
     let servers = crate::caller_seat::tmux_servers(&procs);
     if !within(pid, &procs, &servers, &delegate, &crate::claude_registry::process_incarnation) { return None; }

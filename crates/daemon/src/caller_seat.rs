@@ -242,7 +242,7 @@ pub fn recovery_seat(pid: i32) -> Seat {
     if pid <= 0 {
         return Seat::Unreadable;
     }
-    let Some(table) = crate::proc_table::snapshot() else { return Seat::Unreadable };
+    let Some(table) = crate::proc_table::topology() else { return Seat::Unreadable };
     let procs = procs(&table);
     let servers = tmux_servers(&procs);
     let agent = |pid: i32| crate::proc_table::command_of(pid).map(|(exe, args)| {
@@ -297,7 +297,7 @@ impl View {
             })
             .collect();
         let ttys: HashSet<String> = snapshot.panes.iter().map(|p| p.tty.trim_start_matches("/dev/").to_string()).collect();
-        let procs = procs(&crate::proc_table::snapshot()?);
+        let procs = procs(&crate::proc_table::topology()?);
         let servers: HashSet<i32> = panes.keys().filter_map(|root| procs.get(root)).map(|row| row.ppid).filter(|&p| p > 1).collect();
         Some(View { panes, servers, ttys, procs })
     }
@@ -343,7 +343,7 @@ pub fn is_own_app_or_its_child(pid: i32) -> bool {
     if is_own_app(pid) {
         return true;
     }
-    let parent = crate::proc_table::snapshot().and_then(|table| procs(&table).get(&pid).map(|row| row.ppid));
+    let parent = crate::proc_table::topology().and_then(|table| procs(&table).get(&pid).map(|row| row.ppid));
     parent.is_some_and(|ppid| ppid > 1 && is_own_app(ppid))
 }
 

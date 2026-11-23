@@ -661,3 +661,55 @@ async fn workflow_runtime_a_tree_made_under_the_old_name_is_kept_until_made_agai
     assert_eq!(finish(&mut runtime, "w").await.items["coding"].phase, Phase::Done);
     assert!(!tree.exists(), "no second tree was made");
 }
+
+#[tokio::test]
+async fn restart_paces_six_interrupted_runs_at_two_per_minute() {
+    let (dir, runtime) = fixture().await;
+    let root = dir.path().join("runtime");
+    std::fs::write(root.join("workflow-places.json"), r#"{"agent":2}"#).unwrap();
+    let controller = runtime.controller();
+    // Observe only each run's first dispatch. Later stages would compete for
+    // their own work places and could delay additional runs independently.
+    let mut definition = coding_definition(true);
+    definition.stages.iter_mut().find(|stage| stage.kind == StageKind::Build).unwrap()
+        .progression = Progression::AwaitApproval { principal: "owner".into() };
+    for index in 0..6 {
+        let workspace = format!("board-{index}");
+        let item = format!("run-{index}");
+        let receipt = runtime.submit_now(&controller, Request {
+            id: format!("enqueue-{index}"), workspace: workspace.clone(), expected_revision: 0, sequence: 1,
+            command: Command::Enqueue {
+                resource: Exec::item_resource(&workspace, &item), item, definition: definition.clone(),
+                policy_pin: "policy/v1".into(), dependencies: BTreeSet::new(), initial_candidate: None,
+            },
+        }, 1).unwrap();
+        assert!(receipt.result.is_ok(), "{:?}", receipt.result);
+        // These leases belonged to the old owner, which stopped before it
+        // could admit the external operation.
+        let _ = claim(&runtime, &workspace, 2);
+    }
+    drop(runtime);
+
+    let mut runtime = Runtime::open(&root).unwrap();
+    runtime.retain_interrupted_runs().unwrap();
+    let started = |runtime: &Runtime| {
+        (0..6).filter(|index| {
+            let workspace = format!("board-{index}");
+            runtime.store.workflow_outbox(&workspace).unwrap().iter().any(|stored| !stored.active &&
+                matches!(stored.effect.kind, EffectKind::Execute(StageKind::Provision)))
+        }).count()
+    };
+    assert_eq!(started(&runtime), 0);
+    for index in 0..6 {
+        runtime.pump(100 + index * 35_000).await.unwrap();
+        assert_eq!(started(&runtime), index as usize + 1);
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(25)).await;
+        tokio::time::resume();
+        runtime.pump(100 + index * 35_000 + 25_000).await.unwrap();
+        assert_eq!(started(&runtime), index as usize + 1);
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(10)).await;
+        tokio::time::resume();
+    }
+}

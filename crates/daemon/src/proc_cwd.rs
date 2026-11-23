@@ -12,8 +12,12 @@ use std::path::PathBuf;
 
 /// Where `pid` is working, or `None` for a pid that's gone, isn't ours to
 /// read, or runs on a system this doesn't know how to ask.
-#[cfg(target_os = "macos")]
 pub fn cwd_of(pid: i32) -> Option<PathBuf> {
+    crate::process_reads::DETAILS.read(move || read_cwd_of(pid)).flatten()
+}
+
+#[cfg(target_os = "macos")]
+fn read_cwd_of(pid: i32) -> Option<PathBuf> {
     use std::os::unix::ffi::OsStrExt;
 
     let mut info = std::mem::MaybeUninit::<libc::proc_vnodepathinfo>::zeroed();
@@ -37,7 +41,7 @@ pub fn cwd_of(pid: i32) -> Option<PathBuf> {
 /// Where `pid` is working, or `None` for a pid that's gone or isn't ours to
 /// read.
 #[cfg(target_os = "linux")]
-pub fn cwd_of(pid: i32) -> Option<PathBuf> {
+fn read_cwd_of(pid: i32) -> Option<PathBuf> {
     std::fs::read_link(format!("/proc/{pid}/cwd")).ok().and_then(linux_cwd)
 }
 
@@ -59,7 +63,7 @@ fn linux_cwd(link: PathBuf) -> Option<PathBuf> {
 
 /// Nothing to ask on this system, so nothing is ever seen.
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-pub fn cwd_of(_pid: i32) -> Option<PathBuf> {
+fn read_cwd_of(_pid: i32) -> Option<PathBuf> {
     None
 }
 

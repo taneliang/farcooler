@@ -62,6 +62,7 @@ mod repin_reply_tests;
 #[cfg(test)]
 mod build_cleanup_tests;
 mod recovery_backoff;
+mod restart_pacing;
 #[cfg(test)]
 mod recovery_backoff_tests;
 pub use coding::{AGENT_REVIEWER, CodingConfigExt,CodingConfig, CodingCommand, CodingHarness, CodingReviewer, CodingCi, CodingLanding, CodingPullRequest, LaunchFile, MAX_COMMAND_MS};
@@ -312,6 +313,7 @@ pub struct Runtime {
     cancel_refused: std::collections::BTreeSet<(String, String)>,
     /// Uncertain effects the sweep couldn't recover, looked at less and less often (ov-1301).
     recovery: recovery_backoff::RecoveryBackoff,
+    restart_pacing: restart_pacing::RestartPacing,
     scheduling: std::sync::Mutex<scheduling::Scheduler>,
     inbox: mpsc::Receiver<Inbox>,
     send: mpsc::Sender<Inbox>,
@@ -433,7 +435,7 @@ impl Runtime {
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
             exec: Exec { yielding: crate::yielding::Yielding::at(&root), activities: Default::default(), places: std::sync::Arc::new(std::sync::Mutex::new(Places::load(&root)?)), root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, host: None,
                 seeding: Default::default(), tree_locks: Default::default(), #[cfg(test)] user_home: None, #[cfg(test)] build_free_bytes: Some(u64::MAX), #[cfg(test)] cleanup_check: None },
-            notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None, trees_recovered: false, cancel_refused: Default::default(), recovery: Default::default(), scheduling: Default::default(),
+            notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None, trees_recovered: false, cancel_refused: Default::default(), recovery: Default::default(), restart_pacing: Default::default(), scheduling: Default::default(),
             _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
         runtime.validate_native_host()?;
         Ok(runtime)
@@ -864,6 +866,10 @@ impl Runtime {
                     && published.as_ref().is_some_and(|c| c.pin != item.policy_pin) {
                     continue;
                 }
+                if self.restart_pacing.delayed(workspace, &effect) {
+                    if let Some(pool) = pool { waiting.push(Placed::new(workspace, &effect, pool)); }
+                    continue;
+                }
                 let tree = self.effect_tree(workspace, &effect);
                 let Ok(tree) = self.tree_lock(&tree).try_read_owned() else { continue };
                 let Some(claim) = self.store.workflow_claim_effect(workspace, &effect.id,
@@ -905,6 +911,8 @@ impl Runtime {
                     }
                 };
                 if !self.admit_effect(&claim, clock())? { continue; }
+                let per_minute = self.places().cap(Pool::Agent);
+                self.restart_pacing.started(workspace, &effect, per_minute);
                 let activity = std::sync::Arc::new(execution::Activity::default());
                 self.activities.lock().unwrap().insert((workspace.clone(), effect.id.clone()), activity.clone());
                 let binding = Binding::new(workspace, &effect, claim.resource_generation, item.iteration, &base);
@@ -1088,6 +1096,7 @@ impl Runtime {
     pub async fn run(&mut self, mut shutdown: tokio::sync::watch::Receiver<bool>) -> Result<()> {
         self.shutdown = Some(shutdown.clone());
         self.continuous = true;
+        self.retain_interrupted_runs()?;
         loop {
             if *shutdown.borrow() { return Ok(()); }
             // Bounded drain prevents a busy sender from starving effects/shutdown.

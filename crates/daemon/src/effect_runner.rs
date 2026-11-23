@@ -132,6 +132,10 @@ impl Owner {
         if TEST_START_UNAVAILABLE.try_with(|_| ()).is_ok() {
             return Err(std::io::Error::other("injected unavailable process start identity"));
         }
+        crate::process_reads::OWNER.read(move || Self::read_started_at(pid))
+            .ok_or_else(|| std::io::Error::other("process start identity query unavailable"))?
+    }
+    fn read_started_at(pid: u32) -> std::io::Result<String> {
         let output = std::process::Command::new("/bin/ps")
             .args(["-o", "lstart=", "-p", &pid.to_string()]).env_clear().output()?;
         let started = String::from_utf8(output.stdout).map_err(std::io::Error::other)?.trim().to_string();

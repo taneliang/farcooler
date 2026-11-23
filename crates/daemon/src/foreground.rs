@@ -150,16 +150,18 @@ impl Foreground {
 pub async fn read() -> Foreground {
     // In this process first (`proc_table`): no spawn, so a tick costs the
     // syscalls and not a `ps` over the whole host.
-    if let Ok(Some(table)) = tokio::task::spawn_blocking(crate::proc_table::snapshot).await {
-        return parse(&table);
+    match crate::proc_table::foreground_snapshot().await {
+        Some(Some(table)) => return parse(&table),
+        // Keep the ancestry join usable while a label read is stuck.
+        None => return crate::proc_table::topology_async().await.map_or_else(Foreground::default, |raw| parse(&raw)),
+        Some(None) => {}
     }
     // The system can't be read in-process, or the walk came back empty: ask `ps`.
-    let out = tokio::process::Command::new("ps")
+    let out = crate::process_reads::LABELS.read_async(|| std::process::Command::new("ps")
         .args(["-axo", "pid=,ppid=,pgid=,tty=,stat=,args="])
         .stdin(std::process::Stdio::null())
-        .output()
-        .await;
-    let Ok(out) = out else { return Foreground::default() };
+        .output()).await;
+    let Some(Ok(out)) = out else { return Foreground::default() };
     parse(&String::from_utf8_lossy(&out.stdout))
 }
 

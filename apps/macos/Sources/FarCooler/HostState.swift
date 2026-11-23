@@ -26,6 +26,8 @@ enum HostState: Equatable {
     /// Checked again slowly, as `.removed` is, so being added back is seen.
     case noAccess
 
+    static let runnerNotRespondingReason = "Runner not responding"
+
     var isUsable: Bool { self == .connected }
 
     /// What to tell someone whose action was refused, or nil to let it proceed.

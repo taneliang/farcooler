@@ -551,3 +551,32 @@ async fn ov1267_the_workspace_orchestrator_publishes_and_no_other_agent_does() {
     assert_eq!(refused(&reply), "scope-denied", "published past the owner's reservation");
     assert_eq!(snapshot(&runtime, ws), before);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn workflow_get_answers_while_another_panes_arguments_are_unreadable() {
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let ws = svc.store.ensure_main_workspace(repo).unwrap().id;
+    let (_, caller) = alices_pane(&svc, repo, ws, true).await;
+    let worktree = svc.store.list_worktrees_for_repository(repo).unwrap().remove(0);
+    let unrelated = svc.create_terminal(worktree.id, "unreadable pane", "shell").await.unwrap();
+    svc.inventory.refresh().await;
+    let pid = svc.inventory_snapshot().panes.iter().find(|p| p.terminal_id == unrelated.id).unwrap().stamp.pid as i32;
+    let runtime = Runtime::open_service(&svc.root_dir().join("workflow-test"), svc.store.clone()).unwrap();
+    let rpc = factory(&svc, &runtime, Peer { client_id: None, scope: Scope::Control }, Some(caller));
+    let mut get = request(ws, &Action::Get);
+    get.accepts.push("workflow_summary_v1".into());
+
+    let blocked = crate::proc_table::StalledRead::install(pid);
+    let label_read = tokio::spawn(crate::proc_table::foreground_snapshot());
+    let entered = tokio::time::timeout(Duration::from_secs(1), blocked.entered.notified()).await;
+    if entered.is_err() { blocked.release(); }
+    entered.expect("sampler reached the unrelated process's arguments");
+    let started = std::time::Instant::now();
+    let reply = tokio::time::timeout(Duration::from_secs(1), tokio::spawn(async move { rpc.handle(get).await })).await;
+    let elapsed = started.elapsed();
+    blocked.release();
+    let _ = label_read.await;
+    assert!(elapsed < Duration::from_secs(1), "workflow get took {elapsed:?}");
+    let reply = reply.expect("workflow get answered within one second").unwrap();
+    assert!(matches!(reply.outcome, Some(response::Outcome::Result(_))), "{reply:?}");
+}
