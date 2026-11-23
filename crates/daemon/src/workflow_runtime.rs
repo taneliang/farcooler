@@ -185,6 +185,12 @@ enum Inbox {
     #[cfg(test)]
     Resolve(String, String, oneshot::Sender<Result<()>>),
 }
+impl Inbox {
+    fn is_read_only(&self) -> bool {
+        matches!(self, Self::State(..) | Self::PublicationPreview(..))
+            || matches!(self, Self::Wire(_, action, _) if matches!(**action, farcooler_protocol::workflow_commands::Action::Get))
+    }
+}
 /// Who moves a ticket, for its card's history, and whether they still may when the engine takes the move: asked
 /// in the inbox, with no await before the write (R-111, L8). A move the daemon makes for itself always may.
 pub struct MoveBy { pub actor: farcooler_store::models::Actor, pub still: Box<dyn FnOnce() -> bool + Send> }
@@ -754,7 +760,7 @@ impl Runtime {
                 }
                 Event::Message(message) => {
                     if let Some(message) = message {
-                        let read_only = matches!(message, Inbox::State(..) | Inbox::PublicationPreview(..));
+                        let read_only = message.is_read_only();
                         self.receive(message).await;
                         // A cancel may have ended a group.
                         cleanup_requested |= !read_only;
@@ -1055,9 +1061,7 @@ impl Runtime {
     }
     async fn receive(&self, message: Inbox) {
         // The orchestrator's word may have written the receipt an Uncertain effect waits on: look at once (ov-1301).
-        let read = matches!(&message, Inbox::State(..) | Inbox::PublicationPreview(..))
-            || matches!(&message, Inbox::Wire(_, action, _) if matches!(**action, farcooler_protocol::workflow_commands::Action::Get));
-        if !read { self.recovery.wake(); }
+        if !message.is_read_only() { self.recovery.wake(); }
         match message {
             Inbox::Apply(authority, request, time, reply) => {
                 let request = *request;
@@ -1168,7 +1172,7 @@ impl Runtime {
             // Bounded drain prevents a busy sender from starving effects/shutdown.
             for _ in 0..32 {
                 let Ok(message) = self.inbox.try_recv() else { break; };
-                if !matches!(message, Inbox::State(..)) {
+                if !message.is_read_only() {
                     self.next_cleanup = Some(tokio::time::Instant::now());
                 }
                 self.receive(message).await;
@@ -1182,7 +1186,7 @@ impl Runtime {
                     }
                     message = self.inbox.recv() => {
                         let Some(message) = message else { return Ok(()); };
-                        let read_only = matches!(message, Inbox::State(..) | Inbox::PublicationPreview(..));
+                        let read_only = message.is_read_only();
                         self.receive(message).await;
                         if !read_only {
                             self.next_cleanup = Some(tokio::time::Instant::now());

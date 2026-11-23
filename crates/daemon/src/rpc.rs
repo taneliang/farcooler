@@ -2324,19 +2324,6 @@ impl Rpc {
         }
     }
 
-    /// Tell every client a worktree's layouts as they now stand.
-    ///
-    /// For a mutation that changes tmux's arrangement as a side effect rather
-    /// than as its purpose, like a pane being killed. When the pane was the
-    /// last in its window the window is gone, and the list simply no longer
-    /// holds it, which is exactly what a client needs to drop the tab.
-    async fn announce_layout(&self, worktree: Uuid) {
-        if let Ok(groups) = self.service.layout(worktree).await {
-            self.watcher.publish_layout(worktree, &groups);
-        }
-    }
-
-
 }
 
 #[cfg(test)]

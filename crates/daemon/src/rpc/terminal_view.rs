@@ -3,6 +3,14 @@
 use super::{DomainError, Rpc, Result, Uuid, result, wire};
 
 impl Rpc {
+    /// Publish the current layout after a pane mutation. Closing the last pane
+    /// in a window removes that window from the client layout.
+    pub(super) async fn announce_layout(&self, worktree: Uuid) {
+        if let Ok(groups) = self.service.layout(worktree).await {
+            self.watcher.publish_layout(worktree, &groups);
+        }
+    }
+
     /// Re-read a terminal so the reply carries its DERIVED state rather than
     /// the intent that was just written.
     pub(super) async fn terminal_result(&self, id: Uuid) -> Result<result::Value> {

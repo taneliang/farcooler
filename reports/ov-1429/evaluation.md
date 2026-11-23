@@ -115,3 +115,19 @@ The loaded fixture's RPCs took 527 ms for Plan, 1,331 ms for Plan theme list, 33
 The idle census passed with 23 `lsof` processes (12 recursive), 77 Git processes (two remote-head probes), one `gh` process (zero polls of the finished run), and 64 tmux clients in one minute.
 
 All 91 selected daemon unit tests passed across build cleanup, group tree release, owned directories, CI watch, builder resources, and workflow concurrency. The native Codex owned-directory fixture remained ignored because it requires a real login and dedicated scratch credentials.
+
+## Verification on landing base `fec026430`
+
+The rebased dispatcher adopts the current publication and refreshes groups before the rate-limited automatic queue check. Publication previews use the same read-only classification in each inbox path, so a preview does not request cleanup.
+
+| Loaded RPC | Rebased latency | Budget |
+| --- | ---: | ---: |
+| Plan | 636 ms | < 2 s |
+| Plan theme list | 723 ms | < 2 s |
+| Workflow Get | 184 ms | < 1 s |
+| Task List, first page | 48 ms | — |
+| Worktree List | 0.44 ms | < 2 s |
+
+The loaded read sequence launched no tmux clients. The idle minute recorded 22 `lsof` invocations (12 recursive), 77 Git invocations (two remote-head probes), one `gh` invocation (zero polls of the finished run), and 64 tmux invocations. All five echoes during the cleanup sweep arrived within 100 ms, with a slowest echo of 20.1 ms. The resumed sweep released the output.
+
+The CLI, workflow, and store suites passed 708, 266, and 674 tests respectively. The selected daemon socket suite passed 53 tests. Nextest passed 701 of 706 selected daemon unit tests. The remaining five passed on a serial rerun after restoring the dispatcher scan after an inbox message and putting native Python first on the test path. The rerun also passed both ov-1425 publication migration tests and the root-guard test with the macOS scratch home spelled under `/tmp`. The daemon layer, file-size, and Nightly dispatch checks passed.
