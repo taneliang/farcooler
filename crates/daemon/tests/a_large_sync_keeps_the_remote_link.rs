@@ -28,6 +28,46 @@ async fn released_plan_keeps_live_runs_when_workflow_metadata_exceeds_the_frame(
     exercise(8 * 1024, 1200 * 1024).await;
 }
 
+#[tokio::test]
+async fn engine_refuses_an_oversized_snapshot_and_plan_reads_every_live_run() {
+    let dir = tempfile::Builder::new().prefix("fc1417").tempdir_in("/tmp").unwrap();
+    let service = Service::open_in(dir.path().to_path_buf()).await.unwrap();
+    let root = service.store.create_repository_root(service.host_id, "/fixture", 0).unwrap();
+    let repo = service.store.create_repository(service.host_id, root.id, "fixture", "/fixture/.git", "").unwrap();
+    let workspace = service.store.ensure_main_workspace(repo.id).unwrap().id;
+    let state = large_state(workspace, 1200 * 1024);
+    assert!(serde_json::to_vec(&state.items).unwrap().len() > farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES);
+    seed_state(&service, &state);
+    let (last_item, last_run) = state.items.last_key_value().unwrap();
+    let receipts = dir.path().join("workflow/receipts");
+    std::fs::create_dir_all(&receipts).unwrap();
+    let stop = farcooler_workflow::digest(&(workspace.to_string(), last_item));
+    std::fs::write(receipts.join(format!("{stop}.tree-stop.json")),
+        serde_json::json!({"run": last_run.run, "text": "The tree changed."}).to_string()).unwrap();
+    drop(service);
+    let _daemon = common::listening_daemon(dir.path()).await;
+    let session = farcooler_client::session::Session::connect_local(&dir.path().join("farcoolerd.sock")).await.unwrap();
+
+    let engine = session.workflow_snapshot(workspace, farcooler_client::workflow_presentation::Style::Apple).await;
+    let plan = session.plan_with_workflow(workspace).await.unwrap();
+    let runs = plan["workflow"]["runs"].as_array().unwrap();
+    let actual: std::collections::BTreeSet<_> = runs.iter().map(|run| run["item"].as_str().unwrap()).collect();
+    let refused = matches!(engine, Err(farcooler_client::session::SessionError::Refused { what, .. })
+        if what == "response_too_large");
+    assert_eq!((refused, runs.len(), actual.len()), (true, state.items.len(), state.items.len()),
+        "Engine must explicitly refuse and Plan must show every live run once");
+    assert!(state.items.keys().all(|item| actual.contains(item.as_str())));
+    let last = runs.iter().find(|run| run["item"].as_str() == Some(last_item)).unwrap();
+    assert_eq!(last["page"]["reason"], "The tree changed.");
+}
+
+fn seed_state(service: &Service, state: &State) {
+    let json = serde_json::to_string(state).unwrap();
+    farcooler_store::testing::exec_for_tests(&service.store, &format!(
+        "INSERT INTO workflow_states(workspace, revision, epoch, state) VALUES('{}', {}, 1, '{}')",
+        state.workspace, state.revision, json.replace('\'', "''")));
+}
+
 async fn exercise(item_bytes: usize, metadata_bytes: usize) {
     let dir = tempfile::Builder::new().prefix("fc1162").tempdir_in("/tmp").unwrap();
     let service = Service::open_in(dir.path().to_path_buf()).await.unwrap();
@@ -48,9 +88,7 @@ async fn exercise(item_bytes: usize, metadata_bytes: usize) {
     // Fixture-only seed, before the daemon opens the database. The state is a
     // collection of approval-waiting runs, with repeated definitions as on the
     // reported runner; nothing can launch an effect or touch a real repository.
-    farcooler_store::testing::exec_for_tests(&service.store, &format!(
-        "INSERT INTO workflow_states(workspace, revision, epoch, state) VALUES('{}', {}, 1, '{}')",
-        workspace, state.revision, json.replace('\'', "''")));
+    seed_state(&service, &state);
     for i in 0..1200 {
         let task = service.store.create_task(workspace, &format!("ticket {i}"), Actor::User).unwrap();
         farcooler_store::testing::exec_for_tests(&service.store, &format!(
