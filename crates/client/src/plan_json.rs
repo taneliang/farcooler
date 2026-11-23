@@ -15,17 +15,23 @@ use serde_json::{Value, json};
 
 use crate::session::{short, uuid_of};
 
-/// The authenticated workflow read used to enrich every app's Plan, including the CLI.
+/// The authenticated workflow snapshot request used by Engine.
 pub fn workflow_request(workspace: uuid::Uuid) -> pb::Request {
     use farcooler_protocol::capability;
     let mut request = farcooler_transport::request("workflow.get");
     request.target_resource_id = Some(bytes::Bytes::copy_from_slice(workspace.as_bytes()));
     request.required_capabilities = vec![capability::WORKFLOW_COMMANDS.into()];
-    request.accepts.push(farcooler_protocol::accepts::WORKFLOW_PLAN.into());
     request.payload = Some(pb::request::Payload::WorkflowCommand(pb::WorkflowCommand {
         schema: 1,
         json: serde_json::to_string(&farcooler_protocol::workflow_commands::Action::Get).expect("closed action"),
     }));
+    request
+}
+
+/// The compact workflow read used to enrich every app's Plan, including the CLI.
+pub fn workflow_plan_request(workspace: uuid::Uuid) -> pb::Request {
+    let mut request = workflow_request(workspace);
+    request.accepts.push(farcooler_protocol::accepts::WORKFLOW_PLAN.into());
     request
 }
 

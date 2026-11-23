@@ -608,6 +608,7 @@ async fn engine_returns_the_projection_from_the_authorized_workspace_read() {
     let read = &link.sent[0];
     assert_eq!(read.target_resource_id.as_ref(), Some(&id_bytes(WORKSPACE)));
     assert_eq!(read.required_capabilities, [capability::WORKFLOW_COMMANDS]);
+    assert!(read.accepts.is_empty(), "Engine needs the published workflow, ticket items and places");
 }
 
 /// `plan set` takes waiting tickets by key and sends their ids in order; a
