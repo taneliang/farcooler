@@ -440,8 +440,6 @@ object RunnerBoards {
             put("read", listRead)
             put("served", listServed)
         })
-
-
 }
 
 /** The current link's board sweep state, projected by the shared board model. */
