@@ -6,7 +6,8 @@
 _Static_assert(ATOMIC_BOOL_LOCK_FREE == 2, "the hangup flag must always be lock-free");
 static atomic_bool hangup = false;
 
-// Keep this callback private to C and limited to an async-signal-safe store.
+// The OS calls this private handler from signal context. Keep it in C so it
+// can do just the store, without entering a Rust FFI panic boundary.
 static void on_hangup(int signal_number) {
     (void)signal_number;
     atomic_store(&hangup, true);
