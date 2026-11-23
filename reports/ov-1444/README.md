@@ -16,6 +16,7 @@
 | Recover a lost terminal or agent | `terminal.list`, `terminal.restart` | Check that the runner still reports the terminal as lost. Use the daemon’s existing recovery logic and follow the ID it returns. |
 | Show writer or read-only status | `ServerHello.granted_scope`, `terminal.list` with enforcement through existing daemon scopes | A control or host-admin grant can write. A read grant can see terminal metadata and gets a plain-language explanation when a command requires control. The current daemon does not enforce exclusive writer leases. |
 | Open a workspace or terminal URL | Same inventory reads and terminal attach as above | Resolve runner-qualified IDs. Missing workspace and terminal links get an explanation without opening another terminal in their place. |
+| Quote a Plan item in the orchestrator’s conversation | No mutation. Uses the selected terminal and the existing conversation reads. | The browser waits for the selected agent pane, then prefills an unsent draft or shows an error in Plan. |
 
 ## Shared Rust and the browser
 
@@ -35,6 +36,10 @@ The fake runner uses the shared Rust projection and production work controls and
 The three Rust projection tests first failed against an empty projection. The initial nine browser cases first failed against the baseline work screen. The stream test independently failed when the fake runner withheld the disconnect event. The browser check then passed all ten cases.
 
 The shared Rust client suite passed 399 tests with one ignored. The browser Rust suite, WASM target check, TypeScript check, web unit and workflow suites, and shared-core lint passed.
+
+The **Web bundles and browser checks** CI job builds `work_view_bin` and runs the work browser check with Chromium or Chrome. Running that step locally with a deliberately incorrect terminal ID in the rename assertion exited with status 1. The superseded-selection and Plan quote-error regressions also failed before the fix. After restoration and the fix, all eleven work browser cases and the Plan render check passed.
+
+The existing SSH browser fixtures now serve the work inventory and preserve runner identity during the host-pin test. All seven Chromium sleep cases passed once the test waited for terminal reattachment before sending input.
 
 To rerun the browser tests after installing the web dependencies, build the shared client example and pass the Chrome executable path.
 

@@ -748,7 +748,9 @@ async function everyRunner(page) {
       { id: 'r2', label: 'build-box', user: me, host_key: second.hostKey, token: 'test2', why: '' },
     ],
   })
-  await page.reload()
+  // This fixture installs new runner IDs. Start at the app root so the
+  // earlier runner's deep link does not carry into this check.
+  await page.goto(origin)
   const before = touches
   await statusSays(page, 'Connect to studio')
   await page.click('#status-action')
@@ -801,7 +803,7 @@ async function workspaceWalk(page) {
   writeFileSync(join(runner.dir, 'billing'), '')
   await edit(page, { runners: [{ id: 'r1', label: 'studio', user: me, host_key: runner.hostKey, token: 'test', why: '' }] })
   await page.evaluate(() => localStorage.clear())
-  await page.reload()
+  await page.goto(origin)
   await statusSays(page, 'Connect to studio')
   await page.click('#status-action')
   await page.waitForSelector('#work:not([hidden]) .terminal-choice', { timeout: 120_000 })
@@ -844,8 +846,8 @@ async function workspaceWalk(page) {
   console.log('csp-check: picking Billing swapped the terminals, Needs You (2) and the plan, and opened its first terminal')
   await shoot(page, 'workspace-billing')
 
-  // The pick is remembered across a reload.
-  await page.reload()
+  // The workspace pick is retained when returning to the app without a deep link.
+  await page.goto(origin)
   await statusSays(page, 'Connect to studio')
   await page.click('#status-action')
   await page.waitForSelector('#work:not([hidden]) .terminal-choice', { timeout: 120_000 })
@@ -1221,7 +1223,11 @@ try {
 
       // The pin altered: refused with the host-key sentence, no terminal, and
       // no touch: the passkey is never asked for a runner it doesn't trust.
-      await edit(page, { runners: [{ id: 'r1', label: 'studio', user: me, host_key: 'SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', token: 'test', why: '' }] })
+      const enrolled = await device(page)
+      await edit(page, { runners: enrolled.runners.map(runner => ({
+        ...runner,
+        host_key: 'SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      })) })
       await page.reload()
       const pinned = touches
       await statusSays(page, 'Connect to studio')

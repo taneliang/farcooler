@@ -21,9 +21,9 @@ export interface PlanHandlers {
   detail(card: CardRef): void
   /// A Needs You row: leave `text` in the orchestrator's input, unsent. False
   /// when there is no orchestrator to put it in.
-  quote(text: string): boolean
+  quote(text: string): boolean | Promise<boolean>
   /// An agent's chat or terminal. False when it has none to open.
-  openAgent(agent: { id: string; name: string; terminal?: string | null }): boolean
+  openAgent(agent: { id: string; name: string; terminal?: string | null }): boolean | Promise<boolean>
   /// A footer count's list.
   openList(kind: CountKind): void
   edit(theme: string): void
@@ -120,10 +120,10 @@ function needsSection(rows: NeedsRow[], now: number, on: PlanHandlers): HTMLElem
     b.append(words)
     const when = age(row.since, now)
     if (when) b.append(make('span', 'plan-time', when))
-    b.onclick = () => {
+    b.onclick = async () => {
       list.querySelector('.plan-notice')?.remove()
-      if (on.quote(row.quote)) return
-      const n = notice('There’s no orchestrator running here to quote this in. Start one, then try again.')
+      if (await on.quote(row.quote)) return
+      const n = notice('Couldn’t quote this in the orchestrator’s input. Open its conversation and try again.')
       if (n) b.after(n)
     }
     list.append(b)
@@ -232,8 +232,8 @@ function agentCard(agent: ColumnAgent, stage: string, more: string | null | unde
   words.append(make('strong', '', agent.name), document.createTextNode(' '), make('span', agent.doingIsTrouble ? 'plan-amber' : '', agent.doing))
   head.append(glyph(agent), words)
   if (agent.time) head.append(make('span', 'plan-time', agent.time))
-  head.onclick = () => {
-    if (on.openAgent(agent)) return
+  head.onclick = async () => {
+    if (await on.openAgent(agent)) return
     // No chat to open: its first ticket is the nearest page.
     const first = agent.tickets[0]
     if (first) on.detail({ task: first.task, key: first.key })

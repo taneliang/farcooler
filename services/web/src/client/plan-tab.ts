@@ -27,10 +27,10 @@ export interface PlanTab {
 export interface PlanActions {
   /// A card's detail.
   openCard(card: CardRef): void
-  /// Leave `text` in the orchestrator's input, unsent; false with none to put it in.
-  quote(text: string): boolean
+  /// Leave `text` in the orchestrator's input, unsent, and report whether it was delivered.
+  quote(text: string): boolean | Promise<boolean>
   /// Open an agent's chat; false when it has none.
-  openAgent(agent: { id: string; name: string; terminal?: string | null }): boolean
+  openAgent(agent: { id: string; name: string; terminal?: string | null }): boolean | Promise<boolean>
   openList(kind: CountKind): void
 }
 

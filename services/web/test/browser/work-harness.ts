@@ -103,7 +103,7 @@ const screen = mountWork({
   prefer: () => null,
   failure: (error: Error & { code?: string }) => fakeFailure(error),
 })
-Object.assign(window, { dropStream: () => dropStream?.() })
+Object.assign(window, { dropStream: () => dropStream?.(), chooseTerminal: screen.chooseTerminal })
 void screen.refresh(true, 'replaceState')
 async function fakeFailure(error: Error & { code?: string }): Promise<string> {
   const reply = await fetch('/failure', { method: 'POST', body: JSON.stringify([error.message, error.code ?? '', '']) })

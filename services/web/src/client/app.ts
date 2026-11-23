@@ -539,7 +539,7 @@ let planList: PlanList | null = null
 
 /// What the plan does to the panes of the runner in front: open a terminal,
 /// and leave words in the orchestrator's message box.
-let paneControls: { open(terminal: string): boolean; quote(terminal: string, text: string): boolean } | null = null
+let paneControls: { open(terminal: string): Promise<boolean>; quote(terminal: string, text: string): Promise<boolean> } | null = null
 
 /// Which part of the work screen is in front.
 function showTab(tab: 'terminals' | 'needs' | 'plan'): void {
@@ -820,11 +820,11 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   mine.up(target.id)
   planTab = startPlanTab($('plan'), target.label, () => (reconnector.current && !reconnector.hasLost(reconnector.current) ? reconnector.current : null), chosenSpace, {
     openCard: card => openCard(target.id, { id: card.task, key: card.key, title: '' }),
-    quote: text => {
+    quote: async text => {
       const orchestrator = planTab?.orchestrator()
-      return !!orchestrator && !!paneControls?.quote(orchestrator, text)
+      return !!orchestrator && !!await paneControls?.quote(orchestrator, text)
     },
-    openAgent: agent => !!agent.terminal && !!paneControls?.open(agent.terminal),
+    openAgent: async agent => !!agent.terminal && !!await paneControls?.open(agent.terminal),
     openList: kind => {
       const found = planTab?.listing(kind)
       if (!found) return
@@ -907,18 +907,22 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   }
   $('view-conversation').onclick = () => void viewAs('conversation')
   $('view-terminal').onclick = () => void viewAs('terminal')
-  let pendingQuote: { id: string; text: string } | undefined
   paneControls = {
-    open: id => {
-      if (!screen?.chooseTerminal(id)) return false
+    open: async id => {
+      if (!await screen?.chooseTerminal(id)) return false
       showTab('terminals')
       return true
     },
-    quote: (id, text) => {
+    quote: async (id, text) => {
       const terminal = agentById.get(id)
-      if (!terminal?.agent || !terminal.attach || !paneControls?.open(id)) return false
-      pendingQuote = { id, text }
-      return true
+      if (!terminal?.agent || !terminal.attach) return false
+      if (!await screen?.chooseTerminal(id) || set.shown !== id) return false
+      const agent = agentPanes.get(id)
+      if (!agent) return false
+      if (agent.mode !== 'conversation') void viewAs('conversation')
+      if (agent.mode !== 'conversation') return false
+      showTab('terminals')
+      return agent.prefill(text)
     },
   }
   screen = mountWork({
@@ -947,15 +951,6 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
         drawView()
       } else if (shouldOpen || set.shown !== terminal.id) {
         void open(terminal.id)
-      }
-      if (pendingQuote && pendingQuote.id === terminal?.id) {
-        const quote = pendingQuote
-        pendingQuote = undefined
-        const agent = agentPanes.get(quote.id)
-        if (agent) {
-          if (agent.mode !== 'conversation') void viewAs('conversation')
-          agent.prefill(quote.text)
-        }
       }
     },
   })

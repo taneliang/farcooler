@@ -74,11 +74,13 @@ try {
     }
     await page.close()
   }
+  const page = await browser.newPage({ viewport: { width: 320, height: 800 } })
+  await page.setContent(html.replace('<head>', '<head><script>window.checkQuote=true</script>'))
+  await page.waitForFunction(() => window.done === true)
+  await page.locator('#plan').getByRole('button', { name: 'Quote delivery check' }).click()
+  await page.locator('#plan .plan-notice').filter({ hasText: /Couldn’t quote this/ }).waitFor({ timeout: 2000 })
   // ov-1105: the current Plan renderer keeps a queue-only plan reachable and
   // wraps every supplied member/failure line at a narrow phone width.
-  const page = await browser.newPage({ viewport: { width: 320, height: 800 } })
-  await page.setContent(html)
-  await page.waitForFunction(() => window.done === true)
   await page.evaluate(() => { document.getElementById('plan').hidden = true })
   failures.push(...await page.evaluate(() => {
     const out = []
@@ -110,4 +112,4 @@ try {
   await page.close()
 } finally { await browser.close() }
 if (failures.length) { console.error(failures.join('\n')); process.exit(1) }
-console.log('plan render check: golden and ov-895 pipeline pass at 360 and 1440 px; landing queue lines pass at 320 px')
+console.log('plan render check: goldens, quote failure notice and narrow landing queue pass')

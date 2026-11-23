@@ -15,13 +15,14 @@ import { renderPlan } from '../../src/client/plan-view'
 const present: PlanPresenter = () => JSON.stringify(golden.answer)
 const plan = parsePlan(JSON.stringify(golden.request.plan))!
 const none = () => {}
+const checkQuote = (window as any).checkQuote === true
 renderPlan(
   document.getElementById('plan') as HTMLElement,
   { state: 'ready', plan, raw: golden.request.plan, runner: 'Mac mini', workspaces: [], workspace: null, editing: null, busy: new Set(), notices: new Map(), banner: '' },
   golden.answer.view.now,
-  { detail: none, quote: () => true, openAgent: () => true, openList: none, edit: none, type: none, save: none, cancel: none, keep: none, keepAll: none },
+  { detail: none, quote: async () => !checkQuote, openAgent: () => true, openList: none, edit: none, type: none, save: none, cancel: none, keep: none, keepAll: none },
   '',
-  [],
+  checkQuote ? [{ id: 'quote-test', question: 'Quote delivery check', since: null, task: null, terminal: null }] : [],
   present,
 )
 for (const id of ['work', 'plan']) document.getElementById(id)!.hidden = false

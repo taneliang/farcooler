@@ -48,8 +48,8 @@ use std::sync::{Arc, Mutex};
 
 use bytes::{Bytes, BytesMut};
 use farcooler_protocol::v1::{
-    Empty, NeedsYouAction, NeedsYouItem, NeedsYouKind, NeedsYouList, ServerHello, TaskRef, Terminal, TerminalAttachResult, TerminalList, TerminalRef,
-    TerminalRole, TerminalState, request, result, wire_envelope,
+    Empty, NeedsYouAction, NeedsYouItem, NeedsYouKind, NeedsYouList, Repository, RepositoryList, ServerHello, TaskRef, Terminal,
+    TerminalAttachResult, TerminalList, TerminalRef, TerminalRole, TerminalState, WorktreeList, request, result, wire_envelope,
 };
 use farcooler_protocol::{capability, framing};
 use uuid::Uuid;
@@ -60,6 +60,7 @@ const TERMINALS: u8 = 14;
 const BILLING_FROM: u8 = 13;
 /// Billing's id, and its decision's task.
 const BILLING: Uuid = Uuid::from_u128(0x0199_0000_0000_7000_8000_0000_0000_00a2);
+const REPOSITORY: Uuid = Uuid::from_u128(0x0199_0000_0000_7000_8000_0000_0000_00a3);
 const TASK: Uuid = Uuid::from_u128(0x0199_0000_0000_7000_8000_0000_0000_0d01);
 
 fn id_bytes(id: Uuid) -> Bytes {
@@ -314,17 +315,40 @@ fn main() {
                     }
                     vec![support::answer(&req, result::Value::Empty(Empty {}))]
                 }
-                // The plan tab's reads (ov-775): Main's board has one theme, and
-                // Billing's a theme and a ticket on one card.
+                // The work screen reads the runner's repository, workspace and checkout lists.
+                ("repository.list", _) => vec![support::answer(
+                    &req,
+                    result::Value::RepositoryList(RepositoryList {
+                        items: vec![Repository { id: id_bytes(REPOSITORY), display_name: "Studio".into(), ..Default::default() }],
+                        ..Default::default()
+                    }),
+                )],
+                ("worktree.list", _) => vec![support::answer(
+                    &req,
+                    result::Value::WorktreeList(WorktreeList::default()),
+                )],
                 ("workspace.list", _) => vec![support::answer(
                     &req,
                     result::Value::WorkspaceList(farcooler_protocol::v1::WorkspaceList {
                         items: vec![
-                            farcooler_protocol::v1::Workspace { id: id_bytes(support::WORKSPACE), name: "Main".into(), is_main: true, ..Default::default() },
-                            farcooler_protocol::v1::Workspace { id: id_bytes(BILLING), name: "Billing".into(), ordinal: 1, ..Default::default() },
+                            farcooler_protocol::v1::Workspace {
+                                id: id_bytes(support::WORKSPACE),
+                                name: "Main".into(),
+                                is_main: true,
+                                repository_id: id_bytes(REPOSITORY),
+                                ..Default::default()
+                            },
+                            farcooler_protocol::v1::Workspace {
+                                id: id_bytes(BILLING),
+                                name: "Billing".into(),
+                                ordinal: 1,
+                                repository_id: id_bytes(REPOSITORY),
+                                ..Default::default()
+                            },
                         ],
                     }),
                 )],
+                // Main's board has one theme, and Billing's a theme and a ticket on one card.
                 ("plan.get", Some(request::Payload::PlanGet(get))) => {
                     use farcooler_protocol::v1 as pb;
                     let billing = get.workspace_id == id_bytes(BILLING);

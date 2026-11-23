@@ -400,7 +400,8 @@ async function run(engine, s, c, n) {
     for (let i = 0; i < 200; i++) {
       await sleepMs(300)
       end = await state(page)
-      if (end.link === 'up' || /Can’t|couldn’t|Couldn’t/.test(end.link)) break
+      // The SSH link is announced before the terminal has reattached.
+      if ((end.link === 'up' && end.live) || /Can’t|couldn’t|Couldn’t/.test(end.link)) break
     }
     const ok = end.link === 'up' && end.live && (await typesThrough(page, `ok${n}b`))
     out.result = ok ? 'needed a touch' : 'lost the pane'

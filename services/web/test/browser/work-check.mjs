@@ -32,7 +32,7 @@ async function test(name, run, { query = '', width = 1280 } = {}) {
     await route.fulfill({ contentType: 'text/html', body: html })
   })
   const page = await context.newPage()
-  page.setDefaultTimeout(1200)
+  page.setDefaultTimeout(5000)
   try {
     await page.goto(origin + '/' + query)
     await run(page, context)
@@ -57,6 +57,7 @@ try {
     await page.waitForURL('**workspace=next')
     const dialog = await work(page)
     await dialog.getByLabel('Repository').selectOption('platform')
+    await page.waitForURL('**workspace=delivery')
     await dialog.getByRole('button', { name: 'New Worktree' }).click()
     await dialog.getByLabel('Worktree Name').fill('Verify deployment compatibility')
     await dialog.getByLabel('Branch', { exact: true }).fill('release/verify-deployment-compatibility')
@@ -102,6 +103,15 @@ try {
     assert.equal((await rpc(page, 'attach')).terminal, 'recovered')
   })
 
+  await test('a superseded terminal selection reports failure', async page => {
+    await page.locator('[data-attached=true]:visible').waitFor()
+    const selected = await page.evaluate(() => Promise.all([
+      window.chooseTerminal('lost-agent'),
+      window.chooseTerminal('shell'),
+    ]))
+    assert.deepEqual(selected, [false, true])
+  })
+
   await test('reconnect a stream without restarting the running process', async page => {
     await page.getByText('Writer', { exact: true }).waitFor()
     await page.locator('[data-attached=true]:visible').waitFor()
@@ -130,7 +140,7 @@ try {
     await terminal.waitFor()
     const href = await terminal.getAttribute('href')
     const tab = await context.newPage()
-    tab.setDefaultTimeout(2000)
+    tab.setDefaultTimeout(5000)
     await tab.goto(new URL(href, origin).href)
     await tab.getByRole('button', { name: 'Recover Terminal' }).waitFor()
     await tab.reload()

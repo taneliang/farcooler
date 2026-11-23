@@ -160,13 +160,18 @@ export function mountWork(options: Options) {
     void project(true, 'pushState')
   }
 
-  function chooseTerminal(id: string): boolean {
+  async function chooseTerminal(id: string): Promise<boolean> {
     if (busy || !view?.terminals.some(t => t.id === id)) return false
-    navigate({ workspace: view.workspace, terminal: id })
-    return true
+    selection = { workspace: view.workspace, terminal: id }
+    try {
+      return (await project(true, 'pushState'))?.id === id
+    } catch (e) {
+      if (!disposed) notify(await options.failure(e as WorkError))
+      return false
+    }
   }
 
-  async function project(open: boolean, historyMode?: 'pushState' | 'replaceState', replace?: string): Promise<void> {
+  async function project(open: boolean, historyMode?: 'pushState' | 'replaceState', replace?: string): Promise<WorkTerminal | undefined> {
     if (!inventory) return
     const revision = ++drawId
     const next = JSON.parse(await options.project(inventory, JSON.stringify(selection))) as WorkView
@@ -183,6 +188,7 @@ export function mountWork(options: Options) {
       if (url.href !== location.href) history[historyMode](null, '', url)
     }
     options.select(next, terminal, switchPane, replace)
+    return terminal
   }
 
   function draw(view: WorkView, terminal: WorkTerminal | undefined): void {
@@ -230,7 +236,7 @@ export function mountWork(options: Options) {
       link.href = destination(options.runner, view.workspace, t.id).href
       if (t.agent) link.dataset.agent = 'true'
       if (t.id === view.terminal) link.setAttribute('aria-current', 'true')
-      link.onclick = e => follow(e, () => chooseTerminal(t.id))
+      link.onclick = e => follow(e, () => void chooseTerminal(t.id))
       return link
     }))
     if (focused) [...list.querySelectorAll('a')].find(link => link.href === focused)?.focus()
