@@ -5,10 +5,7 @@ import Testing
 
 @testable import Far_Cooler
 
-/// Now draws landings as row groups on the Mac (ov-309): the fixture's Landing
-/// 9, red, carries ov-4, which sits inside its card and indented; and a
-/// landing whose CI moves washes as a ticket does. The words are AgentKit's
-/// (`PlanLandingTests`).
+/// Older runners may still send numbered landing rows; the Plan does not draw them.
 @MainActor
 @Suite(.serialized)
 struct PlanLandingViewTests {
