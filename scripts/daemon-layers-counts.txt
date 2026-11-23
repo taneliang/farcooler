@@ -21,7 +21,7 @@ agents -> unresolved: 32
 agents -> watch: 4
 board -> access: 16
 board -> agents: 12
-board -> composition: 23
+board -> composition: 22
 board -> delivery: 2
 board -> engine: 3
 board -> service: 56
