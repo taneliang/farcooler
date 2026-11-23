@@ -478,11 +478,10 @@ struct PlanTicketRecordPage: View {
         }
     }
 
-    /// ".claude/worktrees/mac-ux · mac-ux · in Landing 9".
+    /// ".claude/worktrees/mac-ux · mac-ux".
     private var place: String {
         [
             line.worktreePath, line.branch == line.worktreePath ? "" : line.branch,
-            line.landing.map { "in Landing \($0)" } ?? "",
         ].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 }
