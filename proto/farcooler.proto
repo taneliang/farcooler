@@ -4984,6 +4984,15 @@ message Plan {
   // A fingerprint of the paged result, independent of now_ms. Restart at
   // offset zero if this changes between pages.
   optional fixed64 page_revision = 24;
+  // A paged read can carry a chunk of an oversized row instead of complete rows.
+  PlanRowChunk row_chunk = 25;
+}
+
+message PlanRowChunk {
+  // Concatenate these bytes across consecutive pages, then merge the result
+  // into Plan. The result encodes a Plan containing just the oversized row.
+  bytes data = 1;
+  bool last = 2;
 }
 
 // One reviewer pull requests of a board are waiting on (ov-579).

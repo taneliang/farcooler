@@ -11,6 +11,8 @@ use uuid::Uuid;
 use super::overview::{PLAN_BUDGET, row_bytes};
 
 const THEME_MEMBERS_PER_ROW: usize = 256;
+// Leave room inside the Plan for scalar fields, the cursor and the chunk wrapper.
+const PAGE_PAYLOAD_BYTES: usize = PLAN_BUDGET - 256;
 
 pub(super) fn page(mut plan: pb::Plan, query: pb::PlanDetailRead) -> Result<pb::Plan> {
     match query.subject {
@@ -78,27 +80,37 @@ fn paginate(mut plan: pb::Plan, offset: u32) -> Result<pb::Plan> {
     plan.themes = split_theme_memberships(plan.themes);
     let mut page = Page {
         skip: offset as usize,
-        bytes_left: PLAN_BUDGET,
+        bytes_left: PAGE_PAYLOAD_BYTES,
         len: 0,
         more: false,
+        chunk: None,
     };
-    page.take(&mut plan.themes);
-    page.take(&mut plan.lines);
-    page.take(&mut plan.cards);
-    page.take(&mut plan.landings);
-    page.take(&mut plan.agents);
-    page.take(&mut plan.rulings);
-    page.take(&mut plan.ci);
-    page.take(&mut plan.review_waits);
-    page.take(&mut plan.suggested_reviewers);
-    if let Some(cost) = &mut plan.cost {
-        page.take(&mut cost.compare);
-        page.take(&mut cost.week);
+    macro_rules! take {
+        ($field:ident) => {
+            page.take(&mut plan.$field, |row| pb::Plan { $field: vec![row], ..Default::default() });
+        };
     }
+    take!(themes);
+    take!(lines);
+    take!(cards);
+    take!(landings);
+    take!(agents);
+    take!(rulings);
+    take!(ci);
+    take!(review_waits);
+    take!(suggested_reviewers);
+    if let Some(cost) = &mut plan.cost {
+        page.take(&mut cost.compare, |row| pb::Plan {
+            cost: Some(pb::PlanCost { compare: vec![row], ..Default::default() }),
+            ..Default::default()
+        });
+        page.take(&mut cost.week, |row| pb::Plan {
+            cost: Some(pb::PlanCost { week: vec![row], ..Default::default() }),
+            ..Default::default()
+        });
+    }
+    plan.row_chunk = page.chunk;
     if page.more {
-        if page.len == 0 {
-            return Err(DomainError::InvalidArgument { what: "plan_detail_row_too_large" });
-        }
         plan.next_offset = Some(offset.checked_add(page.len)
             .ok_or(DomainError::InvalidArgument { what: "plan_detail_offset" })?);
     }
@@ -113,6 +125,13 @@ fn split_theme_memberships(themes: Vec<pb::BoardThemeView>) -> Vec<pb::BoardThem
             continue;
         }
         let task_ids = std::mem::take(&mut theme.task_ids);
+        if row_bytes(&theme) + THEME_MEMBERS_PER_ROW * (16 + 10) > PAGE_PAYLOAD_BYTES {
+            // The text alone is close to a frame. Chunk the whole row once
+            // instead of duplicating its text in every membership fragment.
+            theme.task_ids = task_ids;
+            rows.push(theme);
+            continue;
+        }
         for members in task_ids.chunks(THEME_MEMBERS_PER_ROW) {
             rows.push(pb::BoardThemeView { task_ids: members.to_vec(), ..theme.clone() });
         }
@@ -139,19 +158,24 @@ struct Page {
     bytes_left: usize,
     len: u32,
     more: bool,
+    chunk: Option<pb::PlanRowChunk>,
 }
 
 impl Page {
-    fn take(&mut self, rows: &mut Vec<impl Message>) {
+    fn take<M: Message + Clone>(&mut self, rows: &mut Vec<M>, pack: impl Fn(M) -> pb::Plan) {
         rows.retain(|row| {
-            if self.skip > 0 {
-                self.skip -= 1;
-                return false;
-            }
             if self.more {
                 return false;
             }
             let bytes = row_bytes(row);
+            if bytes > PAGE_PAYLOAD_BYTES {
+                self.take_chunk(pack(row.clone()).encode_to_vec());
+                return false;
+            }
+            if self.skip > 0 {
+                self.skip -= 1;
+                return false;
+            }
             if bytes > self.bytes_left {
                 self.more = true;
                 return false;
@@ -161,12 +185,90 @@ impl Page {
             true
         });
     }
+
+    // Each chunk occupies one cursor position and a page of its own so its
+    // decoded row stays in order with the complete rows on neighboring pages.
+    fn take_chunk(&mut self, encoded: Vec<u8>) {
+        let count = encoded.len().div_ceil(PAGE_PAYLOAD_BYTES);
+        if self.skip >= count {
+            self.skip -= count;
+            return;
+        }
+        if self.len != 0 {
+            self.more = true;
+            return;
+        }
+        let start = self.skip * PAGE_PAYLOAD_BYTES;
+        let end = (start + PAGE_PAYLOAD_BYTES).min(encoded.len());
+        let last = end == encoded.len();
+        self.chunk = Some(pb::PlanRowChunk {
+            data: bytes::Bytes::copy_from_slice(&encoded[start..end]),
+            last,
+        });
+        self.skip = 0;
+        self.bytes_left = 0;
+        self.len = 1;
+        self.more = !last;
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES;
+
+    #[test]
+    fn a_live_landing_larger_than_one_frame_loads_in_overview_and_detail() {
+        use farcooler_client::plan_pages::PlanPages;
+
+        let landing = pb::Landing {
+            id: bytes::Bytes::from_static(b"landing id"),
+            number: 17,
+            phase: pb::LandingPhase::ReadyToLand as i32,
+            ci_subject: "sha:abc".into(),
+            task_ids: (0u128..60_000)
+                .map(|n| bytes::Bytes::copy_from_slice(&n.to_le_bytes()))
+                .collect(),
+            ..Default::default()
+        };
+        assert!(landing.encoded_len() > MAX_CONTROL_ENVELOPE_BYTES);
+        let ci = pb::BoardCiRead {
+            subject: landing.ci_subject.clone(),
+            jobs: vec![pb::BoardCiJob { name: "Test on a matrix".into(), ..Default::default() }; 65_000],
+            ..Default::default()
+        };
+        assert!(ci.encoded_len() > MAX_CONTROL_ENVELOPE_BYTES);
+        let plan = pb::Plan {
+            landings: vec![landing],
+            ci: vec![ci],
+            board_counts: Some(pb::PlanStatusCounts { in_progress: 60_000, ..Default::default() }),
+            ..Default::default()
+        };
+        let subject = Subject::Landings(pb::PlanLandingQuery { number: Some(17) });
+        let readers = [
+            PlanPages::overview(bytes::Bytes::new()),
+            PlanPages::detail(bytes::Bytes::new(), Some(subject)),
+        ];
+        for mut reader in readers {
+            let mut pages = 0;
+            loop {
+                let request = reader.request();
+                let reply = if let Some(query) = request.detail {
+                    page(plan.clone(), query)
+                } else {
+                    overview(plan.clone(), request.overview_offset.unwrap())
+                }.expect("even a single oversized landing must fit across pages");
+                assert!(reply.encoded_len() <= PLAN_BUDGET);
+                let reply = pb::Plan::decode(reply.encode_to_vec().as_slice()).unwrap();
+                pages += 1;
+                if let Some(read) = reader.push(reply).unwrap() {
+                    assert_eq!(read, plan);
+                    break;
+                }
+            }
+            assert!(pages > 1);
+        }
+    }
 
     #[test]
     fn a_theme_larger_than_one_frame_can_be_read_in_order() {

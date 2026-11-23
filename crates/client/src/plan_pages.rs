@@ -2,6 +2,7 @@
 
 use bytes::Bytes;
 use farcooler_protocol::v1 as pb;
+use prost::Message;
 
 use crate::session::SessionError;
 
@@ -12,6 +13,7 @@ pub struct PlanPages {
     offset: u32,
     restarted: bool,
     plan: pb::Plan,
+    row: Vec<u8>,
 }
 
 impl PlanPages {
@@ -22,6 +24,7 @@ impl PlanPages {
             offset: 0,
             restarted: false,
             plan: pb::Plan::default(),
+            row: Vec::new(),
         }
     }
 
@@ -52,9 +55,20 @@ impl PlanPages {
             self.restarted = true;
             self.offset = 0;
             self.plan = pb::Plan::default();
+            self.row.clear();
             return Ok(None);
         }
         let next = page.next_offset.take();
+        if let Some(chunk) = page.row_chunk.take() {
+            self.row.extend_from_slice(&chunk.data);
+            if chunk.last {
+                page.merge(self.row.as_slice())
+                    .map_err(|error| SessionError::Protocol(format!("Invalid plan row: {error}")))?;
+                self.row.clear();
+            }
+        } else if !self.row.is_empty() {
+            return Err(SessionError::Protocol("The runner interrupted a plan row.".into()));
+        }
         let themes = std::mem::take(&mut page.themes);
         if self.offset == 0 {
             self.plan = page;
@@ -88,6 +102,9 @@ impl PlanPages {
             }
             self.offset = next;
             return Ok(None);
+        }
+        if !self.row.is_empty() {
+            return Err(SessionError::Protocol("The runner returned an incomplete plan row.".into()));
         }
         self.plan.page_revision = None;
         Ok(Some(std::mem::take(&mut self.plan)))
