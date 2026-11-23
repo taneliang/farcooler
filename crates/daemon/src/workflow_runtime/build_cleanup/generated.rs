@@ -188,16 +188,36 @@ impl Inventory {
     fn swift_outputs(&mut self, tree: &Path, path: &Path, meta: &Metadata) {
         let Some(map) = read_metadata(path).and_then(|data| serde_json::from_str::<Value>(&data).ok()) else { return };
         let Some(sources) = map.as_object() else { return };
+        let Some(window) = swift_build_window(tree, path, meta, &map) else { return };
         for source in sources.values().filter_map(Value::as_object) {
             for (kind, output) in source {
                 if matches!(kind.as_str(), "object" | "swiftmodule" | "swift-dependencies" | "diagnostics") {
                     if let Some(output) = output.as_str() {
-                        self.swift.insert(tree.join(output), BuildWindow { start: None, end: changed(meta) });
+                        self.swift.insert(tree.join(output), window);
                     }
                 }
             }
         }
     }
+}
+
+fn swift_build_window(tree: &Path, map_path: &Path, map_meta: &Metadata, map: &Value) -> Option<BuildWindow> {
+    // SwiftPM writes the map before compiling. The Swift driver writes the
+    // target's dependency graph (.priors) when the compilation completes.
+    // The empty map key describes the target-wide dependency path on both
+    // the native and XCBuild backends.
+    let dependencies = tree.join(map[""]["swift-dependencies"].as_str()?);
+    if dependencies.parent() != map_path.parent() || dependencies.extension()? != "swiftdeps" {
+        return None;
+    }
+    let mut priors = open_regular(&dependencies.with_extension("priors")).ok()?;
+    let mut magic = [0; 4];
+    priors.read_exact(&mut magic).ok()?;
+    let completion = priors.metadata().ok()?;
+    if &magic != b"DDEP" || completion.dev() != map_meta.dev() { return None; }
+    let start = changed(map_meta);
+    let end = changed(&completion).min((completion.mtime(), completion.mtime_nsec()));
+    (start <= end).then_some(BuildWindow { start: Some(start), end })
 }
 
 // Rustc emits dep-info before linking. A matching Cargo fingerprint brackets
@@ -398,5 +418,53 @@ impl Layout {
             (Self::Swift, "pcm" | "pch") => prefix == b"CPCH" || compiled,
             _ => compiled || universal_macho,
         })
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn swiftpm_outputs_are_reclaimed_and_later_replacements_are_preserved() {
+        let dir = tempfile::tempdir().unwrap();
+        let tree = dir.path().canonicalize().unwrap();
+        let sources = tree.join("Sources/CleanupFixture");
+        fs::create_dir_all(&sources).unwrap();
+        fs::write(tree.join("Package.swift"), concat!(
+            "// swift-tools-version: 5.9\nimport PackageDescription\n",
+            "let package = Package(name: \"CleanupFixture\", targets: [.target(name: \"CleanupFixture\")])\n",
+        )).unwrap();
+        for source in ["Keep", "Release"] {
+            fs::write(sources.join(format!("{source}.swift")),
+                format!("public func fixture{source}() -> Int {{ 1428 }}\n")).unwrap();
+        }
+        let folder = tree.join(".build");
+        let result = std::process::Command::new("/usr/bin/swift").current_dir(&tree)
+            .args(["build", "--disable-sandbox", "--manifest-cache", "local", "--scratch-path"])
+            .arg(&folder).arg("--cache-path").arg(tree.join("swift-cache"))
+            .env("CLANG_MODULE_CACHE_PATH", tree.join("module-cache")).output().unwrap();
+        assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+
+        let device = tree.metadata().unwrap().dev();
+        let mut inventory = Inventory::default();
+        inventory.scan(&tree, &folder, device).unwrap();
+        let object = |stem: &str| inventory.files.iter().map(|(path, _)| path)
+            .find(|path| path.file_stem().and_then(|name| name.to_str())
+                .is_some_and(|name| name == stem || name == format!("{stem}.swift"))
+                && path.extension().is_some_and(|ext| ext == "o")).unwrap();
+        let keep = object("Keep");
+        let release = object("Release");
+        let original = ArtifactPlan::inspect(&tree, &folder, device).unwrap();
+        assert!([keep, release].iter().all(|output| original.0.iter().any(|(path, _)| path == *output)),
+            "completed SwiftPM objects should be recognized");
+
+        let replacement = fs::read(keep).unwrap();
+        let temporary = tree.join("personal.o");
+        fs::write(&temporary, &replacement).unwrap();
+        fs::rename(&temporary, keep).unwrap();
+        ArtifactPlan::inspect(&tree, &folder, device).unwrap().release(&folder).unwrap();
+        assert_eq!(fs::read(keep).unwrap(), replacement);
+        assert!(!release.exists());
     }
 }

@@ -313,37 +313,22 @@ impl Exec {
     }
     async fn release_folder(&self, tree: &Path, path: &Path, held: Arc<CleanupFences>, retry: &mut bool,
         check_whole_checkout: bool) -> std::result::Result<u64, String> {
-        // A configured output may have become source. Refuse tracked files, even inside a listed folder.
         let relative = path.strip_prefix(tree).map_err(|e| e.to_string())?;
-        let spec = format!(":(icase,literal){}", relative.to_string_lossy());
-        let tracked = crate::git::git(tree, &["ls-files", "-z", "--cached", "--", &spec])
-            .await.map_err(|e| e.to_string())?;
-        if !tracked.ok || !tracked.stdout.is_empty() {
-            return Err("contains tracked files or git could not check".into());
-        }
-        if check_whole_checkout {
-            // A staged removal can hide still-present source from the index and
-            // the usual untracked listing if the folder is also ignored.
-            let staged = crate::git::git(tree, &["diff", "--cached", "--name-only", "-z", "HEAD", "--", &spec])
-                .await.map_err(|e| e.to_string())?;
-            if !staged.ok || !staged.stdout.is_empty() { return Err("contains staged changes or git could not check".into()); }
-        }
+        check_output_index(tree, relative, check_whole_checkout).await?;
         let metadata = path.symlink_metadata().map_err(|e| e.to_string())?;
         let device = tree.symlink_metadata().map_err(|e| e.to_string())?.dev();
         let generated_reports = relative.file_name().is_some_and(|n| n == "build");
-        let output = path.to_path_buf();
-        let checkout = tree.to_path_buf();
-        let (bytes, artifacts) = tokio::task::spawn_blocking(move || {
-            if check_whole_checkout {
-                Ok((0, Some(generated::ArtifactPlan::inspect(&checkout, &output, device)?)))
-            } else {
-                Ok::<_, std::io::Error>((size(&output, device, generated_reports)?, None))
-            }
-        }).await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
-        if artifacts.as_ref().is_some_and(generated::ArtifactPlan::is_empty) {
-            return Err("no verified build artifacts".into());
-        }
-        // Check after inventorying the output, which can take seconds on a large target.
+        let artifacts = if check_whole_checkout {
+            let output = path.to_path_buf();
+            let checkout = tree.to_path_buf();
+            let plan = tokio::task::spawn_blocking(move || generated::ArtifactPlan::inspect(&checkout, &output, device))
+                .await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
+            if plan.is_empty() { return Err("no verified build artifacts".into()); }
+            Some(plan)
+        } else {
+            None
+        };
+        // Selective deletion revalidates individual files after this check.
         // No deletion has started: an unavailable check is safe to retry.
         *retry = true;
         #[cfg(test)]
@@ -355,6 +340,12 @@ impl Exec {
         // legacy checkout even when the output folder itself has no readers.
         check_open_files(if check_whole_checkout { tree } else { path }).await?;
         *retry = false;
+        // A completed git add can leave both the artifact inode and the
+        // open-file check unchanged. Recheck the index before unlinking.
+        check_output_index(tree, relative, check_whole_checkout).await?;
+        if check_whole_checkout && !self.store.workflow_cleanup_has_authority().map_err(|e| e.to_string())? {
+            return Err("engine authority unavailable".into());
+        }
         let tree = tree.to_path_buf();
         let relative = relative.to_string_lossy().into_owned();
         let path = path.to_path_buf();
@@ -370,11 +361,34 @@ impl Exec {
             // Either deletion can remove some entries before returning an error.
             let released = match artifacts {
                 Some(plan) => plan.release(&path),
-                None => std::fs::remove_dir_all(&path).map(|()| bytes),
+                None => {
+                    // The open-file check can take seconds. Validate descendants
+                    // afterward so an inserted repository or report is protected.
+                    let bytes = size(&path, device, generated_reports).map_err(|e| e.to_string())?;
+                    std::fs::remove_dir_all(&path).map(|()| bytes)
+                }
             };
             released.map_err(|e| format!("{OUTPUT_INTERRUPTED}: {e}"))
         }).await.map_err(|e| e.to_string())?
     }
+}
+
+async fn check_output_index(tree: &Path, relative: &Path, check_staged: bool) -> std::result::Result<(), String> {
+    let spec = format!(":(icase,literal){}", relative.to_string_lossy());
+    let tracked = crate::git::git(tree, &["ls-files", "-z", "--cached", "--", &spec])
+        .await.map_err(|e| e.to_string())?;
+    if !tracked.ok || !tracked.stdout.is_empty() {
+        return Err("contains tracked files or git could not check".into());
+    }
+    if check_staged {
+        // A staged removal can hide still-present source from the index.
+        let staged = crate::git::git(tree, &["diff", "--cached", "--name-only", "-z", "HEAD", "--", &spec])
+            .await.map_err(|e| e.to_string())?;
+        if !staged.ok || !staged.stdout.is_empty() {
+            return Err("contains staged changes or git could not check".into());
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn default_build_folders(folders: &[String]) -> bool {

@@ -895,7 +895,7 @@ async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output(
     for (separator, digit) in [('-', "a"), (':', "b")] {
         let tree = runtime.root.join(format!("tree-wf1{separator}{}", digit.repeat(64)));
         adapters::git(&runtime.repository(), &["worktree", "add", "--detach", tree.to_str().unwrap(), "HEAD"]).await.unwrap();
-        for (file, bytes) in layouts {
+        for (file, bytes) in &layouts[..2] {
             let path = tree.join(file);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, bytes).unwrap();
@@ -906,10 +906,17 @@ async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output(
             std::fs::write(&dep, format!("{}: src/lib.rs\n\n{}: src/lib.rs\n",
                 dep.display(), path.display())).unwrap();
         }
-        for (file, _) in &layouts[2..] {
+        for (file, bytes) in &layouts[2..] {
             let path = tree.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             let output_map = path.with_file_name("output-file-map.json");
-            std::fs::write(output_map, serde_json::to_vec(&serde_json::json!({"src": {"object": path}})).unwrap()).unwrap();
+            let dependencies = path.with_file_name("primary.swiftdeps");
+            std::fs::write(output_map, serde_json::to_vec(&serde_json::json!({
+                "": {"swift-dependencies": dependencies},
+                "src": {"object": path},
+            })).unwrap()).unwrap();
+            std::fs::write(path, bytes).unwrap();
+            std::fs::write(dependencies.with_extension("priors"), b"DDEP fixture").unwrap();
         }
         seed_nextest_archive(&tree);
         // Cargo cannot compile into a path containing the PATH separator.
@@ -965,6 +972,55 @@ async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output(
         assert!(tree.join(".git").is_file());
         assert_eq!(std::fs::read(tree.join("uncommitted.txt")).unwrap(), b"keep this");
     }
+}
+
+#[tokio::test]
+async fn legacy_cleanup_preserves_an_artifact_staged_during_inventory() {
+    let (_dir, mut runtime, _, _) = building_group(None).await;
+    let tree = runtime.root.join(format!("tree-wf1-{}", "f".repeat(64)));
+    adapters::git(&runtime.repository(), &["worktree", "add", "--detach", tree.to_str().unwrap(), "HEAD"]).await.unwrap();
+    let relative = "target/debug/deps/runner";
+    let artifact = tree.join(relative);
+    std::fs::create_dir_all(artifact.parent().unwrap()).unwrap();
+    std::fs::write(&artifact, b"\x7fELFtest").unwrap();
+    let dep = artifact.with_extension("d");
+    std::fs::write(&dep, format!("{}: src/lib.rs\n\n{}: src/lib.rs\n",
+        dep.display(), artifact.display())).unwrap();
+    let check = std::sync::Arc::new((tokio::sync::Notify::new(), tokio::sync::Notify::new()));
+    runtime.cleanup_check = Some(check.clone());
+    let sweep = runtime.release_orphan_builds(std::slice::from_ref(&tree));
+    let stage = async {
+        check.0.notified().await;
+        adapters::git(&tree, &["add", "--force", "--", relative]).await.unwrap();
+        check.1.notify_one();
+    };
+    let (pending, ()) = tokio::time::timeout(Duration::from_secs(30), async {
+        tokio::join!(sweep, stage)
+    }).await.unwrap();
+    assert!(pending.unwrap().is_empty());
+    assert_eq!(std::fs::read(&artifact).unwrap(), b"\x7fELFtest");
+}
+
+#[tokio::test]
+async fn build_cleanup_preserves_repository_moved_into_output_during_open_file_check() {
+    let (dir, mut runtime, tree) = building().await;
+    let new_repo = dir.path().join("new-repository");
+    std::fs::create_dir(&new_repo).unwrap();
+    adapters::git(&new_repo, &["init", "--bare"]).await.unwrap();
+    let nested = tree.join("target/new-repository");
+    let check = std::sync::Arc::new((tokio::sync::Notify::new(), tokio::sync::Notify::new()));
+    runtime.cleanup_check = Some(check.clone());
+    let move_repo = async {
+        check.0.notified().await;
+        std::fs::rename(&new_repo, &nested).unwrap();
+        check.1.notify_one();
+    };
+    tokio::time::timeout(Duration::from_secs(30), async {
+        tokio::join!(review(&mut runtime), move_repo);
+    }).await.unwrap();
+    assert!(nested.join("HEAD").is_file());
+    let result = runtime.store.workflow_cleanups("w").unwrap().remove(0).result.unwrap();
+    assert!(result.skipped.iter().any(|s| s.contains("git metadata")), "{result:?}");
 }
 
 #[tokio::test]
