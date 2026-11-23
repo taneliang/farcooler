@@ -75,6 +75,7 @@ export class ChatView implements Pane<WebRunner> {
     private readonly host: HTMLElement,
     private readonly runnerLabel: string,
     private readonly agentId?: string,
+    private readonly local?: { load(): string; save(text: string): void; position: () => string; savePosition(value: string): void },
   ) {
     host.classList.add('chat-host')
     this.scroller.setAttribute('role', 'log')
@@ -134,8 +135,10 @@ export class ChatView implements Pane<WebRunner> {
     host.append(this.note, this.scroller, this.latest, foot)
 
     this.scroller.addEventListener('scroll', () => {
+      if (this.host.hidden || this.restorePosition !== null) return
       this.stick = this.scroller.scrollHeight - this.scroller.scrollTop - this.scroller.clientHeight <= STICK
       this.latest.hidden = this.stick
+      this.local?.savePosition(this.stick ? '' : String(this.scroller.scrollTop))
     })
     this.latest.onclick = () => {
       this.stick = true
@@ -147,7 +150,8 @@ export class ChatView implements Pane<WebRunner> {
       event.preventDefault()
       void this.submit()
     })
-    this.box.addEventListener('input', () => this.sizeBox())
+    this.box.value = local?.load() ?? ''
+    this.box.addEventListener('input', () => this.draftChanged())
     this.attachButton.onclick = () => this.chooser.click()
     this.chooser.addEventListener('change', () => {
       const files = [...(this.chooser.files ?? [])]
@@ -185,8 +189,12 @@ export class ChatView implements Pane<WebRunner> {
       event.preventDefault()
       void this.submit()
     })
+    const position = local?.position()
+    if (position) this.restorePosition = Number(position)
     this.paint()
   }
+
+  private restorePosition: number | null = null
 
   // MARK: Pane
 
@@ -205,10 +213,15 @@ export class ChatView implements Pane<WebRunner> {
       this.child?.dialog.close()
       return
     }
-    if (this.stick) this.toBottom()
+    this.sizeBox()
+    this.placeScroll()
     // Not on a touch screen: focusing the box would raise the keyboard over
     // the conversation before the person asked to write.
-    if (!this.agentId && !matchMedia('(pointer: coarse)').matches) this.box.focus()
+    if (!this.local) this.focus()
+  }
+
+  focus(): void {
+    if (!this.agentId && !matchMedia('(pointer: coarse)').matches) this.box.focus({ preventScroll: true })
   }
 
   async attach(runner: WebRunner, terminal: string, _ended: () => void, _resuming = false): Promise<void> {
@@ -236,7 +249,7 @@ export class ChatView implements Pane<WebRunner> {
   prefill(text: string): void {
     const have = this.box.value.trimEnd()
     this.box.value = have ? `${have}\n${text}` : text
-    this.sizeBox()
+    this.draftChanged()
     this.box.focus({ preventScroll: true })
     this.box.setSelectionRange(this.box.value.length, this.box.value.length)
   }
@@ -288,8 +301,20 @@ export class ChatView implements Pane<WebRunner> {
     if (!this.stick && this.scroller.scrollHeight !== height && this.prepended) this.scroller.scrollTop += this.scroller.scrollHeight - height
     this.prepended = false
     this.paint()
-    if (this.stick) this.toBottom()
+    this.placeScroll()
   }
+
+  private placeScroll(): void {
+    if (this.host.hidden) return
+    if (this.restorePosition !== null) {
+      if (this.phase.kind === 'loading') return
+      this.scroller.scrollTop = this.restorePosition
+      this.restorePosition = null
+      this.stick = this.scroller.scrollHeight - this.scroller.scrollTop - this.scroller.clientHeight <= STICK
+      this.latest.hidden = this.stick
+    } else if (this.stick) this.toBottom()
+  }
+
   private prepended = false
 
   private signature(node: ViewNode): string {
@@ -364,6 +389,11 @@ export class ChatView implements Pane<WebRunner> {
   private toBottom(): void {
     this.scroller.scrollTop = this.scroller.scrollHeight
     this.latest.hidden = true
+  }
+
+  private draftChanged(): void {
+    this.local?.save(this.box.value)
+    this.sizeBox()
   }
 
   private sizeBox(): void {
@@ -458,7 +488,7 @@ export class ChatView implements Pane<WebRunner> {
       // The person's own words stay if they went on typing meanwhile.
       if (this.box.value === text) {
         this.box.value = ''
-        this.sizeBox()
+        this.draftChanged()
       }
       // Images added while it was going wait for the next message.
       this.images = this.images.filter(i => !sent.includes(i))

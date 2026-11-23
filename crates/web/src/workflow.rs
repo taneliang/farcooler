@@ -32,3 +32,13 @@ mod needs_you_tests {
         assert_eq!(super::needs_you_view(request), farcooler_client::plan_view::json(request));
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = workspaceLayout))]
+pub fn workspace_layout(request: &str) -> String {
+    farcooler_client::workspace_layout::json(request)
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = workspaceOrchestrator))]
+pub fn workspace_orchestrator(plan: &str) -> Option<String> {
+    farcooler_client::workspace_layout::orchestrator(plan)
+}

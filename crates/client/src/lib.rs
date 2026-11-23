@@ -29,6 +29,7 @@ pub mod needs_you_view;
 pub mod pipe;
 pub mod plan_json;
 pub mod plan_view;
+pub mod workspace_layout;
 pub mod rows_json;
 pub mod session;
 pub mod ssh;

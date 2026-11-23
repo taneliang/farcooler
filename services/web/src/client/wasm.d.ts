@@ -52,6 +52,8 @@ declare module 'fc-web' {
   /// error}). Pure; no I/O.
   export function recoveryView(count: number, current: boolean): string
   export function planView(request: string): string
+  export function workspaceLayout(request: string): string
+  export function workspaceOrchestrator(plan: string): string | undefined
   export function needsYouView(request: string): string
   export function workView(inventory: string, selection: string): string
   export function workFailure(word: string, code: string, what: string): string

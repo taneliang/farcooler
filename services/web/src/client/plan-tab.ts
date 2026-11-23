@@ -18,8 +18,6 @@ export interface PlanTab {
   /// The plan as last read with its view, and a footer count's size, for
   /// that count's list.
   listing(kind: CountKind): { plan: Plan; view: PlanViewModel; count: number } | null
-  /// The terminal of this workspace's orchestrator, when the plan names one.
-  orchestrator(): string | null
   stop(): void
 }
 
@@ -34,14 +32,6 @@ export interface PlanActions {
   openList(kind: CountKind): void
 }
 
-/// The orchestrator's pane: its own `terminal`, else the pane its id names
-/// (`pane:<terminal id>`).
-export function orchestratorOf(plan: Plan | null): string | null {
-  const agent = plan?.agents.find(a => a.role === 'orchestrator')
-  if (!agent) return null
-  return agent.terminal ?? (agent.id.startsWith('pane:') ? agent.id.slice(5) : null)
-}
-
 /// `current` is the connection as it is now, or null when there is none.
 export function startPlanTab(
   root: HTMLElement,
@@ -51,6 +41,7 @@ export function startPlanTab(
   actions: PlanActions,
   /// The view model's presenter (wasm's `planView`).
   present: PlanPresenter,
+  afterDraw?: (raw: unknown) => void,
 ): PlanTab {
   const live = (): WebRunner => {
     const r = current()
@@ -90,6 +81,7 @@ export function startPlanTab(
         items,
         present,
       )
+      afterDraw?.(view.raw)
     },
   })
   let timer = 0
@@ -115,7 +107,6 @@ export function startPlanTab(
       const view = presentPlan(present, last.raw, { needsYou: items.length })
       return view ? { plan: last.plan, view, count: view.column.footer.find(c => c.kind === kind)?.count ?? 0 } : null
     },
-    orchestrator: () => orchestratorOf(last?.plan ?? null),
     stop() {
       clearInterval(timer)
       board.stop()

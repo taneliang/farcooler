@@ -280,6 +280,7 @@ export class PlanBoard {
   private readonly notices = new Map<string, string>()
   private reading: Promise<void> | null = null
   private dead = false
+  private generation = 0
 
   constructor(private readonly deps: PlanDeps) {
     this.workspace = deps.workspace ?? null
@@ -290,17 +291,21 @@ export class PlanBoard {
   /// poll never takes the field from under the person's hands.
   refresh(): Promise<void> {
     if (this.dead) return Promise.resolve()
-    this.reading ??= this.read().finally(() => {
-      this.reading = null
+    if (this.reading) return this.reading
+    const reading = this.read(this.generation).finally(() => {
+      if (this.reading === reading) this.reading = null
     })
-    return this.reading
+    this.reading = reading
+    return reading
   }
 
-  private async read(): Promise<void> {
+  private async read(generation: number): Promise<void> {
+    const current = () => !this.dead && generation === this.generation
     try {
       if (this.workspaces.length === 0) {
         this.workspaces = parseWorkspaces(await this.deps.workspaces())
       }
+      if (!current()) return
       const chosen = this.workspaces.find(w => w.id === this.workspace) ?? this.workspaces.find(w => w.isMain) ?? this.workspaces[0]
       if (!chosen) {
         this.plan = null
@@ -310,6 +315,7 @@ export class PlanBoard {
       } else {
         this.workspace = chosen.id
         const text = await this.deps.plan(chosen.id)
+        if (!current()) return
         const plan = parsePlan(text)
         if (!plan) throw new Error('protocol')
         this.plan = plan
@@ -319,7 +325,7 @@ export class PlanBoard {
         for (const id of [...this.notices.keys()]) if (id !== 'all' && !this.knows(id)) this.notices.delete(id)
       }
     } catch (e) {
-      if (this.dead) return
+      if (!current()) return
       const word = (e as Error).message
       if (word === 'runner_too_old') {
         this.plan = null
@@ -341,6 +347,8 @@ export class PlanBoard {
   choose(workspace: string | null): void {
     if (this.dead || workspace === this.workspace) return
     this.workspace = workspace
+    this.generation++
+    this.reading = null
     this.plan = null
     this.raw = null
     this.state = 'loading'

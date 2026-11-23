@@ -5,6 +5,9 @@
 //
 //   node test/browser/csp-check.mjs [--dist dist] [--fake-daemon BINARY] [--screenshots DIR] [--cpu-throttle N] [--tunnel-delay MS] [--max-sessions N]
 //
+// To run just the workspace walks, add --workstation-only with --fake-daemon.
+// --workstation-screenshots DIR saves the split at phone and desktop widths.
+//
 // Serves dist/ (build.sh's output, with the real wasm) through
 // shell-server.ts, which uses the Worker's own header and asset code, at
 // https://<the build's app host>/ — routed inside the browser, so nothing goes
@@ -79,6 +82,9 @@ const dist = resolve(flag('--dist') ?? 'dist')
 const fakeDaemon = flag('--fake-daemon') && resolve(flag('--fake-daemon'))
 // For a person judging the screens: each one at a desktop and a phone width.
 const shots = flag('--screenshots')
+const workstationShots = flag('--workstation-screenshots')
+const workstationOnly = args.includes('--workstation-only')
+if (workstationOnly && !fakeDaemon) throw new Error('--workstation-only needs --fake-daemon')
 // Slow the page's CPU by this factor (Chromium's own throttling), to run the
 // walk on a slow machine. A slow link is --tunnel-delay, which CI uses.
 const throttle = Number(flag('--cpu-throttle') ?? 1)
@@ -89,11 +95,12 @@ const delay = Number(flag('--tunnel-delay') ?? 0)
 const maxSessions = Number(flag('--max-sessions') ?? 10)
 const later = send => (delay > 0 ? setTimeout(send, delay) : send())
 const shoot = async (page, name) => {
-  if (!shots) return
+  const directory = name.startsWith('workstation-') ? workstationShots ?? shots : shots
+  if (!directory) return
   for (const [width, height] of [[1280, 800], [390, 844]]) {
     await page.setViewportSize({ width, height })
     await page.waitForTimeout(300)
-    await page.screenshot({ path: join(shots, `${name}-${width}.png`) })
+    await page.screenshot({ path: join(directory, `${name}-${width}.png`) })
   }
   await page.setViewportSize({ width: 1280, height: 800 })
 }
@@ -215,7 +222,7 @@ async function startRunner(name) {
     log,
     /// The Key A line the phone's enrollment has the daemon write, in the
     /// fence's shape: restricted, with the daemon as its forced command.
-    enroll: keyA => (enrolled = keyA) && writeFileSync(keys, `restrict,command="${fakeDaemon} ${typedLog} ${name}" ${keyA}\n`),
+    enroll: keyA => (enrolled = keyA) && writeFileSync(keys, `restrict,command="cd '${dir}' && '${fakeDaemon}' typed ${name}" ${keyA}\n`),
     typed: () =>
       (existsSync(typedLog) ? readFileSync(typedLog, 'utf8') : '')
         .split('\n')
@@ -271,7 +278,7 @@ async function authenticator(context, page, prf = false) {
 async function launch(video, secret, { prf = false, dir = profile } = {}) {
   const args = ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream']
   if (video) args.push(`--use-file-for-fake-video-capture=${video}`)
-  const context = await chromium.launchPersistentContext(dir, { args, permissions: ['camera'], viewport: { width: 1280, height: 800 } })
+  const context = await chromium.launchPersistentContext(dir, { executablePath: process.env.CHROME_PATH, args, permissions: ['camera'], viewport: { width: 1280, height: 800 } })
   await context.route(`${origin}/**`, serve)
   await context.route(`https://${SIBLING}/**`, serve)
   if (runner) {
@@ -582,7 +589,7 @@ const sorted = xs => [...xs].sort((a, b) => a - b)
 const percentile = (xs, p) => sorted(xs)[Math.min(xs.length - 1, Math.ceil(xs.length * p) - 1)]
 
 /// Ends the walk once the low-limit check has run.
-class LowLimitDone extends Error {}
+class WalkDone extends Error {}
 
 /// A runner whose sshd allows fewer sessions than the page assumes (ov-846):
 /// eight panes opened in a row cost one refusal, the first, and no more. The
@@ -754,10 +761,16 @@ async function everyRunner(page) {
   const before = touches
   await statusSays(page, 'Connect to studio')
   await page.click('#status-action')
-  await page.waitForSelector('#work:not([hidden]) .terminal-choice', { timeout: 120_000 })
+  await page.waitForSelector('#work:not([hidden])', { timeout: 120_000 })
   await page.click('#show-needs')
+  // Restored work connects the foreground runner first. A fresh grant can
+  // already be connecting the secondary runner.
   const rows = () => page.$$eval('#needs .need', rows => rows.map(r => ({ text: r.textContent, runner: r.querySelector('.need-runner')?.textContent ?? '' })))
-  await page.waitForFunction(() => document.querySelectorAll('#needs .need').length === 2, null, { timeout: 60_000 })
+  const connectOther = page.locator('.need-runner-note').filter({ hasText: 'build-box' }).getByRole('button', { name: 'Connect', exact: true })
+  const secondCard = page.locator('#needs .need').nth(1)
+  await connectOther.or(secondCard).first().waitFor({ timeout: 60_000 })
+  if (await connectOther.isVisible()) await connectOther.click()
+  await secondCard.waitFor({ timeout: 60_000 })
   const both = await rows()
   const names = both.map(r => r.runner).sort()
   if (JSON.stringify(names) !== JSON.stringify(['build-box', 'studio'])) failures.push(`the rows name ${JSON.stringify(names)}, not both runners`)
@@ -782,7 +795,7 @@ async function everyRunner(page) {
   await page.reload()
   await statusSays(page, 'Connect to studio')
   await page.click('#status-action')
-  await page.waitForSelector('#work:not([hidden]) .terminal-choice', { timeout: 120_000 })
+  await page.waitForSelector('#work:not([hidden])', { timeout: 120_000 })
   await page.click('#show-needs')
   await page.waitForFunction(() => document.querySelector('.need-runner-note')?.textContent?.includes('build-box'), null, { timeout: 60_000 })
   // Studio's own list is read over its own connection, and may land after the note.
@@ -835,6 +848,7 @@ async function workspaceWalk(page) {
   const plan = await page.textContent('#plan')
   if (plan.includes('Visual language') || !plan.includes('Invoice export') || (await page.$('.plan-board'))) failures.push(`Billing's plan reads ${JSON.stringify(plan.slice(0, 200))}`)
   await planColumnWalk(page)
+  await page.click('#close-split')
   await page.click('#show-needs')
   await page.waitForFunction(() => document.querySelectorAll('#needs .need').length === 2, null, { timeout: 30_000 })
   if (!same(await rows(), ['Run the invoice tests?', 'Which invoice format first?'])) failures.push(`Billing's Needs You lists ${JSON.stringify(await rows())}`)
@@ -885,7 +899,7 @@ async function planColumnWalk(page) {
   const composes = () => (existsSync(join(runner.dir, 'composed')) ? readFileSync(join(runner.dir, 'composed'), 'utf8') : '')
   const before = composes()
   await page.locator('#plan .plan-need').first().click()
-  await page.waitForFunction(() => !document.getElementById('pane').hidden && document.querySelector('.chat-host:not([hidden]) .chat-input')?.value.includes('About'), null, { timeout: 30_000 })
+  await page.waitForFunction(() => !document.getElementById('plan').hidden && document.querySelector('#side-stage .chat-host:not([hidden]) .chat-input')?.value.includes('About'), null, { timeout: 30_000 })
   const boxText = await page.inputValue('.chat-host:not([hidden]) .chat-input')
   if (boxText !== 'About \u201CRun the invoice tests?\u201D: ') failures.push(`the quote reads ${JSON.stringify(boxText)}`)
   if (composes() !== before) failures.push('quoting sent a message')
@@ -906,6 +920,113 @@ async function planColumnWalk(page) {
   console.log('csp-check: a ticket opened its card and the builder opened its terminal')
   await page.click('#show-plan')
   await shoot(page, 'workspace-plan')
+}
+
+/// ov-1445: real WASM projection, two pane streams and one authenticated session.
+async function workstationWalk(page) {
+  const assert = (ok, message) => { if (!ok) throw new Error(message) }
+  const palette = page.locator('#workspace-commands')
+  const main = page.locator('#workspace-main')
+  const side = page.locator('#workspace-side')
+  const draft = side.getByRole('textbox', { name: 'Message', exact: true })
+  const focus = async slot => page.waitForFunction(slot => document.getElementById(`workspace-${slot}`)?.dataset.focused === 'true', slot)
+  const commands = () => page.click('#show-commands')
+  const action = label => palette.getByRole('button', { name: new RegExp(`^${label}`) })
+
+  await page.click('#show-terminals')
+  await commands()
+  await action('Split Pane').click()
+  await focus('side')
+  await page.locator('.terminal-choice', { hasText: 'billing agent' }).click()
+  await side.getByRole('button', { name: 'Raw Terminal' }).click()
+  await side.locator('.xterm').waitFor()
+  await page.waitForSelector('#side-stage [data-attached="true"]:not([hidden])')
+  assert(await main.locator('.xterm').isVisible(), 'the main terminal disappeared after splitting')
+
+  await main.locator('.xterm').click()
+  await focus('main')
+  await page.keyboard.press('Alt+Shift+F')
+  assert(await main.getAttribute('data-focused') === 'true', 'the shortcut stole focus from xterm')
+  await main.focus()
+  await page.keyboard.press('Alt+Shift+F')
+  await focus('side')
+
+  await commands()
+  await action('Keyboard Shortcuts').click()
+  const shortcut = palette.getByRole('textbox', { name: 'Focus Other Pane', exact: true })
+  await shortcut.fill('J')
+  await shortcut.press('Tab')
+  await palette.getByRole('button', { name: 'Close', exact: true }).click()
+  await side.focus()
+  await page.keyboard.press('Alt+Shift+J')
+  await focus('main')
+
+  await page.click('#show-plan')
+  await page.locator('#plan .plan-ticket').waitFor()
+  await page.click('#show-orchestrator')
+  await side.getByRole('button', { name: 'Chat', exact: true }).click()
+  await draft.fill('Keep the invoice export draft here.')
+  await side.locator('.bubble').first().waitFor()
+  await shoot(page, 'workstation-plan')
+  await page.setViewportSize({ width: 390, height: 560 })
+  const panes = await page.locator('.workspace-leaf').evaluateAll(leaves => leaves.map(el => el.getBoundingClientRect().toJSON()))
+  assert(panes[0].bottom <= panes[1].top + 1 && panes[1].right <= 390, 'phone panes did not stack within the viewport')
+
+  const plan = page.locator('#plan')
+  const position = await plan.evaluate(el => {
+    el.scrollTop = 85
+    return el.scrollTop
+  })
+  assert(position > 0, 'the narrow Plan fixture has no scroll position to restore')
+  await page.waitForFunction(position => {
+    const prefix = 'fc-workspace:'
+    return Object.keys(localStorage).some(key => key.startsWith(prefix) && key.includes(':scroll:') &&
+      key.includes('"plan"') && localStorage.getItem(key) === String(position))
+  }, position)
+  // The click scrolls the ticket into view itself. Use its keyboard action
+  // with preventScroll to preserve the position being tested.
+  await page.locator('#plan .plan-ticket').first().evaluate(button => button.focus({ preventScroll: true }))
+  await page.keyboard.press('Enter')
+  await page.locator('#detail[open] .detail-note').waitFor()
+  assert(await draft.inputValue() === 'Keep the invoice export draft here.', 'ticket hid the orchestrator draft')
+  await page.click('#show-workflow')
+  await page.locator('#workflow-runs[open]').getByText('No workflow runs.').waitFor()
+  assert(await draft.isVisible(), 'workflow hid the orchestrator')
+  await page.goBack()
+  await page.locator('#detail[open]').waitFor()
+  await page.goBack()
+  await page.locator('#plan .plan-ticket').waitFor()
+  await page.waitForFunction(position => document.getElementById('plan').scrollTop === position, position)
+  await page.goForward()
+  await page.locator('#detail[open]').waitFor()
+  await page.goForward()
+  await page.locator('#workflow-runs[open]').getByText('No workflow runs.').waitFor()
+
+  await main.focus()
+  const before = touches
+  await page.reload()
+  await statusSays(page, 'Connect to studio')
+  await page.click('#status-action')
+  await page.locator('#workflow-runs[open]').getByText('No workflow runs.').waitFor()
+  await draft.waitFor()
+  assert(await draft.inputValue() === 'Keep the invoice export draft here.', 'reload lost the orchestrator draft')
+  assert(await main.getAttribute('data-focused') === 'true', 'reload lost the focused pane')
+  assert(touches - before === 1, 'restoring two panes needed more than one passkey touch')
+  await main.focus()
+  await page.keyboard.press('Alt+Shift+J')
+  await focus('side')
+  await page.click('#close-split')
+  await page.click('#show-terminals')
+  const picker = page.locator('#space-picker')
+  const billing = await picker.inputValue()
+  await picker.selectOption({ index: 0 })
+  await page.goBack()
+  assert(await picker.inputValue() === billing, 'Back did not restore the workspace')
+  await page.goForward()
+  assert(await picker.inputValue() !== billing, 'Forward did not restore the switched workspace')
+  await page.goBack()
+  await page.setViewportSize({ width: 1280, height: 800 })
+  console.log('csp-check: split, pane focus, palette and remapping, history and draft restoration passed')
 }
 
 /// A card's detail (ov-871), after `workspaceWalk`, on Billing.
@@ -936,7 +1057,7 @@ async function detailWalk(page) {
   await page.waitForFunction(() => !document.querySelector('#detail .detail-answers'), null, { timeout: 30_000 })
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => !document.getElementById('detail').open)
-  // The dialog's close event is a task of its own, so focus is looked for, not read once.
+  // History navigation restores focus after the page changes.
   const landed = await page.waitForFunction(() => document.activeElement?.id === 'show-needs', null, { timeout: 5000 }).then(
     () => true,
     () => false,
@@ -1052,6 +1173,16 @@ try {
     // browser holds the key. Making the passkey itself, and showing the code, cost none.
     if (touches !== 1) failures.push(`making the passkey cost ${touches} sign-ins, not the one registration`)
     console.log(`csp-check: the offer's key is ${key.type} for ${key.application}`)
+
+    if (workstationOnly) {
+      runner.enroll(offer.key_a)
+      await workspaceWalk(page)
+      await workstationWalk(page)
+      await detailWalk(page)
+      await imageWalk(page)
+      await switchWalk(page)
+      throw new WalkDone()
+    }
 
     if (await page.$('#scan')) failures.push('an unsigned camera reply can bypass device verification')
 
@@ -1181,7 +1312,7 @@ try {
 
       if (maxSessions < 10) {
         await lowLimit(page)
-        throw new LowLimitDone()
+        throw new WalkDone()
       }
       await panes(page)
 
@@ -1240,6 +1371,7 @@ try {
 
       await everyRunner(page)
       await workspaceWalk(page)
+      await workstationWalk(page)
       await detailWalk(page)
       await imageWalk(page)
       await switchWalk(page)
@@ -1301,12 +1433,13 @@ try {
       else console.log('csp-check: Sign Out deleted the passkey’s sealed copy at the relay')
     }
   } catch (e) {
-    if (!(e instanceof LowLimitDone)) {
+    if (!(e instanceof WalkDone)) {
       // Where it stopped: the screen on show says more than a timeout does.
       const shown = await Promise.all(
         session.context.pages().map(p => p.evaluate(() => [...document.querySelectorAll('main > section:not([hidden]), #status:not([hidden])')].map(e => `${e.id}: ${e.textContent?.trim().slice(0, 200)}`).join(' | ')).catch(() => 'closed')),
       ).catch(() => [])
-      failures.push(`the walk stopped: ${String(e.message).split('\n')[0]}; on screen: ${shown.join(' || ')}`)
+      const where = e.stack?.split('\n').find(line => line.includes('csp-check.mjs:'))?.trim() ?? ''
+      failures.push(`the walk stopped: ${String(e.message).split('\n')[0]} ${where}; on screen: ${shown.join(' || ')}`)
     }
   }
 

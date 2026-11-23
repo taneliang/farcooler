@@ -39,6 +39,7 @@ export interface Budget {
 export interface Pane<R> {
   /// Attached, or attaching: it holds a channel, or is about to.
   readonly active: boolean
+  readonly usesChannel?: boolean
   /// It has shown a terminal before, so its screen is worth keeping.
   readonly used: boolean
   /// Put it in front (true) or out of sight (false).
@@ -55,7 +56,7 @@ export class PaneSet<R> {
   private readonly panes = new Map<string, Pane<R>>()
   /// Terminal ids, least recently put in front first.
   private recent: string[] = []
-  private front: string | null = null
+  private visible: string[] = []
   /// Panes this set detached to make room: not put back by a reconnect.
   private readonly letGo = new Set<string>()
 
@@ -67,7 +68,7 @@ export class PaneSet<R> {
 
   /// The terminal in front.
   get shown(): string | null {
-    return this.front
+    return this.visible[0] ?? null
   }
 
   /// The terminals holding a channel, or about to.
@@ -77,50 +78,65 @@ export class PaneSet<R> {
 
   /// Put `terminal` in front, attached. `ended` is told when its stream stops
   /// while it is in front.
-  async open(terminal: string, runner: R, ended: () => void): Promise<void> {
-    const before = this.front
-    if (before && before !== terminal) this.panes.get(before)?.show(false)
-    this.front = terminal
-    this.recent = [...this.recent.filter(id => id !== terminal), terminal]
-    let pane = this.panes.get(terminal)
-    if (!pane) {
-      pane = this.make(terminal)
-      this.panes.set(terminal, pane)
+  async open(terminal: string, runner: R, ended: (id: string) => void): Promise<void> {
+    this.display([terminal])
+    await this.openVisible(terminal, runner, ended)
+  }
+
+  /// IDs arrive in focus order from the layout. Keep both leaves visible and
+  /// keep the hidden screens available for a later visit.
+  display(ids: string[]): void {
+    for (const id of this.visible) if (!ids.includes(id)) this.panes.get(id)?.show(false)
+    for (const id of ids) {
+      let pane = this.panes.get(id)
+      if (!pane) {
+        pane = this.make(id)
+        this.panes.set(id, pane)
+      }
+      if (!this.visible.includes(id)) pane.show(true)
     }
-    pane.show(true)
-    if (pane.active) return
+    this.visible = ids
+    this.recent = [...this.recent.filter(id => !ids.includes(id)), ...ids.slice().reverse()]
+  }
+
+  async openVisible(terminal: string, runner: R, ended: (id: string) => void): Promise<void> {
+    const pane = this.panes.get(terminal)
+    if (!pane || !this.visible.includes(terminal) || pane.active) return
     await this.attach(terminal, pane, runner, ended)
   }
 
-  /// Nothing in front: the pane that was goes out of sight, attached still.
-  /// For a workspace with no terminals.
+  discard(id: string): void {
+    this.panes.get(id)?.dispose()
+    this.panes.delete(id)
+    this.visible = this.visible.filter(visible => visible !== id)
+    this.recent = this.recent.filter(recent => recent !== id)
+    this.letGo.delete(id)
+  }
+
   clear(): void {
-    if (this.front) this.panes.get(this.front)?.show(false)
-    this.front = null
+    this.display([])
   }
 
   /// A new connection: attach again every pane that was attached, the one in
   /// front first. A pane that can't be (its terminal ended) is left as it is;
   /// the one in front reports why.
-  async resume(runner: R, ended: () => void): Promise<void> {
-    const ids = [...this.panes.keys()].filter(id => !this.letGo.has(id) && this.panes.get(id)?.used)
-    ids.sort((a, b) => Number(b === this.front) - Number(a === this.front))
+  async resume(runner: R, ended: (id: string) => void, onFailure?: (id: string, error: unknown) => void): Promise<void> {
+    const ids = [...this.visible, ...[...this.panes.keys()].filter(id =>
+      !this.visible.includes(id) && !this.letGo.has(id) && this.panes.get(id)?.used)]
+    for (const pane of this.panes.values()) pane.detach()
+    let failure: unknown
     for (const id of ids) {
-      const pane = this.panes.get(id) as Pane<R>
+      const pane = this.panes.get(id)
+      if (!pane) continue
       try {
         await this.attach(id, pane, runner, ended)
       } catch (e) {
-        if (id === this.front) throw e
+        if (!this.visible.includes(id)) continue
+        if (onFailure) onFailure(id, e)
+        else failure ??= e
       }
     }
-  }
-
-  forget(terminal: string): void {
-    if (this.front === terminal) this.front = null
-    this.panes.get(terminal)?.dispose()
-    this.panes.delete(terminal)
-    this.letGo.delete(terminal)
-    this.recent = this.recent.filter(id => id !== terminal)
+    if (failure) throw failure
   }
 
   dispose(): void {
@@ -128,18 +144,25 @@ export class PaneSet<R> {
     this.panes.clear()
     this.recent = []
     this.letGo.clear()
-    this.front = null
+    this.visible = []
   }
 
-  private async attach(id: string, pane: Pane<R>, runner: R, ended: () => void): Promise<void> {
+  private async attach(id: string, pane: Pane<R>, runner: R, ended: (id: string) => void): Promise<void> {
     this.letGo.delete(id)
     const told = () => {
-      if (this.front === id) ended()
+      if (this.visible.includes(id)) ended(id)
+    }
+    if (pane.usesChannel === false) {
+      await pane.attach(runner, id, told, pane.used)
+      return
     }
     // Where the runner has shown a lower limit, a channel just given back
     // still counts against it: wait for it to be freed rather than be refused
     // again.
     if (this.makeRoom(id) && this.budget.max < MAX_LIVE_PANES) await this.wait()
+    if (this.live.filter(other => other !== id).length >= this.budget.max) {
+      throw new Error('exec_failed')
+    }
     try {
       await pane.attach(runner, id, told, pane.used)
     } catch (e) {
@@ -178,7 +201,7 @@ export class PaneSet<R> {
   }
 
   private releaseOne(keep: string): boolean {
-    const victim = this.recent.find(id => id !== keep && this.panes.get(id)?.active)
+    const victim = this.recent.find(id => id !== keep && !this.visible.includes(id) && this.panes.get(id)?.active)
     if (!victim) return false
     this.panes.get(victim)?.detach()
     this.letGo.add(victim)

@@ -15,14 +15,14 @@ export type View = 'conversation' | 'terminal'
 
 export class AgentPane<R> implements Pane<R> {
   private view: View = 'conversation'
-  private terminal: Pane<R> | null = null
+  private terminal: (Pane<R> & { focus?(): void }) | null = null
   private front = false
 
   /// `conversation` is made at once; the terminal's screen is made the first
   /// time it is asked for, since most agents are only ever read.
   constructor(
-    private readonly conversation: Pane<R> & { prefill?(text: string): void },
-    private readonly makeTerminal: () => Pane<R>,
+    private readonly conversation: Pane<R> & { prefill?(text: string): void; focus?(): void },
+    private readonly makeTerminal: () => Pane<R> & { focus?(): void },
   ) {}
 
   get mode(): View {
@@ -32,6 +32,10 @@ export class AgentPane<R> implements Pane<R> {
   /// Holds a channel only while the terminal is in front of it.
   get active(): boolean {
     return this.view === 'terminal' && !!this.terminal?.active
+  }
+
+  get usesChannel(): boolean {
+    return this.view === 'terminal'
   }
 
   get used(): boolean {
@@ -63,6 +67,11 @@ export class AgentPane<R> implements Pane<R> {
     }
     this.view = view
     this.show(this.front)
+  }
+
+  focus(): void {
+    if (this.view === 'terminal') this.terminal?.focus?.()
+    else this.conversation.focus?.()
   }
 
   /// Leave `text` in the conversation's message box, unsent. The pane must be

@@ -1957,7 +1957,7 @@ jobs:
           WORK_VIEW_BIN="${CARGO_TARGET_DIR:-../../target}/debug/examples/work_view_bin" \
             node test/browser/work-check.mjs
       - run: node test/browser/csp-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon --tunnel-delay 100
-      - run: node test/browser/sleep-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon --engines chromium
+      - run: node test/browser/sleep-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon --engines chromium --split
 
   # Keep the existing Web check green only when both jobs pass, or when
   # Changes explicitly skipped Web, as it did for the original job.

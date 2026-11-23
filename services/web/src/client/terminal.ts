@@ -37,6 +37,10 @@ export class PaneView implements Pane<WebRunner> {
   /// arrives, and is cleared only then (`resume`).
   private replacement = new Replacement(false)
   private resizing = 0
+  private restoreTimer = 0
+  private restoreOffset = 0
+  private savedOffset = 0
+  private restorePending = false
   /// The size the terminal had before this page fitted it (`SizeLease`).
   private readonly lease = new SizeLease()
   private readonly claim = new Claim()
@@ -44,7 +48,12 @@ export class PaneView implements Pane<WebRunner> {
   private readonly onPageHide = () => this.giveBack()
   private readonly watching = new ResizeObserver(() => this.refit())
 
-  constructor(private readonly host: HTMLElement, private readonly onProblem: (word: string, code?: string, what?: string) => void) {
+  constructor(
+    private readonly host: HTMLElement,
+    private readonly onProblem: (word: string, code?: string, what?: string) => void,
+    private readonly autoFocus = true,
+    position?: { load(): string; save(value: string): void },
+  ) {
     this.term = new Terminal({
       scrollback: SCROLLBACK,
       cursorBlink: true,
@@ -62,6 +71,16 @@ export class PaneView implements Pane<WebRunner> {
     this.term.textarea?.addEventListener('focus', () => this.claimSize(true))
     // Closing the tab is not a detach; hand the pane back as it goes.
     window.addEventListener('pagehide', this.onPageHide)
+    if (position) {
+      this.savedOffset = Math.max(0, Number(position.load()) || 0)
+      this.term.onScroll(() => {
+        if (this.restorePending || this.host.hidden) return
+        const offset = this.offset()
+        if (offset === this.savedOffset) return
+        this.savedOffset = offset
+        position.save(offset ? String(offset) : '')
+      })
+    }
   }
 
   get active(): boolean {
@@ -79,6 +98,10 @@ export class PaneView implements Pane<WebRunner> {
     this.host.hidden = !on
     if (!on) return
     this.refit()
+    if (this.autoFocus) this.focus()
+  }
+
+  focus(): void {
     this.term.focus()
   }
 
@@ -107,6 +130,8 @@ export class PaneView implements Pane<WebRunner> {
     // keeps its scrollback on screen until the runner's replay arrives, so the
     // person is never looking at a blank terminal, and the replay, which
     // carries the pane's history of its own, replaces it in one step.
+    this.restoreOffset = resuming ? this.offset() || this.savedOffset : this.savedOffset
+    this.restorePending = this.restoreOffset > 0
     this.replacement = new Replacement(resuming)
     if (!resuming) this.term.reset()
     const generation = ++this.generation
@@ -114,7 +139,7 @@ export class PaneView implements Pane<WebRunner> {
     const current = () => this.generation === generation
     this.typedEarly = []
     this.typedEarlyBytes = 0
-    this.term.focus()
+    if (this.autoFocus) this.focus()
     let pane: WebPane
     try {
       const before = await this.sizeOf(runner, terminal)
@@ -148,12 +173,14 @@ export class PaneView implements Pane<WebRunner> {
     for (const bytes of early) this.send(bytes)
     this.host.dataset.attached = 'true'
     this.refit(true)
-    this.term.focus()
+    if (this.autoFocus) this.focus()
   }
 
   /// Let the channel go. The terminal keeps what it shows.
   detach(): void {
     this.generation++
+    clearTimeout(this.restoreTimer)
+    this.restorePending = false
     this.holding = false
     this.typedEarly = null
     delete this.host.dataset.attached
@@ -196,8 +223,22 @@ export class PaneView implements Pane<WebRunner> {
   /// whether this pane was in front; nothing else does.
   private write(bytes: Uint8Array): void {
     const measure = (globalThis as { __fcMeasure?: (inFront: boolean) => void }).__fcMeasure
-    if (!measure) return void this.term.write(bytes)
-    this.term.write(bytes, () => measure(!this.host.hidden))
+    if (!measure && !this.restorePending) return void this.term.write(bytes)
+    const generation = this.generation
+    this.term.write(bytes, () => {
+      measure?.(!this.host.hidden)
+      if (generation !== this.generation || !this.restorePending) return
+      clearTimeout(this.restoreTimer)
+      this.restoreTimer = window.setTimeout(() => {
+        this.term.scrollToLine(Math.max(0, this.term.buffer.active.baseY - this.restoreOffset))
+        this.restorePending = false
+      }, 150)
+    })
+  }
+
+  private offset(): number {
+    const buffer = this.term.buffer.active
+    return buffer.baseY - buffer.viewportY
   }
 
   private send(bytes: Uint8Array): void {

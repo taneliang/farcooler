@@ -134,7 +134,8 @@ fn waiting(typed_log: &Path, runner: &str) -> NeedsYouList {
                 ..Default::default()
             });
         }
-        if noted.is_empty() {
+        let answer = format!("{} ", farcooler_protocol::v1::TaskNoteKind::Answer as i32);
+        if !noted.lines().any(|line| line.starts_with(&answer)) {
             items.push(NeedsYouItem {
                 id: "decision:billing".into(),
                 kind: NeedsYouKind::Decision as i32,
@@ -266,6 +267,7 @@ fn main() {
                     capabilities: vec![
                         capability::TERMINAL_STREAM.to_string(),
                         capability::WORKSTREAMS.to_string(),
+                        capability::WORKFLOW_COMMANDS.to_string(),
                         capability::BOARD_PLAN.to_string(),
                         capability::NEEDS_YOU.to_string(),
                         capability::TASKS.to_string(),
@@ -424,6 +426,24 @@ fn main() {
                     };
                     vec![support::answer(&req, result::Value::Plan(plan))]
                 }
+                ("workflow.get", Some(request::Payload::WorkflowCommand(_))) => {
+                    let workspace = Uuid::from_slice(req.target_resource_id.as_deref().unwrap()).unwrap();
+                    let json = serde_json::json!({
+                        "context": {
+                            "capabilities": {
+                                "workspace": workspace.to_string(), "epoch": 1,
+                                "inspect": true, "controller": false, "decision_principal": null,
+                            },
+                            "binding": "fixture",
+                        },
+                    });
+                    vec![support::answer(&req, result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply {
+                        schema: 1, json: json.to_string(),
+                    }))]
+                }
+                ("host.health", _) => vec![support::answer(&req, result::Value::Host(farcooler_protocol::v1::Host {
+                    id: id_bytes(Uuid::from_u128(1)), ..Default::default()
+                }))],
                 ("task.get", _) => vec![support::answer(&req, result::Value::TaskDetail(task_detail()))],
                 ("task.note", Some(request::Payload::TaskNoteAppend(n))) => {
                     let mut log = std::fs::OpenOptions::new().create(true).append(true).open(typed_log.with_file_name("notes")).unwrap();

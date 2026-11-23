@@ -1,3 +1,4 @@
+import { readLocal, writeLocal } from './workspace-layout'
 import { WorkflowBoard, type WorkflowPort, type WorkflowRun, type WorkflowView } from './workflow'
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, text = '') => {
@@ -45,6 +46,7 @@ export function renderWorkflow(root: HTMLElement, view: WorkflowView, board: Wor
   } else focusMemory.delete(root)
 }
 const drafts = new WeakMap<WorkflowBoard, Map<string, { value: string; start: number; end: number }>>()
+const draftScopes = new WeakMap<WorkflowBoard, string>()
 function runCard(run: WorkflowRun, view: WorkflowView, board: WorkflowBoard): HTMLElement {
   const card = el('article'); card.append(el('h2', run.page.ticket), el('h3', run.page.outcome), el('p', run.page.reason))
   for (const line of run.page.more) card.append(el('p', line))
@@ -54,12 +56,27 @@ function runCard(run: WorkflowRun, view: WorkflowView, board: WorkflowBoard): HT
     const form = run.forms?.find(f => f.action === action.kind)
     const weighted = (node: HTMLButtonElement) => { node.className = `workflow-action-${action.weight.toLowerCase()}`; return node }
     if (form) {
-      let saved = drafts.get(board); if (!saved) { saved = new Map(); drafts.set(board, saved) }
-      const draft = saved.get(key) ?? { value: '', start: 0, end: 0 }; saved.set(key, draft)
+      const scope = draftScopes.get(board)
+      const draftKey = scope && `${scope}:reason:${key}`
+      let saved = drafts.get(board)
+      if (!saved) { saved = new Map(); drafts.set(board, saved) }
+      let draft = saved.get(key) ?? { value: '', start: 0, end: 0 }
+      const memory = !saved.has(key) && draftKey ? readLocal(draftKey) : ''
+      if (memory) {
+        try {
+          const restored = JSON.parse(memory)
+          if (typeof restored?.value === 'string') draft = restored
+        } catch {}
+      }
+      saved.set(key, draft)
       const label = el('label', form.label), input = keyed(el('textarea'), key + ':input')
       input.value = draft.value; input.disabled = !view.ready || view.busy
       input.setAttribute('aria-label', form.label)
-      input.oninput = input.onselect = () => { draft.value = input.value; draft.start = input.selectionStart; draft.end = input.selectionEnd }
+      input.oninput = input.onselect = () => {
+        draft = { value: input.value, start: input.selectionStart, end: input.selectionEnd }
+        saved.set(key, draft)
+        if (draftKey) writeLocal(draftKey, draft.value ? JSON.stringify(draft) : '')
+      }
       input.onfocus = () => input.setSelectionRange(draft.start, draft.end)
       label.append(input); actions.append(label, el('p', form.help),
         keyed(weighted(button(form.submitLabel, () => void board.dispatch(run.item, action, draft.value), !view.ready || view.busy)), key))
@@ -83,23 +100,38 @@ function runCard(run: WorkflowRun, view: WorkflowView, board: WorkflowBoard): HT
 // method is invented here; ov-925 attaches the reviewed adapter at this seam.
 let currentPort: (runner: string) => WorkflowPort | null = () => null
 export function installWorkflowPort(port: (runner: string) => WorkflowPort | null): void { currentPort = port }
-export function openWorkflow(dialog: HTMLDialogElement, runner: string, workspace: string): { close(): void; connection(up: boolean): void } {
-  const key = `workflow.run.${runner}.${workspace}`
+export function openWorkflow(dialog: HTMLDialogElement, runner: string, workspace: string, scope: string, closePage: () => void): { close(): void; connection(up: boolean): void } {
+  const key = `${scope}:run`
+  const scrollKey = `${scope}:scroll`
   const root = el('div'); root.className = 'plan-sheet-body'
   const bar = el('div'); bar.className = 'plan-sheet-bar'
-  bar.append(el('h2', 'Workflow Runs'), button('Close', () => dialog.close()))
+  bar.append(el('h2', 'Workflow Runs'), button('Close', closePage))
   dialog.replaceChildren(bar, root)
-  const board = new WorkflowBoard(workspace, () => currentPort(runner), view => renderWorkflow(root, view, board), item => {
-    try { if (item) localStorage.setItem(key, item); else localStorage.removeItem(key) } catch { /* private storage */ }
-  })
-  try { board.select(localStorage.getItem(key)) } catch { board.select(null) }
+  let position = Number(readLocal(scrollKey))
+  const board = new WorkflowBoard(workspace, () => currentPort(runner), view => {
+    renderWorkflow(root, view, board)
+    if (view.ready) root.scrollTop = position
+  }, item => writeLocal(key, item ?? ''))
+  draftScopes.set(board, scope)
+  root.onscroll = () => {
+    if (root.scrollHeight <= root.clientHeight && position > 0) return
+    position = root.scrollTop
+    writeLocal(scrollKey, String(position))
+  }
+  dialog.setAttribute('open', '')
+  board.select(readLocal(key) || null)
   const refresh = () => { if (dialog.open) void board.refresh() }
   window.addEventListener('online', refresh)
   const offline = () => board.disconnect()
   window.addEventListener('offline', offline)
-  const stop = () => { board.disconnect(); window.removeEventListener('online', refresh); window.removeEventListener('offline', offline); dialog.removeEventListener('close', onClose) }
-  const onClose = () => { if (!dialog.open) stop() }
-  dialog.addEventListener('close', onClose)
-  dialog.showModal(); void board.refresh()
-  return { close: () => { dialog.close(); stop() }, connection: up => { if (up) refresh(); else board.disconnect() } }
+  void board.refresh()
+  return {
+    close() {
+      dialog.removeAttribute('open')
+      board.disconnect()
+      window.removeEventListener('online', refresh)
+      window.removeEventListener('offline', offline)
+    },
+    connection: up => { if (up) refresh(); else board.disconnect() },
+  }
 }

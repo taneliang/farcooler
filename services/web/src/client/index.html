@@ -85,41 +85,81 @@
         <button type="button" id="show-needs" aria-pressed="false">Needs You</button>
         <button type="button" id="show-plan" aria-pressed="false">Plan</button>
       </div>
-      <button type="button" id="show-workflow" aria-haspopup="dialog">Workflow Runs</button>
+      <div class="workspace-tools">
+        <button type="button" id="show-orchestrator"></button>
+        <button type="button" id="show-workflow">Workflow Runs</button>
+        <button type="button" id="show-commands" aria-haspopup="dialog"></button>
+      </div>
       <div class="work-launch">
         <button type="button" id="show-start-work" aria-haspopup="dialog" hidden></button>
         <a id="workspace-link" hidden></a>
       </div>
       <div class="terminal-list" id="terminal-list"></div>
     </nav>
-    <div class="needs" id="needs" aria-live="polite" hidden></div>
-    <div class="plan" id="plan" hidden></div>
-    <div class="pane" id="pane">
-      <p class="note" id="pane-note" hidden></p>
+    <div class="workspace-main-area">
       <div class="note link-note" id="link-note" role="status" hidden>
         <p class="link-title" id="link-title"></p>
         <p class="link-detail" id="link-detail"></p>
         <button id="link-action" type="button" hidden>Reconnect</button>
       </div>
-      <header class="terminal-manage" id="terminal-manage" hidden>
-        <div class="terminal-identity">
-          <strong id="terminal-name"></strong>
-          <span id="terminal-state"></span>
-          <span class="terminal-access" id="terminal-access"></span>
-        </div>
-        <div class="terminal-actions">
-          <button class="quiet" type="button" id="terminal-rename" hidden></button>
-          <button class="quiet" type="button" id="terminal-close" hidden></button>
-          <button type="button" id="terminal-recover" hidden></button>
-        </div>
-      </header>
-      <div class="pane-bar" id="pane-bar" hidden>
-        <div class="view-switch" role="group" aria-label="View">
-          <button type="button" id="view-conversation" aria-pressed="true">Conversation</button>
-          <button type="button" id="view-terminal" aria-pressed="false">Terminal</button>
-        </div>
+        <header class="terminal-manage" id="terminal-manage" hidden>
+          <div class="terminal-identity">
+            <strong id="terminal-name"></strong>
+            <span id="terminal-state"></span>
+            <span class="terminal-access" id="terminal-access"></span>
+          </div>
+          <div class="terminal-actions">
+            <button class="quiet" type="button" id="terminal-rename" hidden></button>
+            <button class="quiet" type="button" id="terminal-close" hidden></button>
+            <button type="button" id="terminal-recover" hidden></button>
+          </div>
+        </header>
+      <div class="workspace-panes">
+        <section class="workspace-leaf" id="workspace-main" tabindex="0" aria-label="Main pane">
+          <div class="needs" id="needs" aria-live="polite" hidden></div>
+          <div class="plan" id="plan" hidden></div>
+          <div class="pane" id="pane">
+            <p class="note" id="pane-note" hidden></p>
+            <div class="pane-bar" id="pane-bar" hidden>
+              <span class="pane-title" id="pane-title"></span>
+              <div class="view-switch" role="group" aria-label="View">
+                <button type="button" id="view-conversation"></button>
+                <button type="button" id="view-terminal"></button>
+              </div>
+            </div>
+            <div class="terminal" id="terminal"></div>
+          </div>
+          <dialog class="plan-sheet" id="workflow-runs" aria-label="Workflow Runs"></dialog>
+          <dialog class="detail" id="detail" aria-labelledby="detail-title">
+            <header class="detail-bar">
+              <div class="detail-heading">
+                <p class="detail-meta"><span id="detail-key"></span> <span class="detail-status" id="detail-status" hidden></span></p>
+                <h2 id="detail-title"></h2>
+              </div>
+              <button class="quiet" id="detail-close" type="button">Close</button>
+            </header>
+            <div class="detail-scroll" id="detail-body"></div>
+            <form class="detail-form" id="detail-form">
+              <label class="sr-only" for="detail-note">Note</label>
+              <textarea id="detail-note" rows="2" placeholder="Add a note"></textarea>
+              <button type="submit" id="detail-add">Add Note</button>
+              <p class="need-notice" id="detail-notice" role="alert" hidden></p>
+            </form>
+          </dialog>
+        </section>
+        <section class="workspace-leaf pane" id="workspace-side" tabindex="0" hidden>
+          <div class="pane-bar">
+            <span class="pane-title" id="side-title"></span>
+            <div class="view-switch" id="side-switch" role="group" aria-label="View" hidden>
+              <button type="button" id="side-conversation"></button>
+              <button type="button" id="side-terminal"></button>
+            </div>
+            <button class="quiet" type="button" id="close-split"></button>
+          </div>
+          <p class="note" id="side-note" hidden></p>
+          <div class="terminal" id="side-stage"></div>
+        </section>
       </div>
-      <div class="terminal" id="terminal"></div>
     </div>
   </section>
 </main>
@@ -145,6 +185,7 @@
     <button type="button" id="work-start"></button>
   </div>
 </dialog>
+<dialog class="workspace-commands" id="workspace-commands"></dialog>
 <dialog class="saved-copies" id="saved-copies" aria-label="Saved Copies"></dialog>
 <dialog class="sign-out" id="sign-out" aria-labelledby="sign-out-title" aria-describedby="sign-out-detail">
   <h2 id="sign-out-title"></h2>
@@ -154,7 +195,6 @@
     <button class="quiet" id="sign-out-anyway" type="button" hidden></button>
   </div>
 </dialog>
-<dialog class="plan-sheet" id="workflow-runs" aria-label="Workflow Runs"></dialog>
 <dialog class="plan-sheet" id="plan-list" aria-labelledby="plan-list-title">
   <header class="plan-sheet-bar">
     <h2 id="plan-list-title"></h2>
@@ -163,21 +203,6 @@
   <p class="plan-sheet-note" id="plan-list-note" hidden></p>
   <div class="plan-sheet-body" id="plan-list-body"></div>
 </dialog>
-<dialog class="detail" id="detail" aria-labelledby="detail-title">
-  <header class="detail-bar">
-    <div class="detail-heading">
-      <p class="detail-meta"><span id="detail-key"></span> <span class="detail-status" id="detail-status" hidden></span></p>
-      <h2 id="detail-title"></h2>
-    </div>
-    <button class="quiet" id="detail-close" type="button">Close</button>
-  </header>
-  <div class="detail-scroll" id="detail-body"></div>
-  <form class="detail-form" id="detail-form">
-    <label class="sr-only" for="detail-note">Note</label>
-    <textarea id="detail-note" rows="2" placeholder="Add a note"></textarea>
-    <button type="submit" id="detail-add">Add Note</button>
-    <p class="need-notice" id="detail-notice" role="alert" hidden></p>
-  </form>
-</dialog>
+
 </body>
 </html>

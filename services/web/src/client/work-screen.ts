@@ -63,10 +63,12 @@ interface Options {
   runner: string
   current: () => WorkRunner | null
   project: (inventory: string, selection: string) => string | Promise<string>
-  select: (view: WorkView, terminal: WorkTerminal | undefined, open: boolean, replace?: string) => void
+  select: (view: WorkView, terminal: WorkTerminal | undefined, open: boolean, replace?: string, historyMode?: 'pushState' | 'replaceState') => void
   started: () => void
   note: (words: string) => void
   prefer: () => string | null
+  inventory?: string
+  navigation?: { workspace(id: string | null): void; terminal(id: string): void }
   failure: (error: WorkError) => string | Promise<string>
 }
 
@@ -78,8 +80,9 @@ function fromUrl(): Selection {
   return { workspace: param('workspace'), terminal: param('terminal') }
 }
 
-function destination(runner: string, workspace: string | null, terminal?: string): URL {
+export function destination(runner: string, workspace: string | null, terminal?: string): URL {
   const url = new URL(location.href)
+  url.hash = ''
   url.searchParams.set('runner', runner)
   updateParam(url, 'workspace', workspace)
   updateParam(url, 'terminal', terminal)
@@ -132,7 +135,7 @@ export function mountWork(options: Options) {
   const recover = get<HTMLButtonElement>('terminal-recover')
   const manage = get('terminal-manage')
   const mutationControls = [picker, repo, tree, preset, create, start, newTree, refreshButton, rename, close, recover]
-  let inventory: string | undefined
+  let inventory = options.inventory
   let selection: Selection = { preferredWorkspace: options.prefer(), ...fromUrl() }
   let view: WorkView | undefined
   let openTerminal: string | null = null
@@ -141,6 +144,7 @@ export function mountWork(options: Options) {
   let busy = false
   let disposed = false
   let replaced: string | undefined
+  const ended = new Set<string>()
 
   const notify = (words: string) => {
     workNote.hidden = !words || !dialog.open
@@ -181,23 +185,28 @@ export function mountWork(options: Options) {
     const switchPane = open || openTerminal !== next.terminal
     openTerminal = next.terminal
     draw(next, terminal)
-    if (historyMode) {
+    if (historyMode && !options.navigation) {
       const workspace = next.workspace ?? selection.workspace ?? null
       selection.workspace = workspace
       const url = destination(options.runner, workspace, selection.terminal ?? undefined)
       if (url.href !== location.href) history[historyMode](null, '', url)
     }
-    options.select(next, terminal, switchPane, replace)
+    options.select(next, terminal, options.navigation ? open : switchPane, replace, historyMode)
     return terminal
   }
 
   function draw(view: WorkView, terminal: WorkTerminal | undefined): void {
-    choices(picker, view.workspaces.map(w => ({ id: w.id, label: w.name })), view.workspace)
-    picker.hidden = view.workspaces.length === 0
+    if (!options.navigation) {
+      choices(picker, view.workspaces.map(w => ({ id: w.id, label: w.name })), view.workspace)
+      picker.hidden = view.workspaces.length === 0
+    }
     workspaceLink.hidden = !view.workspace
     workspaceLink.textContent = view.labels.link
     workspaceLink.href = destination(options.runner, view.workspace).href
-    workspaceLink.onclick = e => follow(e, () => navigate({ workspace: view.workspace }))
+    workspaceLink.onclick = e => follow(e, () => {
+      if (options.navigation) options.navigation.workspace(view.workspace)
+      else navigate({ workspace: view.workspace })
+    })
     choices(repo, view.repositories, view.repository)
     choices(tree, view.worktrees.length ? view.worktrees : [{ id: '', label: view.labels.emptyTree }], view.worktree ?? '')
     get('work-title').textContent = view.labels.open
@@ -234,9 +243,14 @@ export function mountWork(options: Options) {
       link.textContent = t.title
       link.title = t.state
       link.href = destination(options.runner, view.workspace, t.id).href
+      link.dataset.terminal = t.id
       if (t.agent) link.dataset.agent = 'true'
       if (t.id === view.terminal) link.setAttribute('aria-current', 'true')
-      link.onclick = e => follow(e, () => void chooseTerminal(t.id))
+      link.onclick = e => follow(e, () => {
+        if (busy) return
+        if (options.navigation) options.navigation.terminal(t.id)
+        else void chooseTerminal(t.id)
+      })
       return link
     }))
     if (focused) [...list.querySelectorAll('a')].find(link => link.href === focused)?.focus()
@@ -268,7 +282,10 @@ export function mountWork(options: Options) {
       const data = await runner.work_inventory()
       if (disposed || revision !== readId || runner !== options.current()) return
       inventory = data
-      if (open) selection.streamEnded = false
+      if (open) {
+        if (selection.terminal) ended.delete(selection.terminal)
+        selection.streamEnded = false
+      }
       const old = replaced
       await project(open, historyMode, old)
       if (replaced === old) replaced = undefined
@@ -311,7 +328,7 @@ export function mountWork(options: Options) {
     }
   }
 
-  picker.onchange = () => navigate({ workspace: picker.value })
+  if (!options.navigation) picker.onchange = () => navigate({ workspace: picker.value })
   repo.onchange = () => navigate({ repository: repo.value })
   tree.onchange = () => {
     selection = { ...selection, worktree: tree.value }
@@ -330,13 +347,24 @@ export function mountWork(options: Options) {
     selection = { ...fromUrl(), preferredWorkspace: options.prefer() }
     void project(true)
   }
-  window.addEventListener('popstate', pop)
+  if (!options.navigation) window.addEventListener('popstate', pop)
 
   return {
     refresh,
     chooseTerminal,
+    show(workspace: string | null, terminal?: string) {
+      if (terminal) ended.delete(terminal)
+      selection = { workspace, terminal }
+      return project(false)
+    },
+    focusTerminal(id: string | null) {
+      if (!view || (selection.terminal ?? view.terminal) === id) return
+      selection = { workspace: view.workspace, terminal: id, streamEnded: id !== null && ended.has(id) }
+      void project(false)
+    },
     hasTerminal: (id: string) => !!view?.terminals.some(t => t.id === id),
     streamEnded(id: string) {
+      ended.add(id)
       if (id !== view?.terminal) return
       selection = { ...selection, terminal: id, streamEnded: true }
       void refresh()

@@ -5,7 +5,7 @@
 //
 //   node test/browser/sleep-check.mjs --fake-daemon BINARY [--dist dist]
 //        [--engines chromium,webkit,firefox] [--cases a,b,c] [--no-clock]
-//        [--json FILE]
+//        [--json FILE] [--split]
 //
 // Every engine signs with the same software passkey (a P-256 key made here and
 // handed to the page as `navigator.credentials`), because only Chromium has a
@@ -55,6 +55,7 @@ if (!fakeDaemon) throw new Error('--fake-daemon BINARY is required')
 const engineNames = (flag('--engines') ?? 'chromium,webkit,firefox').split(',')
 const only = flag('--cases')?.split(',')
 const jsonOut = flag('--json')
+const split = args.includes('--split')
 const ENGINES = { chromium, webkit, firefox }
 
 const toml = readFileSync('wrangler.toml', 'utf8')
@@ -238,9 +239,11 @@ const statusSays = (page, text, timeout = 90_000) =>
   page.waitForFunction(t => !document.getElementById('status')?.hidden && document.getElementById('status')?.textContent?.includes(t), text, { timeout })
 const LIVE = '#terminal .terminal-host:not([hidden])[data-attached="true"]'
 
+const SIDE_LIVE = '#side-stage .terminal-host:not([hidden])[data-attached="true"]'
+
 /// One browser and context: the tunnel splice with a switch for the dead tunnel.
 async function open(engine) {
-  const browser = await ENGINES[engine].launch()
+  const browser = await ENGINES[engine].launch(engine === 'chromium' ? { executablePath: process.env.CHROME_PATH } : {})
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
   await context.route(`${origin}/**`, serve)
   const tunnels = new Set()
@@ -285,7 +288,7 @@ async function connected(s, first) {
     await page.click('#status-action')
     await page.waitForFunction(() => !document.getElementById('enroll')?.hidden && document.getElementById('offer-fingerprint')?.textContent?.includes('SHA256:'), null, { timeout: 90_000 })
     const offer = JSON.parse((await device(page)).offer)
-    writeFileSync(keys, `restrict,command="${fakeDaemon} ${typedLog}" ${offer.key_a}\n`)
+    writeFileSync(keys, `restrict,command="cd '${dir}' && '${fakeDaemon}' typed" ${offer.key_a}\n`)
     await edit(page, { runners: [{ id: 'r1', label: 'studio', user: me, host_key: hostKey, token: 'test', why: '' }] })
     await page.reload()
   }
@@ -293,6 +296,13 @@ async function connected(s, first) {
   await page.click('#status-action')
   await page.waitForSelector('#work:not([hidden]) .terminal-choice', { timeout: 90_000 })
   await page.waitForSelector(LIVE, { timeout: 60_000 })
+  if (!split) return
+  if (!await page.isVisible('#workspace-side')) {
+    await page.click('#show-commands')
+    await page.locator('#workspace-commands').getByRole('button', { name: /^Split Pane/ }).click()
+    await page.locator('.terminal-choice').nth(1).click()
+  }
+  await page.waitForSelector(SIDE_LIVE)
 }
 
 /// What the page is showing about the link, and whether the pane is live.
@@ -345,6 +355,7 @@ async function run(engine, s, c, n) {
   const { page, context } = s
   await connected(s, false)
   const out = { engine, case: c.name }
+  const touches = (await state(page)).touches
   const cdp = engine === 'chromium' ? await context.newCDPSession(page) : null
   await sleepMs(c.idle ?? Number(process.env.SLEEP_SETTLE ?? 0))
   if (c.idle) return { ...out, result: (await state(page)).link === 'up' ? 'reconnected without help' : 'lost the pane', detail: `idle ${c.idle} ms: ${(await state(page)).link}` }
@@ -409,6 +420,13 @@ async function run(engine, s, c, n) {
   } else {
     out.result = 'lost the pane'
     out.detail = `notice without a button: ${after.link}`
+  }
+  if (split && out.result !== 'lost the pane') {
+    await page.waitForSelector(SIDE_LIVE, { timeout: 15_000 })
+    if ((await state(page)).touches - touches > 1) {
+      return { ...out, result: 'lost the pane', detail: 'restoring the split took more than one passkey touch' }
+    }
+    out.detail += '; both terminal panes attached'
   }
   return out
 }

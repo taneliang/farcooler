@@ -23,7 +23,7 @@
 
 import { openWorkflow, installWorkflowPort } from './workflow-view'
 import { WorkflowSessionPort } from './workflow-session'
-import init, { connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, needsYouView, openReply, passkeyKeyLine, planView, recoveryView, registrationData, registrationProof, rpId, workFailure, workView, type WebRunner } from 'fc-web'
+import init, { connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, needsYouView, openReply, passkeyKeyLine, planView, recoveryView, registrationData, registrationProof, rpId, workFailure, workView, workspaceLayout, workspaceOrchestrator, type WebRunner } from 'fc-web'
 
 import { compareWords, connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, needsYouFailure, registerFailure, restoreFailure, runnerStopped, saveFailure, sealedRefusal, unreachable } from './copy'
 import { askForCopy, assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
@@ -33,10 +33,8 @@ import { renderNeeds } from './needs-view'
 import { type PlanTab, startPlanTab } from './plan-tab'
 import { PlanList } from './plan-list'
 import { scopeBoard, type Space, waitingIn } from './scope'
+import { linkedRunner, mountWork, type WorkTerminal, type WorkView } from './work-screen'
 import { drawPicker, saveSpace, savedSpace } from './space-picker'
-import { linkedRunner, mountWork, type WorkError, type WorkTerminal } from './work-screen'
-import { AgentPane, type View } from './agent-pane'
-import { ChatView } from './chat'
 import { DetailBoard, type Subject } from './detail'
 import { type Answer, DetailSheet } from './detail-view'
 import { corePhrases } from './core-phrases'
@@ -44,14 +42,16 @@ import { useNeedsYouPresenter } from './needs-present'
 import { useConversationWords } from './chat-copy'
 import { askToUsePasskey } from './passkey-prompt'
 import { drawCode } from './qr'
-import { type Budget, MAX_LIVE_PANES, PaneSet } from './panes'
+import { type Budget, MAX_LIVE_PANES } from './panes'
+import { readLocal, WorkspaceLayout, writeLocal, type Tab } from './workspace-layout'
+import { WorkspacePanes } from './workspace-panes'
+import { WorkspaceHistory, type Route } from './workspace-history'
 import { comparisonButtons, type Opened, registerDevice, waitForReply } from './sealed'
 import { type LinkView, Reconnector } from './reconnect'
 import { installSignOut } from './sign-out'
 import { relayCopy, relayRaw as requestRelay } from './relay-client'
 import { type RecoveryPresenter, type RecoveryView, SavedCopies } from './saved-copies'
 import { StartWatch } from './start'
-import { PaneView } from './terminal'
 import { loadTailcat, type Tailcat, type TunnelConn } from './tunnel'
 import { b64url, deriveKeys, needsSaving, prfUse, restore, syncCopy, type Saved, type Vault } from './vault'
 
@@ -507,7 +507,9 @@ function confirmJoin(session: Session, from: string, runners: Granted[]): void {
 // MARK: Working
 
 /// The terminals on the page, so a second visit to `work` replaces them.
-let panes: PaneSet<WebRunner> | null = null
+let panes: WorkspacePanes | null = null
+let layout: WorkspaceLayout | null = null
+let navigation: WorkspaceHistory | null = null
 /// What each runner's sshd has shown it will hold, kept for the session.
 const paneBudgets = new Map<string, Budget>()
 
@@ -528,7 +530,7 @@ let others: Reconnector<WebRunner, TunnelConn>[] = []
 const retries = new Map<string, () => void>()
 let drawn = ''
 
-/// The active runner’s work screen and its destination history.
+/// The terminal buttons by id, which is what an Open on an item can go to.
 let workScreen: ReturnType<typeof mountWork> | null = null
 
 /// The workspace workflow sheet, preserving the panes behind it.
@@ -539,21 +541,10 @@ let planList: PlanList | null = null
 
 /// What the plan does to the panes of the runner in front: open a terminal,
 /// and leave words in the orchestrator's message box.
-let paneControls: { open(terminal: string): Promise<boolean>; quote(terminal: string, text: string): Promise<boolean> } | null = null
+let paneControls: { open(terminal: string): boolean } | null = null
 
-/// Which part of the work screen is in front.
-function showTab(tab: 'terminals' | 'needs' | 'plan'): void {
-  const needs = tab === 'needs'
-  const plan = tab === 'plan'
-  $('needs').hidden = !needs
-  $('plan').hidden = !plan
-  $('pane').hidden = needs || plan
-  $('terminal-list').hidden = needs || plan
-  $('show-terminals').setAttribute('aria-pressed', String(tab === 'terminals'))
-  $('show-needs').setAttribute('aria-pressed', String(needs))
-  $('show-plan').setAttribute('aria-pressed', String(plan))
-  planTab?.show(plan)
-  if (needs) void fleet?.refresh()
+function showTab(tab: Tab): void {
+  navigation?.navigate({ space: chosenSpace, page: tab, tab })
 }
 
 /// The workspaces of the runner in front, the one showing, and the last view
@@ -587,7 +578,6 @@ function drawNeeds(view: BoardView): void {
     {
       canOpen: (terminal, item) => fleet?.canOpenItem(terminal, item) ?? false,
       press: (item, press) => {
-        if (press.kind === 'open') showTab('terminals')
         void fleet?.press(item, press)
       },
       retry: runner => retries.get(runner)?.(),
@@ -606,15 +596,22 @@ let sheet: DetailSheet | null = null
 /// Open a task's detail, read from the runner it is on. The buttons that
 /// answer it are the Needs You item's own, while one waits on the person.
 function openCard(runner: string, task: { id: string; key: string; title: string }): void {
-  const member = fleet?.cardsOf(runner)
+  if (fleet?.cardsOf(runner)?.deps?.task && navigation) {
+    navigation.navigate({ ...navigation.route, page: 'ticket', ticket: { runner, ...task } }, true)
+  }
+}
+
+function showCard(ticket: NonNullable<Route['ticket']>, scope: string, afterDraw: () => void): void {
+  const member = fleet?.cardsOf(ticket.runner)
   const deps = member?.deps
   if (!member || !deps?.task || !deps.note) return
   const read = deps.task
   const write = deps.note
-  sheet ??= new DetailSheet($('detail') as HTMLDialogElement, $, () => corePhrases(planView).waitingOnYou)
-  const subject: Subject = { runner, id: task.id, key: task.key, title: task.title }
-  const board = new DetailBoard({ runner: member.label, task: id => read(id), addNote: (id, body) => write(id, body), show: view => sheet?.draw(view) }, subject)
-  sheet.open(board, () => answersFor(runner, task.id))
+  sheet ??= new DetailSheet($('detail') as HTMLDialogElement, $, () => corePhrases(planView).waitingOnYou, () => layout?.run('close_page'))
+  const subject: Subject = ticket
+  const board = new DetailBoard({ runner: member.label, task: id => read(id), addNote: (id, body) => write(id, body), show: view => { sheet?.draw(view); afterDraw() } }, subject)
+  const key = `${scope}:ticket:${JSON.stringify([ticket.runner, ticket.id])}:draft`
+  sheet.open(board, () => answersFor(ticket.runner, ticket.id), readLocal(key), text => writeLocal(key, text))
 }
 
 /// The buttons a waiting item on this task offers (not Open: the sheet covers
@@ -631,6 +628,12 @@ function answersFor(runner: string, task: string): Answer[] {
 }
 
 function stopNeeds(): void {
+  workScreen?.dispose()
+  workScreen = null
+  navigation?.stop()
+  navigation = null
+  layout?.stop()
+  layout = null
   sheet?.close()
   workflowSheet?.close()
   workflowSheet = null
@@ -638,8 +641,6 @@ function stopNeeds(): void {
   planList?.close()
   planTab?.stop()
   planTab = null
-  workScreen?.dispose()
-  workScreen = null
   paneControls = null
   clearInterval(boardTimer)
   fleet?.stop()
@@ -739,6 +740,7 @@ function showLink(view: LinkView, label: string): void {
 
 async function connectTo(session: Session, target: Granted): Promise<void> {
   status(`Connecting to ${target.label}…`)
+  let runner: WebRunner
   let screen: ReturnType<typeof mountWork> | undefined
   let mineFleet: Fleet | null = null
   const reconnector = new Reconnector<WebRunner, TunnelConn>({
@@ -746,9 +748,8 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     discard: conn => conn.close(),
     connect: (conn, onLost) => connect(conn, target.host_key, target.user, session.keyLine, signIn(session, target.label), onLost),
     resume: async next => {
-      // The runner can be back even if a pane exited independently.
-      await panes?.resume(next, () => ended(next)).catch(() => {})
-      await screen?.refresh(true)
+      await panes?.resume(next)
+      await screen?.refresh()
     },
     show: view => {
       showLink(view, target.label)
@@ -762,13 +763,15 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   })
   /// A pane's stream ended: said so unless the whole connection did, which
   /// the notice above the terminal already says.
-  const ended = (from: WebRunner) => {
+  const ended = (from: WebRunner, id: string) => {
     // Asked a moment later: the loss reaches the page as the pane's end and as
     // `onLost`, in either order. The reconnector remembers it; the wasm object
     // cannot be asked once it is freed.
-    const id = panes?.shown
     setTimeout(() => {
-      if (id && !reconnector.hasLost(from) && reconnector.current === from) screen?.streamEnded(id)
+      if (!reconnector.hasLost(from) && reconnector.current === from) {
+        panes?.problem('This terminal’s stream ended. Select it to open it again.', id)
+        screen?.streamEnded(id)
+      }
     }, 100)
   }
   const workflowPort = new WorkflowSessionPort(() => {
@@ -780,7 +783,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   try {
     const conn = await session.tailcat.dial(target.token, session.device.nodePriv)
     dialed = conn
-    await reconnector.open(conn)
+    runner = await reconnector.open(conn)
   } catch (e) {
     dialed?.close()
     const word = (e as Error).message
@@ -792,13 +795,37 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     return
   }
 
+  let inventory: string
+  let initial: WorkView
+  const params = new URLSearchParams(location.search)
+  const linkedSpace = params.get('workspace')
+  const linkedTerminal = params.get('terminal') ?? undefined
+  try {
+    inventory = await runner.work_inventory()
+    initial = JSON.parse(workView(inventory, JSON.stringify({
+      workspace: linkedSpace, terminal: linkedTerminal, preferredWorkspace: savedSpace(target.id),
+    })))
+  } catch (e) {
+    status(`Can’t list ${target.label}’s terminals`, connectFailure((e as Error).message, target.label), {
+      label: 'Connect',
+      run: () => void connectTo(session, target),
+    })
+    return
+  }
+
   $('runner-name').textContent = target.label
+  const list = $('terminal-list')
+  list.replaceChildren()
   show('work')
 
   stopNeeds()
   installWorkflowPort(id => id === target.id && reconnector.current ? workflowPort : null)
   frontRunner = target.id
-  $<HTMLButtonElement>('show-workflow').disabled = true
+  spaces = initial.workspaces
+  const fallbackSpace = initial.workspace ?? linkedSpace
+  chosenSpace = fallbackSpace
+  const scope = `fc-workspace:${JSON.stringify([session.device.account, target.id])}`
+  const returning = history.state?.workspaceScope === scope
   const mine = new Fleet(
     drawNeeds,
     (runner, terminal) => {
@@ -808,154 +835,256 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   )
   mineFleet = mine
   fleet = mine
-  // Every enrolled runner, in the order they were enrolled: this one is read
-  // now, the rest are connected to one after another (one passkey touch each)
-  // and each holds one channel on its own connection (ov-861).
-  const runners = session.device.runners ?? []
-  for (const r of runners) {
+  for (const r of session.device.runners ?? []) {
     if (r.id === target.id) mine.add(r.id, r.label, depsOf(reconnector))
     else if (r.why !== '') mine.addUnreachable(r.id, r.label, unreachable(r.why, r.label, r.cause))
-    else joinRunner(session, r, mine)
+    else joinRunner(session, r, mine, !returning)
   }
-  mine.up(target.id)
-  planTab = startPlanTab($('plan'), target.label, () => (reconnector.current && !reconnector.hasLost(reconnector.current) ? reconnector.current : null), chosenSpace, {
+  planTab = startPlanTab($('plan'), target.label, () => reconnector.current, chosenSpace, {
     openCard: card => openCard(target.id, { id: card.task, key: card.key, title: '' }),
     quote: async text => {
-      const orchestrator = planTab?.orchestrator()
-      return !!orchestrator && !!await paneControls?.quote(orchestrator, text)
+      if (!orchestrator) return false
+      layout?.run('orchestrator')
+      layout?.run('conversation', 'side')
+      return !!await panes?.quote(text)
     },
-    openAgent: async agent => !!agent.terminal && !!await paneControls?.open(agent.terminal),
+    openAgent: agent => !!agent.terminal && !!paneControls?.open(agent.terminal),
     openList: kind => {
       const found = planTab?.listing(kind)
       if (!found) return
       planList ??= new PlanList($('plan-list') as HTMLDialogElement, $, card => openCard(target.id, { id: card.task, key: card.key, title: '' }))
       planList.open(found.plan, found.view, kind, found.count)
     },
-  },
-  planView)
-  showTab('terminals')
-  boardTimer = window.setInterval(() => {
-    if (document.visibilityState === 'visible') void mine.refresh()
-  }, NEEDS_POLL_MS)
-  panes?.dispose()
-  // One xterm per terminal, each in a host of its own inside the stage. Only
-  // the one in front is displayed; the rest keep their screens and, up to the
-  // channel budget, their streams (panes.ts). An agent's terminal opens as
-  // its conversation (chat.ts), which rides the control session and holds no
-  // channel.
-  let agentById = new Map<string, WorkTerminal>()
-  const budget = paneBudgets.get(target.label) ?? { max: MAX_LIVE_PANES }
-  paneBudgets.set(target.label, budget)
-  const agentPanes = new Map<string, AgentPane<WebRunner>>()
-  const hostIn = () => {
-    const host = document.createElement('div')
-    host.className = 'terminal-host'
-    $('terminal').append(host)
-    return host
-  }
-  const shell = () => new PaneView(hostIn(), (word, code, what) => {
-    paneNote(code === 'scope-denied' ? workFailure(word, code, what ?? '') : connectFailure(word, target.label))
+  }, planView, raw => {
+    if (navigation?.route.page !== 'plan' || !raw) return
+    setOrchestrator(workspaceOrchestrator(JSON.stringify(raw)) ?? null)
+    restoreScroll('plan')
   })
-  const set = new PaneSet<WebRunner>(id => {
-    if (!agentById.get(id)?.agent) return shell()
-    // An agent opens as its conversation; the Mac's view switch (the bar over
-    // the pane) shows the terminal it runs in.
-    const agent = new AgentPane<WebRunner>(new ChatView(hostIn(), target.label), shell)
-    agentPanes.set(id, agent)
-    return agent
-  }, budget)
-  panes = set
-  const open = async (id: string) => {
-    const current = reconnector.current
-    if (!current) return
-    try {
-      const opening = set.open(id, current, () => ended(current))
-      drawView()
-      await opening
-    } catch (e) {
-      if (set.shown === id) {
-        const error = e as WorkError
-        if (error.code === 'scope-denied') paneNote(workFailure(error.message, error.code, error.what ?? ''))
-        else screen?.streamEnded(id)
-      }
+
+  panes?.dispose()
+  const budget = paneBudgets.get(target.id) ?? { max: MAX_LIVE_PANES }
+  paneBudgets.set(target.id, budget)
+  const mounted = new WorkspacePanes(scope, target.label, budget, () => reconnector.current, ended)
+  panes = mounted
+
+  let shown: WorkTerminal[] = []
+  let inventoryWorkspace: string | null | undefined
+  let firstRender = true
+  let focusedSlot: 'main' | 'side' = 'main'
+  let pendingTerminal: { id: string; slot?: 'main' | 'side' } | undefined
+  let orchestrator: string | null = null
+  let discovery = 0
+  let pendingScroll: { page: keyof typeof scrollIds; position: number } | null = null
+  let previous: Route | null = null
+  let opener: { element: Element | null; task: string | null } | null = null
+  const scrollIds = { plan: 'plan', needs: 'needs', ticket: 'detail-body' } as const
+  const scrollKey = (page: keyof typeof scrollIds) => `${scope}:scroll:${JSON.stringify([chosenSpace, page, navigation?.route.ticket?.id])}`
+  const restoreScroll = (page: keyof typeof scrollIds) => {
+    if (pendingScroll?.page !== page || navigation?.route.page !== page) return
+    const element = $(scrollIds[page])
+    if (element.scrollHeight <= element.clientHeight) return
+    element.scrollTop = pendingScroll.position
+    pendingScroll = null
+  }
+  for (const [page, id] of Object.entries(scrollIds)) {
+    const element = $(id)
+    element.onscroll = () => {
+      if (pendingScroll?.page === page || navigation?.route.page !== page || element.scrollHeight <= element.clientHeight) return
+      writeLocal(scrollKey(page as keyof typeof scrollIds), String(element.scrollTop))
     }
-    drawView()
   }
-  /// The bar over an agent's pane: its name and which view is in front.
-  const drawView = () => {
-    const id = set.shown
-    const agent = id ? agentPanes.get(id) : undefined
-    $('pane-bar').hidden = !agent
-    if (!id || !agent) return
-    $('view-conversation').setAttribute('aria-pressed', String(agent.mode === 'conversation'))
-    $('view-terminal').setAttribute('aria-pressed', String(agent.mode === 'terminal'))
-  }
-  const viewAs = async (mode: View) => {
-    const id = set.shown
-    const agent = id ? agentPanes.get(id) : undefined
-    const current = reconnector.current
-    if (!id || !agent || !current || agent.mode === mode) return
-    agent.setMode(mode)
-    paneNote('')
-    try {
-      await set.open(id, current, () => ended(current))
-    } catch (e) {
-      const error = e as WorkError
-      paneNote(workFailure(error.message, error.code ?? '', error.what ?? ''))
+
+  const controller = new WorkspaceLayout(scope, workspaceLayout, (view, intent) => {
+    mounted.render(view, intent === 'open' || view.effect.kind === 'refresh_pane')
+    for (const [id, action] of [
+      ['show-orchestrator', 'orchestrator'], ['show-workflow', 'workflow'], ['show-commands', 'commands'],
+      ['view-conversation', 'conversation'], ['side-conversation', 'conversation'],
+      ['view-terminal', 'raw_terminal'], ['side-terminal', 'raw_terminal'], ['close-split', 'close_split'],
+    ] as const) {
+      const command = view.actions.find(a => a.id === action)!
+      const button = $<HTMLButtonElement>(id)
+      button.textContent = command.label
+      if (id.startsWith('show-')) button.disabled = !command.enabled
+      if (command.key) button.setAttribute('aria-keyshortcuts', view.shortcut_prefix + command.key.toUpperCase())
+      else button.removeAttribute('aria-keyshortcuts')
     }
-    drawView()
+    list.hidden = navigation?.route.page !== 'terminals' && !view.side
+    focusedSlot = view.focus
+    const selected = view[view.focus]?.terminal
+    if (selected && !pendingTerminal) screen?.focusTerminal(selected)
+    if (!selected) $('terminal-manage').hidden = true
+  }, effect => {
+    if (effect.kind === 'focus') mounted.focus(effect.slot, false)
+    else if (effect.kind === 'navigate') {
+      if (effect.page === 'workflow') {
+        if (navigation && navigation.route.page !== 'workflow') {
+          navigation.navigate({ space: chosenSpace, page: 'workflow', tab: navigation.route.tab }, true)
+        }
+      } else showTab(effect.page)
+    } else if (effect.kind === 'close_page') navigation?.leave()
+  })
+  layout = controller
+  $('show-orchestrator').onclick = () => controller.run('orchestrator')
+  $('show-workflow').onclick = () => controller.run('workflow')
+  $('show-commands').onclick = () => controller.run('commands')
+  $('close-split').onclick = () => controller.run('close_split')
+  for (const [id, action, slot] of [
+    ['view-conversation', 'conversation', 'main'], ['view-terminal', 'raw_terminal', 'main'],
+    ['side-conversation', 'conversation', 'side'], ['side-terminal', 'raw_terminal', 'side'],
+  ] as const) {
+    $(id).onclick = () => { controller.run(action, slot); mounted.focus(slot, true) }
   }
-  $('view-conversation').onclick = () => void viewAs('conversation')
-  $('view-terminal').onclick = () => void viewAs('terminal')
-  paneControls = {
-    open: async id => {
-      if (!await screen?.chooseTerminal(id)) return false
-      showTab('terminals')
-      return true
-    },
-    quote: async (id, text) => {
-      const terminal = agentById.get(id)
-      if (!terminal?.agent || !terminal.attach) return false
-      if (!await screen?.chooseTerminal(id) || set.shown !== id) return false
-      const agent = agentPanes.get(id)
-      if (!agent) return false
-      if (agent.mode !== 'conversation') void viewAs('conversation')
-      if (agent.mode !== 'conversation') return false
-      showTab('terminals')
-      return agent.prefill(text)
-    },
+
+  const openTerminal = (id: string, fromPage: boolean) => {
+    if (!screen?.hasTerminal(id) || !navigation) return false
+    const route = navigation.route
+    const slot = fromPage ? 'main' : focusedSlot
+    const next = slot === 'main'
+      ? { space: chosenSpace, page: 'terminals', tab: 'terminals', terminal: id, slot } as const
+      : { ...route, terminal: id, slot }
+    if (route.page === next.page && route.terminal === id && route.slot === slot) {
+      pendingTerminal = { id, slot }
+      void screen.show(chosenSpace, id)
+    } else navigation.navigate(next)
+    return true
   }
+  paneControls = { open: id => openTerminal(id, true) }
+
   screen = mountWork({
     runner: target.id,
     current: () => reconnector.current,
+    inventory,
     project: workView,
     prefer: () => savedSpace(target.id),
+    navigation: {
+      workspace: space => navigation?.navigate({ space, page: 'terminals', tab: 'terminals' }),
+      terminal: id => { openTerminal(id, false) },
+    },
     failure: e => workFailure(e.message, e.code ?? '', e.what ?? ''),
-    started: () => showTab('terminals'),
-    note: paneNote,
-    select: (view, terminal, shouldOpen, replace) => {
-      const changed = view.workspace !== chosenSpace
+    started: () => {},
+    note: words => { if (words) mounted.problem(words) },
+    select: (view, terminal, open, replace, historyMode) => {
+      const route = navigation?.route
+      if (!route) return
       spaces = view.workspaces
-      chosenSpace = view.workspace
-      if (chosenSpace) saveSpace(target.id, chosenSpace)
-      if (changed) planTab?.choose(chosenSpace)
-      $('show-workflow').toggleAttribute('disabled', !chosenSpace)
+      if (replace) mounted.forget(replace)
+      if (historyMode && (view.workspace !== route.space || open && terminal)) {
+        navigation?.navigate({
+          space: view.workspace, page: 'terminals', tab: 'terminals', terminal: open ? terminal?.id : undefined,
+          slot: open && historyMode === 'replaceState' ? focusedSlot : 'main',
+        }, false, historyMode === 'replaceState')
+        return
+      }
+      shown = view.terminals
+      inventoryWorkspace = route.space
+      controller.contextFor(chosenSpace, route.page, shown, orchestrator)
+      const pending = pendingTerminal
+      pendingTerminal = undefined
+      if (pending) {
+        controller.open(pending.id, pending.slot)
+        if (route.page === 'terminals') mounted.focus(focusedSlot, true)
+      } else if (open && terminal) controller.open(terminal.id, focusedSlot)
+      if (firstRender) {
+        firstRender = false
+        if (route.page === 'terminals') mounted.restoreFocus(true)
+      }
+      if (view.notice) mounted.problem(view.notice)
       if (lastView) drawNeeds(lastView)
-      agentById = new Map(view.terminals.map(t => [t.id, t]))
-      if (replace) {
-        set.forget(replace)
-        agentPanes.delete(replace)
-      }
-      if (!terminal?.attach) {
-        set.clear()
-        drawView()
-      } else if (shouldOpen || set.shown !== terminal.id) {
-        void open(terminal.id)
-      }
+      else pickerDrawn = drawPicker($<HTMLSelectElement>('space-picker'), spaces, chosenSpace, new Map())
     },
   })
   workScreen = screen
-  await screen.refresh(true, 'replaceState')
+
+  const setOrchestrator = (id: string | null) => {
+    if (id === orchestrator) return
+    orchestrator = id
+    if (inventoryWorkspace === chosenSpace && navigation) controller.contextFor(chosenSpace, navigation.route.page, shown, orchestrator)
+  }
+
+  const discover = async () => {
+    const current = reconnector.current
+    const space = chosenSpace
+    if (!current || !space || layout !== controller || navigation?.route.page === 'plan') return
+    const mine = ++discovery
+    try {
+      const id = workspaceOrchestrator(await current.plan(space)) ?? null
+      if (mine !== discovery || layout !== controller || space !== chosenSpace || current !== reconnector.current) return
+      setOrchestrator(id)
+    } catch {}
+  }
+
+  const resolve = (route: Route): Route => {
+    const unavailable = route.page === 'workflow' && !spaces.some(space => space.id === route.space) ||
+      route.page === 'ticket' && (!route.ticket || !fleet?.cardsOf(route.ticket.runner)?.deps?.task)
+    return unavailable ? { ...route, page: route.tab, ticket: undefined } : route
+  }
+  const renderRoute = (route: Route) => {
+    const changedSpace = previous === null || chosenSpace !== route.space
+    const cameFrom = previous
+    if (route.page === 'ticket' && cameFrom?.page !== 'ticket') {
+      const element = document.activeElement
+      opener = { element, task: element?.closest('[data-task]')?.getAttribute('data-task') ?? null }
+    }
+    previous = route
+    sheet?.close()
+    workflowSheet?.close()
+    workflowSheet = null
+    planList?.close()
+    chosenSpace = route.space
+    const scrollPage = route.page in scrollIds ? route.page as keyof typeof scrollIds : null
+    const position = scrollPage ? Number(readLocal(scrollKey(scrollPage))) : 0
+    pendingScroll = scrollPage && position ? { page: scrollPage, position } : null
+    if (changedSpace) {
+      orchestrator = null
+      if (spaces.some(space => space.id === chosenSpace)) saveSpace(target.id, chosenSpace!)
+      planTab?.choose(chosenSpace)
+    }
+    const changedTerminal = route.terminal !== cameFrom?.terminal || route.slot !== cameFrom?.slot
+    pendingTerminal = route.terminal && (changedSpace || changedTerminal) && !(cameFrom === null && returning)
+      ? { id: route.terminal, slot: route.slot ?? 'main' } : undefined
+    $('needs').hidden = route.page !== 'needs'
+    $('plan').hidden = route.page !== 'plan'
+    $('pane').hidden = route.page !== 'terminals'
+    if (scrollPage && scrollPage !== 'ticket') $(scrollIds[scrollPage]).scrollTop = 0
+    for (const tab of ['terminals', 'needs', 'plan'] as const) {
+      $(`show-${tab}`).setAttribute('aria-pressed', String(tab === route.page))
+    }
+    if (changedSpace || pendingTerminal) void screen?.show(route.space, pendingTerminal?.id)
+    else if (inventoryWorkspace === route.space) controller.contextFor(chosenSpace, route.page, shown, orchestrator)
+    planTab?.show(route.page === 'plan')
+    if (lastView) drawNeeds(lastView)
+    else pickerDrawn = drawPicker($<HTMLSelectElement>('space-picker'), spaces, chosenSpace, new Map())
+    if (route.page === 'needs') void mine.refresh()
+    if (route.page === 'workflow' && chosenSpace) {
+      workflowSheet = openWorkflow($<HTMLDialogElement>('workflow-runs'), target.id, chosenSpace,
+        `${scope}:workflow:${JSON.stringify(chosenSpace)}`, () => controller.run('close_page'))
+    }
+    if (route.page === 'ticket' && route.ticket) showCard(route.ticket, scope, () => restoreScroll('ticket'))
+    if (scrollPage) restoreScroll(scrollPage)
+    if (cameFrom?.page === 'ticket' && route.page !== 'ticket') {
+      const task = opener?.task ? `[data-task="${CSS.escape(opener.task)}"]` : null
+      const sameCard = task ? [...document.querySelectorAll<HTMLElement>(`button${task},${task} button`)].find(el => el.getClientRects().length) : null
+      const back = opener?.element instanceof HTMLElement && opener.element.getClientRects().length ? opener.element : sameCard ?? $(`show-${route.tab}`)
+      back.focus({ preventScroll: true })
+      opener = null
+    }
+    if (changedSpace) void discover()
+  }
+  navigation = new WorkspaceHistory(scope, target.id, { space: fallbackSpace, page: 'terminals', tab: 'terminals', terminal: linkedTerminal }, resolve, renderRoute)
+  renderRoute(navigation.route)
+  $<HTMLSelectElement>('space-picker').onchange = event => {
+    const tab = navigation?.route.tab ?? 'terminals'
+    navigation?.navigate({ space: (event.target as HTMLSelectElement).value, page: tab, tab })
+  }
+  mine.up(target.id)
+  boardTimer = window.setInterval(() => {
+    if (document.visibilityState !== 'visible') return
+    void mine.refresh()
+    void discover()
+    void screen?.refresh()
+    restoreScroll('ticket')
+    restoreScroll('needs')
+  }, NEEDS_POLL_MS)
 }
 
 /// What reads and answers for the runner `rec` is connected to.
@@ -982,7 +1111,7 @@ let turn: Promise<void> = Promise.resolve()
 /// panes and plan stay with the runner in front. If it can't be reached the
 /// list says so and offers Connect (or Reconnect, once it has been up), whose
 /// click is also what Safari wants before it prompts for a passkey.
-function joinRunner(session: Session, target: Granted, into: Fleet): void {
+function joinRunner(session: Session, target: Granted, into: Fleet, automatically: boolean): void {
   let everUp = false
   const passkey = session.device.passkey as Passkey
   const rp = rpId()
@@ -1029,13 +1158,8 @@ function joinRunner(session: Session, target: Granted, into: Fleet): void {
     }
   }
   retries.set(target.id, () => void (everUp ? rec.reconnect() : attempt()))
-  turn = turn.then(attempt)
-}
-
-function paneNote(text: string): void {
-  const note = $('pane-note')
-  note.textContent = text
-  note.hidden = text === ''
+  if (automatically) turn = turn.then(attempt)
+  else into.unreachable(target.id, runnerStopped(target.label), 'Connect')
 }
 
 /// The tab is visible again or the browser is online: ask the runner now
@@ -1093,13 +1217,14 @@ async function boot(): Promise<void> {
   $('show-terminals').addEventListener('click', () => showTab('terminals'))
   $('show-needs').addEventListener('click', () => showTab('needs'))
   $('show-plan').addEventListener('click', () => showTab('plan'))
-  $('show-workflow').addEventListener('click', () => {
-    if (!frontRunner || !chosenSpace) return
-    workflowSheet?.close()
-    workflowSheet = openWorkflow($('workflow-runs') as HTMLDialogElement, frontRunner, chosenSpace)
-  })
   $('bar-count').addEventListener('click', () => showTab('needs'))
-  window.addEventListener('focus', () => void checkVersion())
+  window.addEventListener('focus', () => { void checkVersion(); recheckLink() })
+  window.addEventListener('pageshow', recheckLink)
+  document.addEventListener('keydown', event => {
+    if ($('work').hidden || event.key !== 'Escape' || event.defaultPrevented || document.querySelector('dialog:modal') ||
+        event.target instanceof Element && event.target.closest('.xterm, .chat-input')) return
+    layout?.run('close_page')
+  })
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') recheckLink()
   })

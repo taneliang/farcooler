@@ -17,7 +17,7 @@ const out = mkdtempSync(path.join(tmpdir(), 'workflow-test-'))
 let failed = false
 try {
   buildSync({
-    entryPoints: ['workflow', 'workflow-view', 'workflow-session'].map(n => path.join(web, 'src/client', n + '.ts')),
+    entryPoints: ['workflow', 'workflow-view', 'workflow-session', 'workspace-layout'].map(n => path.join(web, 'src/client', n + '.ts')),
     outdir: out,
     format: 'cjs',
     target: 'es2022',

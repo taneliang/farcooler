@@ -1,9 +1,3 @@
-/// The task sheet on the page (ov-871): a native dialog, so focus is held
-/// inside it, Esc closes it, and a screen reader hears it as a dialog. It
-/// shows a card as the Mac does: its status, why it exists, what makes it
-/// done, the notes on it, the buttons that answer it when it waits on the
-/// person, and a box to add a note.
-///
 /// Every value is the runner's or an agent's, so each goes in through
 /// `textContent` and never markup (the CSP's Trusted Types refuse an HTML
 /// string sink).
@@ -34,9 +28,7 @@ export class DetailSheet {
   private answers: () => Answer[] = () => []
   private timer = 0
   private drawn = ''
-  private opener: Element | null = null
-  /// The task the opener's card was about, to find its button again if the list was drawn anew.
-  private openerTask: string | null = null
+  private saveDraft: (text: string) => void = () => {}
   private last: DetailView | null = null
 
   constructor(
@@ -44,13 +36,10 @@ export class DetailSheet {
     private readonly $: (id: string) => HTMLElement,
     /// The answer row's label, which the core words (core-phrases.ts).
     private readonly waitingOnYou: () => string,
+    closePage: () => void,
   ) {
-    $('detail-close').addEventListener('click', () => dialog.close())
-    // A click on the backdrop is a click on the dialog itself.
-    dialog.addEventListener('click', event => {
-      if (event.target === dialog) dialog.close()
-    })
-    dialog.addEventListener('close', () => this.closed())
+    $('detail-close').addEventListener('click', closePage)
+    $('detail-note').addEventListener('input', event => this.saveDraft((event.target as HTMLTextAreaElement).value))
     $('detail-form').addEventListener('submit', event => {
       event.preventDefault()
       void this.add()
@@ -63,7 +52,7 @@ export class DetailSheet {
 
   /// Open the sheet on `board`. `answers` is asked every time it draws, so the
   /// buttons go when the card stops waiting on the person.
-  open(board: DetailBoard, answers: () => Answer[]): void {
+  open(board: DetailBoard, answers: () => Answer[], draft: string, save: (text: string) => void): void {
     this.board?.stop()
     clearInterval(this.timer)
     this.board = board
@@ -71,11 +60,11 @@ export class DetailSheet {
     this.drawn = ''
     this.last = null
     const note = this.$('detail-note') as HTMLTextAreaElement
-    note.value = ''
+    note.value = draft
+    this.saveDraft = save
     this.$('detail-notice').hidden = true
-    this.opener = document.activeElement
-    this.openerTask = this.opener?.closest('[data-task]')?.getAttribute('data-task') ?? null
-    if (!this.dialog.open) this.dialog.showModal()
+    this.dialog.setAttribute('open', '')
+    this.$('detail-body').scrollTop = 0
     board.publish()
     void board.refresh()
     this.timer = window.setInterval(() => {
@@ -84,7 +73,11 @@ export class DetailSheet {
   }
 
   close(): void {
-    if (this.dialog.open) this.dialog.close()
+    this.dialog.removeAttribute('open')
+    clearInterval(this.timer)
+    this.board?.stop()
+    this.board = null
+    this.last = null
   }
 
   /// The runner's list of what waits changed: the buttons may have.
@@ -93,28 +86,17 @@ export class DetailSheet {
     if (this.last && this.dialog.open) this.draw(this.last)
   }
 
-  private closed(): void {
-    clearInterval(this.timer)
-    this.board?.stop()
-    this.board = null
-    this.last = null
-    // Back to where the person was: the button that opened it, or the same
-    // card's button once the list was drawn anew, or the tab they are on.
-    const shown = (el: HTMLElement) => el.getClientRects().length > 0
-    const again = this.openerTask ? [...document.querySelectorAll<HTMLElement>(`[data-task="${CSS.escape(this.openerTask)}"] button`)].find(shown) : undefined
-    const back = this.opener instanceof HTMLElement && this.opener.isConnected ? this.opener : again ?? document.querySelector<HTMLElement>('.seg [aria-pressed="true"]')
-    back?.focus()
-    this.opener = null
-    this.openerTask = null
-  }
-
   private async add(): Promise<void> {
     const note = this.$('detail-note') as HTMLTextAreaElement
     const board = this.board
     if (!board) return
     const body = note.value
-    if (await board.note(body)) {
-      if (note.value === body) note.value = ''
+    const save = this.saveDraft
+    const done = await board.note(body)
+    if (this.board !== board) return
+    if (done && note.value === body) {
+      note.value = ''
+      save('')
     }
     note.focus({ preventScroll: true })
   }
