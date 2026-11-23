@@ -1365,7 +1365,7 @@ async fn daemon(runner: Option<&str>, cmd: DaemonCmd, json: bool) -> Fallible {
 
     match cmd {
         DaemonCmd::Ensure => {
-            let (action, build) = daemon_link::ensure_local().await?;
+            let (action, build) = daemon_link::ensure_local(json).await?;
             if json {
                 println!(
                     "{}",

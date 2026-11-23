@@ -227,10 +227,18 @@ impl Ensured {
 ///
 /// Terminals outlive replacement in tmux, and agent shims reconnect on the next
 /// start. Landing checks and pushes must record their results before it starts.
-pub async fn ensure_local() -> Result<(Ensured, String), Box<dyn std::error::Error>> {
+pub async fn ensure_local(json: bool) -> Result<(Ensured, String), Box<dyn std::error::Error>> {
     let socket = farcooler_daemon_contracts::paths::socket_path()?;
     let database = farcooler_daemon_contracts::paths::database_path()?;
-    ensure_in(&socket, &database).await
+    ensure_in(&socket, &database, || {
+        let view = farcooler_client::runner_update_view::landing_wait();
+        if json {
+            // Keep stdout available for the final ensure result.
+            eprintln!("{}", serde_json::json!(view));
+        } else {
+            eprintln!("{}", view.message);
+        }
+    }).await
 }
 
 /// `ensure_local` against an explicit socket and database, so a test can
@@ -238,6 +246,7 @@ pub async fn ensure_local() -> Result<(Ensured, String), Box<dyn std::error::Err
 async fn ensure_in(
     socket: &std::path::Path,
     database: &std::path::Path,
+    on_wait: impl FnOnce(),
 ) -> Result<(Ensured, String), Box<dyn std::error::Error>> {
     let link = match dial(socket).await {
         Ok(link) => link,
@@ -278,9 +287,7 @@ async fn ensure_in(
     // at the point that actually stops the old runner.
     drop(link);
     let home = database.parent().expect("database has a runtime directory");
-    let _landing = wait_for_landing(home, || {
-        eprintln!("Waiting for in-flight landing checks or pushes to finish before replacing the local runner.");
-    }).await?;
+    let _landing = wait_for_landing(home, on_wait).await?;
     // The runner may have changed while we waited.
     let mut link = dial(socket).await?;
     let running = link.daemon_build().to_string();
@@ -714,8 +721,16 @@ mod tests {
             })
         };
         let hold = farcooler_daemon::landing_update::try_update(dir.path()).unwrap().unwrap();
-        let mut ensuring = std::pin::pin!(ensure_in(&socket, &database));
-        assert!(tokio::time::timeout(Duration::from_millis(100), &mut ensuring).await.is_err());
+        let (report_wait, waiting) = tokio::sync::oneshot::channel();
+        let mut ensuring = std::pin::pin!(ensure_in(&socket, &database, || {
+            report_wait.send(()).unwrap();
+        }));
+        tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::select! {
+                result = &mut ensuring => panic!("ensure finished before the landing released its lock: {result:?}"),
+                report = waiting => report.expect("ensure reported that it was waiting"),
+            }
+        }).await.expect("ensure reached the locked landing");
         assert_eq!(handshakes.load(Ordering::SeqCst), 1);
         assert_eq!(daemon.shutdowns.load(Ordering::SeqCst), 0);
         drop(hold);
@@ -766,7 +781,7 @@ mod tests {
             })
         };
 
-        let (ensured, build) = ensure_in(&socket, &database).await.expect("ensured");
+        let (ensured, build) = ensure_in(&socket, &database, || panic!("unexpected wait")).await.expect("ensured");
         assert_eq!(ensured, Ensured::KeptNewer);
         assert_eq!(build, "a-newer-build");
         assert_eq!(daemon.shutdowns.load(std::sync::atomic::Ordering::SeqCst), 0, "asked to stop");
@@ -810,7 +825,7 @@ mod tests {
                     .await
             })
         };
-        let (ensured, build) = ensure_in(&socket, &database).await.expect("ensured");
+        let (ensured, build) = ensure_in(&socket, &database, || panic!("unexpected wait")).await.expect("ensured");
         assert_eq!(ensured, Ensured::KeptHeld);
         assert_eq!(build, "the-build-that-froze-it");
         assert_eq!(daemon.shutdowns.load(std::sync::atomic::Ordering::SeqCst), 0, "asked to stop");
@@ -846,7 +861,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let socket = dir.path().join("farcooler.sock");
         let database = frozen_by_another_build(dir.path());
-        let err = ensure_in(&socket, &database).await.expect_err("refused");
+        let err = ensure_in(&socket, &database, || panic!("unexpected wait")).await.expect_err("refused");
         assert_eq!(
             err.to_string(),
             "A cutover started on this runner by another build is unfinished, and this build can't finish or undo it. Reinstall the build that started it, then finish or recover there."
@@ -882,7 +897,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
 
-        let err = ensure_in(&socket, &database).await.expect_err("refused");
+        let err = ensure_in(&socket, &database, || panic!("unexpected wait")).await.expect_err("refused");
         assert_eq!(
             err.to_string(),
             "This runner's data was written by a newer Far Cooler. Update Far Cooler to use it."

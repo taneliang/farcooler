@@ -32,6 +32,7 @@ pub mod plan_pages;
 pub mod plan_view;
 pub mod workspace_layout;
 pub mod rows_json;
+pub mod runner_update_view;
 pub mod session;
 pub mod ssh;
 pub mod task_starts_json;

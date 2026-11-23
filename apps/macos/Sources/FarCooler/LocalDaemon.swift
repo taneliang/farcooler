@@ -77,23 +77,38 @@ final class LocalDaemon: ObservableObject {
         inFlight = attempt
         defer { inFlight = nil }
 
-        let result = await CLI.run(["--json", "daemon", "ensure"], stderrLine: { [weak self] line in
-            // This line comes from daemon_link.rs while ensure holds off replacement.
-            guard line.hasPrefix("Waiting for in-flight landing checks or pushes to finish") else { return }
+        var result = await CLI.run(["--json", "daemon", "ensure"], stderrLine: { [weak self] line in
+            guard let message = EnsureProgress.landingWaitMessage(line) else { return }
             Task { @MainActor in
                 guard let self, self.inFlight == attempt else { return }
-                self.state = .waitingForLanding(line)
+                self.state = .waitingForLanding(message)
             }
         })
         guard result.ok, let data = result.output.data(using: .utf8),
             let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let build = body["daemonVersion"] as? String
         else {
-            state = .failed(result.said.isEmpty ? "Far Cooler’s background service didn’t start." : result.said)
+            result.errors = result.errors.components(separatedBy: "\n").filter {
+                EnsureProgress.landingWaitMessage($0) == nil
+            }.joined(separator: "\n")
+            let failure = result.said
+            state = .failed(failure.isEmpty ? "Far Cooler’s background service didn’t start." : failure)
             return state
         }
 
         state = .running(build: build)
         return state
+    }
+
+    private struct EnsureProgress: Decodable {
+        let event: String
+        let message: String
+
+        static func landingWaitMessage(_ line: String) -> String? {
+            guard let progress = try? JSONDecoder().decode(Self.self, from: Data(line.utf8)),
+                progress.event == "landing_wait"
+            else { return nil }
+            return progress.message
+        }
     }
 }
