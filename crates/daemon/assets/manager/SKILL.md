@@ -184,7 +184,8 @@ it, rerun the failed job once, file a flaky card, and keep landing on the rerun'
 for its gate by itself when nothing is ahead. The group folds, gates, pushes and watches CI (a canceled run reruns once); a failed
 batch gate splits it in two. `workflow queue` puts a ticket waiting at its landing step into the group and `workflow leave` takes one
 out before the group leaves. A push whose outcome was lost: look at the target yourself, then `workflow settle … --landed true`
-(or `false`). `landing show <N>` follows a group. Landings from before the engine are history: `landing list` shows each as it ended.
+(or `false`). Follow active groups in the Engine view or with `workflow get`.
+Use `landing list` and `landing show <N>` to read numbered landings from before the engine.
 ```
 {{cli}} landing show <N> --repo <repo>
 ```
