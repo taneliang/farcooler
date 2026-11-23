@@ -2,8 +2,8 @@
 //!
 //! The workflow engine lands now (ov-960): its landing groups draw here as
 //! landings, and the landings from before it are kept as history, each read
-//! as where it ended. Landings are named by number, counting up per board:
-//! Landing 12.
+//! as where it ended. Historical landings are numbered per board, and
+//! engine landing groups appear as Landing 0.
 //!
 //! ```text
 //! farcooler landing list
@@ -39,7 +39,7 @@ pub(crate) enum LandingCmd {
     List,
     /// One landing: its tickets, lander, CI and timeline.
     Show {
-        /// Its number: 12.
+        /// Its number: 12 for a historical landing, 0 for an engine group.
         number: String,
     },
 }
@@ -64,7 +64,7 @@ fn landing_number(given: &str) -> Result<u32, Failed> {
     };
     plan.landings
         .iter()
-        .find(|l| l.number != 0 && l.number == number)
+        .find(|l| l.number == number)
         .ok_or_else(|| format!("No landing here is number {number}. `farcooler landing list` shows them.").into())
 }
 
@@ -201,11 +201,14 @@ pub(super) async fn run_on<L: DispatchLink>(
         } else {
             plan.landings.iter().flat_map(|l| landing_text(&plan, l, now)).collect::<Vec<_>>().join("\n")
         }),
-        LandingCmd::Show { .. } => {
-            let number = number.expect("show parsed a landing number");
-            let found = plan.landings.iter().find(|l| l.number == number)
-                .ok_or_else(|| format!("No landing here is number {number}. `farcooler landing list` shows them."))?;
-            let events = events_of(link, board, pb::plan_events_request::Subject::LandingId(found.id.clone())).await?;
+        LandingCmd::Show { number } => {
+            let found = find_landing(&plan, &number)?;
+            // Engine groups have workflow history. The line timeline only accepts stored landing IDs.
+            let events = if found.number == 0 {
+                Vec::new()
+            } else {
+                events_of(link, board, pb::plan_events_request::Subject::LandingId(found.id.clone())).await?
+            };
             Ok(if json {
                 let mut out = farcooler_client::plan_json::landing_json(&plan, found);
                 out["events"] = events_json(&events);
