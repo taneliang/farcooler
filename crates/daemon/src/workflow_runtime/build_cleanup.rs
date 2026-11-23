@@ -78,8 +78,9 @@ impl Exec {
         let mut bytes_freed = 0u64;
         let mut pending = Vec::new();
         for tree in trees {
-            let paths: Vec<_> = DEFAULT_BUILD_FOLDERS.iter().chain(LEGACY_BUILD_FOLDERS)
-                .filter_map(|folder| checked_folder(tree, folder).ok().flatten()).collect();
+            let paths: BTreeSet<_> = DEFAULT_BUILD_FOLDERS.iter().chain(LEGACY_BUILD_FOLDERS)
+                .filter_map(|folder| checked_folder(tree, folder).ok().flatten())
+                .chain(cargo_cache_folders(tree)).collect();
             if paths.is_empty() { continue; }
             let Ok(guard) = self.tree_lock(tree).try_write_owned() else {
                 pending.push(tree.clone());
@@ -279,13 +280,20 @@ impl Exec {
                 }
             }
         }
+        let discovered = if default_build_folders(&effect.folders) {
+            cargo_cache_folders(tree).filter(|path| !paths.contains(path)).collect()
+        } else {
+            BTreeSet::new()
+        };
+        paths.extend(discovered.iter().cloned());
         // Nested/duplicate patterns must not count or remove a folder twice.
         let mut removed: Vec<PathBuf> = Vec::new();
         for path in paths {
             if removed.iter().any(|p| path.starts_with(p)) { continue; }
             let label = path.strip_prefix(tree).unwrap().to_string_lossy().into_owned();
             let mut retry = false;
-            let answer = self.release_folder(tree, &path, held.clone(), &mut retry, adopted.is_some()).await;
+            let selective = adopted.is_some() || discovered.contains(&path);
+            let answer = self.release_folder(tree, &path, held.clone(), &mut retry, selective).await;
             result.retry |= retry;
             match answer {
                 Ok(bytes) => { result.bytes_freed = result.bytes_freed.saturating_add(bytes); removed.push(path); }
@@ -308,13 +316,10 @@ impl Exec {
         // A configured output may have become source. Refuse tracked files, even inside a listed folder.
         let relative = path.strip_prefix(tree).map_err(|e| e.to_string())?;
         let spec = format!(":(icase,literal){}", relative.to_string_lossy());
-        let mut args = vec!["ls-files", "-z", "--cached"];
-        if check_whole_checkout { args.extend(["--others", "--exclude-standard"]); }
-        args.extend(["--", &spec]);
-        let tracked = crate::git::git(tree, &args).await.map_err(|e| e.to_string())?;
+        let tracked = crate::git::git(tree, &["ls-files", "-z", "--cached", "--", &spec])
+            .await.map_err(|e| e.to_string())?;
         if !tracked.ok || !tracked.stdout.is_empty() {
-            return Err(if check_whole_checkout { "contains tracked or unignored files, or git could not check" }
-                else { "contains tracked files or git could not check" }.into());
+            return Err("contains tracked files or git could not check".into());
         }
         if check_whole_checkout {
             // A staged removal can hide still-present source from the index and
@@ -327,15 +332,16 @@ impl Exec {
         let device = tree.symlink_metadata().map_err(|e| e.to_string())?.dev();
         let generated_reports = relative.file_name().is_some_and(|n| n == "build");
         let output = path.to_path_buf();
+        let checkout = tree.to_path_buf();
         let (bytes, artifacts) = tokio::task::spawn_blocking(move || {
             if check_whole_checkout {
-                Ok((0, Some(generated::ArtifactPlan::inspect(&output, device)?)))
+                Ok((0, Some(generated::ArtifactPlan::inspect(&checkout, &output, device)?)))
             } else {
                 Ok::<_, std::io::Error>((size(&output, device, generated_reports)?, None))
             }
         }).await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
         if artifacts.as_ref().is_some_and(generated::ArtifactPlan::is_empty) {
-            return Err("no recognized generated artifacts".into());
+            return Err("no verified build artifacts".into());
         }
         // Check after inventorying the output, which can take seconds on a large target.
         // No deletion has started: an unavailable check is safe to retry.
@@ -371,11 +377,28 @@ impl Exec {
     }
 }
 
+pub(super) fn default_build_folders(folders: &[String]) -> bool {
+    [DEFAULT_BUILD_FOLDERS, LEGACY_PUBLISHED_DEFAULTS].into_iter()
+        .any(|defaults| folders.iter().map(String::as_str).eq(defaults.iter().copied()))
+}
+
 pub(super) fn build_folders(folders: &[String], include_legacy: bool) -> impl Iterator<Item = &str> {
-    // Preserve an explicit policy. Only augment the stock list published by older engines.
-    let legacy = include_legacy && [DEFAULT_BUILD_FOLDERS, LEGACY_PUBLISHED_DEFAULTS].into_iter()
-        .any(|defaults| folders.iter().map(String::as_str).eq(defaults.iter().copied()));
+    // Preserve an explicit policy. Only augment the stock lists.
+    let legacy = include_legacy && default_build_folders(folders);
     folders.iter().map(String::as_str).chain(LEGACY_BUILD_FOLDERS.iter().copied().filter(move |_| legacy))
+}
+
+/// Discover Cargo targets set by an agent's environment. Nested targets can
+/// also be named explicitly in the workflow build-folder policy.
+pub(super) fn cargo_cache_folders(tree: &Path) -> impl Iterator<Item = PathBuf> + '_ {
+    std::fs::read_dir(tree).into_iter().flatten().filter_map(|entry| {
+        let entry = entry.ok()?;
+        if !entry.file_type().ok()?.is_dir() { return None; }
+        let name = entry.file_name();
+        let name = name.to_str().filter(|name| valid_folder(name))?;
+        let path = checked_folder(tree, name).ok()??;
+        generated::cargo_cache(&path).then_some(path)
+    })
 }
 
 pub(super) fn folder_paths<'a>(tree: &'a Path, folder: &'a str) -> impl Iterator<Item = std::io::Result<Option<PathBuf>>> + 'a {

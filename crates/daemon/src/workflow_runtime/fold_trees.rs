@@ -73,7 +73,8 @@ impl Exec {
             let folders = item.definition.build_folders();
             let adopted = item.tree.as_ref().is_some_and(|tree| tree.adopted);
             if !build_cleanup::build_folders(&folders, adopted).any(|folder| build_cleanup::folder_paths(&tree, folder)
-                .any(|path| matches!(path, Ok(Some(_))))) { continue; }
+                .any(|path| matches!(path, Ok(Some(_)))))
+                && !(build_cleanup::default_build_folders(&folders) && build_cleanup::cargo_cache_folders(&tree).next().is_some()) { continue; }
             self.store.workflow_cleanup_enqueue(&CleanupEffect {
                 id: digest(&("idle-build-release/v1", workspace, id, &item.run, item.fence)),
                 workspace: workspace.into(), revision: state.revision, item: id.clone(), run: item.run.clone(),

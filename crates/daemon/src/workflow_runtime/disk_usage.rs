@@ -71,7 +71,11 @@ impl Exec {
                     let tree = item.tree.as_ref().map_or_else(|| self.item_tree_for(&workspace, id, item.restart.as_deref()),
                         |tree| PathBuf::from(&tree.path));
                     if tree.canonicalize().ok().as_deref() != Some(tree.as_path()) { continue; }
-                    for folder in build_cleanup::build_folders(&item.definition.build_folders(), true) {
+                    let policy = item.definition.build_folders();
+                    if build_cleanup::default_build_folders(&policy) {
+                        folders.extend(build_cleanup::cargo_cache_folders(&tree));
+                    }
+                    for folder in build_cleanup::build_folders(&policy, true) {
                         folders.extend(build_cleanup::folder_paths(&tree, folder).filter_map(|path| path.ok().flatten()));
                     }
                 }

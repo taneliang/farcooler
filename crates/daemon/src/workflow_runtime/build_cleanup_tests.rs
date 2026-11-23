@@ -834,6 +834,31 @@ async fn recovery_accounts_for_idle_output_left_by_an_older_engine() {
     assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::WaitingReview);
 }
 
+fn seed_nextest_archive(tree: &Path) {
+    let target = tree.join("target");
+    let file = File::create(target.join("rust-tests.tar.zst")).unwrap();
+    let encoder = zstd::stream::write::Encoder::new(file, 1).unwrap();
+    let mut archive = tar::Builder::new(encoder);
+    for (path, metadata) in [
+        ("target/nextest/binaries-metadata.json", serde_json::json!({
+            "rust-binaries": {"runner": {"binary-path": target.join("debug/deps/runner")}},
+            "rust-build-meta": {"target-directory": target},
+        })),
+        ("target/nextest/cargo-metadata.json", serde_json::json!({
+            "packages": [{"name": "runner"}],
+            "workspace_root": tree,
+            "target_directory": target,
+        })),
+    ] {
+        let bytes = serde_json::to_vec(&metadata).unwrap();
+        let mut header = tar::Header::new_gnu();
+        header.set_mode(0o644);
+        header.set_size(bytes.len() as u64);
+        archive.append_data(&mut header, path, bytes.as_slice()).unwrap();
+    }
+    archive.into_inner().unwrap().finish().unwrap();
+}
+
 #[tokio::test]
 async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output() {
     let (_dir, runtime, group, active_tree) = building_group(None).await;
@@ -854,6 +879,18 @@ async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output(
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, bytes).unwrap();
         }
+        for (file, _) in &layouts[..2] {
+            let path = tree.join(file);
+            let dep = path.with_extension("d");
+            std::fs::write(&dep, format!("{}: src/lib.rs\n\n{}: src/lib.rs\n",
+                dep.display(), path.display())).unwrap();
+        }
+        for (file, _) in &layouts[2..] {
+            let path = tree.join(file);
+            let output_map = path.with_file_name("output-file-map.json");
+            std::fs::write(output_map, serde_json::to_vec(&serde_json::json!({"src": {"object": path}})).unwrap()).unwrap();
+        }
+        seed_nextest_archive(&tree);
         std::fs::write(tree.join("uncommitted.txt"), b"keep this").unwrap();
         orphan_trees.push(tree);
     }
@@ -862,8 +899,13 @@ async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output(
     let live_output = active_tree.join(layouts[0].0);
     std::fs::create_dir_all(live_output.parent().unwrap()).unwrap();
     std::fs::write(&live_output, layouts[0].1).unwrap();
-    runtime.release_orphan_builds(&[active_tree]).await.unwrap();
+    let dep = live_output.with_extension("d");
+    std::fs::write(&dep, format!("{}: src/lib.rs\n\n{}: src/lib.rs\n",
+        dep.display(), live_output.display())).unwrap();
+    seed_nextest_archive(&active_tree);
+    runtime.release_orphan_builds(std::slice::from_ref(&active_tree)).await.unwrap();
     assert!(live_output.is_file());
+    assert!(active_tree.join("target/rust-tests.tar.zst").is_file());
 
     let root = runtime.root.clone();
     drop(runtime);
@@ -882,7 +924,8 @@ async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output(
     let (stop, shutdown) = tokio::sync::watch::channel(false);
     let task = tokio::spawn(async move { runtime.run(shutdown).await.unwrap(); });
     tokio::time::timeout(Duration::from_secs(30), async {
-        while orphan_trees.iter().any(|tree| layouts.iter().any(|(file, _)| tree.join(file).exists())) {
+        while orphan_trees.iter().any(|tree| tree.join("target/rust-tests.tar.zst").exists()
+            || layouts.iter().any(|(file, _)| tree.join(file).exists())) {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }).await.unwrap();

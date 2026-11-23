@@ -95,6 +95,9 @@ uuid.workspace = true
 directories.workspace = true
 libc.workspace = true
 tempfile = "3"
+# Read the landing gate's nextest metadata without extracting its test archive.
+tar = { version = "0.4", default-features = false }
+zstd = { version = "0.14", default-features = false }
 # Key bytes and the seed they come from are wiped when dropped (runner_key.rs).
 zeroize = "1"
 # Reading and writing `authorized_keys`, which is the one file this daemon

@@ -197,8 +197,14 @@ async fn adopted(wait_for_review: bool) -> (tempfile::TempDir, Runtime, PathBuf,
         definition.source = "adapted-local-policy/v1".into();
         let review = definition.stages.iter_mut().find(|stage| matches!(stage.kind, StageKind::Review(_))).unwrap();
         review.kind = StageKind::Review(Reviewer::Person("owner".into()));
-        adapter(dir.path(), |s| s.replace("if stage == 'build':\n",
-            "if stage == 'build':\n    pathlib.Path('target/debug/deps').mkdir(parents=True, exist_ok=True)\n    pathlib.Path('target/debug/deps/built').write_bytes(bytes.fromhex('7f454c46') + b'localout')\n"));
+        adapter(dir.path(), |s| s.replace("if stage == 'build':\n", concat!(
+            "if stage == 'build':\n",
+            "    path = pathlib.Path('target/debug/deps/built')\n",
+            "    path.parent.mkdir(parents=True, exist_ok=True)\n",
+            "    path.write_bytes(bytes.fromhex('7f454c46') + b'localout')\n",
+            "    dep = path.with_suffix('.d')\n",
+            "    dep.write_text(f'{dep}: src/lib.rs\\n\\n{path}: src/lib.rs\\n')\n",
+        )));
     }
     let state = runtime.state(&workspace).unwrap().unwrap();
     let receipt = runtime.apply(Request { id: "start".into(), workspace: workspace.clone(), expected_revision: state.revision, sequence: 2,
@@ -247,20 +253,46 @@ async fn wait_for_adopted_review(runtime: &mut Runtime, workspace: &str) {
 
 #[tokio::test]
 async fn waiting_adopted_worktree_releases_build_output_and_reclaims_older_output_on_startup() {
-    let (_dir, mut runtime, tree, workspace) = adopted(true).await;
+    let (dir, mut runtime, tree, workspace) = adopted(true).await;
+    let personal = [
+        ("target/debug/deps/libpersonal-0123456789abcdef.a", b"!<arch>\npersonal".as_slice()),
+        ("target/debug/deps/personal-0123456789abcdef", b"\x7fELFpersonal".as_slice()),
+    ];
+    for (path, contents) in personal {
+        let path = tree.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
+    }
     wait_for_adopted_review(&mut runtime, &workspace).await;
+    for (path, contents) in personal {
+        assert_eq!(std::fs::read(tree.join(path)).unwrap(), contents);
+    }
     let records = runtime.store.workflow_cleanups(&workspace).unwrap();
     assert!(!tree.join("target/debug/deps/built").exists(), "{records:?}");
     assert!(tree.join("result.txt").is_file());
     assert!(records.iter().any(|record| record.result.as_ref().is_some_and(|r| r.bytes_freed == 12)));
-    std::fs::write(runtime.repository().join(".git/info/exclude"), "target/\n/apps/macos/.build/\n").unwrap();
-    let old_artifacts = [tree.join("target/debug/deps/from-old-engine"), tree.join("apps/macos/.build/out/Products/runner")];
-    let mut binary = [0x5a; 8192];
-    binary[..4].copy_from_slice(b"\x7fELF");
-    for artifact in &old_artifacts {
-        std::fs::create_dir_all(artifact.parent().unwrap()).unwrap();
-        std::fs::write(artifact, binary).unwrap();
-    }
+    // Exercise Cargo's actual cache tag and dep-info, including when the
+    // target directory is selected only through CARGO_TARGET_DIR.
+    let package = dir.path().join("cargo-fixture");
+    std::fs::create_dir_all(package.join("src")).unwrap();
+    std::fs::write(package.join("Cargo.toml"), "[package]\nname = \"previous\"\nversion = \"0.1.0\"\n").unwrap();
+    std::fs::write(package.join("src/lib.rs"), "pub fn built() {}").unwrap();
+    let output = std::process::Command::new(env!("CARGO"))
+        .args(["build", "--offline", "--manifest-path"]).arg(package.join("Cargo.toml"))
+        .env("CARGO_TARGET_DIR", tree.join(".artifacts"))
+        .output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let rlib = std::fs::read_dir(tree.join(".artifacts/debug/deps")).unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.extension().is_some_and(|ext| ext == "rlib")).unwrap();
+    let old_binary = tree.join("target/debug/deps/from-old-engine");
+    std::fs::write(&old_binary, b"\x7fELFtest").unwrap();
+    let dep = old_binary.with_extension("d");
+    std::fs::write(&dep, format!("{}: src/lib.rs\n\n{}: src/lib.rs\n",
+        dep.display(), old_binary.display())).unwrap();
+    let old_artifacts = [old_binary, rlib, tree.join(".artifacts/debug/libprevious.rlib")];
+    let unrelated_archive = zstd::stream::encode_all(b"personal archive".as_slice(), 1).unwrap();
+    std::fs::write(tree.join("target/rust-tests.tar.zst"), &unrelated_archive).unwrap();
     runtime.refresh_disk_usage().unwrap().await.unwrap();
     let allocated: u64 = old_artifacts.iter().map(|path| path.metadata().unwrap().blocks() * 512).sum();
     assert!(runtime.read_get(&workspace).unwrap()["disk_usage"]["waiting_build_bytes"].as_u64().unwrap() >= allocated);
@@ -276,7 +308,13 @@ async fn waiting_adopted_worktree_releases_build_output_and_reclaims_older_outpu
     let mut runtime = Runtime::open(&root).unwrap();
     runtime.host = host;
     runtime.pump(100).await.unwrap();
-    assert!(old_artifacts.iter().all(|artifact| !artifact.exists()));
+    for artifact in old_artifacts {
+        assert!(!artifact.exists(), "retained {}", artifact.display());
+    }
+    assert_eq!(std::fs::read(tree.join("target/rust-tests.tar.zst")).unwrap(), unrelated_archive);
+    for (path, contents) in personal {
+        assert_eq!(std::fs::read(tree.join(path)).unwrap(), contents);
+    }
     for path in ["target/local-source.rs", "target/debug/deps/personal-notes", "target/debug/deps/local-source.rs"] {
         assert_eq!(std::fs::read(tree.join(path)).unwrap(), b"person's work");
     }
