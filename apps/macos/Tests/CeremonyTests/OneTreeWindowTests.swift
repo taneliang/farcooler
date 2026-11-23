@@ -39,6 +39,14 @@ struct OneTreeWindowTests {
         #expect(saved.flatMap(SelectionMemory.decode) == place)
     }
 
+    @Test("A saved Engine selection still restores the Engine")
+    func engineSelectionIsKept() {
+        let place = Selection.workspace(host: "h", workspace: "w", focus: .plan(.engine(nil)))
+        let saved = SelectionMemory.encode(place)
+        #expect(saved == "h|w|plan:engine")
+        #expect(saved.flatMap(SelectionMemory.decode) == place)
+    }
+
     @Test("⌘K offers the Board view in a workspace, and the way back to the tree")
     func boardViewInThePalette() {
         let board = PaletteIndex.matching("board", in: [], boardView: false)
