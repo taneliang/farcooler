@@ -51,12 +51,7 @@ class PlanViewTest {
             view.sections.map { it.kind },
         )
         assertEquals("Reviewed tickets land on main together, after one round of checks.", view.section(PlanViewKind.Landing)?.help)
-        assertEquals(listOf("Landing 86", "Landing 89", "Landing 84"), view.landings.map { it.label })
-        val stalled = view.landings.last()
-        assertTrue(stalled.attention)
-        assertEquals("Stalled · step 1 of 3", stalled.ladder.compact)
-        assertEquals(3, stalled.ladder.steps.size)
-        assertEquals("Lander · opus · 1.4M", view.landings.first().landerWords)
+        assertTrue(view.landings.isEmpty())
         val fixing = view.inReview.first { it.key == "ov-312" }
         assertEquals(PlanViewMark.Fixing, fixing.mark)
         assertEquals("Fixing · round 2", fixing.status)
@@ -151,18 +146,13 @@ class PlanViewTest {
     }
 
     @Test
-    fun `the Now line calls a landing by its number and phase, never its title (ov-514)`() {
-        fun landing(number: Int, title: String) =
-            """{"id": "t$number", "short": "t", "number": $number, "title": "$title", "summary": "", "route": "push", "base": "main", "pushed_sha": null,
-               "state": "pushed", "state_since": 5, "phase": "waiting_for_ci", "phase_since": 5, "actor": "m", "created_at": 1, "landed_at": null, "tickets": [], "ci_subject": ""}"""
+    fun `historical landings do not appear in the Now line`() {
         val plan = Plan.decode(
-            """{"now_ms": 1, "themes": [], "lines": [], "cards": [], "landings": [${landing(89, "Landing 89 · The agents table and the themes grid on the phones")}, ${landing(90, "Another long title")}]}""",
+            """{"now_ms": 1, "themes": [], "lines": [], "cards": [], "landings": [{"id":"t89","short":"t","number":89,"title":"Old landing","summary":"","route":"push","base":"main","pushed_sha":null,"state":"pushed","state_since":5,"phase":"waiting_for_ci","phase_since":5,"actor":"m","created_at":1,"landed_at":null,"tickets":[],"ci_subject":""}]}""",
         )
-        val now = PlanGlanceSentence.of(PlanViews.of(plan)!!).now!!
-        assertEquals("Landing 89 checking on CI · 1 more landing", now)
-        assertTrue(now, !now.contains("agents table"))
-        // Short enough for 320 dp and for a watch's line.
-        assertTrue(now, now.length <= 44)
+        val view = PlanViews.of(plan)!!
+        assertTrue(view.landings.isEmpty())
+        assertFalse(PlanGlanceSentence.of(view).now.orEmpty().contains("Landing 89"))
     }
 
     @Test

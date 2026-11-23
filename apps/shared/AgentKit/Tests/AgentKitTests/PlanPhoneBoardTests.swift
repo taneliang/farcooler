@@ -45,21 +45,11 @@ struct PlanPhoneBoardTests {
         #expect(!said.contains("Next: Mac finishes"), "the story's next line is back on the tile: \(said)")
     }
 
-    @Test("work reads by what it does: the landing as Landing 9 with what it carries and its place, its tickets by title with no branch")
-    func landingNamesTheLanding() throws {
+    @Test("historical landing rows are absent from the phone board")
+    func historicalLandingsAreAbsent() throws {
         let plan = try F.plan("plan-seeded.json")
-        let view = try #require(WirePlanView.build(plan: plan))
-        let card = try #require(view.landings.first { $0.number == 9 })
-        let said = card.spoken(ci: nil, now: view.now)
-        #expect(said.contains("Landing 9"), "\(said)")
-        #expect(said.contains("A read-only Files browser"), "the landing doesn't say what it carries: \(said)")
-        #expect(said.contains("Checking Here \u{00B7} step 1 of 3"), "no place on the ladder: \(said)")
-        #expect(said.contains("Lander \u{00B7} opus"), "the landing doesn't say who lands it: \(said)")
-        #expect(!said.contains("a-integ9"), "the lander's id is in the text: \(said)")
-        let aboard = try #require(card.tickets.first { $0.key == "ov-259" })
-        #expect(aboard.heading.contains("read-only Files browser"))
-        #expect(aboard.note == nil, "a ticket aboard says nothing of its state")
-        #expect(!aboard.heading.contains("Landing 9") && !aboard.heading.contains("phones-b"), "a slug is in the text")
+        #expect(!plan.landings.isEmpty)
+        #expect(try #require(WirePlanView.build(plan: plan)).landings.isEmpty)
     }
 
     @Test("a theme's record says what changed: the story it had before, when there was one")

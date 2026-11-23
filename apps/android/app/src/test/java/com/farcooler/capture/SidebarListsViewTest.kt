@@ -88,18 +88,13 @@ class SidebarListsViewTest {
         assertTrue("a done card is there under All", "card-row-ov-486" in all)
     }
 
-    @Test fun `Tickets groups Landing first with its landings inside it, then In review and Building, with Waiting folded and agents under their ticket`() {
+    @Test fun `Tickets omit historical landings, with Waiting folded and agents under their ticket`() {
         val tags = drawn(tickets())
-        val groups = listOf("Landing", "In review", "Building", "Waiting")
+        val groups = listOf("In review", "Building", "Waiting")
             .map { g -> tags.keys.first { it.startsWith("ticket-group-") && it.removePrefix("ticket-group-").startsWith(g) } }
         val tops = groups.map { tags.getValue(it).bounds.top }
-        assertEquals("Landing first, then the groups, in the Plan's order", tops.sorted(), tops)
-        val landings = listOf("Landing 89", "Landing 86", "Landing 84").map { tags.getValue("ticket-landing-$it").bounds.top }
-        assertEquals("the landings sit inside Landing, furthest along first", landings.sorted(), landings)
-        assertTrue("Landing comes first", landings.first() > tags.getValue("ticket-group-Landing").bounds.top && landings.last() < tags.getValue("ticket-group-In review").bounds.top)
-        assertTrue(tags.getValue("ticket-landing-Landing 89").words, "The agents table" in tags.getValue("ticket-landing-Landing 89").words)
-        assertTrue("where it stands leads the line", tags.getValue("ticket-landing-Landing 89-line").words.startsWith("Checking on CI"))
-        assertFalse("no landing-named group sits beside Building or Waiting", tags.keys.any { it.startsWith("ticket-group-Landing ") })
+        assertEquals(tops.sorted(), tops)
+        assertFalse("historical landings are absent", tags.keys.any { it.startsWith("ticket-landing-") })
         assertTrue("Waiting starts folded", tags.getValue("ticket-group-Waiting").words.contains("Collapsed"))
         assertFalse("its tickets are hidden", "ticket-row-ov-302" in tags)
         assertTrue("ticket-row-ov-311" in tags)

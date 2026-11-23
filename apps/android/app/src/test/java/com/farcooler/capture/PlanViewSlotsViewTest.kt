@@ -66,13 +66,10 @@ class PlanViewSlotsViewTest {
         assertTrue(tags.getValue("plan-in-review").words, "In review" in tags.getValue("plan-in-review").words && "3" in tags.getValue("plan-in-review").words)
     }
 
-    @Test fun `a landing says the view's label, ladder, lander and tickets`() {
+    @Test fun `historical landing rows are not drawn`() {
         val tags = drawn(golden())
-        assertEquals("Landing 86", tags.getValue("plan-landing-86-label").words.substringBefore(" |"))
-        assertEquals("Waiting for tickets · step 1 of 3", tags.getValue("plan-landing-86-phase").words.substringBefore(" |"))
-        assertEquals("Stalled · step 1 of 3", tags.getValue("plan-landing-84-phase").words.substringBefore(" |"))
-        assertTrue(tags.getValue("plan-landing-86-words").words, "Lander · opus · 1.4M" in tags.getValue("plan-landing-86-words").words.replace(' ', ' '))
-        assertTrue("plan-landing-ticket-ov-487" in tags)
+        assertTrue("plan-landing" in tags)
+        assertFalse(tags.keys.any { it.startsWith("plan-landing-86-") || it.startsWith("plan-landing-ticket-") })
     }
 
     @Test fun `a card says its second line and its notes as the view wrote them`() {
@@ -94,9 +91,8 @@ class PlanViewSlotsViewTest {
     }
 
     @Test fun `what the view says is what is drawn, whatever the app would have said`() {
-        val said = golden().replace("Waiting for tickets", "Under way elsewhere").replace("0 of 5 done", "nought of five")
+        val said = golden().replace("0 of 5 done", "nought of five")
         val tags = drawn(said)
-        assertTrue(tags.getValue("plan-landing-86-phase").words, tags.getValue("plan-landing-86-phase").words.startsWith("Under way elsewhere"))
         assertTrue(tags.getValue("plan-tile-Trustworthy agent view-progress").words.startsWith("nought of five"))
     }
 

@@ -120,7 +120,7 @@ class PlanTest {
         val plan = Plan.decode(fixture)
         assertEquals("Waiting · 1st", PlanViews.status(plan, plan.tickets[0]))
         assertEquals("In review", PlanViews.status(plan, plan.tickets[1]))
-        assertEquals("Landing · in Landing 9", PlanViews.status(plan, plan.tickets[2]))
+        assertEquals("Landing", PlanViews.status(plan, plan.tickets[2]))
         assertEquals("Landed · 4d3c8cb1", PlanViews.status(plan, plan.tickets[3]))
         assertEquals(listOf("1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st"), listOf(1, 2, 3, 4, 11, 12, 13, 21).map(PlanWords::ordinal))
     }

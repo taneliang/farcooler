@@ -297,8 +297,8 @@ struct PlanModelTests {
                 Self.line("t7", "needs_you"),
             ])
         #expect(plan.lines.map { plan.status(of: $0) } == [
-            "Fixing \u{00B7} round 1", "Landing \u{00B7} in Landing 8", "Waiting \u{00B7} 2nd", "Landed \u{00B7} ac840108",
-            "In Review \u{00B7} in Landing 9", "Building", "Needs You",
+            "Fixing \u{00B7} round 1", "Landing", "Waiting \u{00B7} 2nd", "Landed \u{00B7} ac840108",
+            "In Review", "Building", "Needs You",
         ])
         #expect(plan.lines[0].isFixing && !plan.lines[5].isFixing)
     }

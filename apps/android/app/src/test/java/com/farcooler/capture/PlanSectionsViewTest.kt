@@ -85,28 +85,17 @@ class PlanSectionsViewTest {
 
     @Test fun `the band says Now and Next, and Needs you says who`() {
         val tags = drawn(PlanFixtures.long())
-        assertTrue(tags.getValue("plan-band-now").words, "Landing 89" in tags.getValue("plan-band-now").words)
+        assertFalse("Landing 89" in tags.getValue("plan-band-now").words)
         assertTrue(tags.getValue("plan-band-next").words, "Onboarding" in tags.getValue("plan-band-next").words)
         // The Needs you section follows the band and says it, so the band doesn't say it twice.
         assertFalse("plan-band-needs-you" in tags)
         assertTrue(tags.getValue("plan-needs-you-row").words, "2 need you" in tags.getValue("plan-needs-you-row").words)
     }
 
-    @Test fun `Landing draws each live landing as Landing N with its title under it, furthest along first, with its ladder compact`() {
+    @Test fun `Landing omits historical rows and their tickets`() {
         val tags = drawn(PlanFixtures.long())
-        val landings = listOf(89, 86, 84).map { tags.getValue("plan-landing-$it").bounds.top }
-        assertEquals("Checking on CI, then waiting for main, then stalled", landings.sorted(), landings)
-        assertEquals("Landing 89", tags.getValue("plan-landing-89-label").words.substringBefore(" |"))
-        assertTrue(tags.getValue("plan-landing-89-subtitle").words, tags.getValue("plan-landing-89-subtitle").words.startsWith("The agents table"))
-        assertEquals("Checking on CI · step 2 of 3", tags.getValue("plan-landing-89-phase").words.substringBefore(" |"))
-        assertEquals("Waiting for main's checks to pass · step 1 of 3", tags.getValue("plan-landing-86-phase").words.substringBefore(" |"))
-        assertEquals("Stalled · step 1 of 3", tags.getValue("plan-landing-84-phase").words.substringBefore(" |"))
-        assertTrue("a ticket simply aboard says nothing", "plan-landing-ticket-ov-485-note" !in tags)
-        assertTrue("no landing says who holds it", tags.keys.none { it.endsWith("-held") })
-        val facts = tags.getValue("plan-landing-89-words").words.replace('\u00a0', ' ')
-        assertTrue(facts, "3f78754f" in facts && "2 of 5 jobs done" in facts && "Lander" in facts)
-        assertTrue("a landed landing is not in Landing", "plan-landing-83" !in tags)
-        assertTrue("tickets sit inside their landing", "plan-landing-ticket-ov-487" in tags && "plan-landing-ticket-ov-485" in tags)
+        assertTrue("plan-landing" in tags)
+        assertFalse(tags.keys.any { it.startsWith("plan-landing-89") || it.startsWith("plan-landing-ticket-") })
     }
 
     @Test fun `In review and Building rows carry their agent`() {

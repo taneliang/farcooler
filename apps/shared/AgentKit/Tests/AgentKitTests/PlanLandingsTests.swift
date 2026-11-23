@@ -61,7 +61,7 @@ struct PlanLandingsTests {
                 PlanModelTests.landing(15, "pushed", sha: "1a1b3275"),
                 PlanModelTests.landing(13, "landed", tickets: ["t9"]),
             ])
-        #expect(plan.status(of: plan.lines[0]) == "In Review \u{00B7} in Landing 14")
+        #expect(plan.status(of: plan.lines[0]) == "In Review")
         #expect(plan.lines(on: plan.landings[2]).map(\.task) == ["t9"], "a landed landing still lists its tickets")
     }
 

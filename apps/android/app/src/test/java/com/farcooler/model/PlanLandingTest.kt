@@ -29,18 +29,12 @@ class PlanLandingTest {
     }
 
     @Test
-    fun `the sidebar's Landing group holds the landings as Landing N with their titles, and their tickets inside`() {
-        val tree = TicketTree.of(plan("landing-ticket-notes"), view("landing-ticket-notes"))
-        assertEquals(listOf("Landing", "In review"), tree.groups.map { it.title })
-        val landing = tree.groups.first()
-        assertTrue(landing.tickets.isEmpty())
-        assertEquals(listOf("Landing 5", "Landing 6"), landing.landings.map { it.label })
-        val first = landing.landings[0]
-        assertEquals("People on a shared runner; sign in on the web", first.subtitle)
-        assertEquals(listOf("ov-15", "ov-16", "ov-17", "ov-18"), first.tickets.map { it.key })
-        assertEquals("", first.tickets.first { it.key == "ov-15" }.state)
-        assertEquals("ov-14", tree.cardOf(plan("landing-ticket-notes").tickets.first { it.key == "ov-14" }.task)?.key)
-        assertTrue("no landing-named group sits beside Building or Waiting", tree.groups.drop(1).all { it.landings.isEmpty() })
+    fun `the sidebar omits historical landing rows`() {
+        val plan = plan("landing-ticket-notes")
+        val view = view("landing-ticket-notes")
+        assertTrue(plan.landings.isNotEmpty())
+        assertTrue(view.landings.isEmpty())
+        assertTrue(TicketTree.of(plan, view).groups.all { it.landings.isEmpty() })
     }
 
     @Test

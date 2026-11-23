@@ -39,12 +39,7 @@ struct PlanViewTests {
         #expect(view.inReview.first { $0.key == "ov-312" }?.mark == .fixing)
         #expect(view.inReview.first { $0.key == "ov-482" }?.notes.map(\.kind) == [.warning])
 
-        let landing = try #require(view.landings.first)
-        #expect(landing.label == "Landing 86" && landing.phaseWord == "Waiting for Tickets" && landing.ladder.at == 0)
-        #expect(landing.ladder.steps.map(\.label) == ["Waiting for Tickets", "Checking on CI", "Landed"])
-        #expect(landing.landerWords == "Lander \u{00B7} opus \u{00B7} 1.4M" && landing.lander?.model == "opus")
-        let aboard = try #require(landing.tickets.first)
-        #expect(aboard.note == nil && aboard.mark == .landing && aboard.branch == "team-dir")
+        #expect(view.landings.isEmpty, "historical landing rows are not projected")
 
         #expect(view.waiting.map(\.kind) == [.notRanked] && !view.namesWaitingGroups)
         #expect(view.waiting.first?.id == "plan-not-ranked")
@@ -53,6 +48,20 @@ struct PlanViewTests {
         let tile = try #require(view.themes.tiles.first { $0.name == "Marketing" })
         #expect(tile.ownerAsk == "How do we ship the site?" && tile.cards.map(\.glyph) == [.notStarted])
         #expect(view.themes.finishedTitle == "Finished" && view.themes.finishedWords == "1 theme")
+    }
+
+    @Test("engine landing groups remain in the shared view")
+    func engineLandingGroups() throws {
+        let data = try Data(contentsOf: PlanPhoneFixtures.root.appendingPathComponent("test/fixtures/landing-queue.json"))
+        let fixture = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let request = try #require(fixture["request"] as? [String: Any])
+        let plan = try PlanModel.decode(JSONSerialization.data(withJSONObject: try #require(request["plan"])))
+        let view = try #require(WirePlanView.build(plan: plan))
+        let groups = try #require(view.landingGroups)
+        #expect(groups.count == 4)
+        #expect(groups[0].lines.contains { $0.contains("complete long ticket title") })
+        #expect(groups[2].lines.contains("Failed job: cargo test --workspace"))
+        #expect(view.landings.isEmpty)
     }
 
     @Test("the bridge answers the golden's request with the golden's view, as the apps ask it")
