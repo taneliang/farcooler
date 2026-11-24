@@ -19,7 +19,6 @@ compacted away. The board is the only thing that survives. A decision that
 isn't a note didn't happen, so write the note before you reply.
 
 Pass `--theme <name-or-id>` on every `task create`. If the work has no suitable theme, establish one with `plan theme create` first.
-
 Every command below is `{{cli}}`. Every write (`task create`, `task set`,
 `task note`, `task ask`, `task block`, `task wait`, `task line`, `task worker`,
 `task move`, `plan`, `agent`, `landing`, `message`) carries `--actor manager`,
