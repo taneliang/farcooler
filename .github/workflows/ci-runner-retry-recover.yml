@@ -1,0 +1,23 @@
+name: Recover interrupted CI retry submissions
+run-name: Recover ${{ github.event.workflow_run.display_title }}
+on:
+  workflow_run:
+    workflows: [Retry CI failures and runner acquisition]
+    types: [completed]
+permissions:
+  actions: write
+  checks: read
+  contents: read
+jobs:
+  recover:
+    if: github.event.workflow_run.conclusion != 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: runner-retry-${{ github.event.workflow_run.display_title }}
+      queue: max
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/ci-runner-retry.py --recover
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -15,7 +15,8 @@ spec.loader.exec_module(retry)
 
 class RetryTest(unittest.TestCase):
     def setUp(self):
-        self.event = {"workflow_run": {"id": 123, "head_branch": "main", "event": "push",
+        self.event = {"workflow_run": {"id": 123, "name": "CI", "head_branch": "main", "event": "push",
+                                       "status": "completed",
                                        "run_attempt": 2, "conclusion": "failure"}}
         self.shards = [dict(id=i, name=f"Rust native tests (macOS {n}/2)",
                             conclusion="cancelled", steps=[], runner_name="",
@@ -24,59 +25,34 @@ class RetryTest(unittest.TestCase):
         self.attempts = {1: [dict(j, conclusion="success", steps=[{"name": "test"}],
                                   runner_name="runner") for j in self.shards],
                          2: self.shards}
-        self.markers = set()
 
     def api(self, path):
         if path.startswith("check-runs/"):
             return [{"message": retry.MESSAGE}]
-        if path.startswith("actions/artifacts?"):
-            return {"artifacts": [{"name": name, "expired": False} for name in self.markers]}
         attempt = int(path.split("/attempts/")[1].split("/")[0])
         return {"jobs": self.attempts[attempt]}
 
     def test_later_attempt_siblings_and_retry_bound(self):
-        # Execute the workflow's actual POST command against a recording gh.
-        workflow = pathlib.Path('.github/workflows/ci-runner-retry.yml').read_text()
-        command = next(line.strip()[5:] for line in workflow.splitlines()
-                       if line.strip().startswith('run: gh api --method POST'))
-        with tempfile.TemporaryDirectory() as d:
-            gh = pathlib.Path(d) / 'gh'
-            log = pathlib.Path(d) / 'requests'
-            gh.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$LOG"\n')
-            gh.chmod(0o755)
-            for expected in (456, 789):
-                job, name = retry.retry_job(self.event, self.api)
-                self.assertEqual(job, expected)
-                self.markers.add(name)  # upload-artifact precedes POST
-                self.assertIsNone(retry.retry_job(self.event, self.api))
-                subprocess.run(['/bin/sh', '-c', command], check=True,
-                               env={'PATH': d, 'LOG': str(log), 'JOB': str(job),
-                                    'GITHUB_REPOSITORY': 'owner/repo'})
-                self.event['workflow_run']['run_attempt'] += 1
-                self.attempts[self.event['workflow_run']['run_attempt']] = [
-                    dict(self.shards[0 if job == 456 else 1], id=job + 1000,
-                         completed_at="2026-11-23T14:59:20Z")]
-            self.assertEqual(retry.retry_job(self.event, self.api)[0], 1456)
-            self.event['workflow_run']['run_attempt'] = retry.MAX_ATTEMPTS
-            self.assertIsNone(retry.retry_job(self.event, self.api))
-            self.assertEqual(log.read_text().splitlines(), [
-                'api --method POST repos/owner/repo/actions/jobs/456/rerun',
-                'api --method POST repos/owner/repo/actions/jobs/789/rerun'])
+        for expected in (456, 789):
+            job = retry.retry_job(self.event, self.api)
+            self.assertEqual(job, expected)
+            self.event['workflow_run']['run_attempt'] += 1
+            self.attempts[self.event['workflow_run']['run_attempt']] = [
+                dict(self.shards[0 if job == 456 else 1], id=job + 1000,
+                     completed_at="2026-11-23T14:59:20Z")]
+        self.assertEqual(retry.retry_job(self.event, self.api), 1456)
+        self.event['workflow_run']['run_attempt'] = retry.MAX_ATTEMPTS
+        self.assertIsNone(retry.retry_job(self.event, self.api))
 
     def test_first_failure_reruns_failed_jobs_once(self):
         self.event['workflow_run']['run_attempt'] = 1
         self.attempts[1] = [dict(self.shards[0], conclusion='failure'),
                             dict(self.shards[1], conclusion='success')]
-        jobs, name = retry.failed_retry(self.event, self.api)
+        jobs = retry.failed_retry(self.event, self.api)
         self.assertEqual([job['id'] for job in jobs], [456])
-        self.markers.add(name)
-        self.assertIsNone(retry.failed_retry(self.event, self.api))
-        self.markers.clear()
         self.event['workflow_run']['run_attempt'] = 2
         self.attempts[2] = [dict(self.shards[0], conclusion='failure')]
         self.assertIsNone(retry.failed_retry(self.event, self.api))
-        workflow = pathlib.Path('.github/workflows/ci-runner-retry.yml').read_text()
-        self.assertIn('actions/runs/$RUN/rerun-failed-jobs', workflow)
 
     def test_failed_retry_excludes_branches_and_pull_requests(self):
         self.event['workflow_run']['run_attempt'] = 1
@@ -94,33 +70,32 @@ class RetryTest(unittest.TestCase):
             root = pathlib.Path(d)
             (root / 'event').write_text(json.dumps(self.event))
             env = {'GITHUB_REPOSITORY': 'owner/repo', 'GITHUB_EVENT_PATH': str(root / 'event'),
-                   'GITHUB_OUTPUT': str(root / 'output'), 'GITHUB_STEP_SUMMARY': str(root / 'summary')}
+                   'GITHUB_STEP_SUMMARY': str(root / 'summary')}
+            current = self.event['workflow_run'].copy()
+            posts = []
 
             def gh(args, **kwargs):
                 path = args[-1]
                 if path.endswith('/runs/123'):
-                    return json.dumps(dict(status='completed', run_attempt=self.event['workflow_run']['run_attempt'])).encode()
+                    return json.dumps(current).encode()
                 if path.endswith('/logs'):
                     return 'test example::broken ... FAILED\n'
-                if 'artifacts?' in path:
-                    return json.dumps([{'artifacts': []}]).encode()
+                if '--method' in args:
+                    posts.append(path)
+                    current.update(run_attempt=2, status="queued", conclusion=None)
+                    return b''
                 return json.dumps([{'jobs': [job]}]).encode()
 
-            old = os.getcwd()
-            try:
-                os.chdir(d)
-                with mock.patch.dict(os.environ, env), mock.patch.object(retry.subprocess, 'check_output', side_effect=gh):
-                    retry.main()
-                    self.assertIn(job['name'], (root / 'summary').read_text())
-                    self.assertIn('example::broken', (root / 'summary').read_text())
-                    self.assertIn('failed_run=123', (root / 'output').read_text())
-                    (root / 'output').unlink()
-                    self.event['workflow_run']['run_attempt'] = 2
-                    (root / 'event').write_text(json.dumps(self.event))
-                    retry.main()
-                    self.assertFalse((root / 'output').exists())
-            finally:
-                os.chdir(old)
+            with mock.patch.dict(os.environ, env), mock.patch.object(retry.subprocess, 'check_output', side_effect=gh), mock.patch.object(retry.time, 'sleep'):
+                retry.main()
+                self.assertIn(job['name'], (root / 'summary').read_text())
+                self.assertIn('example::broken', (root / 'summary').read_text())
+                retry.main()  # Duplicate completion for the original attempt.
+                current.update(status="completed", conclusion="failure")
+                self.event['workflow_run'].update(current)
+                (root / 'event').write_text(json.dumps(self.event))
+                retry.main()
+            self.assertEqual(posts, ['repos/owner/repo/actions/runs/123/rerun-failed-jobs'])
 
     def test_agentkit_removal_carried_cancellation_gets_a_retry(self):
         # Run 45191956221. Attempt 2 copied the build's cancellation without
@@ -144,9 +119,46 @@ class RetryTest(unittest.TestCase):
                 return [{"message": retry.MESSAGE}] if str(build["id"]) in path else []
             return self.api(path)
 
-        selection = retry.retry_job(self.event, api)
-        self.assertIsNotNone(selection)
-        self.assertEqual(selection[0], copied["id"])
+        self.assertEqual(retry.retry_job(self.event, api), copied["id"])
+
+        # Attempt 2 is still current after three rejected submissions. The
+        # independent recovery controller must select the same copied job.
+        current = self.event["workflow_run"].copy()
+        posts = []
+        with tempfile.TemporaryDirectory() as d:
+            event = pathlib.Path(d) / "event"
+            event.write_text(json.dumps(self.event))
+            env = {"GITHUB_REPOSITORY": "owner/repo", "GITHUB_EVENT_PATH": str(event)}
+            recovery = {"workflow_run": {"display_title": "Retry CI 45191956221 attempt 2"}}
+
+            def gh(args, **kwargs):
+                path = args[-1].removeprefix("repos/owner/repo/")
+                if "--method" in args:
+                    posts.append(path)
+                    if len(posts) <= retry.SUBMISSION_TRIES:
+                        raise subprocess.CalledProcessError(1, args)
+                    current.update(run_attempt=3, status="queued", conclusion=None)
+                    raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+                if path == "actions/runs/45191956221":
+                    return json.dumps(current).encode()
+                # Simulate a stale artifact from a controller that died
+                # between reserving and submitting the rerun.
+                if path.startswith("actions/artifacts?"):
+                    return json.dumps([{"artifacts": [{
+                        "name": "runner-retry-45191956221-attempt-2", "expired": False
+                    }]}]).encode()
+                return json.dumps([api(path)]).encode()
+
+            with mock.patch.dict(os.environ, env), mock.patch.object(retry.subprocess, 'check_output', side_effect=gh), mock.patch.object(retry.time, 'sleep'):
+                with self.assertRaisesRegex(RuntimeError, "Could not confirm"):
+                    retry.main()
+                self.assertEqual(current["run_attempt"], 2)
+                event.write_text(json.dumps(recovery))
+                with mock.patch.object(retry.sys, "argv", ["ci-runner-retry.py", "--recover"]):
+                    retry.main()
+                    retry.main()  # Redelivery cannot resubmit the uncertain POST.
+            self.assertEqual(posts, [f"actions/jobs/{copied['id']}/rerun"] * (retry.SUBMISSION_TRIES + 1))
+            self.assertEqual(current["run_attempt"], 3)
 
         # A later, unrelated cancellation of the same job cannot inherit the
         # original acquisition annotation.
@@ -167,7 +179,7 @@ class RetryTest(unittest.TestCase):
             with mock.patch.dict(os.environ, env), mock.patch.object(
                     retry.subprocess, "check_output", return_value=b'{"status":"completed","run_attempt":3}') as gh:
                 retry.main()
-            gh.assert_called_once_with(["gh", "api", "repos/owner/repo/actions/runs/123"])
+            gh.assert_called_once_with(["gh", "api", "repos/owner/repo/actions/runs/123"], timeout=retry.REQUEST_TIMEOUT)
 
     def test_parse_real_failure_lines(self):
         # Run 43985211994, job 133713551594, including nextest ANSI colors.

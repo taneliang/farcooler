@@ -86,7 +86,8 @@ async fn the_retry_controller_keeps_only_its_own_attempt_pending() {
         let observed = retry_pending(&run, Some(2), finished + age, |path| {
             let value = if path.starts_with("actions/workflows/") {
                 if status == "missing" { return std::future::ready(RetryRead::error(b"gh: Not Found (HTTP 404)")); }
-                serde_json::json!({"workflow_runs":[{"id":45_199_285_951_u64,"display_title":title,"status":status}]})
+                serde_json::json!({"workflow_runs":[{"id":45_199_285_951_u64,"display_title":title,
+                    "status":status,"conclusion":"success"}]})
             } else {
                 assert_eq!(path, "actions/runs/45191956221");
                 let reads = source_reads.get();
@@ -97,6 +98,49 @@ async fn the_retry_controller_keeps_only_its_own_attempt_pending() {
             std::future::ready(RetryRead::Data(serde_json::to_vec(&value).unwrap()))
         }).await;
         assert_eq!(observed, pending, "{title} {status} age {age}, next attempt {next_attempt}");
+    }
+}
+
+#[tokio::test]
+async fn failed_submission_waits_for_recovery_or_exhaustion() {
+    let run = parse_run(br#"{
+        "id":45191956221,"name":"CI","head_sha":"6a02832c7","event":"push",
+        "html_url":"","created_at":"2026-11-23T14:13:54Z","updated_at":"2026-11-23T14:54:35Z",
+        "status":"completed","conclusion":"cancelled"
+    }"#).unwrap();
+    let controller_finished = "2026-11-23T15:54:35Z";
+    let finished = crate::ci_canary::epoch_secs(controller_finished).unwrap();
+    for (controller, recovery, age, rerun, pending) in [
+        ("failure", None, 10, false, true),
+        ("cancelled", None, 10, false, true),
+        ("failure", None, RETRY_EVENT_WAIT_SECS, false, false),
+        ("failure", Some("queued"), 3600, false, true),
+        ("failure", Some("completed"), 10, false, false),
+        ("failure", Some("completed"), 10, true, true),
+    ] {
+        let recovery_read = std::cell::Cell::new(false);
+        let observed = retry_pending(&run, Some(2), finished + age, |path| {
+            let value = if path.contains("ci-runner-retry-recover.yml") {
+                recovery_read.set(true);
+                let runs = recovery.into_iter().map(|status| serde_json::json!({
+                    "id": 25, "display_title":"Recover Retry CI 45191956221 attempt 2",
+                    "status":status, "conclusion":"failure"
+                })).collect::<Vec<_>>();
+                serde_json::json!({"workflow_runs":runs})
+            } else if path.contains("ci-runner-retry.yml") {
+                serde_json::json!({"workflow_runs":[{
+                    "id":24, "display_title":"Retry CI 45191956221 attempt 2",
+                    "status":"completed", "conclusion":controller, "updated_at":controller_finished
+                }]})
+            } else {
+                assert_eq!(path, "actions/runs/45191956221");
+                serde_json::json!({"id":run.id,"head_sha":run.head_sha,"status":"completed",
+                    "head_branch":"main","conclusion":"cancelled",
+                    "run_attempt":if rerun && recovery_read.get() { 3 } else { 2 }})
+            };
+            std::future::ready(RetryRead::Data(serde_json::to_vec(&value).unwrap()))
+        }).await;
+        assert_eq!(observed, pending, "{controller} {recovery:?} age {age}, rerun {rerun}");
     }
 }
 

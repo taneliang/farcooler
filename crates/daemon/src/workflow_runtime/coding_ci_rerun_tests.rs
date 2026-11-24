@@ -157,9 +157,13 @@ if len(sys.argv) == 1:
     assert candidate == os.environ['FARCOOLER_CANDIDATE']
     pathlib.Path(os.environ['FARCOOLER_RECEIPT']).write_text(json.dumps(
         dict(binding=os.environ['FARCOOLER_OPERATION_BINDING'], repository='offline/repository', run=run)))
+elif 'ci-runner-retry-recover.yml' in sys.argv[4]:
+    assert poll == 2
+    print(json.dumps(dict(workflow_runs=[dict(id=124,
+        display_title='Recover Retry CI 45191956221 attempt 2', status='in_progress')])))
 elif 'ci-runner-retry.yml' in sys.argv[4]:
     print(json.dumps(dict(workflow_runs=[dict(id=123, display_title=f'Retry CI 45191956221 attempt {attempt}',
-        status='in_progress' if poll <= 2 else 'completed')])))
+        status='in_progress' if poll == 1 else 'completed', conclusion='failure')])))
 elif '/attempts/8/jobs?' in sys.argv[4]:
     print('Swift (app build + bundle checks)')
 else:

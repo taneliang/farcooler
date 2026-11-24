@@ -23,7 +23,8 @@ import time
 SCRIPT_USERS = {
     '.github/workflows/canary-baseline.yml': None,  # Full: transitive gate users not established; retain conservative fallback.
     '.github/workflows/canary.yml': None,  # Full: transitive gate users not established; retain conservative fallback.
-    '.github/workflows/ci-runner-retry.yml': {'wire'},  # wire retry-test reads and executes retry commands; no platform consumer (ov-1324).
+    '.github/workflows/ci-runner-retry-recover.yml': {'wire'},  # Workflow lint and retry replay cover the recovery controller.
+    '.github/workflows/ci-runner-retry.yml': {'wire'},  # Workflow lint and retry replay cover the primary controller.
     '.github/workflows/ci.yml': None,  # Full: steps_for derives every gate command from this workflow.
     '.github/workflows/claude-prices.yml': None,  # Full: transitive gate users not established; retain conservative fallback.
     '.github/workflows/derp-hosts.yml': None,  # Full: transitive gate users not established; retain conservative fallback.

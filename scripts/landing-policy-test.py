@@ -87,8 +87,8 @@ class LandingTests(unittest.TestCase):
         self.assertEqual(policy.script_users("scripts/copy-lint.py", {}), {"wire"})
 
     def test_retry_diff_runs_only_script_checks(self):
-        paths = [".github/workflows/ci-runner-retry.yml", "scripts/ci-runner-retry.py",
-                 "scripts/ci-runner-retry-test.py"]
+        paths = [".github/workflows/ci-runner-retry.yml", ".github/workflows/ci-runner-retry-recover.yml",
+                 "scripts/ci-runner-retry.py", "scripts/ci-runner-retry-test.py"]
         for diff in ([p] for p in paths):
             with self.subTest(diff=diff):
                 self.assertEqual(self.script_reach(diff), {"wire", "doc-comments"})

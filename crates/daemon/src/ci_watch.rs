@@ -177,8 +177,10 @@ fn run_state(run: &GhRun) -> &'static str {
     board_ci::job_state(&run.status, run.conclusion.as_deref())
 }
 
-/// How long a completion event has to create its retry workflow run.
+/// How long a completion event has to create a retry or recovery workflow run.
 const RETRY_EVENT_WAIT_SECS: i64 = 15 * 60;
+// Keep this ceiling in sync with scripts/ci-runner-retry.py.
+const MAX_CI_ATTEMPTS: u64 = 8;
 
 pub(crate) enum RetryRead {
     Data(Vec<u8>),
@@ -232,6 +234,9 @@ where
         id: u64,
         display_title: String,
         status: String,
+        conclusion: Option<String>,
+        #[serde(default)]
+        updated_at: String,
     }
     #[derive(Deserialize)]
     struct Controllers {
@@ -246,7 +251,7 @@ where
         serde_json::from_slice::<Source>(&raw).ok()
             .filter(|s| s.id == run.id && s.head_sha == run.head_sha)
     };
-    let Some(current) = source().await else { return active || recent(&run.updated_at) };
+    let Some(current) = source().await else { return true };
     if current.head_branch != "main" { return false; }
     if active || current.status != "completed" || current.conclusion != run.conclusion
         || attempt.is_some_and(|n| current.run_attempt != n)
@@ -254,25 +259,47 @@ where
         return true;
     }
 
+    if current.run_attempt >= MAX_CI_ATTEMPTS { return false; }
+
     let title = format!("Retry CI {} attempt {}", run.id, current.run_attempt);
-    let mut path = "actions/workflows/ci-runner-retry.yml/runs?event=workflow_run&per_page=100".to_string();
     let updated_at = if current.updated_at.is_empty() { &run.updated_at } else { &current.updated_at };
-    if crate::ci_canary::epoch_secs(updated_at).is_some() {
-        path.push_str(&format!("&created=%3E%3D{updated_at}"));
-    }
-    let raw = match read(path).await {
-        RetryRead::Data(raw) => raw,
-        RetryRead::Missing => return false,
-        RetryRead::Unavailable => return recent(updated_at),
+    let read = &read;
+    let controller = |workflow: &'static str, title: String| async move {
+        let mut path = format!("actions/workflows/{workflow}/runs?event=workflow_run&per_page=100");
+        if crate::ci_canary::epoch_secs(updated_at).is_some() {
+            path.push_str(&format!("&created=%3E%3D{updated_at}"));
+        }
+        match read(path).await {
+            RetryRead::Data(raw) => serde_json::from_slice::<Controllers>(&raw)
+                .map(|runs| runs.workflow_runs.into_iter()
+                    .filter(|r| r.display_title == title).max_by_key(|r| r.id))
+                .map_err(|_| RetryRead::Unavailable),
+            error => Err(error),
+        }
     };
-    let controller = serde_json::from_slice::<Controllers>(&raw).ok()
-        .and_then(|runs| runs.workflow_runs.into_iter().filter(|r| r.display_title == title).max_by_key(|r| r.id));
-    match controller {
-        None => recent(updated_at),
-        Some(controller) if controller.status != "completed" => true,
-        Some(_) => source().await.is_none_or(|fresh| fresh.status != "completed"
-            || fresh.run_attempt != current.run_attempt),
+    let first = match controller("ci-runner-retry.yml", title.clone()).await {
+        Ok(Some(first)) => first,
+        Ok(None) => return recent(updated_at),
+        Err(RetryRead::Missing) => return false,
+        Err(_) => return true,
+    };
+    if first.status != "completed" { return true; }
+
+    if first.conclusion.as_deref() != Some("success") {
+        // A failed controller gets one independent recovery workflow. Measure
+        // its delivery grace from the primary controller's completion.
+        match controller("ci-runner-retry-recover.yml", format!("Recover {title}")).await {
+            Ok(Some(recovery)) if recovery.status != "completed" => return true,
+            Ok(Some(_)) => {}
+            Ok(None) | Err(RetryRead::Missing) if recent(&first.updated_at) => return true,
+            Ok(None) | Err(RetryRead::Missing) => {}
+            Err(_) => return true,
+        }
     }
+
+    // A POST may have advanced CI even when the controller was interrupted.
+    source().await.is_none_or(|fresh| fresh.status != "completed"
+        || fresh.run_attempt != current.run_attempt)
 }
 
 /// What the runs (each with its jobs, when they were read) say about a
