@@ -1,5 +1,6 @@
-//! The board's routes: `task.*` but `task.move`, a workspace write, and
-//! `workspace.mark_read`, whose read state is the board's.
+//! The board's routes are `task.*` except `task.create` and `task.move`,
+//! plus `workspace.mark_read`, whose read state is the board's.
+//! Task creation has its own dispatcher for themed and unthemed cards.
 //!
 //! Out of `rpc.rs` so the dispatch table there stays inside its size budget.
 //! `Rpc::dispatch` names every route here in one arm, so its own coverage
@@ -164,13 +165,16 @@ mod tests {
         let routes = Method::ALL
             .iter()
             .map(|m| m.name())
-            .filter(|m| (m.starts_with("task.") && *m != "task.move") || *m == "workspace.mark_read");
+            .filter(|m| {
+                (m.starts_with("task.") && !matches!(*m, "task.create" | "task.move"))
+                    || *m == "workspace.mark_read"
+            });
         let mut seen = 0;
         for route in routes {
             assert!(source.contains(&format!("\"{route}\" => {{")), "no arm for {route}");
             seen += 1;
         }
-        assert_eq!(seen, 13, "the board's routes");
+        assert_eq!(seen, 12, "the board's routes");
     }
 }
 
