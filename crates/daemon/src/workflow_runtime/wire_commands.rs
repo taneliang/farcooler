@@ -106,6 +106,19 @@ pub(crate) fn encode_legacy_get(mut value: serde_json::Value) -> String {
         }
     }
 
+    // Release history can outgrow the frame even with very few live items.
+    // Plan can render from the state, authenticated context and stop records.
+    let fields = value.as_object_mut().expect("workflow reply object");
+    for key in ["publication_history", "notices", "notice_deliveries",
+        "build_cleanup", "build_cleanup_omitted", "process_logs", "process_logs_omitted"]
+    {
+        fields.remove(key);
+    }
+    let json = value.to_string();
+    if json.len() <= PLAN_WORKFLOW_BYTES {
+        return json;
+    }
+
     // Released action clients use this caller's sequence to prepare mutations.
     let source = value.pointer("/context/capabilities/decision_principal")
         .and_then(|v| v.as_str()).map(|principal| format!("wire:{principal}"));
