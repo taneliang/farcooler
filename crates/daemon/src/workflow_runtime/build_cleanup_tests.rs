@@ -834,6 +834,7 @@ async fn recovery_accounts_for_idle_output_left_by_an_older_engine() {
 
 fn seed_nextest_archive(tree: &Path) {
     let target = tree.join("target");
+    std::fs::create_dir_all(&target).unwrap();
     let file = File::create(target.join("rust-tests.tar.zst")).unwrap();
     let encoder = zstd::stream::write::Encoder::new(file, 1).unwrap();
     let mut archive = tar::Builder::new(encoder);
@@ -857,24 +858,42 @@ fn seed_nextest_archive(tree: &Path) {
     archive.into_inner().unwrap().finish().unwrap();
 }
 
-pub(super) fn incremental_cargo_output(package: &Path, target: &Path) -> Vec<PathBuf> {
+pub(super) fn cargo_build_output(package: &Path, target: &Path) -> Vec<PathBuf> {
     std::fs::create_dir_all(package.join("src")).unwrap();
     std::fs::write(package.join("Cargo.toml"), concat!(
         "[package]\nname = \"cleanup_fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
         "[lib]\ncrate-type = [\"rlib\", \"staticlib\"]\n",
     )).unwrap();
     std::fs::write(package.join("src/lib.rs"), "pub fn built() -> u64 { 1428 }").unwrap();
+    std::fs::write(package.join("build.rs"), r#"
+        fn main() {
+            println!("cargo:rerun-if-changed=build.rs");
+            let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+            std::fs::write(out.join("generated.rs"), "pub const VALUE: u64 = 1428;").unwrap();
+            std::fs::write(out.join("custom.data"), b"generated data").unwrap();
+        }
+    "#).unwrap();
     let output = std::process::Command::new(env!("CARGO")).current_dir(package)
         .args(["build", "--offline", "--manifest-path"]).arg(package.join("Cargo.toml"))
         .env("CARGO_TARGET_DIR", target).env("CARGO_INCREMENTAL", "1")
         .env_remove("CARGO_BUILD_BUILD_DIR").env_remove("CARGO_BUILD_TARGET")
         .output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    let incremental = target.join("debug/incremental");
-    let unit = std::fs::read_dir(incremental).unwrap().next().unwrap().unwrap().path();
-    let session = std::fs::read_dir(unit).unwrap().map(|entry| entry.unwrap().path())
-        .find(|path| path.is_dir()).unwrap();
-    ["dep-graph.bin", "query-cache.bin", "work-products.bin"].map(|file| session.join(file)).to_vec()
+    fn collect(path: &Path, files: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(path).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_dir() {
+                collect(&entry.path(), files);
+            } else {
+                files.push(entry.path());
+            }
+        }
+    }
+    let mut files = Vec::new();
+    collect(target, &mut files);
+    assert!(files.iter().any(|path| path.ends_with("work-products.bin")));
+    assert!(files.iter().any(|path| path.ends_with("out/custom.data")));
+    files
 }
 
 pub(super) fn android_build_output(tree: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
@@ -927,8 +946,8 @@ pub(super) fn android_build_output(tree: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) 
 async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output() {
     let (dir, runtime, group, active_tree) = building_group(None).await;
     let layouts = [
-        ("target/debug/deps/runner", b"\x7fELFtest".as_slice()),
-        ("crates/web/target/wasm32-unknown-unknown/debug/deps/site.wasm", b"\0asm\x01\0\0\0"),
+        ("target/debug/deps/runner-0123456789abcdef", b"\x7fELFtest".as_slice()),
+        ("crates/web/target/wasm32-unknown-unknown/debug/deps/site-0123456789abcdef.o", b"\xcf\xfa\xed\xfetest"),
         ("apps/macos/.build/out/Intermediates.noindex/AgentKit.o", b"\xcf\xfa\xed\xfetest"),
         ("apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKit.swiftmodule", b"\xe2\x9c\xa8\x0etest"),
     ];
@@ -967,7 +986,9 @@ async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output(
         // Cargo cannot compile into a path containing the PATH separator.
         // The old colon spelling is still covered by the other artifacts.
         if separator == '-' {
-            orphan_caches.extend(incremental_cargo_output(&dir.path().join("cargo-fixture"), &tree.join("target")));
+            orphan_caches.extend(cargo_build_output(&dir.path().join("cargo-fixture"), &tree.join("target"))
+                .into_iter().filter(|path| !path.ends_with("CACHEDIR.TAG") && !path.ends_with(layouts[0].0)
+                    && !path.ends_with("runner-0123456789abcdef.d")));
         }
         orphan_android.push(android_build_output(&tree));
         std::fs::write(tree.join("uncommitted.txt"), b"keep this").unwrap();
@@ -996,7 +1017,7 @@ async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output(
     std::fs::write(&dep, format!("{}: src/lib.rs\n\n{}: src/lib.rs\n",
         dep.display(), live_output.display())).unwrap();
     seed_nextest_archive(&active_tree);
-    let active_caches = incremental_cargo_output(&dir.path().join("cargo-fixture"), &active_tree.join("target"));
+    let active_caches = cargo_build_output(&dir.path().join("cargo-fixture"), &active_tree.join("target"));
     let (active_android, _) = android_build_output(&active_tree);
     runtime.release_orphan_builds(std::slice::from_ref(&active_tree)).await.unwrap();
     assert!(live_output.is_file());
@@ -1027,21 +1048,22 @@ async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output(
     // Make the engine lock retry due while the checkout check is still deferred.
     runtime.orphan_cleanup_retries.insert(orphan_trees[1].clone(), tokio::time::Instant::now());
     runtime.pump(100).await.unwrap();
-    assert!(!orphan_trees[1].join(layouts[0].0).exists());
-    assert!(orphan_trees[0].join(layouts[0].0).exists());
+    assert!(!orphan_trees[1].join("target/rust-tests.tar.zst").exists());
+    assert!(orphan_trees[0].join("target/rust-tests.tar.zst").exists());
     assert_eq!(runtime.orphan_cleanup_retries[&orphan_trees[0]], held_deadline);
     assert!(!runtime.orphan_cleanup_retries.contains_key(&orphan_trees[1]));
     runtime.orphan_cleanup_retries.insert(orphan_trees[0].clone(), tokio::time::Instant::now());
     runtime.pump(100).await.unwrap();
     assert!(orphan_trees.iter().all(|tree| !runtime.orphan_cleanup_retries.contains_key(tree)));
-    assert!(orphan_caches.iter().all(|path| !path.exists()));
+    for path in orphan_caches { assert!(!path.exists(), "retained {}", path.display()); }
     for (artifacts, personal) in orphan_android {
         assert!(artifacts.iter().all(|path| !path.exists()));
         assert!(personal.iter().all(|path| path.is_file()));
     }
     for tree in &orphan_trees {
         assert!(!tree.join("target/rust-tests.tar.zst").exists());
-        assert!(layouts.iter().all(|(file, _)| !tree.join(file).exists()));
+        for (file, contents) in &layouts[..2] { assert_eq!(std::fs::read(tree.join(file)).unwrap(), *contents); }
+        assert!(layouts[2..].iter().all(|(file, _)| !tree.join(file).exists()));
         assert!(tree.join(".git").is_file());
         assert_eq!(std::fs::read(tree.join("uncommitted.txt")).unwrap(), b"keep this");
     }
@@ -1052,13 +1074,10 @@ async fn legacy_cleanup_preserves_an_artifact_staged_during_inventory() {
     let (_dir, mut runtime, _, _) = building_group(None).await;
     let tree = runtime.root.join(format!("tree-wf1-{}", "f".repeat(64)));
     adapters::git(&runtime.repository(), &["worktree", "add", "--detach", tree.to_str().unwrap(), "HEAD"]).await.unwrap();
-    let relative = "target/debug/deps/runner";
+    seed_nextest_archive(&tree);
+    let relative = "target/rust-tests.tar.zst";
     let artifact = tree.join(relative);
-    std::fs::create_dir_all(artifact.parent().unwrap()).unwrap();
-    std::fs::write(&artifact, b"\x7fELFtest").unwrap();
-    let dep = artifact.with_extension("d");
-    std::fs::write(&dep, format!("{}: src/lib.rs\n\n{}: src/lib.rs\n",
-        dep.display(), artifact.display())).unwrap();
+    let bytes = std::fs::read(&artifact).unwrap();
     let check = std::sync::Arc::new((tokio::sync::Notify::new(), tokio::sync::Notify::new()));
     runtime.cleanup_check = Some(check.clone());
     let sweep = runtime.release_orphan_builds(std::slice::from_ref(&tree));
@@ -1071,7 +1090,7 @@ async fn legacy_cleanup_preserves_an_artifact_staged_during_inventory() {
         tokio::join!(sweep, stage)
     }).await.unwrap();
     assert!(pending.unwrap().is_empty());
-    assert_eq!(std::fs::read(&artifact).unwrap(), b"\x7fELFtest");
+    assert_eq!(std::fs::read(&artifact).unwrap(), bytes);
 }
 
 #[tokio::test]

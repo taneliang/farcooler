@@ -7,10 +7,15 @@ use std::io::{self, Read, Seek, SeekFrom};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
+mod cargo;
+
 const METADATA_LIMIT: u64 = 16 * 1024 * 1024;
 const CACHE_TAG: &[u8] = b"Signature: 8a477f597d28d172789f06886806bc55";
 
-pub(super) struct ArtifactPlan(Vec<(PathBuf, Metadata)>);
+pub(super) struct ArtifactPlan {
+    files: Vec<(PathBuf, Metadata)>,
+    empty_directories: BTreeSet<PathBuf>,
+}
 
 #[derive(Clone, Copy)]
 enum Layout { Cargo, Swift, Android }
@@ -28,35 +33,46 @@ impl ArtifactPlan {
     pub(super) fn inspect(tree: &Path, folder: &Path, device: u64) -> io::Result<Self> {
         let mut inventory = Inventory::default();
         inventory.scan(tree, folder, folder, device)?;
-        let mut plan = Self(Vec::new());
+        let cargo = cargo::artifacts(tree, folder, &inventory.files)?;
+        for session in &inventory.incremental_sessions {
+            incremental_outputs(session, &cargo, &mut inventory.incremental);
+        }
+        let mut plan = Self { files: Vec::new(), empty_directories: cargo.directories.into_iter().collect() };
         let gate_archive = tree.join("target/rust-tests.tar.zst");
+        let mut keep_tag = inventory.protected_entries;
+        let mut tag = None;
         for (path, meta) in inventory.files {
-            let layout = if inventory.cargo.get(&path).is_some_and(|window| window.contains(&meta)) {
-                Some(Layout::Cargo)
-            } else if inventory.swift.get(&path).is_some_and(|window| window.contains(&meta)) {
+            if cargo.files.get(&path) == Some(&cargo::TAG) {
+                tag = Some((path, meta));
+                continue;
+            }
+            let layout = if inventory.swift.get(&path).is_some_and(|window| window.contains(&meta)) {
                 Some(Layout::Swift)
             } else if inventory.android.get(&path).is_some_and(|window| window.contains(&meta)) {
                 Some(Layout::Android)
             } else {
                 None
             };
-            let recognized = inventory.incremental.get(&path).is_some_and(|original| same_file(&meta, original)) || match layout {
+            let recognized = cargo.files.contains_key(&path) || inventory.incremental.get(&path).is_some_and(|original| same_file(&meta, original)) || match layout {
                 Some(layout) => layout.recognizes(&path)?,
                 None => path == gate_archive && nextest_archive(&path, tree, &tree.join("target")).unwrap_or(false),
             };
-            if recognized { plan.0.push((path, meta)); }
+            if recognized { plan.files.push((path, meta)); } else { keep_tag = true; }
         }
-        plan.0.sort_by_key(|(path, _)| path.file_name().is_some_and(|name| name == "work-products.bin"));
+        if !keep_tag && let Some(tag) = tag { plan.files.push(tag); }
+        // Keep the verification records available if deletion stops partway.
+        plan.files.sort_by_key(|(path, _)| cargo.files.get(path).copied().unwrap_or_else(||
+            u8::from(path.file_name().is_some_and(|name| name == "work-products.bin"))));
         Ok(plan)
     }
 
-    pub(super) fn is_empty(&self) -> bool { self.0.is_empty() }
+    pub(super) fn is_empty(&self) -> bool { self.files.is_empty() }
 
     pub(super) fn release(self, folder: &Path) -> io::Result<u64> {
         let mut bytes = 0u64;
-        let mut directories = BTreeSet::new();
+        let mut directories = self.empty_directories;
         let mut unlinked = BTreeMap::new();
-        for (path, original) in self.0 {
+        for (path, original) in self.files {
             let parent = path.parent().expect("artifact has a parent");
             let key = (original.dev(), original.ino());
             let current = path.symlink_metadata()?;
@@ -87,7 +103,7 @@ impl ArtifactPlan {
             }
             bytes = bytes.saturating_add(original.len());
             for dir in parent.ancestors().take_while(|p| p.starts_with(folder)) {
-                if !directories.insert(dir.to_owned()) { break; }
+                directories.insert(dir.to_owned());
             }
         }
         // Only remove empty ancestors of artifacts we actually released, deepest first.
@@ -125,12 +141,12 @@ impl BuildWindow {
 
 #[derive(Default)]
 struct Inventory {
-    cargo: BTreeMap<PathBuf, BuildWindow>,
     swift: BTreeMap<PathBuf, BuildWindow>,
     android: BTreeMap<PathBuf, BuildWindow>,
     incremental: BTreeMap<PathBuf, Metadata>,
-    fingerprints: BTreeMap<PathBuf, BTreeMap<String, PathBuf>>,
-    files: Vec<(PathBuf, Metadata)>,
+    incremental_sessions: Vec<PathBuf>,
+    files: BTreeMap<PathBuf, Metadata>,
+    protected_entries: bool,
 }
 
 impl Inventory {
@@ -138,56 +154,28 @@ impl Inventory {
         let meta = path.symlink_metadata()?;
         if meta.dev() != device || path.file_name().is_some_and(|name|
             name.eq_ignore_ascii_case(".git") || name.eq_ignore_ascii_case("reports")) {
+            self.protected_entries = true;
             return Ok(());
         }
         if meta.is_dir() && !is_repository(path) {
             if incremental_session(path) {
-                incremental_outputs(path, &mut self.incremental);
+                self.incremental_sessions.push(path.to_owned());
             }
             for entry in fs::read_dir(path)? {
                 self.scan(tree, folder, &entry?.path(), device)?;
             }
         } else if meta.is_file() {
             let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
-            if let Some(stem) = name.strip_suffix(".d") {
-                self.cargo_outputs(tree, path, stem, &meta);
-            } else if name == "output-file-map.json" || name.ends_with("-OutputFileMap.json") {
+            if name == "output-file-map.json" || name.ends_with("-OutputFileMap.json") {
                 self.swift_outputs(tree, path, &meta);
             } else if name == "output-metadata.json" {
                 self.android_outputs(folder, path, &meta);
             }
-            self.files.push((path.to_owned(), meta));
+            self.files.insert(path.to_owned(), meta);
+        } else {
+            self.protected_entries = true;
         }
         Ok(())
-    }
-
-    fn cargo_outputs(&mut self, tree: &Path, path: &Path, stem: &str, meta: &Metadata) {
-        let Some(data) = read_metadata(path) else { return };
-        let Some(parent) = path.parent() else { return };
-        let mut rules = data.lines().filter_map(|line| line.split_once(": "));
-        // Rustc starts dep-info with a rule for the dep-info file itself.
-        // Cargo's top-level dep-info names its own final executable or library.
-        let Some((first, dependencies)) = rules.next() else { return };
-        let resolve = |name: &str| tree.join(name.replace("\\ ", " "));
-        let first = resolve(first);
-        if dependencies.is_empty() || first.parent() != Some(parent) { return; }
-        let same_target = |output: &Path| {
-            output.parent() == Some(parent) && output.file_stem().and_then(|name| name.to_str())
-                .is_some_and(|name| name == stem || name.strip_prefix("lib") == Some(stem))
-        };
-        if first != path && !same_target(&first) { return; }
-        // A stale pathname and matching binary magic do not identify the
-        // original inode. ctime detects renames, copies, and in-place writes
-        // even when a replacement preserves or restores its mtime.
-        let window = cargo_build_window(path, stem, meta, &mut self.fingerprints)
-            .unwrap_or(BuildWindow { start: None, end: changed(meta) });
-        if first != path { self.cargo.insert(first, window); }
-        for (name, deps) in rules {
-            let output = resolve(name);
-            if deps == dependencies && output != path && same_target(&output) {
-                self.cargo.insert(output, window);
-            }
-        }
     }
 
     fn swift_outputs(&mut self, tree: &Path, path: &Path, meta: &Metadata) {
@@ -196,10 +184,9 @@ impl Inventory {
         let Some(window) = swift_build_window(tree, path, meta, &map) else { return };
         for source in sources.values().filter_map(Value::as_object) {
             for (kind, output) in source {
-                if matches!(kind.as_str(), "object" | "swiftmodule" | "swift-dependencies" | "diagnostics") {
-                    if let Some(output) = output.as_str() {
-                        self.swift.insert(tree.join(output), window);
-                    }
+                if matches!(kind.as_str(), "object" | "swiftmodule" | "swift-dependencies" | "diagnostics")
+                    && let Some(output) = output.as_str() {
+                    self.swift.insert(tree.join(output), window);
                 }
             }
         }
@@ -260,49 +247,6 @@ fn swift_build_window(tree: &Path, map_path: &Path, map_meta: &Metadata, map: &V
     (start <= end).then_some(BuildWindow { start: Some(start), end })
 }
 
-// Rustc emits dep-info before linking. A matching Cargo fingerprint brackets
-// that rustc invocation so its later outputs can also be identified.
-fn cargo_build_window(dep_info: &Path, stem: &str, dep: &Metadata,
-    by_profile: &mut BTreeMap<PathBuf, BTreeMap<String, PathBuf>>) -> Option<BuildWindow>
-{
-    let deps = dep_info.parent()?;
-    if deps.file_name()? != "deps" { return None; }
-    let (name, hash) = stem.rsplit_once('-')?;
-    if hash.len() != 16 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) { return None; }
-    // Cargo uses the package name for the directory and rustc normalizes its
-    // crate name. The hash identifies the unit even when the names differ.
-    let fingerprints = by_profile.entry(deps.parent()?.join(".fingerprint")).or_insert_with_key(|dir| {
-        if !dir.symlink_metadata().is_ok_and(|meta| meta.is_dir()) { return BTreeMap::new(); }
-        fs::read_dir(dir).into_iter().flatten().filter_map(Result::ok).filter_map(|entry| {
-            if !entry.file_type().ok()?.is_dir() { return None; }
-            let filename = entry.file_name();
-            let (_, hash) = filename.to_str()?.rsplit_once('-')?;
-            Some((hash.to_owned(), entry.path()))
-        }).collect()
-    });
-    let fingerprint = fingerprints.get(hash)?;
-    if fingerprint.canonicalize().ok()? != *fingerprint { return None; }
-    let start = changed(&open_regular(&fingerprint.join("invoked.timestamp")).ok()?.metadata().ok()?);
-    if changed(dep) < start { return None; }
-    for entry in fs::read_dir(fingerprint).ok()?.filter_map(Result::ok) {
-        let filename = entry.file_name();
-        let Some(marker) = filename.to_str().and_then(|name| name.strip_suffix(".json")) else { continue };
-        if !marker.ends_with(&format!("-{name}")) { continue; }
-        let mut stamp_file = open_regular(&fingerprint.join(marker)).ok()?;
-        let stamp = stamp_file.metadata().ok()?;
-        let mut digest = [0; 16];
-        if stamp.len() != 16 || stamp_file.read_exact(&mut digest).is_err()
-            || !digest.iter().all(u8::is_ascii_hexdigit)
-            || open_regular(&fingerprint.join(format!("dep-{marker}"))).is_err() { continue; }
-        let completion = open_regular(&entry.path()).ok()?;
-        let end = changed(&completion.metadata().ok()?);
-        if changed(dep) <= changed(&stamp) && changed(&stamp) <= end {
-            return Some(BuildWindow { start: Some(changed(dep)), end });
-        }
-    }
-    None
-}
-
 fn base36(s: &str) -> bool {
     !s.is_empty() && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
 }
@@ -341,7 +285,7 @@ fn rustc_cache_header(file: &mut File) -> Option<Vec<u8>> {
     (end == RUSTC_END).then(|| [prefix.as_slice(), &version].concat())
 }
 
-fn incremental_outputs(session: &Path, outputs: &mut BTreeMap<PathBuf, Metadata>) {
+fn incremental_outputs(session: &Path, cargo: &cargo::Artifacts, outputs: &mut BTreeMap<PathBuf, Metadata>) {
     let index = session.join("work-products.bin");
     let Some((mut file, meta, header)) = open_regular(&index).ok().and_then(|mut file| {
         let meta = file.metadata().ok()?;
@@ -349,6 +293,7 @@ fn incremental_outputs(session: &Path, outputs: &mut BTreeMap<PathBuf, Metadata>
         Some((file, meta, header))
     }) else { return };
     if meta.len() > METADATA_LIMIT { return; }
+    let completion = cargo.incremental_completion(session, &meta).unwrap_or_else(|| changed(&meta));
     let mut products = Vec::new();
     if file.seek(SeekFrom::Start(header.len() as u64)).is_err()
         || file.take(METADATA_LIMIT).read_to_end(&mut products).is_err() { return; }
@@ -357,7 +302,11 @@ fn incremental_outputs(session: &Path, outputs: &mut BTreeMap<PathBuf, Metadata>
         let path = entry.path();
         let Some(candidate) = open_regular(&path).ok().and_then(|mut file| {
             let candidate = file.metadata().ok()?;
-            if candidate.dev() != meta.dev() || changed(&candidate) > changed(&meta) { return None; }
+            if candidate.dev() != meta.dev() || changed(&candidate) > completion
+                || (candidate.mtime(), candidate.mtime_nsec()) > changed(&meta)
+                || candidate.created().ok().zip(meta.created().ok()).is_some_and(|(file, index)| file > index) {
+                return None;
+            }
             let filename = entry.file_name();
             let name = filename.to_str()?;
             let verified = match name {
@@ -381,6 +330,14 @@ fn incremental_outputs(session: &Path, outputs: &mut BTreeMap<PathBuf, Metadata>
     }
     // Leave the index until all other planned files in the session have been
     // processed. A later sweep can still verify the remainder after an error.
+    if let Some((prefix, _)) = session.file_name().and_then(|name| name.to_str()).and_then(|name| name.rsplit_once('-')) {
+        let lock = session.with_file_name(format!("{prefix}.lock"));
+        if let Ok(lock_meta) = lock.symlink_metadata()
+            && lock_meta.is_file() && lock_meta.len() == 0 && lock_meta.dev() == meta.dev()
+            && changed(&lock_meta) <= changed(&meta) {
+            outputs.insert(lock, lock_meta);
+        }
+    }
     outputs.insert(index, meta);
 }
 
@@ -491,14 +448,14 @@ mod tests {
         let device = tree.metadata().unwrap().dev();
         let mut inventory = Inventory::default();
         inventory.scan(&tree, &folder, &folder, device).unwrap();
-        let object = |stem: &str| inventory.files.iter().map(|(path, _)| path)
+        let object = |stem: &str| inventory.files.keys()
             .find(|path| path.file_stem().and_then(|name| name.to_str())
                 .is_some_and(|name| name == stem || name == format!("{stem}.swift"))
                 && path.extension().is_some_and(|ext| ext == "o")).unwrap();
         let keep = object("Keep");
         let release = object("Release");
         let original = ArtifactPlan::inspect(&tree, &folder, device).unwrap();
-        assert!([keep, release].iter().all(|output| original.0.iter().any(|(path, _)| path == *output)),
+        assert!([keep, release].iter().all(|output| original.files.iter().any(|(path, _)| path == *output)),
             "completed SwiftPM objects should be recognized");
 
         let replacement = fs::read(keep).unwrap();

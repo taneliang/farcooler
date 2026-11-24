@@ -197,14 +197,6 @@ async fn adopted(wait_for_review: bool) -> (tempfile::TempDir, Runtime, PathBuf,
         definition.source = "adapted-local-policy/v1".into();
         let review = definition.stages.iter_mut().find(|stage| matches!(stage.kind, StageKind::Review(_))).unwrap();
         review.kind = StageKind::Review(Reviewer::Person("owner".into()));
-        adapter(dir.path(), |s| s.replace("if stage == 'build':\n", concat!(
-            "if stage == 'build':\n",
-            "    path = pathlib.Path('target/debug/deps/built')\n",
-            "    path.parent.mkdir(parents=True, exist_ok=True)\n",
-            "    path.write_bytes(bytes.fromhex('7f454c46') + b'localout')\n",
-            "    dep = path.with_suffix('.d')\n",
-            "    dep.write_text(f'{dep}: src/lib.rs\\n\\n{path}: src/lib.rs\\n')\n",
-        )));
     }
     let state = runtime.state(&workspace).unwrap().unwrap();
     let receipt = runtime.apply(Request { id: "start".into(), workspace: workspace.clone(), expected_revision: state.revision, sequence: 2,
@@ -264,10 +256,15 @@ async fn waiting_adopted_worktree_releases_build_output_and_reclaims_older_outpu
         std::fs::write(path, contents).unwrap();
     }
     let package = dir.path().join("cargo-fixture");
-    let current_caches = super::super::build_cleanup_tests::incremental_cargo_output(&package, &tree.join("target"));
+    let current_caches = super::super::build_cleanup_tests::cargo_build_output(&package, &tree.join("target"));
     let (android, android_personal) = super::super::build_cleanup_tests::android_build_output(&tree);
     wait_for_adopted_review(&mut runtime, &workspace).await;
-    assert!(current_caches.iter().all(|path| !path.exists()));
+    for path in current_caches {
+        if path.ends_with("CACHEDIR.TAG") || personal.iter().any(|(name, _)| path == tree.join(name)) {
+            continue;
+        }
+        assert!(!path.exists(), "retained {}", path.display());
+    }
     assert!(android.iter().all(|path| !path.exists()));
     assert!(android_personal.iter().all(|path| path.is_file()));
     assert!(!tree.join("target/debug/libcleanup_fixture.rlib").exists());
@@ -275,14 +272,13 @@ async fn waiting_adopted_worktree_releases_build_output_and_reclaims_older_outpu
         assert_eq!(std::fs::read(tree.join(path)).unwrap(), contents);
     }
     let records = runtime.store.workflow_cleanups(&workspace).unwrap();
-    assert!(!tree.join("target/debug/deps/built").exists(), "{records:?}");
     assert!(tree.join("result.txt").is_file());
     assert!(records.iter().any(|record| record.result.as_ref().is_some_and(|r| r.bytes_freed > 12)));
     let (old_android, old_android_personal) = super::super::build_cleanup_tests::android_build_output(&tree);
     let mut previous = records.iter().find(|record| record.effect.tree.is_some()).unwrap().effect.clone();
     let state = runtime.state(&workspace).unwrap().unwrap();
     let item = &state.items[&previous.item];
-    previous.id = digest(&("idle-build-release/v1", &workspace, &previous.item, &item.run, item.fence));
+    previous.id = digest(&("idle-adopted-build-release/v2", &workspace, &previous.item, &item.run, item.fence));
     runtime.store.workflow_cleanup_enqueue(&previous).unwrap();
     assert!(runtime.store.workflow_cleanup_begin(&previous, None).unwrap());
     runtime.store.workflow_cleanup_result(&previous, &farcooler_workflow::cleanup::CleanupResult {
@@ -292,27 +288,21 @@ async fn waiting_adopted_worktree_releases_build_output_and_reclaims_older_outpu
     // Exercise Cargo's actual cache tag and dep-info, including when the
     // target directory is selected only through CARGO_TARGET_DIR.
     let target = tree.join(".artifacts");
-    let mut old_artifacts = super::super::build_cleanup_tests::incremental_cargo_output(&package, &target);
+    let old_artifacts = super::super::build_cleanup_tests::cargo_build_output(&package, &target);
     let rlib = std::fs::read_dir(target.join("debug/deps")).unwrap()
         .map(|entry| entry.unwrap().path())
         .find(|path| path.extension().is_some_and(|ext| ext == "rlib")).unwrap();
-    let old_binary = tree.join("target/debug/deps/from-old-engine");
-    std::fs::write(&old_binary, b"\x7fELFtest").unwrap();
-    let dep = old_binary.with_extension("d");
-    std::fs::write(&dep, format!("{}: src/lib.rs\n\n{}: src/lib.rs\n",
-        dep.display(), old_binary.display())).unwrap();
-    old_artifacts.push(old_binary);
-    // Cargo still names both archives in dep-info. Replace one inode and
-    // overwrite the other in place, preserving the original mtimes.
-    let linked = rlib.with_extension("a");
-    let exported = target.join("debug/libcleanup_fixture.rlib");
+    // Cargo writes one top-level .d file for the two crate types. Replace
+    // the export it names, then rewrite the other type's hashed archive.
+    let exports = target.join("debug/libcleanup_fixture");
+    let export_info = std::fs::read_to_string(exports.with_extension("d")).unwrap();
+    let exported = ["rlib", "a"].into_iter().map(|ext| exports.with_extension(ext))
+        .find(|archive| export_info.starts_with(&archive.to_str().unwrap().replace(' ', "\\ "))).unwrap();
+    let linked = if exported.extension().unwrap() == "a" { rlib.clone() } else { rlib.with_extension("a") };
     let personal_archive = std::fs::read(&rlib).unwrap();
     let stem = linked.file_stem().unwrap().to_str().unwrap().strip_prefix("lib").unwrap();
     let deps_info = std::fs::read_to_string(target.join("debug/deps").join(format!("{stem}.d"))).unwrap();
-    let export_info = std::fs::read_to_string(exported.with_extension("d")).unwrap();
-    for (dep_info, archive) in [(&deps_info, &linked), (&export_info, &exported)] {
-        assert!(dep_info.contains(&archive.to_str().unwrap().replace(' ', "\\ ")));
-    }
+    assert!(deps_info.contains(&linked.to_str().unwrap().replace(' ', "\\ ")));
     let temporary = dir.path().join("personal-prebuilt.a");
     let mtime = exported.metadata().unwrap().modified().unwrap();
     std::fs::write(&temporary, &personal_archive).unwrap();
@@ -338,7 +328,12 @@ async fn waiting_adopted_worktree_releases_build_output_and_reclaims_older_outpu
     let mut runtime = Runtime::open(&root).unwrap();
     runtime.host = host;
     runtime.pump(100).await.unwrap();
+    // Both archive pairs lost their original provenance when we replaced
+    // one side. The unchanged pair members may still be independently verified.
+    let uncertain = [rlib.with_extension("a"), rlib, exports.with_extension("a"),
+        exports.with_extension("rlib"), exports.with_extension("d")];
     for artifact in old_artifacts {
+        if artifact.ends_with("CACHEDIR.TAG") || uncertain.contains(&artifact) { continue; }
         assert!(!artifact.exists(), "retained {}", artifact.display());
     }
     assert!(old_android.iter().all(|path| !path.exists()));
@@ -359,7 +354,8 @@ async fn waiting_adopted_worktree_releases_build_output_and_reclaims_older_outpu
 #[tokio::test]
 async fn waiting_adopted_worktree_checks_source_readers_and_external_processes() {
     for hold_source_file in [true, false] {
-        let (_dir, mut runtime, tree, workspace) = adopted(true).await;
+        let (dir, mut runtime, tree, workspace) = adopted(true).await;
+        super::super::build_cleanup_tests::cargo_build_output(&dir.path().join("cargo-fixture"), &tree.join("target"));
         let reader = hold_source_file.then(|| File::open(tree.join(".git")).unwrap());
         let shell = (!hold_source_file).then(|| tokio::process::Command::new("/bin/sleep")
             .arg("120").current_dir(&tree).kill_on_drop(true).spawn().unwrap());
@@ -367,7 +363,7 @@ async fn waiting_adopted_worktree_checks_source_readers_and_external_processes()
         runtime.cleanup_check = Some(std::sync::Arc::new((Default::default(), Default::default())));
         tokio::time::timeout(Duration::from_secs(60), wait_for_adopted_review(&mut runtime, &workspace)).await.unwrap();
         runtime.cleanup_check = None;
-        let output = tree.join("target/debug/deps/built");
+        let output = tree.join("target/debug/libcleanup_fixture.rlib");
         assert!(output.exists());
         assert!(runtime.next_cleanup.unwrap() > tokio::time::Instant::now() + Duration::from_secs(60));
         let pending = runtime.store.workflow_pending_cleanups(&workspace).unwrap();

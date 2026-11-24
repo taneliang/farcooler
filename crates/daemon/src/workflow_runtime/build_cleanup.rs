@@ -366,7 +366,7 @@ impl Exec {
         let tree = tree.to_path_buf();
         let relative = relative.to_string_lossy().into_owned();
         let path = path.to_path_buf();
-        tokio::task::spawn_blocking(move || {
+        let result = tokio::task::spawn_blocking(move || {
             // Blocking deletion can outlive a cancelled async caller; retain the fence here too.
             let _held = held;
             let current = path.symlink_metadata().map_err(|e| e.to_string())?;
@@ -386,7 +386,11 @@ impl Exec {
                 }
             };
             released.map_err(|e| format!("{OUTPUT_INTERRUPTED}: {e}"))
-        }).await.map_err(|e| e.to_string())?
+        }).await.map_err(|e| e.to_string())?;
+        if check_whole_checkout && result.as_ref().is_err_and(|why| why.starts_with(OUTPUT_INTERRUPTED)) {
+            *retry = Some(CHECKOUT_RETRY);
+        }
+        result
     }
 }
 
