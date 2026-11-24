@@ -64,7 +64,7 @@ export class WorkspacePanes {
       const title = node(side ? 'side-title' : 'pane-title')
       title.textContent = model.title
       if (side) node('workspace-side').setAttribute('aria-label', model.title)
-      node(side ? 'side-switch' : 'pane-bar').hidden = !model.agent
+      node(side ? 'side-switch' : 'pane-bar').hidden = !model.agent || !model.attach
       node(side ? 'side-conversation' : 'view-conversation').setAttribute('aria-pressed', String(model.mode === 'conversation'))
       node(side ? 'side-terminal' : 'view-terminal').setAttribute('aria-pressed', String(model.mode === 'terminal'))
       if (model.terminal) {

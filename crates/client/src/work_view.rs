@@ -218,7 +218,7 @@ pub fn view(inventory: &Inventory, selection: &Selection) -> Value {
         };
         let close = writer && matches!(t.state.as_str(), "running" | "starting" | "exited" | "error" | "lost");
         json!({
-            "id": t.id, "title": t.title, "agent": t.agent, "state": state,
+            "id": t.id, "title": t.title, "agent": t.agent, "state": state, "running": running,
             "attach": readable && running,
             "attachNote": if !readable { READ_ONLY } else if t.state == "lost" {
                 "This terminal’s process was lost. Recover it to continue."
@@ -253,6 +253,7 @@ pub fn view(inventory: &Inventory, selection: &Selection) -> Value {
         "workspace": workspace.map(|w| &w.id), "repository": repository,
         "worktree": chosen_tree.map(|w| &w.id), "terminal": selected.map(|t| &t.id), "terminals": terminal_rows,
         "notice": notice,
+        "missingTerminal": selected.is_none() && selection.terminal.is_some(),
         "labels": {
             "open": "Start Work", "link": "Workspace Link", "repository": "Repository", "worktree": "Worktree",
             "close": "Done", "refresh": "Refresh", "emptyTree": "No worktrees available",

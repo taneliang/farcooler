@@ -58,10 +58,18 @@ enum Page {
 struct Terminal {
     id: String,
     title: String,
-    state: String,
+    running: bool,
     agent: bool,
     attach: bool,
     attach_note: String,
+    rename: Option<WorkAction>,
+    close: Option<WorkAction>,
+    recover: Option<WorkAction>,
+}
+
+#[derive(Deserialize)]
+struct WorkAction {
+    label: String,
 }
 
 #[derive(Deserialize)]
@@ -71,6 +79,9 @@ struct Context {
     workspace_name: Option<String>,
     workspace_count: usize,
     runner_name: String,
+    start_work: Option<String>,
+    #[serde(default)]
+    missing_terminal: bool,
     terminals: Vec<Terminal>,
     orchestrator: Option<String>,
 }
@@ -84,7 +95,10 @@ impl Context {
             Some(name) if self.workspace_count > 1 => name,
             _ => &self.runner_name,
         };
-        format!("{name} has no terminals yet. Use Start Work to open one.").into()
+        match &self.start_work {
+            Some(action) => format!("{name} has no terminals yet. Use {action} to open one.").into(),
+            None => format!("{name} has no terminals yet.").into(),
+        }
     }
 }
 
@@ -104,6 +118,10 @@ enum Command {
     Conversation,
     RawTerminal,
     ClosePage,
+    StartWork,
+    RenameTerminal,
+    CloseTerminal,
+    RecoverTerminal,
 }
 
 impl Command {
@@ -122,6 +140,10 @@ impl Command {
             Self::Conversation => "Chat",
             Self::RawTerminal => "Raw Terminal",
             Self::ClosePage => "Close Page",
+            Self::StartWork => "Start Work",
+            Self::RenameTerminal => "Rename Terminal",
+            Self::CloseTerminal => "Close Terminal",
+            Self::RecoverTerminal => "Recover Terminal",
         }
     }
 
@@ -169,6 +191,7 @@ enum Effect {
     Shortcuts,
     ClosePage,
     RefreshPane,
+    Work { command: Command },
 }
 
 #[derive(Serialize)]
@@ -182,17 +205,18 @@ struct Pane<'a> {
 }
 
 #[derive(Serialize)]
-struct Action {
+struct Action<'a> {
     id: Command,
-    label: &'static str,
+    label: &'a str,
     key: Option<String>,
     enabled: bool,
 }
 
-const COMMANDS: [Command; 13] = [
+const COMMANDS: [Command; 17] = [
     Command::Commands, Command::Shortcuts, Command::Terminals, Command::Needs, Command::Plan,
     Command::Workflow, Command::Orchestrator, Command::Split, Command::CloseSplit, Command::FocusOther,
-    Command::Conversation, Command::RawTerminal, Command::ClosePage,
+    Command::Conversation, Command::RawTerminal, Command::ClosePage, Command::StartWork,
+    Command::RenameTerminal, Command::CloseTerminal, Command::RecoverTerminal,
 ];
 
 impl Layout {
@@ -202,7 +226,7 @@ impl Layout {
             self.side = Some(Side::Empty);
         }
         if self.main.as_deref().is_none_or(|id| !present(id)) {
-            self.main = context.terminals.iter().min_by_key(|t| t.state != "Running").map(|t| t.id.clone());
+            self.main = context.terminals.iter().min_by_key(|t| !t.running).map(|t| t.id.clone());
         }
         if self.side.is_none() {
             self.focus = Slot::Main;
@@ -220,11 +244,11 @@ impl Layout {
     fn pane<'a>(&'a self, slot: Slot, context: &'a Context) -> Pane<'a> {
         let orchestrator = slot == Slot::Side && self.side == Some(Side::Orchestrator);
         let id = match slot {
-            Slot::Main if context.page == Page::Terminals => {
+            Slot::Main if context.page == Page::Terminals && !context.missing_terminal => {
                 let side = self.side_id(context);
                 self.main.as_deref().filter(|id| Some(*id) != side).or_else(|| {
                     context.terminals.iter().filter(|t| Some(t.id.as_str()) != side)
-                        .min_by_key(|t| t.state != "Running").map(|t| t.id.as_str())
+                        .min_by_key(|t| !t.running).map(|t| t.id.as_str())
                 })
             }
             Slot::Side => self.side_id(context),
@@ -247,10 +271,27 @@ impl Layout {
                 (_, Some(terminal), _) => terminal.attach_note.as_str().into(),
                 (Slot::Side, None, true) => "No orchestrator is available for this workspace yet.".into(),
                 (Slot::Side, None, false) => context.terminal_notice(),
-                (Slot::Main, None, _) if context.page == Page::Terminals => context.terminal_notice(),
+                (Slot::Main, None, _) if context.page == Page::Terminals && !context.missing_terminal => context.terminal_notice(),
                 _ => "".into(),
             },
         }
+    }
+
+    fn work_label<'a>(&self, command: Command, slot: Slot, context: &'a Context) -> Option<&'a str> {
+        if command == Command::StartWork {
+            return context.start_work.as_deref();
+        }
+        if !matches!(command, Command::RenameTerminal | Command::CloseTerminal | Command::RecoverTerminal) {
+            return None;
+        }
+        let id = self.pane(slot, context).terminal?;
+        let terminal = context.terminals.iter().find(|terminal| terminal.id == id)?;
+        match command {
+            Command::RenameTerminal => terminal.rename.as_ref(),
+            Command::CloseTerminal => terminal.close.as_ref(),
+            Command::RecoverTerminal => terminal.recover.as_ref(),
+            _ => None,
+        }.map(|action| action.label.as_str())
     }
 
     fn allowed(&self, command: Command, slot: Slot, context: &Context) -> bool {
@@ -262,6 +303,8 @@ impl Layout {
                 let pane = self.pane(slot, context);
                 pane.agent && pane.attach
             }
+            Command::StartWork | Command::RenameTerminal | Command::CloseTerminal | Command::RecoverTerminal =>
+                self.work_label(command, slot, context).is_some(),
             Command::ClosePage => matches!(context.page, Page::Ticket | Page::Workflow),
             _ => true,
         }
@@ -279,6 +322,8 @@ impl Layout {
             Command::Plan => Effect::Navigate { page: Page::Plan },
             Command::Workflow => Effect::Navigate { page: Page::Workflow },
             Command::ClosePage => Effect::ClosePage,
+            Command::StartWork | Command::RenameTerminal | Command::CloseTerminal | Command::RecoverTerminal =>
+                Effect::Work { command },
             Command::Orchestrator => self.split(Side::Orchestrator),
             Command::Split => self.split(Side::Empty),
             Command::CloseSplit => {
@@ -379,7 +424,7 @@ pub fn json(request: &str) -> String {
     };
     layout.normalize(context);
     let actions: Vec<_> = COMMANDS.into_iter().map(|id| Action {
-        id, label: id.label(), key: binding(bindings, id).map(str::to_owned),
+        id, label: layout.work_label(id, layout.focus, context).unwrap_or_else(|| id.label()), key: binding(bindings, id).map(str::to_owned),
         enabled: layout.allowed(id, layout.focus, context),
     }).collect();
     serde_json::json!({
@@ -388,6 +433,15 @@ pub fn json(request: &str) -> String {
         "side": layout.side.as_ref().map(|_| layout.pane(Slot::Side, context)),
         "actions": actions, "close_label": "Close", "shortcut_prefix": "Alt+Shift+", "shortcut_help": "Shortcuts work outside terminals and text fields.",
     }).to_string()
+}
+
+/// Restore a page when its workspace or ticket can still be read.
+pub fn page_available(page: &str, workspace: bool, ticket: bool) -> bool {
+    match page {
+        "workflow" => workspace,
+        "ticket" => ticket,
+        _ => true,
+    }
 }
 
 /// Read the named orchestrator from the workspace's Plan reply.
@@ -401,17 +455,17 @@ pub fn orchestrator(plan: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{json, orchestrator};
+    use super::{json, orchestrator, page_available};
     use serde_json::{Value, json as value};
 
     fn context(page: &str) -> Value {
         value!({
             "page": page, "workspace": true, "orchestrator": "orch",
-            "workspace_name": "Billing", "workspace_count": 2, "runner_name": "Build Mac",
+            "workspace_name": "Billing", "workspace_count": 2, "runner_name": "Build Mac", "start_work": "Start Work",
             "terminals": [
-                {"id": "orch", "title": "Runner agent", "state": "Running", "agent": true, "attach": true, "attachNote": ""},
-                {"id": "shell", "title": "Build", "state": "Running", "agent": false, "attach": true, "attachNote": ""},
-                {"id": "logs", "title": "Logs", "state": "Exited", "agent": false, "attach": false, "attachNote": "This terminal is currently unavailable."},
+                {"id": "orch", "title": "Runner agent", "running": true, "agent": true, "attach": true, "attachNote": ""},
+                {"id": "shell", "title": "Build", "running": true, "agent": false, "attach": true, "attachNote": ""},
+                {"id": "logs", "title": "Logs", "running": false, "agent": false, "attach": false, "attachNote": "This terminal is currently unavailable."},
             ],
         })
     }
@@ -426,6 +480,27 @@ mod tests {
 
     fn run(before: &Value, context: &Value, command: &str) -> Value {
         step(before, context, value!({"kind": "run", "command": command}))
+    }
+
+    #[test]
+    fn unavailable_work_cannot_attach_or_offer_management_commands() {
+        let mut page = context("terminals");
+        page["start_work"] = Value::Null;
+        page["terminals"][0]["attach"] = value!(false);
+        page["terminals"][0]["attachNote"] = value!("Read only");
+        let view = run(&Value::Null, &page, "raw_terminal");
+        assert_eq!(view["main"]["attach"], false);
+        assert_eq!(view["main"]["notice"], "Read only");
+        assert_eq!(view["effect"]["kind"], "none");
+        assert_eq!(run(&view, &page, "start_work")["effect"]["kind"], "none");
+        assert_eq!(run(&view, &page, "rename_terminal")["effect"]["kind"], "none");
+
+        page["missing_terminal"] = value!(true);
+        let missing = step(&view, &page, value!({"kind": "present"}));
+        assert_eq!(missing["main"]["terminal"], Value::Null);
+        assert!(!page_available("workflow", false, true));
+        assert!(!page_available("ticket", true, false));
+        assert!(page_available("plan", false, false));
     }
 
     #[test]
@@ -457,7 +532,7 @@ mod tests {
         assert_eq!(selected["main"]["terminal"], "orch");
 
         for terminal in page["terminals"].as_array_mut().unwrap() {
-            terminal["state"] = value!("Exited");
+            terminal["running"] = value!(false);
         }
         let selected = step(&Value::Null, &page, value!({"kind": "present"}));
         assert_eq!(selected["main"]["terminal"], "logs");

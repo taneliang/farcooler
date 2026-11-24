@@ -1,9 +1,10 @@
-import type { WorkTerminal } from './work-screen'
+import type { WorkTerminal, WorkView } from './work-screen'
 
 export type Slot = 'main' | 'side'
 export type Page = 'terminals' | 'needs' | 'plan' | 'ticket' | 'workflow'
 export type Tab = Exclude<Page, 'ticket' | 'workflow'>
-type Command = 'commands' | 'shortcuts' | 'terminals' | 'needs' | 'plan' | 'workflow' |
+type WorkCommand = 'start_work' | 'rename_terminal' | 'close_terminal' | 'recover_terminal'
+type Command = WorkCommand | 'commands' | 'shortcuts' | 'terminals' | 'needs' | 'plan' | 'workflow' |
   'orchestrator' | 'split' | 'close_split' | 'focus_other' | 'conversation' | 'raw_terminal' | 'close_page'
 type Action = { id: Command; label: string; key: string | null; enabled: boolean }
 export type PaneModel = {
@@ -18,7 +19,8 @@ type Intent = { kind: 'present' } | { kind: 'focus'; slot: Slot } | { kind: 'ope
   { kind: 'run'; command: Command; slot?: Slot } | { kind: 'bind'; command: Command; key: string } |
   { kind: 'key'; key: string; alt: boolean; shift: boolean; ctrl: boolean; meta: boolean; editing: boolean; terminal: boolean; modal: boolean }
 type Effect = { kind: 'none' | 'commands' | 'shortcuts' | 'close_page' | 'refresh_pane' } |
-  { kind: 'focus'; slot: Slot } | { kind: 'navigate'; page: Tab | 'workflow' }
+  { kind: 'focus'; slot: Slot } | { kind: 'navigate'; page: Tab | 'workflow' } |
+  { kind: 'work'; command: WorkCommand }
 export type LayoutView = {
   layout: unknown
   bindings: unknown
@@ -55,7 +57,7 @@ export class WorkspaceLayout {
   private workspace = ''
   private context = {
     page: 'terminals' as Page, workspace: false, workspace_name: null as string | null,
-    workspace_count: 0, terminals: [] as WorkTerminal[], orchestrator: null as string | null,
+    workspace_count: 0, missing_terminal: false, start_work: null as string | null, terminals: [] as WorkTerminal[], orchestrator: null as string | null,
   }
   private view: LayoutView | undefined
   private bindings: unknown
@@ -85,10 +87,14 @@ export class WorkspaceLayout {
   private get bindingKey(): string { return `${this.scope}:shortcuts` }
   private get layoutKey(): string { return `${this.scope}:layout:${this.workspace}` }
 
-  contextFor(workspace: string | null, workspaceName: string | null, workspaceCount: number, page: Page, terminals: WorkTerminal[], orchestrator: string | null): void {
+  contextFor(workspace: string | null, page: Page, work: WorkView, orchestrator: string | null): void {
     const changed = this.workspace !== JSON.stringify(workspace)
     this.workspace = JSON.stringify(workspace)
-    this.context = { workspace: workspace !== null, workspace_name: workspaceName, workspace_count: workspaceCount, page, terminals, orchestrator }
+    this.context = {
+      workspace: work.workspace !== null, workspace_name: work.workspaces.find(space => space.id === workspace)?.name ?? null,
+      workspace_count: work.workspaces.length, page, terminals: work.terminals, orchestrator,
+      missing_terminal: work.missingTerminal, start_work: work.create || work.start ? work.labels.open : null,
+    }
     this.dispatch({ kind: 'present' }, changed ? readJson(this.layoutKey) ?? null : this.view?.layout)
   }
 

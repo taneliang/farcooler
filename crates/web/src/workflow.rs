@@ -38,6 +38,11 @@ pub fn workspace_layout(request: &str) -> String {
     farcooler_client::workspace_layout::json(request)
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = workspacePageAvailable))]
+pub fn workspace_page_available(page: &str, workspace: bool, ticket: bool) -> bool {
+    farcooler_client::workspace_layout::page_available(page, workspace, ticket)
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = workspaceOrchestrator))]
 pub fn workspace_orchestrator(plan: &str) -> Option<String> {
     farcooler_client::workspace_layout::orchestrator(plan)

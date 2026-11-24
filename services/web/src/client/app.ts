@@ -23,7 +23,7 @@
 
 import { openWorkflow, installWorkflowPort } from './workflow-view'
 import { WorkflowSessionPort } from './workflow-session'
-import init, { connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, needsYouView, openReply, passkeyKeyLine, planView, recoveryView, registrationData, registrationProof, rpId, workFailure, workView, workspaceLayout, workspaceOrchestrator, type WebRunner } from 'fc-web'
+import init, { connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, needsYouView, openReply, passkeyKeyLine, planView, recoveryView, registrationData, registrationProof, rpId, workFailure, workView, workspaceLayout, workspaceOrchestrator, workspacePageAvailable, type WebRunner } from 'fc-web'
 
 import { compareWords, connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, needsYouFailure, registerFailure, restoreFailure, runnerDeferred, runnerStopped, saveFailure, sealedRefusal, unreachable } from './copy'
 import { askForCopy, assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
@@ -33,7 +33,7 @@ import { renderNeeds } from './needs-view'
 import { type PlanTab, startPlanTab } from './plan-tab'
 import { PlanList } from './plan-list'
 import { scopeBoard, type Space, waitingIn } from './scope'
-import { linkedRunner, mountWork, type WorkTerminal, type WorkView } from './work-screen'
+import { linkedRunner, mountWork, type WorkView } from './work-screen'
 import { drawPicker, saveSpace, savedSpace } from './space-picker'
 import { DetailBoard, type Subject } from './detail'
 import { type Answer, DetailSheet } from './detail-view'
@@ -871,7 +871,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   const mounted = new WorkspacePanes(scope, target.label, budget, () => reconnector.current, ended)
   panes = mounted
 
-  let shown: WorkTerminal[] = []
+  let currentWork = initial
   let inventoryWorkspace: string | null | undefined
   let firstRender = true
   let focusedSlot: 'main' | 'side' = 'main'
@@ -926,6 +926,10 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
         }
       } else showTab(effect.page)
     } else if (effect.kind === 'close_page') navigation?.leave()
+    else if (effect.kind === 'work') $({
+      start_work: 'show-start-work', rename_terminal: 'terminal-rename',
+      close_terminal: 'terminal-close', recover_terminal: 'terminal-recover',
+    }[effect.command]).click()
   })
   layout = controller
   $('show-orchestrator').onclick = () => controller.run('orchestrator')
@@ -955,13 +959,12 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   paneControls = { open: id => openTerminal(id, true) }
 
   const presentLayout = (page: Route['page']) => {
-    const workspaceName = spaces.find(space => space.id === chosenSpace)?.name ?? null
-    controller.contextFor(chosenSpace, workspaceName, spaces.length, page, shown, orchestrator)
+    controller.contextFor(chosenSpace, page, currentWork, orchestrator)
   }
 
   screen = mountWork({
     runner: target.id,
-    current: () => reconnector.current,
+    current: liveRunner,
     inventory,
     project: workView,
     prefer: () => savedSpace(target.id),
@@ -971,20 +974,24 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     },
     failure: e => workFailure(e.message, e.code ?? '', e.what ?? ''),
     started: () => {},
-    note: words => { if (words) mounted.problem(words) },
+    note: words => {
+      const note = $('work-status')
+      note.textContent = words
+      note.hidden = !words
+    },
     select: (view, terminal, open, replace, historyMode) => {
       const route = navigation?.route
       if (!route) return
       spaces = view.workspaces
+      currentWork = view
       if (replace) mounted.forget(replace)
-      if (historyMode && (view.workspace !== route.space || open && terminal)) {
+      if (historyMode && (view.workspace !== route.space || open && terminal || replace && route.terminal === replace)) {
         navigation?.navigate({
           space: view.workspace, page: 'terminals', tab: 'terminals', terminal: open ? terminal?.id : undefined,
           slot: open && historyMode === 'replaceState' ? focusedSlot : 'main',
         }, false, historyMode === 'replaceState')
         return
       }
-      shown = view.terminals
       inventoryWorkspace = route.space
       presentLayout(route.page)
       const pending = pendingTerminal
@@ -997,7 +1004,6 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
         firstRender = false
         if (route.page === 'terminals') mounted.restoreFocus(true)
       }
-      if (view.notice) mounted.problem(view.notice)
       if (lastView) drawNeeds(lastView)
       else pickerDrawn = drawPicker($<HTMLSelectElement>('space-picker'), spaces, chosenSpace, new Map())
     },
@@ -1022,13 +1028,11 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     } catch {}
   }
 
-  // The browser resolves restored history entries against its current workspace
-  // picker and live fleet. Moving this fallback policy to Rust needs a WASM
-  // route resolver fed by both; the current layout interface takes a resolved page.
   const resolve = (route: Route): Route => {
-    const unavailable = route.page === 'workflow' && !spaces.some(space => space.id === route.space) ||
-      route.page === 'ticket' && (!route.ticket || !fleet?.cardsOf(route.ticket.runner)?.deps?.task)
-    return unavailable ? { ...route, page: route.tab, ticket: undefined } : route
+    const workspace = spaces.some(space => space.id === route.space)
+    const ticket = !!(route.ticket && fleet?.cardsOf(route.ticket.runner)?.deps?.task)
+    return workspacePageAvailable(route.page, workspace, ticket)
+      ? route : { ...route, page: route.tab, ticket: undefined }
   }
   const renderRoute = (route: Route) => {
     const changedSpace = previous === null || chosenSpace !== route.space
@@ -1048,7 +1052,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     pendingScroll = scrollPage && position ? { page: scrollPage, position } : null
     if (changedSpace) {
       orchestrator = null
-      if (spaces.some(space => space.id === chosenSpace)) saveSpace(target.id, chosenSpace!)
+      if (chosenSpace && spaces.some(space => space.id === chosenSpace)) saveSpace(target.id, chosenSpace)
       planTab?.choose(chosenSpace)
     }
     const changedTerminal = route.terminal !== cameFrom?.terminal || route.slot !== cameFrom?.slot

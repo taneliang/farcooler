@@ -26,6 +26,7 @@ export interface WorkView {
   terminal: string | null
   terminals: WorkTerminal[]
   notice: string
+  missingTerminal: boolean
   labels: {
     open: string
     link: string
@@ -271,7 +272,9 @@ export function mountWork(options: Options) {
       if (terminal.recover.action === 'restart') void send({ action: 'restart', terminal: terminal.id })
       else void refresh(true)
     })
-    notify(view.notice || terminal?.attachNote || '')
+    // The pane renders Rust's empty and attachment notices in the workspace.
+    const paneNotice = options.navigation && !view.missingTerminal && view.workspace && terminal?.recover?.action !== 'reattach'
+    notify(paneNotice ? '' : view.notice || terminal?.attachNote || '')
   }
 
   async function refresh(open = false, historyMode?: 'pushState' | 'replaceState'): Promise<void> {
