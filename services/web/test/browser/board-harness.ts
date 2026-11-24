@@ -36,6 +36,9 @@ async function main(): Promise<void> {
   get('space-picker').hidden = false
   get('status').hidden = true
   get('work').hidden = false
+  get('terminal-list').hidden = true
+  get('show-orchestrator').textContent = 'Orchestrator'
+  get('show-commands').textContent = 'Commands'
   get('show-board').textContent = 'Board'
   get('show-board').removeAttribute('disabled')
   get('show-board').onclick = () => history.navigate(boardRoute())

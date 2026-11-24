@@ -850,8 +850,9 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
       : { space: chosenSpace, page: 'board', tab: 'board', boardTask: id }),
     openTicket: id => navigation?.navigate({ space: chosenSpace, page: 'board', tab: 'board', boardTask: id }),
     openAgent: async id => {
+      const route = navigation?.route
       await screen?.refresh()
-      paneControls?.open(id)
+      if (route === navigation?.route) paneControls?.open(id)
     },
     openWorktree: id => navigation?.navigate({ space: chosenSpace, page: 'terminals', tab: 'terminals', worktree: id }),
     openActivity: card => openCard(target.id, card),

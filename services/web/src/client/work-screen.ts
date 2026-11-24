@@ -46,7 +46,6 @@ interface Selection {
   repository?: string | null
   worktree?: string | null
   terminal?: string | null
-  worktree?: string | null
   streamEnded?: boolean
 }
 
