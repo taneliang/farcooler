@@ -1,6 +1,7 @@
 use super::{Answer, BLIND, FLAG, Held, Leader, Lineage, ask_blocking, signal_group};
 #[cfg(target_os = "macos")]
 use super::responsibility;
+use crate::proc_table::{ProcessState, process_state};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -47,7 +48,8 @@ fn a_hold_stops_continues_and_ends_its_agents_group() {
     assert!(ticks(h.dir.path()) > at, "and continued");
     assert_eq!(ask_blocking(&h.socket, "end", Duration::from_secs(30)), Answer::Said("ended".into()));
     assert!(!h.socket.exists(), "the socket goes once the group is empty");
-    assert!(!alive(job));
+    // kill(pid, 0) succeeds for an unreaped zombie, even though the job has exited.
+    assert!(process_state(job) == ProcessState::Gone, "the job ended with the group");
     assert_eq!(h.child.wait().unwrap().code(), Some(128 + libc::SIGTERM), "the agent's status, as a shell reports it");
     assert_eq!(ask_blocking(&h.socket, "stop", Duration::from_secs(1)), Answer::Gone, "an ended hold stops nothing");
 }
@@ -58,9 +60,11 @@ fn a_hold_stops_continues_and_ends_its_agents_group() {
 fn an_agent_that_exits_takes_its_group_with_it() {
     let mut h = hold("/bin/sleep 30 & echo $! > job; while [ ! -f go ]; do sleep 0.01; done; exit 7");
     let job = pid_in(h.dir.path(), "job");
+    let before_exit = process_state(job);
     std::fs::write(h.dir.path().join("go"), "").unwrap();
     assert_eq!(h.child.wait().unwrap().code(), Some(7));
-    assert!(!alive(job), "the job it left in its group ended");
+    assert!(before_exit == ProcessState::Running, "the job was alive before the agent exited");
+    assert!(process_state(job) == ProcessState::Gone, "the job it left in its group ended");
     assert!(!h.socket.exists());
 }
 
