@@ -28,7 +28,7 @@ impl Session {
     }
 }
 
-pub fn task_reorder_request(task: Uuid, anchor: Uuid, after: bool, actor: String) -> farcooler_protocol::v1::Request {
+fn task_reorder_request(task: Uuid, anchor: Uuid, after: bool, actor: String) -> farcooler_protocol::v1::Request {
     use farcooler_protocol::v1::{Request, TaskReorder, task_reorder::Placement};
     let anchor = bytes::Bytes::copy_from_slice(anchor.as_bytes());
     Request {

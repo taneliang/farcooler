@@ -28,7 +28,6 @@ mod changes;
 mod web_board;
 mod web_review;
 mod board_order;
-pub use board_order::task_reorder_request;
 mod work;
 pub mod workflow;
 mod link;
