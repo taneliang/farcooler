@@ -925,6 +925,18 @@ async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output(
         std::fs::write(tree.join("uncommitted.txt"), b"keep this").unwrap();
         orphan_trees.push(tree);
     }
+    // A checkout with a separate Git directory also has a .git file, but
+    // it has no linked-worktree registration and is outside the sweep.
+    let separate = runtime.root.join(format!("tree-wf1-{}", "c".repeat(64)));
+    let separate_git = dir.path().join("separate.git");
+    adapters::git(&runtime.repository(), &["clone", "--separate-git-dir", separate_git.to_str().unwrap(),
+        ".", separate.to_str().unwrap()]).await.unwrap();
+    let separate_output = separate.join(layouts[0].0);
+    std::fs::create_dir_all(separate_output.parent().unwrap()).unwrap();
+    std::fs::write(&separate_output, layouts[0].1).unwrap();
+    let dep = separate_output.with_extension("d");
+    std::fs::write(&dep, format!("{}: src/lib.rs\n\n{}: src/lib.rs\n",
+        dep.display(), separate_output.display())).unwrap();
     assert_eq!(runtime.state("w").unwrap().unwrap().items[&group].phase, Phase::Running);
     // Even in the absence of a process lock, the running group's state protects real artifacts.
     let live_output = active_tree.join(layouts[0].0);
@@ -948,6 +960,7 @@ async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output(
     let reader = File::open(orphan_trees[0].join("uncommitted.txt")).unwrap();
     let lock = runtime.tree_lock(&orphan_trees[1]).read_owned().await;
     runtime.pump(100).await.unwrap();
+    assert_eq!(std::fs::read(&separate_output).unwrap(), layouts[0].1);
     let held_deadline = runtime.orphan_cleanup_retries[&orphan_trees[0]];
     let lock_deadline = runtime.orphan_cleanup_retries[&orphan_trees[1]];
     assert!(held_deadline.duration_since(lock_deadline) > Duration::from_secs(60));

@@ -94,8 +94,7 @@ impl Exec {
                 || !tree.join(".git").symlink_metadata().is_ok_and(|m| m.is_file()) {
                 continue;
             }
-            let Ok(top) = crate::git::git(tree, &["rev-parse", "--show-toplevel"]).await else { continue };
-            if !top.ok || Path::new(top.stdout.trim_end()) != tree { continue; }
+            if !registered_private_checkout(tree).await { continue; }
             let held = Arc::new(CleanupFences { _tree: guard, _repository: None });
             for path in paths {
                 let mut retry = None;
@@ -389,6 +388,19 @@ impl Exec {
             released.map_err(|e| format!("{OUTPUT_INTERRUPTED}: {e}"))
         }).await.map_err(|e| e.to_string())?
     }
+}
+
+async fn registered_private_checkout(tree: &Path) -> bool {
+    let Ok(result) = crate::git::git(tree, &["rev-parse", "--show-toplevel", "--absolute-git-dir"]).await else {
+        return false;
+    };
+    let mut lines = result.stdout.lines();
+    if !result.ok || lines.next().map(Path::new) != Some(tree) { return false; }
+    let Some(git_dir) = lines.next().map(Path::new) else { return false; };
+    // A standalone repository with a separate Git directory also has a .git
+    // file. Only a linked worktree has a registration pointing back to it.
+    let Ok(link) = std::fs::read_to_string(git_dir.join("gitdir")) else { return false; };
+    git_dir.join(link.trim_end()).canonicalize().is_ok_and(|path| path == tree.join(".git"))
 }
 
 async fn check_output_index(tree: &Path, relative: &Path, check_staged: bool) -> std::result::Result<(), String> {
