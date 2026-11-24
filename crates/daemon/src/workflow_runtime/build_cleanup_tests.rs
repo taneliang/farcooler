@@ -929,8 +929,10 @@ async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output(
     // it has no linked-worktree registration and is outside the sweep.
     let separate = runtime.root.join(format!("tree-wf1-{}", "c".repeat(64)));
     let separate_git = dir.path().join("separate.git");
-    adapters::git(&runtime.repository(), &["clone", "--separate-git-dir", separate_git.to_str().unwrap(),
-        ".", separate.to_str().unwrap()]).await.unwrap();
+    std::fs::create_dir(&separate).unwrap();
+    adapters::git(&separate, &["init", "--separate-git-dir", separate_git.to_str().unwrap()]).await.unwrap();
+    adapters::git(&separate, &["-c", "commit.gpgsign=false", "-c", "user.name=Test",
+        "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "standalone checkout"]).await.unwrap();
     let separate_output = separate.join(layouts[0].0);
     std::fs::create_dir_all(separate_output.parent().unwrap()).unwrap();
     std::fs::write(&separate_output, layouts[0].1).unwrap();
