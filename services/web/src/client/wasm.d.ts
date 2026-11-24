@@ -93,6 +93,9 @@ declare module 'fc-web' {
     answerDecision(task: string, body: string): Promise<void>
     /// The plan (plan.ts): `plan_json`, the shape `farcooler plan --json` prints.
     plan(workspace: string): Promise<string>
+    boardOrder(workspace: string): Promise<string | undefined>
+    boardOrderLabel(): string | undefined
+    reorderTask(task: string, anchor: string, after: boolean): Promise<void>
     /// `workspace.list` as `workspace_json`.
     workspaces(): Promise<string>
     /// The plan's edits, each the CLI's own RPC. A refusal rejects with message

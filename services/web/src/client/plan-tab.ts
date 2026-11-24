@@ -30,6 +30,7 @@ export interface PlanActions {
   /// Open an agent's chat; false when it has none.
   openAgent(agent: { id: string; name: string; terminal?: string | null }): boolean | Promise<boolean>
   openList(kind: CountKind): void
+  openOrder(workspace: string, label: string): void
 }
 
 /// `current` is the connection as it is now, or null when there is none.
@@ -61,6 +62,8 @@ export function startPlanTab(
     keepAll: workspace => live().keepAllRulings(workspace),
     show: view => {
       last = view
+      const label = current()?.boardOrderLabel()
+      const workspace = view.workspace
       drawn = renderPlan(
         root,
         view,
@@ -70,6 +73,7 @@ export function startPlanTab(
           quote: actions.quote,
           openAgent: actions.openAgent,
           openList: actions.openList,
+          order: workspace && label ? { label, open: () => actions.openOrder(workspace, label) } : undefined,
           edit: id => board.edit(id),
           type: draft => board.type(draft),
           save: () => void board.save(),

@@ -84,6 +84,28 @@ pub(crate) async fn dispatch(
             Ok(result::Value::Task(crate::task_ops::set_status(svc, watcher, &p)?))
         }
 
+        "task.reorder" => {
+            use pb::task_reorder::Placement;
+            use crate::task_ops::{actor_from_wire, required_id};
+            let Some(request::Payload::TaskReorder(p)) = req.payload else {
+                return Err(DomainError::InvalidArgument { what: "payload" });
+            };
+            let (anchor, after) = match p.placement {
+                Some(Placement::Before(id)) => (required_id(&id)?, false),
+                Some(Placement::After(id)) => (required_id(&id)?, true),
+                None => return Err(DomainError::InvalidArgument { what: "placement" }),
+            };
+            let actor = actor_from_wire(&p.actor)?;
+            let id = required_id(&p.task_id)?;
+            if svc.store.reorder_task(id, anchor, after)? {
+                let task = svc.store.get_task(id)?;
+                watcher.announce_task_changed(&task, None, actor);
+                watcher.announce_plan_changed(task.workspace_id, actor);
+                if let Some(handle) = svc.workflow_handle() { let _ = handle.reconcile().await; }
+            }
+            Ok(result::Value::Empty(pb::Empty {}))
+        }
+
         "task.note" => {
             let Some(request::Payload::TaskNoteAppend(p)) = req.payload else {
                 return Err(DomainError::InvalidArgument { what: "payload" });
@@ -128,7 +150,9 @@ pub(crate) async fn dispatch(
             let Some(request::Payload::TaskSetLine(p)) = req.payload else {
                 return Err(DomainError::InvalidArgument { what: "payload" });
             };
-            Ok(result::Value::TaskList(crate::task_starts::set_line(svc, watcher, &p)?))
+            let tasks = crate::task_starts::set_line(svc, watcher, &p)?;
+            if !p.task_ids.is_empty() && let Some(handle) = svc.workflow_handle() { let _ = handle.reconcile().await; }
+            Ok(result::Value::TaskList(tasks))
         }
 
         "task.worker" => {
@@ -174,7 +198,7 @@ mod tests {
             assert!(source.contains(&format!("\"{route}\" => {{")), "no arm for {route}");
             seen += 1;
         }
-        assert_eq!(seen, 12, "the board's routes");
+        assert_eq!(seen, 13, "the board's routes");
     }
 }
 

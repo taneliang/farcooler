@@ -14,6 +14,7 @@ const DAY: f64 = 86_400.0;
 const DONE_FLOOR: usize = 3;
 const SECTION_LIMIT: usize = 10;
 const LIVE_STATES: [&str; 3] = ["running", "starting", "unknown"];
+const REORDER_FAILED: &str = "Couldn’t reorder this ticket.";
 
 #[derive(Clone, Copy)]
 struct Status {
@@ -117,6 +118,17 @@ struct Board<T, U> {
 
 fn columns<T>() -> Vec<Column<T>> {
     STATUSES.iter().map(|status| Column { status: status.wire, rows: Vec::new() }).collect()
+}
+
+/// The web board sheet uses the runner's order within each status.
+pub(crate) fn order_view(tasks: &[farcooler_protocol::v1::Task], may_reorder: bool) -> Value {
+    let sections = STATUSES.iter().filter(|status| matches!(status.wire, "backlog" | "todo")).map(|status| {
+        let rows: Vec<_> = tasks.iter().filter(|task| crate::tasks_json::status_word(task.status) == status.wire)
+            .map(|task| json!({"task": crate::session::uuid_of(&task.id), "key": task.key, "title": task.title}))
+            .collect();
+        json!({"title": status.apple, "rows": rows, "draggable": may_reorder && rows.len() > 1})
+    }).collect::<Vec<_>>();
+    json!({"sections": sections, "dragTitle": "Drag to reorder", "failure": REORDER_FAILED})
 }
 
 #[derive(serde::Deserialize, Serialize)]
@@ -775,6 +787,7 @@ fn present(asked: &Value) -> Option<Value> {
         }),
         "statuses" => json!(STATUSES.map(|status| status.view(asked["android"] == true))),
         "board" => json!(board(asked["tasks"].as_array()?, asked["android"] == true)?),
+        "reorder_failed" => json!(REORDER_FAILED),
         "clock" => {
             let status = STATUSES.iter().find(|status| asked["status"] == status.wire)?;
             json!(clock(*status, asked["now"].as_f64()?, asked["since"].as_f64()?,
@@ -1162,6 +1175,21 @@ mod tests {
             "op": "prune_marks", "floor": older, "opened": { "old": older, "new": now },
         }});
         assert_eq!(project(&request), Some(json!({"new": now})));
+    }
+
+    #[test]
+    fn board_order_view_keeps_board_order_and_shares_reorder_copy() {
+        use farcooler_protocol::v1::{Task, TaskStatus};
+        let task = |key: &str, status: TaskStatus| Task { key: key.into(), status: status as i32, ..Default::default() };
+        let tasks = [task("ov-3", TaskStatus::Todo), task("ov-2", TaskStatus::Backlog), task("ov-1", TaskStatus::Todo)];
+        let view = order_view(&tasks, true);
+        assert_eq!(view["sections"][0]["rows"][0]["key"], "ov-2");
+        assert_eq!(view["sections"][0]["draggable"], false);
+        assert_eq!(view["sections"][1]["rows"][0]["key"], "ov-3");
+        assert_eq!(view["sections"][1]["rows"][1]["key"], "ov-1");
+        assert_eq!(view["sections"][1]["draggable"], true);
+        assert_eq!(order_view(&tasks, false)["sections"][1]["draggable"], false);
+        assert_eq!(project(&json!({"schema": 1, "task_board": {"op": "reorder_failed"}})), Some(view["failure"].clone()));
     }
 
     #[test]

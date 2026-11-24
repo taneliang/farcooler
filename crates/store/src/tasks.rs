@@ -36,6 +36,10 @@ use crate::models::{
 };
 use crate::store::Store;
 
+mod order;
+pub(crate) use order::{BOARD_ORDER, BOARD_ORDER_JOIN, BOARD_ORDER_SCHEMA, BOARD_ORDER_TABLE,
+    LEGACY_BOARD_ORDER, migration_board_order, prioritize_board_tasks};
+
 /// A repository's task key prefix, from its name: what its Main starts with.
 ///
 /// Initials for a multi-word name, the first two letters otherwise. Short
@@ -516,18 +520,15 @@ impl Store {
     /// Every task on one board, or on every board in a repository,
     /// optionally narrowed to one status.
     ///
-    /// Ordered by when each was created, so a listing read twice reads the
-    /// same both times. `rowid` breaks a tie between two tasks created in the
-    /// same millisecond, which is why the order does not depend on how coarse
-    /// the clock happens to be.
+    /// Manual board order, with unplaced cards following in filing order.
     pub fn list_tasks(&self, scope: TaskScope, status: Option<TaskStatus>) -> Result<Vec<Task>> {
         let (within, id) = scope.clause();
         let conn = self.conn();
         let mut stmt = conn
             .prepare(&format!(
-                "SELECT {TASK_COLUMNS} FROM tasks
+                "SELECT {TASK_COLUMNS} FROM tasks {BOARD_ORDER_JOIN}
                   WHERE {within} AND (?2 IS NULL OR status = ?2)
-                  ORDER BY created_at, rowid"
+                  ORDER BY {BOARD_ORDER}"
             ))
             .map_err(map_err)?;
         let rows = stmt

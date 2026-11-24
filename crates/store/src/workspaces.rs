@@ -476,6 +476,7 @@ impl Store {
                 // A line is one board's (`waits`), so a task leaves its
                 // place in one when it leaves the board.
                 crate::waits::leave_line(&tx, task, actor)?;
+                tx.execute("DELETE FROM task_board_positions WHERE task_id = ?1", [uuid_blob(task)]).map_err(map_err)?;
                 tx.execute(
                     "UPDATE tasks SET workspace_id = ?1, resource_version = resource_version + 1
                       WHERE id = ?2",

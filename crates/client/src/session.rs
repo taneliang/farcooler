@@ -27,6 +27,8 @@ mod board_reads;
 mod changes;
 mod web_board;
 mod web_review;
+mod board_order;
+pub use board_order::task_reorder_request;
 mod work;
 pub mod workflow;
 mod link;
@@ -1167,7 +1169,14 @@ impl Session {
         workspace: Option<Uuid>,
     ) -> Result<serde_json::Value, SessionError> {
         require(self.capabilities(), farcooler_protocol::capability::TASKS, "task.list")?;
-        let (mut list, required) = task_list_request(self.capabilities(), repository, workspace);
+        let (list, required) = task_list_request(self.capabilities(), repository, workspace);
+        let whole = self.task_pages(repository, list, required).await?;
+        Ok(crate::tasks_json::board_json(&whole, now_millis()))
+    }
+
+    async fn task_pages(
+        &self, target: Uuid, mut list: farcooler_protocol::v1::TaskListRequest, required: Vec<String>,
+    ) -> Result<farcooler_protocol::v1::TaskList, SessionError> {
         // A page at a time (ov-1298): a long-lived board no longer fits one frame. A runner too old to page
         // answers with every task and no next page. A page whose cursor went (its task deleted or moved
         // between reads) is refused, and the read starts again, once.
@@ -1176,7 +1185,7 @@ impl Session {
         loop {
             list.page_after = Some(whole.next_page_after.take().unwrap_or_default());
             let payload = request::Payload::TaskList(list.clone());
-            let page = match self.value_requiring("task.list", Some(repository), Some(payload), required.clone()).await {
+            let page = match self.value_requiring("task.list", Some(target), Some(payload), required.clone()).await {
                 Ok(result::Value::TaskList(page)) => page,
                 Ok(other) => return Err(wrong("task_list", &other)),
                 Err(_) if !restarted && list.page_after.as_ref().is_some_and(|a| !a.is_empty()) => {
@@ -1193,7 +1202,7 @@ impl Session {
                 None => break,
             }
         }
-        Ok(crate::tasks_json::board_json(&whole, now_millis()))
+        Ok(whole)
     }
 
     /// One task with its whole record, in the shape `farcooler task show

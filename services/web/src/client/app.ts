@@ -934,6 +934,8 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     },
   })
   ticketBoard = board
+  const ticketList = () => planList ??= new PlanList($('plan-list') as HTMLDialogElement, $, card =>
+    openCard(frontRunner, { id: card.task, key: card.key, title: '' }))
   planTab = startPlanTab($('plan'), target.label, liveRunner, chosenSpace, {
     openCard: card => openCard(target.id, { id: card.task, key: card.key, title: '' }),
     quote: async text => {
@@ -946,8 +948,16 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     openList: kind => {
       const found = planTab?.listing(kind)
       if (!found) return
-      planList ??= new PlanList($('plan-list') as HTMLDialogElement, $, card => openCard(target.id, { id: card.task, key: card.key, title: '' }))
-      planList.open(found.plan, found.view, kind, found.count)
+      ticketList().open(found.plan, found.view, kind, found.count)
+    },
+    openOrder: (workspace, label) => {
+      const runner = () => {
+        const link = liveRunner()
+        if (!link) throw new Error('closed')
+        return link
+      }
+      ticketList().openOrder(label, target.label, () => runner().boardOrder(workspace),
+        (task, anchor, after) => runner().reorderTask(task, anchor, after))
     },
   }, planView, raw => {
     if (navigation?.route.page !== 'plan' || !raw) return

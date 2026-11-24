@@ -899,7 +899,12 @@ impl Runtime {
         for workspace in workspaces {
             let published = if self.service_mode { self.store.workflow_configuration(workspace)? } else { None };
             let mut uncertain = BTreeSet::new();
-            for stored in self.store.workflow_dispatch_effects(workspace, &[])? {
+            let mut effects = self.store.workflow_dispatch_effects(workspace, &[])?;
+            if effects.iter().filter(|stored| stored.can_wait_for_slot()).take(2).count() == 2 {
+                let state = self.state(workspace)?.ok_or(Error::Refused("missing state"))?;
+                self.order_effects(&state, &mut effects)?;
+            }
+            for stored in effects {
                 if self.shutdown.as_ref().is_some_and(|s| *s.borrow()) { return Ok(()); }
                 let effect = stored.effect;
                 if stored.dispatch_state == "uncertain" { uncertain.insert(effect.id.clone()); }

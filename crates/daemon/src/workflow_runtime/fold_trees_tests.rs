@@ -1,6 +1,6 @@
 //! Finished groups release verified build output and retain their linked checkouts.
 use super::*;
-use super::coding_verbs_tests::{at_join, batched_push, command, lander, phase_of, until};
+use super::coding_verbs_tests::{at_join, batched_push, command, lander, outbox, phase_of, until};
 
 /// The group a ticket ran in, live or archived.
 fn group_of(state: &State) -> String {
@@ -22,6 +22,46 @@ fn trees(runtime: &Runtime) -> Vec<String> {
         .filter(|n| n.starts_with("tree-")).collect();
     names.sort();
     names
+}
+
+#[tokio::test]
+async fn an_interrupted_fold_checkout_retries_without_stranding_the_group() {
+    use std::os::unix::fs::PermissionsExt;
+    struct RestoreGit;
+    impl Drop for RestoreGit {
+        fn drop(&mut self) { crate::git::PROGRAM.with(|p| *p.borrow_mut() = None); }
+    }
+
+    let (dir, mut runtime) = lander("pass").await;
+    let definition = batched_push(&runtime, "any", 5000);
+    at_join(&mut runtime, "one", &definition).await;
+    let wrapper = dir.path().join("git-interrupt-checkout.py");
+    let marker = dir.path().join("checkout-interrupted");
+    std::fs::write(&wrapper, format!(r#"#!/usr/bin/python3
+import os, pathlib, subprocess, sys
+args = sys.argv[1:]
+marker = pathlib.Path({marker:?})
+if not marker.exists():
+    if args[:2] == ['worktree', 'add'] and '--no-checkout' not in args:
+        # A killed worktree add can leave Git's initializing lock behind.
+        subprocess.check_call(['/usr/bin/git', *args[:2], '--no-checkout',
+                               '--lock', '--reason', 'initializing', *args[2:]])
+    elif args[:1] != ['read-tree']:
+        os.execv('/usr/bin/git', ['/usr/bin/git', *args])
+    marker.write_text('interrupted')
+    sys.exit(128)
+os.execv('/usr/bin/git', ['/usr/bin/git', *args])
+"#, marker = marker.to_str().unwrap())).unwrap();
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let _restore = RestoreGit;
+    crate::git::PROGRAM.with(|p| *p.borrow_mut() = Some(wrapper.into_os_string()));
+
+    assert!(command(&runtime, Command::Queue { item: "one".into() }).result.is_ok());
+    let state = until(&mut runtime, |s| matches!(phase_of(s, "one"), Some(Phase::Done | Phase::Failed))).await;
+    assert!(marker.exists(), "the checkout fault was exercised");
+    assert_eq!(phase_of(&state, "one"), Some(Phase::Done));
+    assert_eq!(outbox(&runtime, StageKind::Fold), 2);
+    assert_eq!(outbox(&runtime, StageKind::Build), 1);
 }
 
 #[tokio::test]

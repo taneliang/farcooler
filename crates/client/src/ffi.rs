@@ -1971,7 +1971,7 @@ async fn dispatch(
         //
         // A phone reads a board, goes from a card to the agent on it, and
         // answers a decision (`task.note`, answers only). It never creates,
-        // edits, moves or deletes a task: the orchestrator owns the task list
+        // edits, re-statuses, transfers or deletes a task: the orchestrator owns those changes
         // (ov-184), and works it through the CLI. So `task.create`,
         // `task.update`, `task.set_status`, `task.move` and `task.block` have
         // no arm here, and come back as `unknown method`.
@@ -2049,6 +2049,13 @@ async fn dispatch(
         // You and wakes the agent waiting on it. Always as `user`; see
         // `task_note_of`.
         "task.note" => Ok(session.task_note(task_note_of(args)?).await?),
+        "task.reorder" => {
+            let task = id("task")?;
+            let anchor = id("anchor")?;
+            let after = args["after"].as_bool().ok_or_else(|| SessionError::Protocol("missing placement".into()))?;
+            session.reorder_task(task, anchor, after).await?;
+            Ok(json!({}))
+        }
 
         // Ruling 8: a phone may start a workspace's orchestrator. `{workspace,
         // harness, replace?}`; `replace` stops a live one first.

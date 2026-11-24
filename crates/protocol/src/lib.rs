@@ -505,6 +505,7 @@ pub mod capability {
     /// that reads it absent refuses before sending, saying the runner needs
     /// an update to record when a task starts.
     pub const TASK_WAITS: &str = "task_waits";
+    pub const BOARD_ORDER: &str = "board_order";
     /// Subagents as task workers (ov-213): `task.worker` and `Task.workers`.
     ///
     /// Apart from `TASK_WAITS` so either half can ship alone. A CLI that
@@ -820,7 +821,7 @@ pub mod capability {
             LAUNCH_PROMPT, TERMINAL_TASK, WORKTREE_FORK_ONLY, WORKSTREAMS, ORCHESTRATOR_HANDOFF,
             NEEDS_YOU, WAKE_ON_ANSWER, STREAM_SIZE_MARKERS, TASK_NOTICES, REPORT, AGENT_USAGE,
             AGENTS_FOUND,
-            TASK_WAITS, TASK_WORKERS, NOTICE_TASK, BOARD_READS, WORKTREE_FILES, TERMINAL_NAMES, TERMINAL_PORTS,
+            TASK_WAITS, BOARD_ORDER, TASK_WORKERS, NOTICE_TASK, BOARD_READS, WORKTREE_FILES, TERMINAL_NAMES, TERMINAL_PORTS,
             READ_ONLY_FOLDERS, BOARD_PLAN, LFS_POINTERS, BOARD_RULINGS,
             BOARD_LINE, BOARD_COST, LANDING, BOARD_RULING_ACTIONS, AGENT_ROWS, DRAFT_HOLD,
             PROJECTOR_SETTING, AGENT_COMPOSE,
@@ -1080,6 +1081,7 @@ pub mod method {
         TaskCreate = "task.create" => TASKS,
         TaskUpdate = "task.update" => TASKS,
         TaskSetStatus = "task.set_status" => TASKS,
+        TaskReorder = "task.reorder" => BOARD_ORDER,
         TaskNote = "task.note" => TASKS,
         TaskBlock = "task.block" => TASKS,
         TaskSearch = "task.search" => TASKS,

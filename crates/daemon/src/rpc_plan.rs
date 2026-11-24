@@ -113,8 +113,12 @@ pub(crate) async fn dispatch(svc: &Arc<Service>, watcher: &Arc<Watcher>, scope: 
             let Some(request::Payload::LineOrder(p)) = req.payload else { return Err(payload_missing()) };
             let workspace = required_id(&p.workspace_id)?;
             let actor = actor_from_wire(&p.actor)?;
-            svc.store.set_line_order(workspace, &ids(&p.task_ids)?, actor)?;
+            let prioritized = svc.store.set_line_order(workspace, &ids(&p.task_ids)?, actor)?;
             watcher.announce_plan_changed(workspace, actor);
+            if let Some(first) = prioritized.first() {
+                watcher.announce_task_changed(&svc.store.get_task(first.task_id)?, None, actor);
+                if let Some(handle) = svc.workflow_handle() { let _ = handle.reconcile().await; }
+            }
             let mut plan = read_plan(svc, watcher, workspace, now() - CLOSED_FOR_MS, admin, control).await?;
             overview::summarize(&mut plan);
             overview::bound_legacy(&mut plan);

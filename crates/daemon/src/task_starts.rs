@@ -36,7 +36,8 @@ pub(crate) fn pb_one(svc: &Service, task: &Task) -> Result<pb::Task> {
 
 fn with_facts(task: &Task, facts: TaskFacts, seen: &WorkerSeen) -> pb::Task {
     pb::Task {
-        wait: task.wait.map(|w| pb_wait(w, &facts)),
+        wait: task.wait.filter(|w| !matches!(w.wait, Wait::InLine(_)) || facts.position > 0)
+            .map(|w| pb_wait(w, &facts)),
         waiting_on: facts.waiting_on,
         workers: facts.workers.iter().map(|w| pb_worker(w, seen)).collect(),
         ..pb_task(task)
@@ -156,7 +157,7 @@ pub fn set_wait(svc: &Service, watcher: &Watcher, req: &pb::TaskSetWait) -> Resu
     pb_one(svc, &task)
 }
 
-/// `task.set_line`: replace one of a board's lines, whole.
+/// `task.set_line`: prioritize cards and replace manual line membership.
 ///
 /// Announces every task whose place changed: the ones named, and the ones
 /// that were in the line and aren't any more.
@@ -180,6 +181,7 @@ pub fn set_line(svc: &Service, watcher: &Watcher, req: &pb::TaskSetLine) -> Resu
         let task = if ids.contains(&task.id) { task.clone() } else { svc.store.get_task(task.id)? };
         announce(watcher, &task, actor);
     }
+    watcher.announce_plan_changed(workspace, actor);
     Ok(pb::TaskList { next_page_after: None, items: pb_tasks(svc, &in_line)?, reads: None })
 }
 

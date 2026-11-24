@@ -70,7 +70,12 @@ impl Places {
     }
     /// What `workflow get` shows for `workspace`: each pool's cap, what holds its places and what waits, with each
     /// waiting effect's place in its pool's line. Another board's effects are counted, never named.
+    #[cfg(test)]
     pub(crate) fn view(&self, workspace: &str) -> serde_json::Value {
+        self.view_with_waiting(workspace, &self.waiting)
+    }
+
+    pub(super) fn view_with_waiting(&self, workspace: &str, queue: &[Placed]) -> serde_json::Value {
         let entry = |p: &Placed| serde_json::json!({"item": p.item, "effect": p.effect, "kind": p.kind, "since_ms": p.since_ms});
         let mut view = serde_json::Map::new();
         for pool in Pool::ALL {
@@ -80,8 +85,8 @@ impl Places {
                 "holding": held.iter().filter(|p| p.workspace == workspace).map(|p| entry(p)).collect::<Vec<_>>(),
                 "elsewhere": held.iter().filter(|p| p.workspace != workspace).count()}));
         }
-        let waiting: Vec<_> = self.waiting.iter().enumerate().filter(|(_, p)| p.workspace == workspace).map(|(index, p)| {
-            let position = 1 + self.waiting[..index].iter().filter(|q| q.pool == p.pool).count();
+        let waiting: Vec<_> = queue.iter().enumerate().filter(|(_, p)| p.workspace == workspace).map(|(index, p)| {
+            let position = 1 + queue[..index].iter().filter(|q| q.pool == p.pool).count();
             let mut value = entry(p);
             value["pool"] = serde_json::json!(p.pool);
             value["position"] = serde_json::json!(position);

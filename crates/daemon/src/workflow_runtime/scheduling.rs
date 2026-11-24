@@ -1,6 +1,6 @@
 //! Owner-published automatic starts. Every transition still passes through the durable reducer.
 use super::*;
-use farcooler_workflow::scheduling::StartPolicy;
+use farcooler_workflow::scheduling::{Budget, StartPolicy};
 use std::collections::BTreeMap;
 use farcooler_store::workflow_publication::Configuration;
 
@@ -98,9 +98,26 @@ impl Runtime {
             if self.shutdown.as_ref().is_some_and(|s| *s.borrow()) { return Ok(()); }
             if self.service_mode && self.store.workflow_board_deleted(workspace)? { continue; }
             let Some(state) = scan.boards.get(workspace).and_then(|b| b.state.as_ref()) else { continue };
-            let keys: Vec<_> = state.items.keys().cloned().collect();
+            let mut keys: Vec<_> = state.items.keys().cloned().collect();
             let config = configs.get(workspace);
             let policy = config.and_then(|c| c.definition.start_policy.as_ref());
+            if let Some(policy) = policy {
+                let startable = |key: &String| {
+                    let item = &state.items[key];
+                    item.definition.is_ticket() && item.phase == Phase::WaitingApproval
+                        && policy.columns.contains(&item.definition.stages[item.stage].id)
+                };
+                let mut starts: Vec<_> = keys.iter().filter(|key| startable(key)).cloned().collect();
+                if starts.len() > 1 {
+                    let order = self.board_order(state)?;
+                    starts.sort_by_key(|key| order.get(key).copied().unwrap_or(usize::MAX));
+                    let mut ordered = starts.into_iter();
+                    // Keep the existing scan order of auto-queue commands.
+                    for key in keys.iter_mut().filter(|key| startable(key)) {
+                        *key = ordered.next().expect("one ticket per start candidate");
+                    }
+                }
+            }
             let removed_member = config.is_some_and(|c| crate::workflow_deciders::names_a_removed_member(&self.store, &c.definition).is_some());
             for key in keys {
                 let state = scan.boards[workspace].state.as_ref().unwrap();
@@ -115,14 +132,16 @@ impl Runtime {
                     let (Some(config), Some(policy)) = (config, policy) else { continue };
                     if removed_member || !item.definition.is_ticket() || item.follows.is_some() || item.phase != Phase::WaitingApproval
                         || !policy.columns.contains(&item.definition.stages[item.stage].id) { continue; }
-                    // All published machine constraints apply together: fixed capacity cannot bypass a load guard.
+                    // Active runs consume budget even while waiting for an execution slot.
+                    // All published machine constraints apply together.
                     if start_gap_ms.is_some_and(|gap| scan.last_start_ms.is_some_and(|last|
-                        now_ms < last || (now_ms.saturating_sub(last) as u64) < gap)) || !budgets.iter().all(|b| b.permits(busy, load))
+                        now_ms < last || (now_ms.saturating_sub(last) as u64) < gap))
+                        || !budgets.iter().all(|b| b.permits(busy, load))
                         || file_conflict(&scan.boards, &configs, workspace, &key, policy)
                         || !self.dependencies_ready(workspace, &key, policy, state)? { continue; }
                     let ordinal = state.items.values().filter(|i| !i.definition.is_ticket() && i.group_of.is_none()).count() + state.archive.len();
                     Command::Start { start_load: Some(farcooler_workflow::StartLoad { sample_milli: load,
-                        below_milli: budgets.iter().filter_map(|b| match b { farcooler_workflow::scheduling::Budget::Load { below_milli, .. } => Some(*below_milli), _ => None }).min() }), item: key.clone(), definition: config.definition.clone(), policy_pin: config.pin.clone(),
+                        below_milli: budgets.iter().filter_map(|b| match b { Budget::Load { below_milli, .. } => Some(*below_milli), _ => None }).min() }), item: key.clone(), definition: config.definition.clone(), policy_pin: config.pin.clone(),
                         resource: Exec::item_resource(workspace, &key), dependencies: policy.dependencies.get(&key).cloned().unwrap_or_default(),
                         initial_candidate: matches!(config.definition.stages[0].kind, StageKind::Tracker).then(|| config.pin.clone()),
                         models: policy.models(&config.definition, ordinal), tree: None, with: vec![] }
@@ -162,9 +181,8 @@ impl Runtime {
     fn dependencies_ready(&self, workspace: &str, key: &str, policy: &StartPolicy, state: &State) -> Result<bool> {
         if policy.dependencies.get(key).is_some_and(|deps| deps.iter().any(|d| !finished(state, d))) { return Ok(false); }
         if !self.service_mode { return Ok(true); }
-        let tasks = self.store.tasks_with_key(None, key).map_err(|_| Error::Refused("task blockers unreadable"))?;
-        let Some(task) = tasks.iter().find(|t| t.workspace_id.to_string() == workspace) else { return Ok(false) };
-        for block in self.store.blocks_for(task.id).map_err(|_| Error::Refused("task blockers unreadable"))? {
+        let Some(task) = self.store.workflow_item_task(workspace, key)? else { return Ok(false) };
+        for block in self.store.blocks_for(task).map_err(|_| Error::Refused("task blockers unreadable"))? {
             let blocker = self.store.get_task(block.blocked_by).map_err(|_| Error::Refused("task blocker missing"))?;
             if blocker.status != farcooler_store::models::TaskStatus::Done { return Ok(false); }
         }
@@ -194,7 +212,6 @@ fn file_conflict(boards: &BTreeMap<String, Board>, configs: &BTreeMap<String, Co
 #[cfg(test)]
 mod tests {
     use super::*;
-    use farcooler_workflow::scheduling::Budget;
     use farcooler_protocol::workflow_commands::{Action, Mutation};
     fn policy(budget: Budget) -> StartPolicy {
         StartPolicy { columns: ["todo".into()].into(), budget, files: Default::default(), dependencies: Default::default(),
@@ -213,8 +230,8 @@ mod tests {
         runtime.track_tickets(&keys.iter().map(|k| ("w".into(), (*k).into(), "todo".into())).collect::<Vec<_>>()).unwrap();
     }
     fn complete(runtime: &Runtime, key: &str, time: i64) {
-        let effect = runtime.store.workflow_outbox("w").unwrap().into_iter()
-            .find(|e| e.active && e.effect.item == key).unwrap().effect;
+        let effect = runtime.store.workflow_dispatch_effects("w", &[]).unwrap().into_iter()
+            .find(|e| e.effect.item == key).unwrap().effect;
         let state = runtime.state("w").unwrap().unwrap();
         let claim = runtime.store.workflow_claim_effect("w", &effect.id, "fake-worker", state.revision,
             state.epoch, time, time + 1000).unwrap().unwrap();
@@ -225,6 +242,145 @@ mod tests {
             fence: effect.fence, outcome: Outcome::Passed(evidence) }, Grant::Operation { effect: effect.id,
                 run: effect.run, fence: effect.fence }, time).unwrap().result.is_ok());
     }
+    fn todo_cards(runtime: &Runtime, titles: &[&str]) -> (String, Vec<farcooler_store::models::Task>) {
+        use farcooler_store::models::{Actor, TaskStatus};
+        let host = Uuid::now_v7();
+        let root = runtime.store.create_repository_root(host, "/repos/ordered", 0).unwrap();
+        let repo = runtime.store.create_repository(host, root.id, "ordered", "/repos/ordered/.git", "").unwrap();
+        let workspace = runtime.store.ensure_main_workspace(repo.id).unwrap().id;
+        let tasks = titles.iter().map(|title| {
+            let task = runtime.store.create_task(workspace, title, Actor::User).unwrap();
+            runtime.store.set_task_status(task.id, TaskStatus::Todo, Actor::User).unwrap()
+        }).collect();
+        (workspace.to_string(), tasks)
+    }
+
+    fn build_only(budget: Budget) -> Definition {
+        let mut definition = coding_definition(false);
+        definition.stages.retain(|stage| stage.kind == StageKind::Build);
+        definition.start_policy = Some(policy(budget));
+        definition
+    }
+
+    #[tokio::test]
+    async fn automatic_starts_follow_the_board_order_out_of_key_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+        let (workspace, tasks) = todo_cards(&runtime, &["first filed", "second filed", "third filed"]);
+        publish_on(&runtime, &workspace, build_only(Budget::Fixed(3)));
+        runtime.track_tickets(&tasks.iter().map(|task| (workspace.clone(), task.key.clone(), "todo".into())).collect::<Vec<_>>()).unwrap();
+        let id = Uuid::parse_str(&workspace).unwrap();
+        runtime.store.set_line(id, farcooler_store::waits::TaskLine::Agent,
+            &[tasks[1].id, tasks[2].id], farcooler_store::models::Actor::Manager).unwrap();
+        runtime.store.reorder_task(tasks[2].id, tasks[1].id, false).unwrap();
+
+        runtime.schedule_with_load(std::slice::from_ref(&workspace), 100, Some(0)).unwrap();
+        let started: Vec<_> = runtime.events(&workspace).unwrap().into_iter().filter_map(|input| {
+            if let Command::Start { item, .. } = input.command { Some(item) } else { None }
+        }).collect();
+        assert_eq!(started, [2, 1, 0].map(|index| tasks[index].key.clone()));
+    }
+
+    #[tokio::test]
+    async fn full_pools_do_not_return_start_allowances_on_later_scans() {
+        for (stage, pool, cap) in [(StageKind::Build, Pool::Agent, 4), (StageKind::Provision, Pool::Work, 2)] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+            runtime.set_effect_cap(4);
+            runtime.places().work = 2;
+            let mut definition = coding_definition(false);
+            definition.stages.retain(|s| s.kind == stage);
+            let budget = cap + 1;
+            definition.start_policy = Some(policy(Budget::Fixed(budget)));
+            publish(&runtime, definition);
+            let tickets = ["a", "b", "c", "d", "e", "f", "g", "h"];
+            track(&runtime, &tickets);
+            let boards = ["w".into()];
+            let mut running = Vec::new();
+            let mut futures = Vec::new();
+            let mut count = 0;
+            runtime.launch_ready(&boards, 100, &mut running, &mut futures, &mut count).await.unwrap();
+            assert_eq!(running.len(), cap);
+            assert!(running.iter().all(|job| job.pool == Some(pool)));
+            assert_eq!(runtime.places().waiting.len(), 1);
+
+            for time in [1100, 61_100, 121_100] {
+                runtime.launch_ready(&boards, time, &mut running, &mut futures, &mut count).await.unwrap();
+                let state = runtime.state("w").unwrap().unwrap();
+                assert_eq!(state.items.values().filter(|item| active(item)).count(), budget,
+                    "{pool:?} waiters still count against the fixed budget at {time}");
+                for key in &tickets[budget..] {
+                    assert!(state.items[*key].definition.is_ticket(), "{key} should still be in To Do");
+                }
+                assert_eq!(runtime.places().waiting.len(), 1);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_reordered_waiting_build_gets_the_next_slot_without_preempting_the_holder() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+        runtime.set_effect_cap(1);
+        let (workspace, tasks) = todo_cards(&runtime, &["holder", "old waiter", "new waiter", "still To Do"]);
+        let [holder, old, new, todo] = tasks.as_slice() else { unreachable!() };
+        let boards = std::slice::from_ref(&workspace);
+        let definition = build_only(Budget::Fixed(3));
+        let new_item = new.id.to_string();
+        for item in [&holder.key, &old.key, &new_item] {
+            super::super::concurrency_tests::enqueue_item(&mut runtime, &workspace, item, definition.clone());
+        }
+        let mut running = Vec::new();
+        let mut futures = Vec::new();
+        let mut count = 0;
+        runtime.launch_ready(boards, 100, &mut running, &mut futures, &mut count).await.unwrap();
+        assert_eq!(running[0].effect.item, holder.key);
+        publish_on(&runtime, &workspace, definition);
+        runtime.track_tickets(&[(workspace.clone(), todo.key.clone(), "todo".into())]).unwrap();
+
+        let position = |runtime: &Runtime, key: &str| {
+            let read = runtime.read_get(&workspace).unwrap();
+            let waiting = read["places"]["waiting"].as_array().unwrap().iter().find(|row| row["item"] == key).unwrap();
+            assert_eq!(read["state"]["items"][key]["execution"]["position"], waiting["position"]);
+            waiting["position"].as_u64().unwrap()
+        };
+        assert_eq!(position(&runtime, &old.key), 1);
+        assert_eq!(position(&runtime, &new_item), 2);
+        let revision = runtime.state(&workspace).unwrap().unwrap().revision;
+        let id = Uuid::parse_str(&workspace).unwrap();
+        runtime.store.set_line(id, farcooler_store::waits::TaskLine::Build, &[new.id, old.id],
+            farcooler_store::models::Actor::Manager).unwrap();
+        assert_eq!(position(&runtime, &new_item), 1, "the existing build line command reorders live runs");
+        assert!(runtime.store.get_task(new.id).unwrap().wait.is_none(), "the engine supplies the live wait");
+        runtime.store.reorder_task(old.id, new.id, false).unwrap();
+        assert_eq!(position(&runtime, &old.key), 1);
+        runtime.store.reorder_task(new.id, old.id, false).unwrap();
+        assert_eq!(position(&runtime, &new_item), 1);
+        assert_eq!(position(&runtime, &old.key), 2);
+        runtime.launch_ready(boards, 101, &mut running, &mut futures, &mut count).await.unwrap();
+        let state = runtime.state(&workspace).unwrap().unwrap();
+        assert_eq!(state.revision, revision);
+        assert!(state.items[&todo.key].definition.is_ticket());
+        assert_eq!(running.len(), 1);
+        assert_eq!(running[0].effect.item, holder.key);
+        assert!(!*running[0].cancel.borrow());
+
+        let finished = running.pop().unwrap();
+        runtime.activities.lock().unwrap().remove(&(workspace.clone(), finished.effect.id.clone()));
+        futures.clear();
+        let evidence = Evidence {
+            candidate: "candidate".into(), manifest: "manifest".into(), receipt: "receipt".into(),
+            policy_pin: finished.effect.policy_pin.clone(),
+        };
+        assert!(runtime.observe(&workspace, &finished.effect, Outcome::Passed(evidence), false, 102).unwrap());
+        runtime.launch_ready(boards, 103, &mut running, &mut futures, &mut count).await.unwrap();
+        assert_eq!(running.len(), 1);
+        assert_eq!(running[0].effect.item, new_item, "the later-started build wins the freed slot");
+        assert_eq!(position(&runtime, &old.key), 1);
+        assert!(!runtime.state(&workspace).unwrap().unwrap().items[&todo.key].definition.is_ticket(),
+            "the holder's completion freed one start allowance");
+    }
+
     #[tokio::test]
     async fn continuous_sweep_advances_load_gap_while_an_effect_stays_running() {
         let dir = tempfile::tempdir().unwrap();

@@ -205,7 +205,10 @@ pub(crate) fn migration(tx: &Transaction<'_>) -> rusqlite::Result<()> {
 /// Store::init and historical fixture helpers have these two equivalent meta
 /// spellings. Recognize only these exact declarations, not arbitrary SQL.
 pub(crate) fn catalog_hash(raw:&Manifest) -> String {
-    let mut objects=raw.objects.clone();
+    hash_catalog(raw.objects.clone())
+}
+
+fn hash_catalog(mut objects: BTreeMap<String, (String, String, Option<String>)>) -> String {
     if let Some((_,_,sql))=objects.get_mut("meta") {
         if sql.as_deref()==Some("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)") {
             *sql=Some("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT)".into());
@@ -213,6 +216,19 @@ pub(crate) fn catalog_hash(raw:&Manifest) -> String {
     }
     farcooler_workflow::digest(&objects)
 }
+// Registry 71 adds one board table. Compare its declaration exactly before
+// applying the existing pin to the rest of the catalog.
+fn is_board_order_table(object: &(String, String, Option<String>)) -> bool {
+    object.0 == "table" && object.1 == crate::tasks::BOARD_ORDER_TABLE
+        && object.2.as_deref() == Some(crate::tasks::BOARD_ORDER_SCHEMA)
+}
+
+fn registry71_catalog_matches(raw: &Manifest) -> bool {
+    let mut objects = raw.objects.clone();
+    objects.remove(crate::tasks::BOARD_ORDER_TABLE).as_ref().is_some_and(is_board_order_table)
+        && hash_catalog(objects) == SOURCE68_SCHEMA_HASH
+}
+
 fn field<'a>(table: &'a manifest::Table, row: &'a [Cell], name: &str) -> Result<&'a Cell> {
     table.columns.iter().position(|c| c.name==name).and_then(|i| row.get(i))
         .ok_or_else(|| Error::Refused(format!("missing source field {name}")))
@@ -224,7 +240,7 @@ fn uuid(value: &Cell) -> Result<String> {
 /// Capture before Store::open: no waits sweep or schema stamp can erase raw facts.
 pub fn preflight(conn: &Connection) -> Result<Preflight> {
     let registry = crate::migrate::read_schema_version(conn).map_err(|e| Error::Refused(e.to_string()))?;
-    if !matches!(registry,60|65..=70) { return refuse("expected raw registry 60 or an exact composed registry from 65 through 70"); }
+    if !matches!(registry,60|65..=71) { return refuse("expected raw registry 60 or an exact composed registry from 65 through 71"); }
     let unsafe_generation:bool=registry>=65 && conn.query_row("SELECT EXISTS(SELECT 1 FROM workflow_resource_generations WHERE typeof(generation)!='integer' OR generation<0 OR generation=9223372036854775807)
         OR EXISTS(SELECT 1 FROM workflow_resources r LEFT JOIN workflow_resource_generations g ON g.resource=r.resource WHERE g.resource IS NULL OR typeof(r.generation)!='integer' OR r.generation!=g.generation)",[],|r|r.get(0))?;
     if unsafe_generation {return refuse("resource generation is invalid, exhausted or inconsistent; no authority transfer");}
@@ -255,7 +271,12 @@ pub fn preflight(conn: &Connection) -> Result<Preflight> {
     let catalog=catalog_hash(&result.raw);
     // The raw60 path reads no table until the catalog is the pinned one.
     if registry==60 && catalog!=SOURCE60_SCHEMA_HASH { return Err(Error::Refused(format!("schema60 catalog differs from the pinned registry prefix: {catalog}"))); }
-    let schema_unknown=registry!=60 && catalog!=if registry>=68 {SOURCE68_SCHEMA_HASH} else {SOURCE_SCHEMA_HASH};
+    let schema_unknown = match registry {
+        60 => false,
+        65..=67 => catalog != SOURCE_SCHEMA_HASH,
+        68..=70 => catalog != SOURCE68_SCHEMA_HASH,
+        _ => !registry71_catalog_matches(&result.raw),
+    };
     if schema_unknown { result.quarantines.push(Quarantine {resource:"schema:unknown".into(),reason:"composed source schema differs from pinned schema65 catalog; retain every raw field, block release".into()}); }
     let tasks = &result.raw.tables["tasks"];
     let mut aliases: BTreeMap<(String,String),Vec<String>> = BTreeMap::new();

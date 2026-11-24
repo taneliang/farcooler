@@ -296,7 +296,10 @@ impl Exec {
         let notices:Vec<_>=deliveries.iter().map(|d|farcooler_store::workflow::WorkflowNotice {
             id:d.notice.id.clone(),revision:d.notice.revision,body:format!("{}:{:?}",d.notice.item,d.notice.point)
         }).collect();
-        let state = self.execution_state(workspace)?;
+        let (state, waiting) = match self.execution_snapshot(workspace)? {
+            Some((state, waiting)) => (Some(state), waiting),
+            None => (None, Vec::new()),
+        };
         let stops = self.plan_stops(workspace, state.as_ref());
         let budgets: std::collections::BTreeMap<_, _> = state.iter().flat_map(|s| &s.items)
             .map(|(id, item)| (id.clone(), farcooler_workflow::back_edge_budgets(item))).collect();
@@ -319,7 +322,7 @@ impl Exec {
         let mut reply = serde_json::json!({"schema":1,"configuration": self.store.workflow_configuration(workspace)?,
             "publication_history":self.store.workflow_publication_history(workspace)?,
             "orchestrator_publishes_workflow":self.store.orchestrator_publishes_workflow(workspace)?,
-            "back_edge_budgets":budgets, "places":self.places().view(workspace), "state":view, "notices":notices,"notice_deliveries":deliveries, "stops":stops});
+            "back_edge_budgets":budgets, "places":self.places().view_with_waiting(workspace, &waiting), "state":view, "notices":notices,"notice_deliveries":deliveries, "stops":stops});
         let fields = reply.as_object_mut().expect("a JSON object");
         fields.insert("disk_usage".into(), self.disk_usage_reply(workspace));
         bound_recent(fields, "build_cleanup", self.store.workflow_cleanups(workspace)?);

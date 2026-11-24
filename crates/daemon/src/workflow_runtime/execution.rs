@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use farcooler_workflow::{Dispatch, execution_view};
+use farcooler_store::workflow::StoredEffect;
 
 #[derive(Default)]
 pub(crate) struct Activity {
@@ -58,8 +59,47 @@ impl Drop for Process {
 }
 
 impl Exec {
+    pub(super) fn board_order(&self, state: &State) -> Result<BTreeMap<String, usize>> {
+        let Ok(id) = Uuid::parse_str(&state.workspace) else { return Ok(BTreeMap::new()) };
+        let keys = self.store.board_task_keys(id).map_err(Error::Domain)?;
+        let mut order: BTreeMap<_, _> = keys.into_iter().enumerate().map(|(index, key)| (key, index)).collect();
+        // A run may have been started using a card UUID or a former key.
+        for item in state.items.keys() {
+            if order.contains_key(item) { continue; }
+            let Some(id) = self.store.workflow_item_task(&state.workspace, item)? else { continue };
+            let task = self.store.get_task(id).map_err(Error::Domain)?;
+            if let Some(&position) = order.get(&task.key) { order.insert(item.clone(), position); }
+        }
+        Ok(order)
+    }
+
+    pub(super) fn order_effects(&self, state: &State, effects: &mut [StoredEffect]) -> Result<()> {
+        if effects.iter().filter(|stored| stored.can_wait_for_slot()).take(2).count() < 2 { return Ok(()); }
+        let order = self.board_order(state)?;
+        if order.is_empty() { return Ok(()); }
+        // Permute only effects competing for the same pool. Recovery, stops,
+        // and landing groups keep their original places in the scan.
+        for pool in [Pool::Agent, Pool::Work] {
+            let competing = |stored: &StoredEffect| {
+                stored.can_wait_for_slot()
+                    && state.items.get(&stored.effect.item).is_some_and(|item| Pool::of(&stored.effect, item) == Some(pool))
+            };
+            let mut candidates = effects.iter().filter(|stored| competing(stored)).cloned().collect::<Vec<_>>();
+            candidates.sort_by_key(|stored| order.get(&stored.effect.item).copied().unwrap_or(usize::MAX));
+            let mut ordered = candidates.into_iter();
+            for stored in effects.iter_mut().filter(|stored| competing(stored)) {
+                *stored = ordered.next().expect("one effect per slot in the scan");
+            }
+        }
+        Ok(())
+    }
+
     /// Same launch order and slot holders across boards. A missing runtime owner never means Running.
     pub(super) fn execution_state(&self, workspace: &str) -> Result<Option<State>> {
+        Ok(self.execution_snapshot(workspace)?.map(|(state, _)| state))
+    }
+
+    pub(super) fn execution_snapshot(&self, workspace: &str) -> Result<Option<(State, Vec<Placed>)>> {
         let Some(mut state) = self.state(workspace)? else { return Ok(None) };
         let activities = self.activities.lock().map_err(|_| Error::Refused("execution observations unavailable"))?.clone();
         let now_ms = self.clock_ms();
@@ -71,22 +111,23 @@ impl Exec {
         for board in self.store.workflow_workspaces()? {
             let running: Vec<_> = activities.keys().filter(|(workspace, _)| workspace == &board)
                 .map(|(_, effect)| effect.as_str()).collect();
-            let effects_in_board = self.store.workflow_dispatch_effects(&board, &running)?;
+            let mut effects_in_board = self.store.workflow_dispatch_effects(&board, &running)?;
             if effects_in_board.is_empty() { continue; }
             let other = if board == workspace { None } else { self.state(&board)? };
             let board_state = if board == workspace { Some(&state) } else { other.as_ref() };
+            if let Some(board_state) = board_state {
+                self.order_effects(board_state, &mut effects_in_board)?;
+            }
             for stored in effects_in_board {
                 let key = (board.clone(), stored.effect.id.clone());
-                let pool = board_state.as_ref().and_then(|s| s.items.get(&stored.effect.item))
+                let pool = board_state.and_then(|state| state.items.get(&stored.effect.item))
                     .and_then(|item| Pool::of(&stored.effect, item));
                 // A live pre-admission claim is launching, so it holds a slot rather than a place in line.
-                let claimed = stored.active && stored.dispatch_state == "claimed"
-                    && stored.lease_until.is_some_and(|t| t > now_ms);
+                let claimed = stored.has_live_claim(now_ms);
                 if (activities.contains_key(&key) || claimed) && pool.is_some() {
                     holders.push((pool, format!("{}/{}", board, stored.effect.item)));
-                } else if stored.active && pool.is_some()
-                    && matches!(stored.dispatch_state.as_str(), "pending" | "claimed") {
-                    queued.push((key.clone(), pool));
+                } else if let Some(pool) = pool && stored.can_wait_for_slot() {
+                    queued.push(Placed::new(&board, &stored.effect, pool));
                 }
                 if stored.active && board == workspace { effects.insert(stored.effect.id.clone(), stored); }
             }
@@ -124,7 +165,8 @@ impl Exec {
                 _ => Dispatch::Uncertain,
             };
             let pool = stored.and_then(|s| Pool::of(&s.effect, item));
-            let position = queued.iter().filter(|(_, p)| *p == pool).position(|(k, _)| k == &key).map(|i| i + 1);
+            let position = queued.iter().filter(|p| Some(p.pool) == pool)
+                .position(|p| p.workspace == workspace && p.effect == key.1).map(|i| i + 1);
             let holding = holders.iter().filter(|(p, _)| *p == pool).map(|(_, h)| h.clone()).collect();
             let view = execution_view(dispatch, position, holding);
             if view.phase == Phase::Running && item.group_of.is_some()
@@ -146,7 +188,7 @@ impl Exec {
                 view.heavy_lock_wait = waits.remove(&group);
             }
         }
-        Ok(Some(state))
+        Ok(Some((state, queued)))
     }
 }
 

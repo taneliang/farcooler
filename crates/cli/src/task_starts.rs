@@ -26,8 +26,8 @@ pub enum StartCmd {
     /// Say when a task that hasn't started will start.
     ///
     /// Hold it until a time or an event, park it, or clear what was said. A
-    /// todo task that's held or parked goes back to the backlog. A started
-    /// task waiting to build goes in `task line --build` instead.
+    /// todo task that's held or parked goes back to the backlog. See
+    /// `workflow get` for a run waiting for an engine slot.
     Wait {
         /// A key like `ov-12`.
         #[arg(allow_negative_numbers = true)]
@@ -51,12 +51,13 @@ pub enum StartCmd {
         #[arg(long)]
         actor: Option<String>,
     },
-    /// Print a board's line, or replace it.
+    /// Show a manual line, or move its named cards to the front of the board.
     ///
-    /// Given keys, the line becomes exactly those, in order: the first is
-    /// next. A task in the line that isn't named loses its place. The agent
-    /// line is for tasks not yet started; `--build` is the line for the
-    /// build slot, for tasks in progress or in review.
+    /// Given keys, put them first in board order and replace manual line
+    /// membership. Other cards keep their relative board order. The agent
+    /// line takes Backlog and To Do. With `--build`, name cards in progress
+    /// or in review, including engine runs waiting for a slot. For live
+    /// engine slot positions, use `workflow get <workspace>`.
     Line {
         /// Keys like `ov-12`, the first to start first.
         #[arg(allow_negative_numbers = true)]
@@ -64,7 +65,7 @@ pub enum StartCmd {
         /// The build line rather than the agent line.
         #[arg(long)]
         build: bool,
-        /// Empty the line.
+        /// Clear manual line membership and keep the board order.
         #[arg(long, conflicts_with = "keys")]
         clear: bool,
         /// Which workspace's board, by name, prefix or id. Defaults to the
@@ -162,7 +163,7 @@ fn said_here(what: &str) -> Option<&'static str> {
         "line_status" => "the agent line takes tasks not yet started, and the build line tasks in progress or in review",
         "other_board" => "a line is one board's, and those tasks aren't all on it",
         "task_twice" => "a task can only be in a line once",
-        "wait_status" => "that task has started. to hold it for the build slot, use `farcooler task line --build`",
+        "wait_status" => "holds apply to tasks in Backlog or To Do",
         "until" => "that time has passed. name one still to come",
         "event" => "use release, recurrence or clear-board",
         "task_closed" => "that task is done or cancelled, so nothing works it now",
@@ -413,7 +414,7 @@ fn render_line(tasks: &[pb::Task], line: pb::TaskLine, json: bool) -> String {
         return format!("{}\n", serde_json::json!({ "line": name, "tasks": rows }));
     }
     if tasks.is_empty() {
-        return format!("the {name} line is empty\n");
+        return format!("the manual {name} line is empty\n");
     }
     tasks
         .iter()

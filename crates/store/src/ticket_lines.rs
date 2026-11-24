@@ -295,11 +295,19 @@ fn row_to_line(r: &Row) -> rusqlite::Result<TicketLine> {
     })
 }
 
-pub(crate) fn line_in(conn: &Connection, task: Uuid) -> Result<TicketLine> {
+fn stored_line(conn: &Connection, task: Uuid) -> Result<TicketLine> {
     conn.query_row(&format!("SELECT {LINE_COLS} FROM ticket_lines WHERE task_id = ?1"), params![uuid_blob(task)], row_to_line)
         .optional()
         .map_err(map_err)?
         .ok_or(DomainError::NotFound)
+}
+
+pub(crate) fn line_in(conn: &Connection, task: Uuid) -> Result<TicketLine> {
+    let line = stored_line(conn, task)?;
+    if line.plan_rank.is_none() {
+        return Ok(line);
+    }
+    lines_of(conn, board_of(conn, task)?)?.into_iter().find(|line| line.task_id == task).ok_or(DomainError::NotFound)
 }
 
 /// `parent` may carry `task`'s branch: on the line, on the same board, open or
@@ -491,12 +499,11 @@ impl Store {
         Ok(line)
     }
 
-    /// Set `workspace`'s plan: `tasks` in order, next up first. Each must be a
-    /// waiting ticket on that board. Every other waiting ticket there leaves
-    /// the plan.
+    /// Move these waiting tickets to the front of the board and replace the
+    /// plan's membership. Plan positions follow the board.
     pub fn set_line_order(&self, workspace: Uuid, tasks: &[Uuid], actor: Actor) -> Result<Vec<TicketLine>> {
         let mut conn = self.conn();
-        let tx = conn.transaction().map_err(map_err)?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(map_err)?;
         board_exists(&tx, workspace)?;
         check_tickets(&tx, workspace, tasks)?;
         let mut seen = std::collections::HashSet::new();
@@ -504,30 +511,32 @@ impl Store {
             if !seen.insert(*task) {
                 return Err(invalid("duplicate"));
             }
-            if line_in(&tx, *task).map_err(|e| if matches!(e, DomainError::NotFound) { invalid("not_on_the_line") } else { e })?.stage
+            if stored_line(&tx, *task).map_err(|e| if matches!(e, DomainError::NotFound) { invalid("not_on_the_line") } else { e })?.stage
                 != Stage::Waiting
             {
                 return Err(invalid("not_waiting"));
             }
         }
+        crate::tasks::prioritize_board_tasks(&tx, workspace, tasks)?;
         tx.execute(
             "UPDATE ticket_lines SET plan_rank = NULL, resource_version = resource_version + 1
               WHERE plan_rank IS NOT NULL AND task_id IN (SELECT id FROM tasks WHERE workspace_id = ?1)",
             params![uuid_blob(workspace)],
         )
         .map_err(map_err)?;
-        let mut out = Vec::with_capacity(tasks.len());
         for (i, task) in tasks.iter().enumerate() {
             let rank = i as i64 + 1;
+            // The old column now records membership. Its numeric value is
+            // ignored on read, including on databases with legacy ranks.
             tx.execute(
-                "UPDATE ticket_lines SET plan_rank = ?2, resource_version = resource_version + 1 WHERE task_id = ?1",
-                params![uuid_blob(*task), rank],
+                "UPDATE ticket_lines SET plan_rank = 1, resource_version = resource_version + 1 WHERE task_id = ?1",
+                params![uuid_blob(*task)],
             )
             .map_err(map_err)?;
             let body = if rank == 1 { "Next up.".to_string() } else { format!("Number {rank} in the plan.") };
             line_event(&tx, LineSubject::Ticket(*task), "plan", actor, &body, serde_json::json!({ "rank": rank }))?;
-            out.push(line_in(&tx, *task)?);
         }
+        let out = lines_of(&tx, workspace)?.into_iter().take(tasks.len()).collect();
         tx.commit().map_err(map_err)?;
         Ok(out)
     }
@@ -594,15 +603,22 @@ impl Store {
 /// Every ticket on `workspace`'s line, read on `conn`: the plan in order, then
 /// the rest by how long they have been where they are.
 pub(crate) fn lines_of(conn: &Connection, workspace: Uuid) -> Result<Vec<TicketLine>> {
+    use crate::tasks::{BOARD_ORDER, BOARD_ORDER_JOIN};
     let mut stmt = conn
         .prepare(&format!(
-            "SELECT {} FROM ticket_lines l JOIN tasks t ON t.id = l.task_id WHERE t.workspace_id = ?1
-              ORDER BY l.plan_rank IS NULL, l.plan_rank, l.stage_since, l.task_id",
+            "SELECT {} FROM ticket_lines l JOIN tasks ON tasks.id = l.task_id {BOARD_ORDER_JOIN}
+              WHERE tasks.workspace_id = ?1 ORDER BY l.plan_rank IS NULL,
+                CASE WHEN l.plan_rank IS NULL THEN l.stage_since END,
+                CASE WHEN l.plan_rank IS NULL THEN l.task_id END, {BOARD_ORDER}",
             LINE_COLS.split(", ").map(|c| format!("l.{c}")).collect::<Vec<_>>().join(", ")
         ))
         .map_err(map_err)?;
     let rows = stmt.query_map(params![uuid_blob(workspace)], row_to_line).map_err(map_err)?;
-    rows.collect::<rusqlite::Result<_>>().map_err(map_err)
+    let mut lines: Vec<_> = rows.collect::<rusqlite::Result<_>>().map_err(map_err)?;
+    for (index, line) in lines.iter_mut().take_while(|line| line.plan_rank.is_some()).enumerate() {
+        line.plan_rank = Some(index as u32 + 1);
+    }
+    Ok(lines)
 }
 
 #[cfg(test)]

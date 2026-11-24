@@ -113,9 +113,9 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     (crate::engine_stage::migration, Older::Refused), // ov-965: a ticket at rest is fenced on its column alone
     (crate::workflow_cleanup::migration, Older::Refused), // ov-1126: pinned deletion policy older engines cannot honor
     (crate::workflow::migration_read_indexes, Older::Refused), // ov-1429: explicit cutover recognizes the pinned index catalog
+    (crate::tasks::migration_board_order, Older::Refused), // older engines would ignore the board's order
 ];
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
-
 pub(crate) fn read_schema_version(conn: &Connection) -> farcooler_core::Result<u32> {
     Ok(read_meta_u32(conn, "schema_version")?.unwrap_or(0))
 }

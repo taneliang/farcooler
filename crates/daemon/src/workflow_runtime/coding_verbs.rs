@@ -700,7 +700,11 @@ impl Exec {
         if self.try_git(binding, &repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")]).await?.0 {
             self.git_recorded(binding, &repo, &["branch", "-D", &branch]).await?;
         }
-        self.git_recorded(binding, &repo, &["worktree", "add", "-b", &branch, &tree_path, &base]).await?;
+        // Git holds an "initializing" lock through worktree add's checkout.
+        // Materialize the files after registration so a checkout timeout
+        // leaves a worktree the next fold attempt can remove.
+        self.git_recorded(binding, &repo, &["worktree", "add", "--no-checkout", "-b", &branch, &tree_path, &base]).await?;
+        self.git_recorded(binding, &tree, &["read-tree", "-u", "-m", "HEAD"]).await?;
         spotlight::exclude_builds(&tree).await;
         for member in members {
             if *cancel.borrow() { return Ok(Outcome::SafeFailure); }

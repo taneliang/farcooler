@@ -22,14 +22,23 @@ pub(super) fn narrowed(mut raw:manifest::Manifest) -> manifest::Manifest {
     raw
 }
 /// A source at the registry keeps its exact catalog. A raw60 source grows into
-/// exactly the pinned later catalog, and every table it grew starts empty: the
-/// upgrade from 60 invents no row.
+/// exactly the pinned later catalog. The board-order backfill is checked
+/// against the retained source fields by `check`.
 pub(super) fn catalog_matches(plan:&Preflight, after:&manifest::Manifest) -> bool {
-    if plan.registry!=60 {
+    if plan.registry == 60 {
+        return registry71_catalog_matches(after)
+            && after.tables.iter().all(|(name, table)| plan.raw.tables.contains_key(name)
+                || name == crate::tasks::BOARD_ORDER_TABLE || table.rows.is_empty());
+    }
+    if plan.registry >= 71 {
         return plan.raw.tables.keys().eq(after.tables.keys()) && plan.raw.objects.keys().eq(after.objects.keys());
     }
-    catalog_hash(after)==SOURCE68_SCHEMA_HASH
-        && after.tables.iter().all(|(name,table)|plan.raw.tables.contains_key(name)||table.rows.is_empty())
+    // Migration 71 adds the board ordering table, retaining every source field.
+    let name = crate::tasks::BOARD_ORDER_TABLE;
+    after.objects.get(name).is_some_and(is_board_order_table)
+        && after.tables.contains_key(name)
+        && plan.raw.tables.keys().eq(after.tables.keys().filter(|key| key.as_str() != name))
+        && plan.raw.objects.keys().eq(after.objects.keys().filter(|key| key.as_str() != name))
 }
 pub(super) fn check(plan:&Preflight, conn:&Connection) -> Result<()> {
     let mut after=preflight(conn)?.raw;
@@ -51,6 +60,14 @@ pub(super) fn check(plan:&Preflight, conn:&Connection) -> Result<()> {
     }
     if !as_registry68(plan).conserved_by(&after) || !catalog_matches(plan,&after) {
         return refuse("per-field/schema/relationship/allocator conservation failed");
+    }
+    if plan.registry < 71 {
+        let expected = crate::tasks::LEGACY_BOARD_ORDER;
+        let actual = "SELECT task_id, position FROM task_board_positions";
+        let differs: bool = conn.query_row(&format!(
+            "SELECT EXISTS({expected} EXCEPT {actual}) OR EXISTS({actual} EXCEPT {expected})"
+        ), [], |row| row.get(0))?;
+        if differs { return refuse("board order differs from the legacy lines"); }
     }
     let schema:String=conn.query_row("SELECT value FROM meta WHERE key='schema_version'",[],|r|r.get(0))?;
     let floor:String=conn.query_row("SELECT value FROM meta WHERE key='compatible_down_to'",[],|r|r.get(0))?;

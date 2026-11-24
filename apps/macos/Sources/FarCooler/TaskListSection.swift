@@ -60,6 +60,26 @@ struct TaskListSection: View {
         }
     }
 
+    @ViewBuilder
+    private func reorderable<Content: View>(_ row: TaskRow, @ViewBuilder content: () -> Content) -> some View {
+        if !filtering, !section.status.isFinished, section.rows.count > 1,
+            let build = store.client.daemonBuild, build.can(.boardOrder), build.grantedScope != "read"
+        {
+            content()
+                .draggable(row.id)
+                .dropDestination(for: String.self) { ids, _ in
+                    guard let id = ids.first, id != row.id,
+                        let from = section.rows.firstIndex(where: { $0.id == id }),
+                        let to = section.rows.firstIndex(where: { $0.id == row.id })
+                    else { return false }
+                    Task { await store.reorder(section.rows[from], relativeTo: row, after: from < to) }
+                    return true
+                }
+        } else {
+            content()
+        }
+    }
+
     private func content(_ cut: TaskBoardColumn.Cut) -> some View {
         // Its chevron at column A, its title at B, its count trailing
         // (ov-83), through the board's one collapsible section (ov-92).
@@ -71,17 +91,19 @@ struct TaskListSection: View {
         ) {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(cut.rows) { row in
-                    TaskListRow(
-                        row: row, prominent: leads, store: store,
-                        live: agents.live(for: row), presence: agents.presence(for: row),
-                        onGoTo: onGoTo, orchestrator: agents.orchestrator(for: row),
-                        speaksOfAgents: agents.runnerRecordsTasks, selected: row.id == lit, keyed: keyed,
-                        worktree: worktrees.byTask[row.id],
-                        worktreeMenu: worktrees.byTask[row.id].map(worktrees.menu) ?? [],
-                        performOnWorktree: { item in
-                            if let worktree = worktrees.byTask[row.id] { worktrees.perform(item, worktree) }
-                        },
-                        onChoose: { onChoose(row) }, ask: ask)
+                    reorderable(row) {
+                        TaskListRow(
+                            row: row, prominent: leads, store: store,
+                            live: agents.live(for: row), presence: agents.presence(for: row),
+                            onGoTo: onGoTo, orchestrator: agents.orchestrator(for: row),
+                            speaksOfAgents: agents.runnerRecordsTasks, selected: row.id == lit, keyed: keyed,
+                            worktree: worktrees.byTask[row.id],
+                            worktreeMenu: worktrees.byTask[row.id].map(worktrees.menu) ?? [],
+                            performOnWorktree: { item in
+                                if let worktree = worktrees.byTask[row.id] { worktrees.perform(item, worktree) }
+                            },
+                            onChoose: { onChoose(row) }, ask: ask)
+                    }
                     .matchedGeometryEffect(id: row.id, in: rows, isSource: true)
                     .transition(BoardMotion.rowTransition(reduceMotion: reduceMotion, slowedBy: slowdown))
                     .id(row.id)

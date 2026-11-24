@@ -100,6 +100,16 @@ pub struct StoredEffect {
     pub lease_until: Option<i64>,
 }
 
+impl StoredEffect {
+    pub fn can_wait_for_slot(&self) -> bool {
+        self.active && matches!(self.dispatch_state.as_str(), "pending" | "claimed")
+    }
+
+    pub fn has_live_claim(&self, now_ms: i64) -> bool {
+        self.active && self.dispatch_state == "claimed" && self.lease_until.is_some_and(|t| t > now_ms)
+    }
+}
+
 impl Store {
     /// All new workflow mutations pass through this transaction. An accepted input
     /// cannot leave state without its event/outbox/receipt, even if a later SQL write fails.

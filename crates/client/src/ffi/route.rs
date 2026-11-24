@@ -72,6 +72,7 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         | Method::TaskList
         | Method::TaskGet
         | Method::TaskNote
+        | Method::TaskReorder
         // Read state on the runner (ov-113): a phone opens a ticket, and
         // the Unread section is built from what comes back.
         | Method::WorkspaceMarkRead

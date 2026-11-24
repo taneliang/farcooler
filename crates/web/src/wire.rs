@@ -241,6 +241,18 @@ impl Runner {
         Ok(self.session.plan_with_workflow(workspace).await?)
     }
 
+    pub async fn board_order(&self, workspace: Uuid) -> Result<Option<serde_json::Value>, WebError> {
+        Ok(self.session.board_order_view(workspace).await?)
+    }
+
+    pub fn board_order_label(&self) -> Option<&'static str> {
+        self.session.board_order_label()
+    }
+
+    pub async fn reorder_task(&self, task: Uuid, anchor: Uuid, after: bool) -> Result<(), WebError> {
+        Ok(self.session.reorder_task(task, anchor, after).await?)
+    }
+
     /// The runner's workspaces, in the shape the phones and the Mac read
     /// (`workspace_json`): the page picks the board whose plan it shows.
     pub async fn workspaces(&self) -> Result<serde_json::Value, WebError> {

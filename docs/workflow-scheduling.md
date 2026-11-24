@@ -44,16 +44,35 @@ scheduling scan, so republishing, completion, and daemon restart do not reset it
 Continuous sweeps advance their clock while effects run, so a long landing gate
 cannot freeze admission gaps or effect lease deadlines. Missing or high load
 samples hold admission even after the gap expires.
-`{"Fixed":0}` pauses automatic starts. Budgets constrain the whole runner:
-active ticket runs across every board count, including manually started runs,
-reviews, approval waits, and runs whose board no longer has a start policy.
-All published budgets apply together. For example, a `Fixed(3)` policy and a
-load-below-6 policy allow at most three active runs and require load below 6
-for each new start. Multiple fixed or load policies use the strictest limit;
-a published `Fixed(0)` pauses automatic starts on the runner. Runs
-that fail, finish, cancel, or enter landing release their agent budget. Landing
-groups and gates use their own exclusive landing resource and take no build
-slots. There is no built-in parallel agent count.
+`{"Fixed":0}` pauses automatic starts. Budgets constrain the whole runner.
+Active ticket runs across every board count, including manually started runs,
+reviews, approval waits, execution slot waits, and runs whose board no longer
+has a start policy. When the fixed budget is full, tickets awaiting an
+automatic start stay in their current column until an allowance opens. All
+published budgets apply together. A `Fixed(3)` policy and a load-below-6 policy
+permit a new start when fewer than three runs are active and load is below 6.
+Multiple fixed or load policies use the strictest limit. Runs that fail, finish,
+cancel, or enter landing release their start allowance. Landing groups and gates
+use their own exclusive landing resource and take no build slots.
+
+The board has one manual order. The engine uses it for eligible starts and
+for runs competing for the next build slot on that board. New cards follow
+filing order and keep their position across status changes. Move a card with
+`farcooler task reorder ov-42 --before ov-33` (or `--after`), relative to any
+other card on that board. On Mac, open View > Tasks by Status and drag within
+a status section. In the web client, open Backlog and To Do from the Plan
+and drag within either section.
+
+`task line KEY…`, `task line --build KEY…`, and `plan set KEY…` put those
+cards first in the same order, keeping the relative order of other cards.
+They also set membership of the manual line or plan. Clearing membership
+keeps the board order. Manual line chips and plan positions are displayed in
+board order. For engine-owned runs, `workflow get <workspace>` reports the
+live slot positions. Changing the order updates these positions without
+restarting a run. A run already building keeps its slot.
+
+When upgrading an existing board, the agent line seeds the order first,
+followed by the build line and then any remaining ranked plan tickets.
 
 The engine checks eligibility when work changes or finishes, and at least once
 per second while idle or waiting. Scheduling snapshots are loaded once per

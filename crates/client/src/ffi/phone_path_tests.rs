@@ -386,6 +386,26 @@ async fn a_phone_answer_reaches_the_runner_and_no_other_note_does() {
     }
 }
 
+#[tokio::test]
+async fn a_phone_reorders_the_runner_board_for_other_sessions() {
+    let runner = a_runner(Scope::Control).await;
+    let store = &runner.service.store;
+    let host = uuid::Uuid::now_v7();
+    let root = store.create_repository_root(host, "/repos/phone-order", 1_000).unwrap();
+    let repository = store.create_repository(host, root.id, "ordered", "/repos/phone-order/.git", "").unwrap().id;
+    let workspace = store.ensure_main_workspace(repository).unwrap().id;
+    let first = store.create_task(workspace, "First", farcooler_store::models::Actor::User).unwrap();
+    let second = store.create_task(workspace, "Second", farcooler_store::models::Actor::User).unwrap();
+    let writer = Session::connect_local(&runner.socket).await.expect("connect");
+    let reader = Session::connect_local(&runner.socket).await.expect("connect");
+    dispatch(&writer, "task.reorder", &json!({
+        "task": second.id.to_string(), "anchor": first.id.to_string(), "after": false
+    })).await.unwrap();
+    let board = reader.tasks(repository, Some(workspace)).await.unwrap();
+    assert_eq!(board["tasks"][0]["key"], second.key);
+    assert_eq!(board["tasks"][1]["key"], first.key);
+}
+
 #[test]
 fn phone_agentkit_registers_literal_operation_source() {
     let generator = include_str!("../../../../apps/ios/generate-project.py");

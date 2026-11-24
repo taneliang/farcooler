@@ -5,11 +5,11 @@
 //! exists. THE LINE holds one row per ticket being worked: its stage
 //! (waiting, building, in review, needs you, landing, landed or dropped), its
 //! own branch, the ticket it's stacked on, its pull request and how it landed.
-//! The plan is the board's ordered list of waiting tickets. An agent is
+//! The plan names waiting tickets and shows them in board order. An agent is
 //! recorded when it starts: the orchestrator, a builder, a reviewer or a
 //! lander, working any number of tickets. A landing puts finished tickets into
 //! the product. The orchestrator writes all of it, and the `task` verbs are
-//! unchanged: nothing here edits a card, and no card carries any of it.
+//! separate from its records. Setting the plan also orders the named cards.
 //!
 //! ```text
 //! farcooler plan                              the overview an app draws
@@ -107,10 +107,10 @@ enum PlanCmd {
     /// Read the Mac Engine presentation for this workspace.
     #[command(hide = true)]
     Engine,
-    /// Replace the plan: these waiting tickets, in this order. The first is next up.
+    /// Move these waiting tickets to the front of the board and name them in the plan.
     ///
     /// A ticket not named leaves the plan. Only a waiting ticket on the line
-    /// can be in it. With no tickets, the plan is emptied.
+    /// can be in it. With no tickets, the plan is emptied and board order is kept.
     Set {
         /// Card keys, first is next up.
         tickets: Vec<String>,

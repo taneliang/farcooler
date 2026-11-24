@@ -276,7 +276,7 @@ fn the_two_copies_of_the_fit_rule_agree() {
     for wait in waits {
         for status in STATUSES {
             let conn = store.conn();
-            write_wait(&conn, t[0].id, Some(wait), Some(1), 1).unwrap();
+            write_wait(&conn, t[0].id, Some(wait), 1).unwrap();
             conn.execute("UPDATE tasks SET status = ?1 WHERE id = ?2", params![status.as_str(), uuid_blob(t[0].id)])
                 .unwrap();
             let sql: bool = conn

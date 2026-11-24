@@ -228,9 +228,11 @@ fn registry68_catalog_is_pinned_and_narrows_only_the_four_guards() {
     c65.execute_batch("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT);").unwrap();
     crate::migrate::migrate_only_to(&mut c65, 65);
     let m65 = Manifest::capture(&c65).unwrap();
-    let store = Store::open_in_memory().unwrap().legacy_for_tests();
-    let plan = preflight(&store.conn()).unwrap();
-    assert_eq!(plan.registry, crate::migrate::CURRENT_SCHEMA_VERSION);
+    let mut c68 = Connection::open_in_memory().unwrap();
+    c68.execute_batch("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT);").unwrap();
+    crate::migrate::migrate_only_to(&mut c68, 68);
+    let plan = preflight(&c68).unwrap();
+    assert_eq!(plan.registry, 68);
     assert_eq!(catalog_hash(&plan.raw), SOURCE68_SCHEMA_HASH, "the composed registry-68 catalog");
     assert!(!plan.quarantines.iter().any(|q| q.resource == "schema:unknown"), "a fresh install is a known source");
     // `meta` has two equivalent spellings, which `catalog_hash` already treats as one.
@@ -283,7 +285,7 @@ fn roll_back_to_67(path: &std::path::Path) {
     reference.execute_batch("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT);").unwrap();
     crate::migrate::migrate_only_to(&mut reference, 67);
     let conn = Connection::open(path).unwrap();
-    conn.execute_batch("DROP TRIGGER engine_task_wait_fence; DROP TABLE engine_stage_tickets; DROP TABLE engine_build_cleanup;").unwrap();
+    conn.execute_batch("DROP TRIGGER engine_task_wait_fence; DROP TABLE engine_stage_tickets; DROP TABLE engine_build_cleanup; DROP TABLE task_board_positions;").unwrap();
     for (name, _, _) in crate::workflow::READ_INDEXES {
         conn.execute_batch(&format!("DROP INDEX {name}")).unwrap();
     }

@@ -19,9 +19,8 @@ import SwiftUI
 // here would compile, ship, and fail at runtime in front of a user.
 //
 // So the record below is drawn from `TaskDetailModel` and offers nothing at
-// all. The orchestrator owns the task list (ov-184): the only task write this
-// app makes is an answer to an agent's question, and
-// `TaskManagementRemovedTests` scans every view for any other.
+// all. The board lets a person reorder cards and answer an agent's question.
+// The orchestrator owns task creation, editing and status moves (ov-184).
 
 /// One workspace's board, as this window last read it.
 ///
@@ -296,6 +295,17 @@ final class TaskBoardStore: ObservableObject {
             await readOnce()
         } while readAgain
         return true
+    }
+
+    func reorder(_ task: TaskRow, relativeTo anchor: TaskRow, after: Bool) async {
+        let (data, _) = await client.runRaw(
+            ["task", "reorder", task.key, after ? "--after" : "--before", anchor.key, "--repo", repositoryID],
+            background: true)
+        guard data != nil else {
+            trouble = TaskBoardModel.reorderFailed
+            return
+        }
+        await reload()
     }
 
     private func readOnce() async {

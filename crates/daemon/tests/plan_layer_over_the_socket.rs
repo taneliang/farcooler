@@ -78,13 +78,13 @@ async fn record(link: &mut Link, workspace: Uuid, role: pb::AgentRole, subagent:
 }
 
 /// The `plan_changed` and `task_changed` events on `listener` within `window`.
-async fn events(listener: &mut Link, window: Duration) -> (Vec<pb::PlanChanged>, usize) {
-    let (mut plans, mut tasks) = (vec![], 0);
+async fn events(listener: &mut Link, window: Duration) -> (Vec<pb::PlanChanged>, Vec<pb::TaskChanged>) {
+    let (mut plans, mut tasks) = (vec![], vec![]);
     let deadline = tokio::time::Instant::now() + window;
     while let Ok(Ok(e)) = tokio::time::timeout_at(deadline, listener.next_event()).await {
         match e.payload {
             Some(event::Payload::PlanChanged(p)) => plans.push(p),
-            Some(event::Payload::TaskChanged(_)) => tasks += 1,
+            Some(event::Payload::TaskChanged(t)) => tasks.push(t),
             _ => {}
         }
     }
@@ -134,12 +134,13 @@ async fn task_create_files_into_a_theme_over_the_socket() {
     assert_eq!(plan.unthemed_open, Some(0));
 }
 
-/// A theme, a ticket on the line and the plan, written and read back; a write
-/// announces `plan_changed` and never `task_changed`.
+/// Theme and line writes announce plan changes. Changing the order also
+/// invalidates the board read used by clients.
 #[tokio::test]
 async fn a_theme_a_ticket_and_the_plan_round_trip_and_announce() {
     let h = start(Scope::HostAdmin).await;
     let repo = a_repository(&h);
+    let earlier = h.service.store.create_task(repo.workspace, "Mac: earlier", Actor::User).unwrap();
     let task = h.service.store.create_task(repo.workspace, "Mac: a jump", Actor::User).unwrap();
     let mut a = connect(&h).await;
     let mut listener = connect(&h).await;
@@ -175,6 +176,7 @@ async fn a_theme_a_ticket_and_the_plan_round_trip_and_announce() {
         panic!("wrong result")
     };
     assert_eq!(p.lines[0].plan_rank, Some(1), "the answer is the new plan");
+    assert_eq!(h.service.store.board_task_keys(repo.workspace).unwrap(), [task.key.clone(), earlier.key]);
 
     let read = plan(&mut connect(&h).await, repo.workspace).await;
     assert_eq!(read.themes.len(), 1);
@@ -196,7 +198,10 @@ async fn a_theme_a_ticket_and_the_plan_round_trip_and_announce() {
     let (plans, tasks) = events(&mut listener, Duration::from_millis(600)).await;
     assert_eq!(plans.len(), 3, "one per write");
     assert!(plans.iter().all(|p| p.workspace_id == id(repo.workspace) && p.actor == "manager"));
-    assert_eq!(tasks, 0, "no layer write moves a task");
+    assert_eq!(tasks.len(), 1, "the order write announces the board change");
+    assert_eq!(tasks[0].task_id, id(task.id));
+    assert_eq!(tasks[0].workspace_id, Some(id(repo.workspace)));
+    assert_eq!(tasks[0].actor, "manager");
 }
 
 /// An agent recorded over the wire works its tickets, which go on the line;
@@ -412,8 +417,8 @@ async fn the_boards_wire_reads_are_the_same_bytes_without_the_layer() {
     link.call(create).await.expect("task.create still works without the layer");
 }
 
-/// A ticket that leaves waiting goes out on the wire without its place in the
-/// plan, and no line or agent write moves its card.
+/// A ticket that leaves waiting loses its plan rank. The order change and the
+/// builder starting the card each announce a board change.
 #[tokio::test]
 async fn a_ticket_that_leaves_waiting_is_sent_without_a_rank() {
     let h = start(Scope::Control).await;
@@ -431,9 +436,8 @@ async fn a_ticket_that_leaves_waiting_is_sent_without_a_rank() {
     record(&mut a, repo.workspace, pb::AgentRole::Builder, "agent-1", &[task.id]).await;
     let (plans, tasks) = events(&mut listener, Duration::from_millis(600)).await;
     assert_eq!(plans.len(), 4, "one per write");
-    // The line's writes leave the card alone; a builder set to work on a card
-    // that hadn't started starts it, as a worker recorded on it always has.
-    assert_eq!(tasks, 1, "the builder starts its backlog card, and nothing else moves the board");
+    assert_eq!(tasks.len(), 2, "one event for ordering and one for the builder starting the card");
+    assert!(tasks.iter().all(|t| t.task_id == id(task.id) && t.workspace_id == Some(id(repo.workspace))));
     assert_eq!(h.service.store.get_task(task.id).unwrap().status, farcooler_store::models::TaskStatus::InProgress);
 }
 

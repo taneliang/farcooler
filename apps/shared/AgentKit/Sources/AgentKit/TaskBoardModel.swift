@@ -298,6 +298,8 @@ public struct TaskBoardColumn: Equatable, Sendable, Identifiable {
 
 /// A repository's board.
 public struct TaskBoardModel: Equatable, Sendable {
+    public static let reorderFailed: String = TaskBoardPresenter.ask("reorder_failed") ?? ""
+
     public static let order = TaskBoardPresenter.statuses.compactMap { TaskStatus(rawValue: $0.wire) }
 
     public var columns: [TaskBoardColumn]

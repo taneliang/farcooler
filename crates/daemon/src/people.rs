@@ -228,6 +228,7 @@ macro_rules! actor_field {
             P::TaskCreate(p) => &$($m)* p.actor,
             P::TaskUpdate(p) => &$($m)* p.actor,
             P::TaskSetStatus(p) => &$($m)* p.actor,
+            P::TaskReorder(p) => &$($m)* p.actor,
             P::TaskNoteAppend(p) => &$($m)* p.actor,
             P::TaskBlockSet(p) => &$($m)* p.actor,
             P::TaskSetWait(p) => &$($m)* p.actor,

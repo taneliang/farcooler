@@ -430,6 +430,24 @@ impl WebRunner {
         Ok(self.0.plan(id).await.map_err(web_failure)?.to_string())
     }
 
+    #[wasm_bindgen(js_name = boardOrder)]
+    pub async fn board_order(&self, workspace: String) -> Result<Option<String>, JsValue> {
+        let id = Uuid::parse_str(&workspace).map_err(|e| failure("protocol", &e.to_string()))?;
+        Ok(self.0.board_order(id).await.map_err(web_failure)?.map(|view| view.to_string()))
+    }
+
+    #[wasm_bindgen(js_name = boardOrderLabel)]
+    pub fn board_order_label(&self) -> Option<String> {
+        self.0.board_order_label().map(str::to_owned)
+    }
+
+    #[wasm_bindgen(js_name = reorderTask)]
+    pub async fn reorder_task(&self, task: String, anchor: String, after: bool) -> Result<(), JsValue> {
+        let id = Uuid::parse_str(&task).map_err(|e| failure("protocol", &e.to_string()))?;
+        let anchor = Uuid::parse_str(&anchor).map_err(|e| failure("protocol", &e.to_string()))?;
+        self.0.reorder_task(id, anchor, after).await.map_err(web_failure)
+    }
+
     /// `workspace.list`, as JSON in the phones' shape (`workspace_json`).
     pub async fn workspaces(&self) -> Result<String, JsValue> {
         Ok(self.0.workspaces().await.map_err(web_failure)?.to_string())

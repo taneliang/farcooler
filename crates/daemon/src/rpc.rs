@@ -527,6 +527,7 @@ fn scope_of(method: Method) -> Scope {
         Method::TaskCreate
         | Method::TaskUpdate
         | Method::TaskSetStatus
+        | Method::TaskReorder
         | Method::TaskNote
         | Method::TaskBlock
         | Method::TaskSetWait
@@ -2012,7 +2013,7 @@ impl Rpc {
             //
             // The arms live in `rpc_board`; every route is named here.
             "task.list" | "task.get" | "task.get_by_key" | "task.search" | "task.update"
-            | "task.set_status" | "task.block" | "task.set_wait" | "task.set_line"
+            | "task.set_status" | "task.reorder" | "task.block" | "task.set_wait" | "task.set_line"
             | "task.worker" | "workspace.mark_read" => crate::rpc_board::dispatch(svc, &self.watcher, &self.peer, (self.caller_pid, &self.caller_pane, self.stepped.get()), req).await,
             "task.create" => task_create::dispatch(svc, &self.watcher, req).await,
             // A note is a board route; a person's answer on a workflow draft's card is also its approval (ov-971).

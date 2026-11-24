@@ -35,6 +35,7 @@ public enum Capability: String, CaseIterable, Sendable {
     case agentUsage = "agent_usage"
     case agentsFound = "agents_found"
     case taskWaits = "task_waits"
+    case boardOrder = "board_order"
     case taskWorkers = "task_workers"
     case noticeTask = "notice_task"
     case boardReads = "board_reads"

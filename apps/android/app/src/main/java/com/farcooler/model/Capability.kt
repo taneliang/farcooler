@@ -38,6 +38,7 @@ enum class Capability(val wire: String) {
     AGENT_USAGE("agent_usage"),
     AGENTS_FOUND("agents_found"),
     TASK_WAITS("task_waits"),
+    BOARD_ORDER("board_order"),
     TASK_WORKERS("task_workers"),
     NOTICE_TASK("notice_task"),
     BOARD_READS("board_reads"),

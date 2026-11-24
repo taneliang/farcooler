@@ -216,6 +216,7 @@ message Request {
     TaskWorkerSet task_worker_set = 132;
     // Raise what is read on a board (ov-113), behind `board_reads`.
     WorkspaceMarkRead workspace_mark_read = 133;
+    TaskReorder task_reorder = 134;
     // A worktree's files, read-only (ov-189), behind `worktree_files`. Tags
     // from 150, for 120's reason.
     WorktreeDirRequest worktree_dir = 150;
@@ -3643,9 +3644,8 @@ enum TaskWaitKind {
   TASK_WAIT_KIND_PARKED = 4;
 }
 
-// Which line. AGENT is for tasks not yet started (backlog, todo): the order
-// they get a free agent in. BUILD is for tasks started (in progress, in
-// review) that wait for the one build slot.
+// Which manual line. AGENT takes Backlog and To Do. BUILD takes In Progress
+// and In Review. Both follow board order.
 enum TaskLine {
   TASK_LINE_UNSPECIFIED = 0;
   TASK_LINE_AGENT = 1;
@@ -3667,8 +3667,8 @@ message TaskWait {
   TaskWaitKind kind = 1;
   // IN_LINE: which line.
   TaskLine line = 2;
-  // IN_LINE, derived on every read: 1 is next. Counts only the tasks in the
-  // same line on the same board whose status fits the line.
+  // IN_LINE, derived from board order. Counts only the tasks in the same
+  // manual line whose status fits. Engine slot positions use workflow.get.
   uint32 position = 3;
   // IN_LINE, derived: the keys of the first three tasks in the line ahead
   // of this one, in line order (all of them, when fewer).
@@ -4033,8 +4033,7 @@ message TaskBlockSet {
 //
 // For a task that hasn't started. A TODO task held or parked moves to
 // BACKLOG in the same write: a held task isn't ready. A task that has
-// started is refused (`wait_status`); a started task waits in the build
-// line, `task.set_line`. IN_LINE is refused here too (`kind`): a line is
+// started is refused (`wait_status`). IN_LINE is refused here too (`kind`): a line is
 // set whole. UNSPECIFIED clears whatever wait the task has, a place in a
 // line included. Answers with the task.
 //
@@ -4053,13 +4052,12 @@ message TaskSetWait {
   string actor = 5;
 }
 
-// Replace one of a board's lines, whole, in order: the first task is next.
-// `task.set_line`, behind `task_waits`.
-//
-// Whole rather than one task at a time, because the line is what goes
-// stale: a task in it that isn't named here loses its place. A task named
-// here loses any other wait it had. An empty list empties the line. Answers
-// with the line's tasks in order.
+// `task.set_line`, behind `task_waits`: move the named cards to the front
+// of the board in the given order and replace manual line membership.
+// A manually managed card named here loses any other wait it had. An empty
+// list clears manual membership and preserves board order. Engine-owned
+// runs use the board order and report slot positions through `workflow.get`.
+// Answers with the named tasks.
 //
 // Refusals, as `Error.what`:
 //   `line`           no line named
@@ -4278,6 +4276,16 @@ message WorkspaceSetSettings {
   // agent's pane (`person_only`).
   optional bool pr_nudge = 8;
   optional uint32 pr_nudge_hours = 9;
+}
+
+// `task.reorder`: place a task before or after a card on its board.
+message TaskReorder {
+  bytes task_id = 1;
+  oneof placement {
+    bytes before = 2;
+    bytes after = 3;
+  }
+  string actor = 4;
 }
 
 // `task.move`: put tasks on another board in the same repository. All or
@@ -5210,9 +5218,8 @@ message TicketLineSet {
   string actor = 11;
 }
 
-// `line.order`, at `control`: set the plan whole. These waiting tickets in
-// this order, next up first, and every other ticket out of it. Answers with
-// the new `Plan`.
+// `line.order`, at `control`: move the named waiting tickets to the front
+// of the board and replace the plan's membership. Answers with the new `Plan`.
 message LineOrder {
   bytes workspace_id = 1;
   repeated bytes task_ids = 2;

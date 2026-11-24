@@ -228,6 +228,7 @@ pub fn member_ruling(method: M) -> Ruling {
         | M::TaskCreate
         | M::TaskUpdate
         | M::TaskSetStatus
+        | M::TaskReorder
         | M::TaskNote
         | M::TaskBlock
         | M::TaskSetWait

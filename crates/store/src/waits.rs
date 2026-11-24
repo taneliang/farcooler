@@ -12,11 +12,9 @@
 //! (`read_wait`); and opening the store clears any an older build left
 //! behind by moving a task without knowing about waits (`sweep_unfitting`).
 //!
-//! **A line is replaced whole** (`Store::set_line`), never edited one task
-//! at a time: the order is what goes stale, and the orchestrator already
-//! rewrites the whole of it on every heartbeat. Only a change of kind writes
-//! a `wait` note; a reorder writes nothing, or the record would be a list of
-//! reorders.
+//! `Store::set_line` replaces membership for manually managed waits and moves
+//! the named cards to the front of the board. The board supplies every line's
+//! order. The engine reports its own slot waits, using the same board order.
 
 use std::collections::HashMap;
 
@@ -36,7 +34,7 @@ use crate::tasks::{insert_note, now_millis};
 pub enum TaskLine {
     /// Tasks not yet started, in the order they get a free agent.
     Agent,
-    /// Tasks started, waiting for the one build slot.
+    /// Tasks marked by hand as waiting to build.
     Build,
 }
 
@@ -194,8 +192,8 @@ const CLEARED: &str =
 /// because the two ship together.
 ///
 /// The waits are nullable columns on `tasks`: a task has at most one, and a
-/// board read must not join for it. `wait_rank` is written only by
-/// `set_line`; the position a client sees is derived from it.
+/// board read must not join for the wait itself. The legacy `wait_rank`
+/// seeds board positions during migration.
 ///
 /// `task_workers` is history: a row per (task, harness, agent), open while
 /// `ended_at` is NULL, never deleted while its task lives. See `workers`.
@@ -392,7 +390,7 @@ pub(crate) fn sweep_unfitting(conn: &Connection) -> Result<()> {
 pub(crate) fn leave_line(tx: &Connection, task: Uuid, actor: Actor) -> Result<()> {
     let (_, _, wait, _) = stored_wait(tx, task)?;
     if let Some(line @ Wait::InLine(_)) = wait {
-        write_wait(tx, task, None, None, 0)?;
+        write_wait(tx, task, None, 0)?;
         note_change(tx, task, Some(line), None, actor)?;
     }
     Ok(())
@@ -427,8 +425,8 @@ fn stored_wait(conn: &Connection, task: Uuid) -> Result<(TaskStatus, Uuid, Optio
     .ok_or(DomainError::NotFound)
 }
 
-/// Write `wait` onto a task's row, `rank` for a line. `None` clears it.
-fn write_wait(tx: &Connection, task: Uuid, wait: Option<Wait>, rank: Option<i64>, since: i64) -> Result<()> {
+/// Write `wait` onto a task's row. `None` clears it.
+fn write_wait(tx: &Connection, task: Uuid, wait: Option<Wait>, since: i64) -> Result<()> {
     let (kind, line, until, event) = match wait {
         None => (None, None, None, None),
         Some(Wait::InLine(l)) => (Some("in_line"), Some(l.as_str()), None, None),
@@ -437,10 +435,10 @@ fn write_wait(tx: &Connection, task: Uuid, wait: Option<Wait>, rank: Option<i64>
         Some(Wait::Parked) => (Some("parked"), None, None, None),
     };
     tx.execute(
-        "UPDATE tasks SET wait_kind = ?1, wait_line = ?2, wait_rank = ?3, wait_until = ?4, wait_event = ?5,
-                          wait_since = ?6
-          WHERE id = ?7",
-        params![kind, line, rank, until, event, wait.map(|_| since), uuid_blob(task)],
+        "UPDATE tasks SET wait_kind = ?1, wait_line = ?2, wait_rank = NULL, wait_until = ?3, wait_event = ?4,
+                          wait_since = ?5
+          WHERE id = ?6",
+        params![kind, line, until, event, wait.map(|_| since), uuid_blob(task)],
     )
     .map_err(map_err)?;
     Ok(())
@@ -467,6 +465,11 @@ fn note_change(tx: &Connection, task: Uuid, before: Option<Wait>, after: Option<
     };
     insert_note(tx, task, NoteKind::Wait, actor, &body, &extra, None)?;
     Ok(())
+}
+
+fn run_owns_wait(conn: &Connection, task: Uuid) -> Result<bool> {
+    use crate::workflow_projection::{is_owned, is_ticket};
+    Ok(is_owned(conn, task).map_err(map_err)? && !is_ticket(conn, task).map_err(map_err)?)
 }
 
 impl Store {
@@ -503,15 +506,15 @@ impl Store {
             }
             let since = if before == wait { since.unwrap_or(now) } else { now };
             // The wait fence passes a ticket at rest; a card with a run never reaches here (ov-965).
-            write_wait(&tx, task, wait, None, since)?;
+            write_wait(&tx, task, wait, since)?;
             note_change(&tx, task, before, wait, actor)?;
             tx.commit().map_err(map_err)?;
         }
         self.get_task(task)
     }
 
-    /// Replace one of a board's lines, whole, in order: the first task is
-    /// next. Answers with the line's tasks, in order.
+    /// Move these cards to the front of the board and replace manual line
+    /// membership. Engine runs take the new order through the board.
     ///
     /// A task in that line on that board and not named loses its place. A
     /// task named loses whatever other wait it had. Each task must be on the
@@ -521,7 +524,7 @@ impl Store {
         let now = now_millis();
         {
             let mut conn = self.conn();
-            let tx = conn.transaction().map_err(map_err)?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(map_err)?;
             let named: std::collections::HashSet<Uuid> = tasks.iter().copied().collect();
             if named.len() != tasks.len() {
                 return Err(DomainError::InvalidArgument { what: "task_twice" });
@@ -535,7 +538,9 @@ impl Store {
                 if !line.takes(status) {
                     return Err(DomainError::InvalidArgument { what: "line_status" });
                 }
-                before.insert(id, (wait, since));
+                if !run_owns_wait(&tx, id)? {
+                    before.insert(id, (wait, since));
+                }
             }
             let members: Vec<Uuid> = {
                 let mut stmt = tx
@@ -547,16 +552,18 @@ impl Store {
                 rows.collect::<rusqlite::Result<_>>().map_err(map_err)?
             };
             for id in members.into_iter().filter(|id| !named.contains(id)) {
-                write_wait(&tx, id, None, None, now)?;
+                if run_owns_wait(&tx, id)? { continue; }
+                write_wait(&tx, id, None, now)?;
                 note_change(&tx, id, Some(Wait::InLine(line)), None, actor)?;
             }
-            for (rank, &id) in tasks.iter().enumerate() {
-                let (was, since) = before[&id];
+            for &id in tasks {
+                let Some(&(was, since)) = before.get(&id) else { continue };
                 let wait = Some(Wait::InLine(line));
                 let since = if was == wait { since.unwrap_or(now) } else { now };
-                write_wait(&tx, id, wait, Some(rank as i64 + 1), since)?;
+                write_wait(&tx, id, wait, since)?;
                 note_change(&tx, id, was, wait, actor)?;
             }
+            crate::tasks::prioritize_board_tasks(&tx, workspace, tasks)?;
             tx.commit().map_err(map_err)?;
         }
         tasks.iter().map(|&id| self.get_task(id)).collect()
@@ -606,7 +613,7 @@ impl Store {
             // After release the hold still lets go (a board fact), and the
             // orchestrator is told through the engine's binding (ov-949).
             for (id, until) in due {
-                write_wait(&tx, id, None, None, now)?;
+                write_wait(&tx, id, None, now)?;
                 let body =
                     format!("Held until {}. That time has come.", farcooler_core::local_time::moment(until));
                 let extra = json!({ "wait": "none", "was": "until", "until": until });
@@ -681,9 +688,11 @@ impl Store {
 fn line_members(conn: &Connection, workspace: Uuid, line: TaskLine) -> Result<Vec<(Uuid, String)>> {
     let mut stmt = conn
         .prepare(&format!(
-            "SELECT id, key FROM tasks
+            "SELECT id, key FROM tasks {}
               WHERE workspace_id = ?1 AND wait_kind = 'in_line' AND wait_line = ?2 AND {FITS_SQL}
-              ORDER BY wait_rank, rowid"
+              AND NOT EXISTS (SELECT 1 FROM workflow_owned_items o WHERE o.task_id = tasks.id
+                  AND NOT EXISTS (SELECT 1 FROM engine_stage_tickets t WHERE t.task_id = tasks.id))
+              ORDER BY {}", crate::tasks::BOARD_ORDER_JOIN, crate::tasks::BOARD_ORDER
         ))
         .map_err(map_err)?;
     let rows = stmt

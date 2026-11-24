@@ -235,6 +235,7 @@ button.danger { color: var(--danger); }
 @media (prefers-reduced-motion: reduce) { .plan-glyph[data-working] { animation: none; } }
 .plan-ticket { display: grid; grid-template-columns: 7ch 1fr auto; align-items: baseline; column-gap: 10px; width: calc(100% - 16px); margin: 0 8px; padding: 3px 8px 3px 34px; text-align: left; background: none; color: var(--text); border-radius: 8px; }
 .plan-ticket:hover { background: var(--selected); filter: none; }
+.plan-ticket[draggable="true"] { cursor: grab; }
 .plan-key { font: 13px ui-monospace, "SF Mono", Menlo, monospace; color: var(--text-2); white-space: nowrap; }
 .plan-ticket-title { min-width: 0; overflow-wrap: anywhere; }
 .plan-ticket-for { font-size: 13px; color: var(--text-2); text-align: right; }

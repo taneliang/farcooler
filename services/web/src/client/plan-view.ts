@@ -26,6 +26,7 @@ export interface PlanHandlers {
   openAgent(agent: { id: string; name: string; terminal?: string | null }): boolean | Promise<boolean>
   /// A footer count's list.
   openList(kind: CountKind): void
+  order?: { label: string; open(): void }
   edit(theme: string): void
   type(draft: string): void
   save(): void
@@ -390,7 +391,7 @@ function draw(plan: Plan, model: PlanViewModel, needs: NeedsRow[], view: PlanBoa
 /// that found nothing new must not take a button out from under a click, or an
 /// open fold closed). Returns what was drawn, to hand back as `last`.
 export function renderPlan(root: HTMLElement, view: PlanBoardView, now: number, on: PlanHandlers, last: string, items: NeedsItem[], present: PlanPresenter): string {
-  const signature = JSON.stringify([items, view.state, view.banner, view.raw, view.workspace, view.workspaces, view.editing?.theme ?? null, [...view.busy], [...view.notices], Math.floor(now / 60_000)])
+  const signature = JSON.stringify([items, view.state, view.banner, view.raw, view.workspace, view.workspaces, on.order?.label, view.editing?.theme ?? null, [...view.busy], [...view.notices], Math.floor(now / 60_000)])
   if (signature === last) return last
 
   // An open fold stays open across a redraw.
@@ -401,6 +402,11 @@ export function renderPlan(root: HTMLElement, view: PlanBoardView, now: number, 
     const banner = make('p', BANNER, view.banner)
     banner.setAttribute('role', 'status')
     children.push(banner)
+  }
+  if (on.order) {
+    const openOrder = button(on.order.label, 'plan-count-link', on.order.open)
+    openOrder.setAttribute('aria-haspopup', 'dialog')
+    children.push(openOrder)
   }
   if (view.state === 'loading') children.push(make('p', 'plan-empty', 'Reading the plan…'))
   else if (view.state === 'ready' && view.plan) {

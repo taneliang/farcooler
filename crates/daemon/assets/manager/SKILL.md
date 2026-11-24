@@ -149,9 +149,9 @@ session: start its description with the key (`fc-12: polish the sidebar`) and
 record it with `agent record --subagent <agentId> --role … --ticket <key>`, the
 id from its launch result, at once (never a model). The runner sees a Claude
 subagent end; for codex, or one you stop using, run `agent end <agent>
---verdict …`. A task you won't start now says why: `task line <key>…` for the
-order (the whole line each time), `task line --build` for the build slot, `task
-block` for another task, `task wait --until "2026-10-05 09:00"` or `--after
+--verdict …`. Order Backlog, To Do and slot contenders with `task reorder KEY --before KEY` (or `--after`).
+`task line KEY…` and `task line --build KEY…` move cards to the front. Read slot positions in `workflow get`.
+For work that must wait, use `task block` for another task, `task wait --until "2026-10-05 09:00"` or `--after
 release|recurrence|clear-board` for a time or an event, `task wait --park` for
 work nobody plans to do.
 
@@ -225,7 +225,7 @@ output, and `worktree remove` its worktree once nothing works in it.
 
 At each check-in, and when the owner returns, re-evaluate rather than replay:
 - the plan: read the plan overview (`{{cli}} plan --repo <repo>`) and its count of open cards with no theme; file those cards under their themes. Rewrite each theme's story (`plan theme set <name> --story …
-  --next …`), correct ticket stages, and reset Next Up (`plan set <key>…`);
+  --next …`), correct ticket stages, and reset Next Up (`plan set <key>…` moves those cards to the front of the board);
 - the structure: do the themes still fit the work? Should a ticket split, or a
   workstream move off?
 - the order: read the plan's history since your last turn (`plan theme show

@@ -70,6 +70,7 @@ fn every_write(actor: &str) -> Vec<Request> {
         call("task.create", P::TaskCreate(pb::TaskCreate { actor: a(), ..Default::default() })),
         call("task.update", P::TaskUpdate(pb::TaskUpdate { actor: a(), ..Default::default() })),
         call("task.set_status", P::TaskSetStatus(pb::TaskSetStatus { actor: a(), ..Default::default() })),
+        call("task.reorder", P::TaskReorder(pb::TaskReorder { actor: a(), ..Default::default() })),
         call("task.note", P::TaskNoteAppend(pb::TaskNoteAppend { actor: a(), ..Default::default() })),
         call("task.block", P::TaskBlockSet(pb::TaskBlockSet { actor: a(), ..Default::default() })),
         call("task.set_wait", P::TaskSetWait(pb::TaskSetWait { actor: a(), ..Default::default() })),

@@ -71,6 +71,9 @@ const SECTIONS: [&str; 10] =
 mod starts;
 #[path = "task_create.rs"]
 mod create;
+#[path = "task_order.rs"]
+mod order;
+use order::move_request;
 
 #[derive(Subcommand)]
 pub enum TaskCmd {
@@ -311,6 +314,8 @@ pub enum TaskCmd {
         #[arg(long)]
         actor: Option<String>,
     },
+    /// Place a ticket before or after another ticket on the same board.
+    Reorder(order::Reorder),
     /// Every note in a repository whose body carries a phrase.
     ///
     /// What makes the board a memory rather than a queue. "Why did we do it
@@ -622,6 +627,7 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
             }
         }
 
+        TaskCmd::Reorder(args) => order::reorder(&mut link, args, json).await?,
         TaskCmd::Note { key, kind, body, rejected, supersedes, repo, actor } => {
             let kind = writable_kind(&kind)?;
             let actor = actor_for(actor.as_deref())?;
@@ -1512,18 +1518,6 @@ fn task_list_request(board: &Board, status: Option<TaskStatus>, stale_after: Opt
         }),
     );
     if asking_a_workspace { needs_workstreams(r) } else { r }
-}
-
-/// `task.move` of `tasks` to `workspace`, as `actor`.
-fn move_request(tasks: &[pb::Task], workspace: Uuid, actor: Actor) -> pb::Request {
-    needs_workstreams(with(
-        req("task.move"),
-        request::Payload::TaskMove(pb::TaskMove {
-            task_ids: tasks.iter().map(|t| t.id.clone()).collect(),
-            workspace_id: id_bytes(workspace),
-            actor: actor.to_string(),
-        }),
-    ))
 }
 
 async fn detail_of(
