@@ -38,7 +38,10 @@ impl LegacyLatches {
         for old in self.0.keys() {
             tickets.extend(live_tickets(old)?);
         }
-        Ok(tickets.iter().map(|t| unsafe { libc::getpgid(t.pid) }).collect())
+        if tickets.is_empty() { return Ok(HashSet::new()); }
+        crate::process_reads::DETAILS.read(move || {
+            tickets.into_iter().map(|ticket| unsafe { libc::getpgid(ticket.pid) }).collect()
+        }).ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "heavy-job ticket process groups unavailable"))
     }
 }
 
@@ -99,7 +102,8 @@ pub(super) fn waiting(queue: &Path, tickets: &[Ticket], candidate_groups: &HashS
     let Some(cutoff) = SystemTime::now().duration_since(UNIX_EPOCH).ok()
         .and_then(|now| now.checked_sub(REPORT_AFTER)).map(|t| t.as_nanos()) else { return Default::default() };
     let locate = |t: &Ticket| {
-        let group = unsafe { libc::getpgid(t.pid) };
+        let pid = t.pid;
+        let group = crate::process_reads::DETAILS.read(move || unsafe { libc::getpgid(pid) })?;
         let status = process_state(t.pid);
         (group > 0 && status != ProcessState::Gone).then_some((group, status))
     };

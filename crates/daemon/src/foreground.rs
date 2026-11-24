@@ -120,10 +120,15 @@ impl Foreground {
     }
 
     /// Start at processes on the tty that still belong to the pane's PTY session.
-    pub(crate) fn under_tty_in_session(&self, tty: &str, session: i32) -> Vec<i32> {
-        let roots = self.on_tty.get(tty).into_iter().flatten().copied()
-            .filter(|&pid| unsafe { libc::getsid(pid) } == session).collect();
-        self.descendants(roots)
+    pub(crate) fn under_tty_in_session(&self, tty: &str, session: i32) -> Option<Vec<i32>> {
+        let mut roots = self.on_tty.get(tty).cloned().unwrap_or_default();
+        if !roots.is_empty() {
+            roots = crate::process_reads::DETAILS.read(move || {
+                roots.retain(|&pid| unsafe { libc::getsid(pid) } == session);
+                roots
+            })?;
+        }
+        Some(self.descendants(roots))
     }
 
     fn descendants(&self, mut found: Vec<i32>) -> Vec<i32> {

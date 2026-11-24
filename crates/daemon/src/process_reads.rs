@@ -25,6 +25,17 @@ pub(crate) static LABELS: Lane = Lane::new("process-labels", 1, Duration::from_m
 pub(crate) static LOG_TOPOLOGY: Lane = Lane::new("log-topology", 2, Duration::from_millis(200));
 pub(crate) static OPEN_FILES: Lane = Lane::new("process-open-files", 2, Duration::from_secs(1));
 
+/// Signal zero checks existence and permission without sending a signal.
+pub(crate) fn probe_pid(pid: i32) -> std::io::Result<()> {
+    DETAILS.read(move || {
+        if unsafe { libc::kill(pid, 0) } == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
+    }).ok_or_else(|| std::io::Error::new(std::io::ErrorKind::TimedOut, "process existence query timed out"))?
+}
+
 struct Place(&'static Lane);
 impl Drop for Place {
     fn drop(&mut self) {

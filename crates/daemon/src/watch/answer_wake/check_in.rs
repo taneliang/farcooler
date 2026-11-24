@@ -21,8 +21,13 @@ pub(super) struct Destination {
 async fn scheduled_foreground(tty: &str) -> Option<(&'static str, i32)> {
     let name = tty.strip_prefix("/dev/").unwrap_or(tty);
     let listing = super::codex_turn::discovery_output("ps", &["-t", name, "-o", "pid=,ppid=,stat=,comm="]).await?;
-    let (pid, comm) = super::in_front(&listing)?;
-    let exe = std::fs::read_link(format!("/proc/{pid}/exe")).map(|p| p.to_string_lossy().into_owned()).unwrap_or(comm);
+    let (pid, exe) = super::in_front(&listing)?;
+    #[cfg(target_os = "linux")]
+    let exe = crate::process_reads::DETAILS
+        .read_async(move || std::fs::read_link(format!("/proc/{pid}/exe")))
+        .await?
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or(exe);
     let args = super::codex_turn::discovery_output("ps", &["-o", "args=", "-p", &pid.to_string()]).await?;
     super::agent_of_process(&exe, args.trim()).map(|agent| (agent, pid))
 }

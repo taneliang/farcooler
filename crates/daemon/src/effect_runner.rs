@@ -25,9 +25,13 @@ impl Group {
     }
 
     pub(crate) fn gone(pid: u32) -> std::io::Result<bool> {
-        if unsafe { libc::killpg(pid as i32, 0) } == 0 { return Ok(false); }
-        let error = std::io::Error::last_os_error();
-        if error.raw_os_error() == Some(libc::ESRCH) { Ok(true) } else { Err(error) }
+        let group = i32::try_from(pid).ok().filter(|&pid| pid > 1)
+            .ok_or_else(|| std::io::Error::other("invalid process group"))?;
+        match crate::process_reads::probe_pid(-group) {
+            Ok(()) => Ok(false),
+            Err(error) if error.raw_os_error() == Some(libc::ESRCH) => Ok(true),
+            Err(error) => Err(error),
+        }
     }
 }
 impl Drop for Group {
@@ -185,11 +189,12 @@ impl Owner {
         // An old/partial receipt or failed lookup cannot distinguish our live writer
         // from a recycled PID. Neither signal it nor authorize another gate.
         if owner.started.trim().is_empty() { return Ok(false); }
-        if unsafe { libc::kill(owner.pid as i32, 0) } == 0 {
-            if !Self::matches_started(owner.pid, &owner.started)? { return Ok(true); }
-        } else {
-            let error = std::io::Error::last_os_error();
-            if error.raw_os_error() != Some(libc::ESRCH) { return Err(error); }
+        let pid = i32::try_from(owner.pid).ok().filter(|&pid| pid > 1)
+            .ok_or_else(|| std::io::Error::other("invalid owner pid"))?;
+        match crate::process_reads::probe_pid(pid) {
+            Ok(()) => if !Self::matches_started(owner.pid, &owner.started)? { return Ok(true); },
+            Err(error) if error.raw_os_error() == Some(libc::ESRCH) => {}
+            Err(error) => return Err(error),
         }
         if let Err(error) = Group::new(owner.pid).kill() { tracing::warn!(pid = owner.pid, %error, "signalling an old group failed; waiting to see it go"); }
         for _ in 0..100 {

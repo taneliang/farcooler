@@ -7,14 +7,18 @@ impl NativeOwner {
         let Some(supervisor) = &self.supervisor else { return Ok(table.under_tty(tty)) };
         let session = i32::try_from(supervisor.pid).ok().filter(|&pid| pid > 1)
             .ok_or(Error::Refused("invalid native supervisor pid"))?;
-        let processes = table.under_tty_in_session(tty, session);
+        let processes = table.under_tty_in_session(tty, session)
+            .ok_or(Error::Refused("native process sessions unavailable"))?;
         // A session keeps its ID while any member survives. If the PID was
         // recycled as a new session leader, its start identity has changed.
-        let owns_session = || unsafe { libc::getsid(session) } == session;
-        if !processes.is_empty() && owns_session() {
+        let owns_session = || crate::process_reads::DETAILS.read(move || unsafe { libc::getsid(session) } == session)
+            .ok_or(Error::Refused("native process session query timed out"));
+        if !processes.is_empty() && owns_session()? {
             match crate::effect_runner::Owner::matches_started(supervisor.pid, &supervisor.started) {
                 Ok(false) => return Ok(Vec::new()),
-                Err(error) if owns_session() => return Err(Error::Io(error)),
+                Err(error) => {
+                    if owns_session()? { return Err(Error::Io(error)); }
+                }
                 _ => {}
             }
         }
