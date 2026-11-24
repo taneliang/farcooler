@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import Testing
 
@@ -27,23 +28,32 @@ struct CancelledReadTests {
         #expect(client.fleetError == nil)
     }
 
-    @Test func aStalledReadReportsThatTheRunnerIsNotResponding() async {
-        let client = DaemonClient(target: "", notifications: NotificationCenter())
+    @Test(.timeLimit(.minutes(2))) func aStalledReadReportsThatTheRunnerIsNotResponding() async {
+        let client = DaemonClient(target: "stalled-runner", notifications: NotificationCenter())
         client.runnerResponseTimeout = 0.05
+        let heldRead = AsyncStream.makeStream(of: Void.self)
+        let states = AsyncStream.makeStream(of: HostState.self)
+        let observation = client.$state.sink { state in
+            if state != .connecting { states.continuation.yield(state) }
+        }
+        defer {
+            observation.cancel()
+            states.continuation.finish()
+            heldRead.continuation.finish()
+            client.stopEvents()
+        }
         client.commandRunnerForTesting = { _ in
-            try? await Task.sleep(for: .seconds(30))
+            var wait = heldRead.stream.makeAsyncIterator()
+            _ = await wait.next()
             return (nil, nil)
         }
         let read = Task { await client.refresh() }
-        let deadline = ContinuousClock.now + .seconds(2)
-        while client.state == .connecting, ContinuousClock.now < deadline {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        #expect(client.state == .unreachable(reason: "Runner not responding"))
+        var changes = states.stream.makeAsyncIterator()
+        let state = await changes.next()
+        #expect(state == .unreachable(reason: "Runner not responding"))
         #expect(client.fleetError == "Runner not responding")
         read.cancel()
         await read.value
-        client.stopEvents()
     }
 
     @Test func aRealFailureStillSaysSo() async {
