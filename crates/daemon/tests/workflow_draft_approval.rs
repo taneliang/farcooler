@@ -584,9 +584,11 @@ async fn ov1456_bundle_exports_live_settings_and_can_draft_a_change() {
     let mut req = farcooler_transport::request("workflow.get");
     req.target_resource_id = Some(bytes::Bytes::copy_from_slice(ws.as_bytes()));
     req.payload = Some(request::Payload::WorkflowCommand(pb::WorkflowCommand { schema: 1, json: r#"{"action":"Get"}"#.into() }));
-    let full = link.call(req.clone()).await.unwrap_err();
+    let mut full_req = req.clone();
+    full_req.accepts.push(farcooler_protocol::accepts::WORKFLOW_FULL.into());
+    let full = link.call(full_req).await.unwrap_err();
     assert!(matches!(&full, farcooler_transport::ClientError::Daemon { what, .. } if what == "response_too_large"), "{full:?}");
-    req.accepts.push("workflow_bundle_v1".into());
+    req.accepts.push(farcooler_protocol::workflow_commands::BUNDLE_VIEW.into());
     let result::Value::WorkflowReply(reply) = link.call(req).await.unwrap().value.unwrap() else { panic!("wrong result") };
     assert!(reply.json.len() < 60 * 1024);
     let exported: lt::Bundle = serde_json::from_str(&reply.json).unwrap();
