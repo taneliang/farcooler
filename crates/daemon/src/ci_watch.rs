@@ -195,7 +195,7 @@ impl RetryRead {
 
 /// GitHub reports each attempt as completed even while our retry workflow is
 /// being scheduled or submitting the rerun. Follow that workflow by source
-/// run ID and attempt, then read the source again after the controller settles.
+/// run ID and attempt, then follow the active rerun on main.
 pub(crate) async fn retry_pending<F, Fut>(
     run: &GhRun,
     attempt: Option<u64>,
@@ -206,9 +206,15 @@ where
     F: Fn(String) -> Fut,
     Fut: std::future::Future<Output = RetryRead>,
 {
-    if run.name != "CI" || run.event != "push" || run.status != "completed"
-        || !matches!(run.conclusion.as_deref(), Some("failure" | "cancelled"))
-    { return false; }
+    if run.name != "CI" || run.event != "push" { return false; }
+    let active = run.status != "completed";
+    if active {
+        // The landing adapter includes the attempt number. The board already
+        // shows an active run as queued or running.
+        if attempt.is_none_or(|n| n <= 1) { return false; }
+    } else if !matches!(run.conclusion.as_deref(), Some("failure" | "cancelled")) {
+        return false;
+    }
 
     #[derive(Deserialize)]
     struct Source {
@@ -240,13 +246,13 @@ where
         serde_json::from_slice::<Source>(&raw).ok()
             .filter(|s| s.id == run.id && s.head_sha == run.head_sha)
     };
-    let Some(current) = source().await else { return recent(&run.updated_at) };
-    if current.status != "completed" || current.conclusion != run.conclusion
+    let Some(current) = source().await else { return active || recent(&run.updated_at) };
+    if current.head_branch != "main" { return false; }
+    if active || current.status != "completed" || current.conclusion != run.conclusion
         || attempt.is_some_and(|n| current.run_attempt != n)
         || (!run.updated_at.is_empty() && !current.updated_at.is_empty() && current.updated_at != run.updated_at) {
         return true;
     }
-    if current.head_branch != "main" { return false; }
 
     let title = format!("Retry CI {} attempt {}", run.id, current.run_attempt);
     let mut path = "actions/workflows/ci-runner-retry.yml/runs?event=workflow_run&per_page=100".to_string();

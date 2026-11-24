@@ -183,9 +183,15 @@ else:
         let definition = batched_push(&runtime, "any", 5000);
         at_join(&mut runtime, "one", &definition).await;
         command(&runtime, Command::Queue { item: "one".into() });
+        until(&mut runtime, |s| s.items.values().any(|i| i.pushed.is_some())).await;
+        let ci = runtime.store.workflow_outbox("w").unwrap().into_iter()
+            .find(|s| s.active && s.effect.kind == EffectKind::Execute(StageKind::AwaitCi)).unwrap();
+        // The original deadline has elapsed while the first controller is still active.
+        runtime.pump(ci.effect.created_ms + 5001).await.unwrap();
         let terminal = if final_conclusion == "success" { Phase::Done } else { Phase::Failed };
-        let state = until(&mut runtime, |s| phase_of(s, "one") == Some(terminal.clone())).await;
         assert_eq!(std::fs::read_to_string(polls).unwrap(), "4", "interim attempts cannot settle the wait");
+        let state = runtime.state("w").unwrap().unwrap();
+        assert_eq!(phase_of(&state, "one"), Some(terminal));
         assert_eq!(outbox(&runtime, StageKind::Push), 1);
         assert_eq!(outbox(&runtime, StageKind::AwaitCi), 1);
         if final_conclusion != "success" {

@@ -22,6 +22,12 @@ struct VerbFact {
     detail: serde_json::Value,
 }
 
+struct CiObservation {
+    status: CiStatus,
+    run: Option<CiRun>,
+    retry_pending: bool,
+}
+
 /// What a push came to, from its exit, its porcelain output and the remote afterwards.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum PushVerdict {
@@ -279,9 +285,9 @@ impl Exec {
                 let predecessor = self.pending_landing(&head, &binding.effect.resource)?;
                 let (mut ci, mut verdict_from) = (None, None);
                 if green && predecessor.is_none() {
-                    let (status, _, unrun) = self.ci_poll_seen(binding, &head, poll, &cancel).await?;
-                    ci = Some(status);
-                    if unrun {
+                    let observed = self.ci_poll(binding, &head, poll, &cancel).await?;
+                    ci = Some(observed.as_ref().map_or(CiStatus::Unknown, |o| o.status));
+                    if observed.is_none() {
                         let since = *unrun_since.get_or_insert_with(|| self.clock_ms());
                         let grace = self.coding.as_ref().and_then(|c| c.ci.unrun.as_ref()).map_or(CiUnrun::DEFAULT_GRACE_MS, |u| u.grace_ms);
                         if self.clock_ms().saturating_sub(since) >= i64::try_from(grace).unwrap_or(i64::MAX) {
@@ -346,9 +352,11 @@ impl Exec {
             if !sha(parent) { return none("CI has no run anywhere in the target's history that reaches the head.".into()); }
             // Each look writes receipts named for its poll, and none may be written twice: an ancestor's gets a number no wait reaches.
             let numbered = 0x4000_0000u32.saturating_add(poll.saturating_mul(32)).saturating_add(step);
-            let (status, _, absent) = self.ci_poll_seen(binding, parent, numbered, cancel).await?;
-            if !absent {
-                return Ok(match status { CiStatus::Passed | CiStatus::Failed => Behind::Verdict(status, parent.to_string()), _ => Behind::Waiting });
+            if let Some(observed) = self.ci_poll(binding, parent, numbered, cancel).await? {
+                return Ok(match observed.status {
+                    CiStatus::Passed | CiStatus::Failed => Behind::Verdict(observed.status, parent.to_string()),
+                    _ => Behind::Waiting,
+                });
             }
             commit = parent.to_string();
         }
@@ -452,17 +460,20 @@ impl Exec {
         let deadline = binding.effect.created_ms.saturating_add(i64::try_from(patience).unwrap_or(i64::MAX));
         for poll in 0u32.. {
             if *cancel.borrow() { return Ok(Outcome::Interrupted); }
-            let (mut status, run) = self.ci_poll(binding, &candidate, poll, &cancel).await?;
+            let CiObservation { mut status, run, retry_pending } = self.ci_poll(binding, &candidate, poll, &cancel)
+                .await?.unwrap_or(CiObservation { status: CiStatus::Unknown, run: None, retry_pending: false });
             if let Some(retry) = &binding.effect.ci_retry {
                 if !run.as_ref().is_some_and(|r| r.id == retry.run.id && r.attempt > retry.run.attempt) {
                     status = CiStatus::Unknown;
                 }
             }
-            let label = match status {
-                CiStatus::Passed => "passed",
-                CiStatus::Failed => "rejected",
-                CiStatus::Superseded => "cancelled",
-                _ if self.clock_ms() >= deadline => "timeout",
+            // An active controller or rerun owns the retry budget. Keep looking
+            // even if the original CI wait has used up its patience.
+            let label = match (retry_pending, status) {
+                (false, CiStatus::Passed) => "passed",
+                (false, CiStatus::Failed) => "rejected",
+                (false, CiStatus::Superseded) => "cancelled",
+                (false, _) if self.clock_ms() >= deadline => "timeout",
                 _ => {
                     if pause(every, &cancel).await { return Ok(Outcome::Interrupted); }
                     continue;
@@ -535,15 +546,9 @@ impl Exec {
     /// One look at CI on `sha`, over every workflow the step waits on. The configured workflow must have a run; each
     /// other one a CI wait names (ov-1071) counts once the push started it. GitHub starts every workflow a push
     /// triggers together, so one with no run beside the configured one's is one this push didn't trigger (a path filter).
-    /// Anything red is red; anything still going waits; all green is green. The run facts are the configured
-    /// workflow's: that is the run a CI retry reruns.
-    async fn ci_poll(&self, binding: &Binding, sha: &str, poll: u32, cancel: &tokio::sync::watch::Receiver<bool>) -> Result<(CiStatus, Option<CiRun>)> {
-        let (status, run, _) = self.ci_poll_seen(binding, sha, poll, cancel).await?;
-        Ok((status, run))
-    }
-    /// `ci_poll`, and whether the configured workflow has no run on `sha` at all (ov-1243): a hook that answered and
-    /// found nothing, not one that failed to answer.
-    async fn ci_poll_seen(&self, binding: &Binding, sha: &str, poll: u32, cancel: &tokio::sync::watch::Receiver<bool>) -> Result<(CiStatus, Option<CiRun>, bool)> {
+    /// The run facts are the configured workflow's: that is the run a CI policy reruns. A retry in any
+    /// required workflow can defer settlement. `None` means the provider answered and found no configured run.
+    async fn ci_poll(&self, binding: &Binding, sha: &str, poll: u32, cancel: &tokio::sync::watch::Receiver<bool>) -> Result<Option<CiObservation>> {
         let config = self.coding.as_ref().ok_or(Error::Refused("missing coding config"))?;
         let also = match &binding.effect.kind {
             EffectKind::Execute(StageKind::AwaitCi) => match binding.effect.operation.arguments.get(4) {
@@ -552,19 +557,23 @@ impl Exec {
             },
             _ => Vec::new(),
         };
-        let Some((first, run)) = self.ci_look(binding, sha, poll, &config.ci.workflow, 0, cancel).await? else { return Ok((CiStatus::Unknown, None, true)) };
-        let mut all = vec![first];
+        let Some(mut observed) = self.ci_look(binding, sha, poll, &config.ci.workflow, 0, cancel).await? else { return Ok(None) };
+        let mut all = vec![observed.status];
         for (index, name) in also.iter().enumerate() {
-            if let Some((status, _)) = self.ci_look(binding, sha, poll, name, index + 1, cancel).await? { all.push(status); }
+            if let Some(other) = self.ci_look(binding, sha, poll, name, index + 1, cancel).await? {
+                all.push(other.status);
+                observed.retry_pending |= other.retry_pending;
+            }
         }
-        Ok((combined(&all), run, false))
+        observed.status = combined(&all);
+        Ok(Some(observed))
     }
     /// One look at one workflow's newest run on `sha`: the configured provider hook runs once, told which workflow in
     /// `FARCOOLER_CI_WORKFLOW`, and writes a receipt. A hook that fails couldn't say (`Unknown`); one that succeeds and
     /// writes nothing found no run (`None`). A receipt about something else is an error. Only the configured workflow
     /// (`index` 0) follows a CI retry's exact run; the others look for their newest run on `sha`.
     async fn ci_look(&self, binding: &Binding, sha: &str, poll: u32, workflow: &str, index: usize,
-        cancel: &tokio::sync::watch::Receiver<bool>) -> Result<Option<(CiStatus, Option<CiRun>)>> {
+        cancel: &tokio::sync::watch::Receiver<bool>) -> Result<Option<CiObservation>> {
         let config = self.coding.as_ref().ok_or(Error::Refused("missing coding config"))?;
         // The configured workflow keeps the names it always had.
         let stem = match index { 0 => format!("{}.poll-{poll}", digest(&binding.effect)), n => format!("{}.poll-{poll}.ci-{n}", digest(&binding.effect)) };
@@ -577,7 +586,9 @@ impl Exec {
         durable(&log, b"")?;
         let exit = crate::effect_runner::configured(&self.repository(), &command.argv, &command.environment, &log,
             Duration::from_millis(command.timeout_ms), cancel.clone()).await?;
-        if exit != Some(0) { return Ok(Some((CiStatus::Unknown, None))); }
+        if exit != Some(0) {
+            return Ok(Some(CiObservation { status: CiStatus::Unknown, run: None, retry_pending: false }));
+        }
         let raw = match self.bytes(&receipt) {
             Ok(raw) => raw,
             Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -610,7 +621,7 @@ impl Exec {
             }).await;
         let status = if pending { CiStatus::Queued }
             else { crate::ci_watch::summarize(&format!("sha:{sha}"), &[(run, None)]).status };
-        Ok(Some((status, facts)))
+        Ok(Some(CiObservation { status, run: facts, retry_pending: pending }))
     }
 
     /// Apply every member's commits, in order, onto the base in a fresh tree. The tree is made new
