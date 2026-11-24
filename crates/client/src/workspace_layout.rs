@@ -215,7 +215,7 @@ struct Action<'a> {
     enabled: bool,
 }
 
-const COMMANDS: [Command; 17] = [
+const COMMANDS: [Command; 18] = [
     Command::Commands, Command::Shortcuts, Command::Terminals, Command::Needs, Command::Board, Command::Plan,
     Command::Workflow, Command::Orchestrator, Command::Split, Command::CloseSplit, Command::FocusOther,
     Command::Conversation, Command::RawTerminal, Command::ClosePage, Command::StartWork,
