@@ -103,7 +103,7 @@ impl Rpc {
         let mut value = value;
         // `workspace re-pin` reads the published workflow and nothing else (ov-1373): the state, notices and
         // lists beside it grow without bound, and the reply may not pass the 1 MiB frame cap.
-        if action_is_get && !full && req.accepts.iter().any(|v| v == "workflow_repin_v1") {
+        if action_is_get && req.accepts.iter().any(|v| v == "workflow_repin_v1") {
             if let Some(o) = value.as_object_mut() {
                 o.retain(|k, _| matches!(k.as_str(), "schema" | "configuration" | "context"));
             }
