@@ -297,12 +297,15 @@ async function connected(s, first) {
   await page.waitForSelector('#work:not([hidden]) .terminal-choice', { timeout: 90_000 })
   await page.waitForSelector(LIVE, { timeout: 60_000 })
   if (!split) return
-  if (!await page.isVisible('#workspace-side')) {
+  if (first) {
     await page.click('#show-commands')
     await page.locator('#workspace-commands').getByRole('button', { name: /^Split Pane/ }).click()
     await page.locator('.terminal-choice').nth(1).click()
   }
-  await page.waitForSelector(SIDE_LIVE)
+  await page.waitForSelector(SIDE_LIVE, { timeout: 15_000 })
+  if ((await state(page)).touches !== 1) {
+    throw new Error('connecting both terminal panes must take exactly one passkey touch')
+  }
 }
 
 /// What the page is showing about the link, and whether the pane is live.
@@ -319,8 +322,8 @@ const state = page =>
   })
 
 /// Whether a keystroke reaches the runner now: the one proof the pane works.
-async function typesThrough(page, tag) {
-  await page.click('#terminal .xterm', { timeout: 5000 }).catch(() => {})
+async function typesThrough(page, tag, pane = LIVE) {
+  await page.locator(`${pane} .xterm`).click({ timeout: 5000 })
   await page.keyboard.type(tag)
   const deadline = Date.now() + 8000
   while (Date.now() < deadline) {
@@ -423,10 +426,13 @@ async function run(engine, s, c, n) {
   }
   if (split && out.result !== 'lost the pane') {
     await page.waitForSelector(SIDE_LIVE, { timeout: 15_000 })
+    if (!await typesThrough(page, `ok${n}side`, SIDE_LIVE)) {
+      return { ...out, result: 'lost the pane', detail: 'input from the split pane did not reach the runner' }
+    }
     if ((await state(page)).touches - touches > 1) {
       return { ...out, result: 'lost the pane', detail: 'restoring the split took more than one passkey touch' }
     }
-    out.detail += '; both terminal panes attached'
+    out.detail += '; input reached the runner from both panes'
   }
   return out
 }
