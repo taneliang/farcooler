@@ -270,6 +270,8 @@ pub struct Exec {
     pub(super) build_free_bytes: Option<u64>,
     #[cfg(test)]
     cleanup_check: Option<std::sync::Arc<(tokio::sync::Notify, tokio::sync::Notify)>>,
+    #[cfg(test)]
+    cleanup_test_probe: Option<build_cleanup::CleanupTestProbe>,
     open_file_checks: Option<build_cleanup::OpenFileChecks>,
     /// Builders pause while a landing gate runs, in every copy (ov-1214).
     pub(crate) yielding: crate::yielding::Yielding,
@@ -333,6 +335,8 @@ pub struct Runtime {
     /// Pending transient cleanup must wake both idle and occupied dispatch loops (ov-1203).
     next_cleanup: Option<tokio::time::Instant>,
     orphan_cleanup_retries: BTreeMap<PathBuf, tokio::time::Instant>,
+    /// Frequent build retries and messages do not move this maintenance deadline.
+    next_process_log_prune: Option<tokio::time::Instant>,
     continuous: bool,
     #[cfg(test)]
     sweeps: usize,
@@ -444,10 +448,10 @@ impl Runtime {
         let store = Store::open(root.join("workflow.sqlite"))
             .map_err(|_| Error::Refused("cannot open fixture database"))?;
         let (send, inbox) = mpsc::channel(32);
-        let runtime = Self { inbox, send, next_lease: None, next_cleanup: None, orphan_cleanup_retries: BTreeMap::new(), continuous: false,
+        let runtime = Self { inbox, send, next_lease: None, next_cleanup: None, orphan_cleanup_retries: BTreeMap::new(), next_process_log_prune: None, continuous: false,
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
             exec: Exec { yielding: crate::yielding::Yielding::at(&root), activities: Default::default(), places: std::sync::Arc::new(std::sync::Mutex::new(Places::load(&root)?)), root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, host: None,
-                seeding: Default::default(), tree_locks: Default::default(), disk_usage: Default::default(), #[cfg(test)] user_home: None, #[cfg(test)] build_free_bytes: Some(u64::MAX), #[cfg(test)] cleanup_check: None, open_file_checks: None },
+                seeding: Default::default(), tree_locks: Default::default(), disk_usage: Default::default(), #[cfg(test)] user_home: None, #[cfg(test)] build_free_bytes: Some(u64::MAX), #[cfg(test)] cleanup_check: None, #[cfg(test)] cleanup_test_probe: None, open_file_checks: None },
             notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None, trees_recovered: false, next_join_refresh: None, cleanup_started: None, cancel_refused: Default::default(), recovery: Default::default(), restart_pacing: Default::default(), scheduling: Default::default(),
             _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
         runtime.validate_native_host()?;
@@ -619,7 +623,7 @@ impl Runtime {
         if recover_trees {
             let exec = self.exec.clone();
             let boards = workspaces.clone();
-            tokio::task::spawn_blocking(move || exec.prune_trees(&boards, true))
+            tokio::task::spawn_blocking(move || exec.recover_trees(&boards))
                 .await.map_err(|_| Error::Refused("cleanup recovery worker failed"))?;
             self.trees_recovered = true;
         }
@@ -685,7 +689,19 @@ impl Runtime {
                     let exec = self.exec.clone();
                     let recover_trees = std::mem::take(&mut recover_trees);
                     let mut orphans = std::mem::take(&mut self.orphan_cleanup_retries);
+                    let prune_logs = self.next_process_log_prune.is_none_or(|due| at >= due);
+                    if prune_logs {
+                        self.next_process_log_prune = Some(at + build_cleanup::CLEANUP_MAINTENANCE_INTERVAL);
+                    }
                     let mut task = BackgroundTask::new(async move {
+                        if prune_logs {
+                            let pruner = exec.clone();
+                            match tokio::task::spawn_blocking(move || pruner.prune_process_logs()).await {
+                                Ok(Ok(())) => {}
+                                Ok(Err(error)) => tracing::warn!(%error, "could not prune orphan process logs"),
+                                Err(error) => tracing::warn!(%error, "process log pruning worker failed"),
+                            }
+                        }
                         let workspaces = exec.store.workflow_workspaces()?;
                         let deadline = exec.release_builds(&workspaces).await?;
                         let now = tokio::time::Instant::now();
@@ -749,7 +765,7 @@ impl Runtime {
                     let (deadline, orphans) = result?;
                     self.orphan_cleanup_retries = orphans;
                     self.next_cleanup = deadline.into_iter().chain(self.orphan_cleanup_retries.values().copied())
-                        .chain(continuous.then(|| tokio::time::Instant::now() + build_cleanup::CLEANUP_MAINTENANCE_INTERVAL)).min();
+                        .chain(self.next_process_log_prune.filter(|_| continuous)).min();
                     // A pending effect may have been waiting for cleanup to release its tree.
                     scan = self.continuous && !stopping;
                 }

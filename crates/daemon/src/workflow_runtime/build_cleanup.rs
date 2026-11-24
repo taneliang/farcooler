@@ -80,6 +80,13 @@ struct ProbeRetry {
 #[derive(Clone, Default)]
 pub(super) struct OpenFileChecks(Arc<tokio::sync::Mutex<OpenFileCheckState>>);
 
+#[cfg(test)]
+#[derive(Clone)]
+pub(super) struct CleanupTestProbe {
+    pub(super) program: PathBuf,
+    pub(super) walking: Arc<std::sync::atomic::AtomicBool>,
+}
+
 impl OpenFileChecks {
     async fn run(
         &self,
@@ -118,9 +125,10 @@ impl OpenFileChecks {
 
 impl Exec {
     pub(super) async fn check_open_files(&self, path: &Path) -> std::result::Result<(), String> {
+        let check = check_open_files(path, #[cfg(test)] self.cleanup_test_probe.as_ref());
         match &self.open_file_checks {
-            Some(checks) => checks.run(path, check_open_files(path)).await,
-            None => check_open_files(path).await,
+            Some(checks) => checks.run(path, check).await,
+            None => check.await,
         }
     }
 
@@ -423,6 +431,8 @@ impl Exec {
         let tree = tree.to_path_buf();
         let relative = relative.to_string_lossy().into_owned();
         let path = path.to_path_buf();
+        #[cfg(test)]
+        let probe = self.cleanup_test_probe.clone();
         let result = tokio::task::spawn_blocking(move || {
             // Blocking deletion can outlive a cancelled async caller; retain the fence here too.
             let _held = held;
@@ -438,7 +448,13 @@ impl Exec {
                 None => {
                     // The open-file check can take seconds. Validate descendants
                     // afterward so an inserted repository or report is protected.
-                    let bytes = size(&path, device, generated_reports).map_err(|e| e.to_string())?;
+                    #[cfg(test)]
+                    if let Some(probe) = &probe { probe.walking.store(true, std::sync::atomic::Ordering::Relaxed); }
+                    let bytes = size(&path, device, generated_reports);
+                    #[cfg(test)]
+                    if let Some(probe) = &probe { probe.walking.store(false, std::sync::atomic::Ordering::Relaxed); }
+                    let bytes = bytes.map_err(|e| e.to_string())?;
+
                     std::fs::remove_dir_all(&path).map(|()| bytes)
                 }
             };
@@ -517,13 +533,13 @@ pub(super) fn folder_paths<'a>(tree: &'a Path, folder: &'a str) -> impl Iterator
         checked_folder(tree, folder)
     })
 }
-async fn check_open_files(path: &Path) -> std::result::Result<(), String> {
+async fn check_open_files(path: &Path, #[cfg(test)] probe: Option<&CleanupTestProbe>) -> std::result::Result<(), String> {
     // macOS launch agents may run without /usr/sbin on PATH.
     let program = if cfg!(target_os = "macos") { "/usr/sbin/lsof" } else { "lsof" };
     #[cfg(test)]
     let shim = std::env::var_os("FARCOOLER_TEST_IDLE_SHIMS").map(|root| PathBuf::from(root).join("lsof"));
     #[cfg(test)]
-    let program = shim.as_deref().unwrap_or_else(|| Path::new(program));
+    let program = probe.map(|probe| probe.program.as_path()).or(shim.as_deref()).unwrap_or_else(|| Path::new(program));
     let mut command = tokio::process::Command::new(program);
     command.args(["-nP", "-F", "p", "+D"]).arg(path).kill_on_drop(true);
     let output = tokio::time::timeout(Duration::from_secs(120), command.output()).await

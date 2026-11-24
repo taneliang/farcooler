@@ -102,7 +102,7 @@ On landing base `1c0c2027a`, the dispatcher uses the new automatic queue check o
 | Task List, first page | 33 ms |
 | Worktree List | 5.2 ms |
 
-All four read latency bounds passed, and the read sequence spawned zero tmux clients. In the idle minute, the daemon launched 20 `lsof` commands (9 recursive), 71 Git commands (2 remote-head probes), 1 `gh` command (0 polls of the finished run), and 64 tmux clients. During cleanup, all five pane echoes arrived within the 100 ms budget, with a slowest echo of 89.7 ms. The resumed sweep released the output.
+All four read latency bounds passed, and the read sequence spawned zero tmux clients. In the idle minute, the daemon launched 20 `lsof` commands (9 recursive), 71 Git commands (2 remote-head probes), 1 `gh` command (0 polls of the finished run), and 64 tmux clients.
 
 The full CLI, store, and workflow suites and the affected daemon unit and integration suites covered 3,385 tests. The initial run passed 3,319. The other 66 passed on rerun with short private fixture paths and a corrected test home. The daemon layer, file-size, and Nightly dispatch checks passed.
 
@@ -110,7 +110,7 @@ The full CLI, store, and workflow suites and the affected daemon unit and integr
 
 I replayed the paused-clock tests against the previous scheduler with an adapter for its probe signature. With 20-second probes, occupied time dropped from 100% to 80% over a 100-second sweep across distinct paths and from 57.5% to 20% over ten minutes with one blocked path. The new tests also verify that a blocked path leaves other paths eligible, that its backoff caps at one hour, and that a successful probe clears the backoff.
 
-The loaded fixture's RPCs took 527 ms for Plan, 1,331 ms for Plan theme list, 330 ms for Workflow Get, 49 ms for Task List's first page, and 0.33 ms for Worktree List. The benchmark recorded zero tmux launches during those reads. The slowest of the five pane echoes during the cleanup sweep took 10.8 ms.
+The loaded fixture's RPCs took 527 ms for Plan, 1,331 ms for Plan theme list, 330 ms for Workflow Get, 49 ms for Task List's first page, and 0.33 ms for Worktree List. The benchmark recorded zero tmux launches during those reads.
 
 The idle census passed with 23 `lsof` processes (12 recursive), 77 Git processes (two remote-head probes), one `gh` process (zero polls of the finished run), and 64 tmux clients in one minute.
 
@@ -144,6 +144,16 @@ The rebased CI watcher follows pushed landing SHAs. The idle fixture warms the S
 | Task List, first page | 44 ms | — |
 | Worktree List | 0.75 ms | < 2 s |
 
-The loaded read sequence used the cached tmux inventory and made zero tmux calls. In the idle minute the daemon launched 23 `lsof` commands (12 recursive), 72 Git commands (one remote-head probe), one `gh` command (zero polls of the finished run), and 63 tmux clients. All five pane echoes arrived within 100 ms during cleanup, with a slowest echo of 11.1 ms. The resumed sweep released the output.
+The loaded read sequence used the cached tmux inventory and made zero tmux calls. In the idle minute the daemon launched 23 `lsof` commands (12 recursive), 72 Git commands (one remote-head probe), one `gh` command (zero polls of the finished run), and 63 tmux clients.
 
 The first broad suite inherited the ticket runner's hook socket setting, which misrouted CLI hook fixtures. With a clean test environment, 3,289 of 3,292 selected CLI, daemon, store, and workflow tests passed in parallel. The three failures passed on isolated reruns: the native notice cleanup receipt, an exited owner's pane quiescence, and review recovery after a vanished tmux server. The daemon-layer, file-size, and Nightly dispatch checks passed.
+
+## Return-review verification
+
+The pane regression shares a scratch Service's database, repository fences, and current-thread Tokio executor with its workflow runtime. It sends input through the pane stream while a 350 ms `lsof` shim is running and during the real accounting walk of 48,000 output files. It observes the echo through a kernel pipe, and each latency includes any delay before the input task can wake. The fixed run echoed 15 keys, including 13 during the probe and one during the walk, with a maximum of 8.2 ms. A second fixed run reached 7.3 ms. Temporarily moving accounting and deletion inline produced a 1.76 s key delay and failed the 100 ms assertion. The test waits for cleanup to finish and verifies the recorded byte count. The filesystem cost is tracked by [ov-1438](farcooler://task/-/ov-1438).
+
+Process-log pruning runs on a blocking worker in the first cleanup round and on the hourly maintenance wake. The pruner selects existing sidecars before reading outboxes and rechecks receipts before deletion. The idle regression failed when pruning was restricted to the startup round. It also checks that either a process receipt or a journal preserves output, and a separate test protects both log names for an admitted effect that has yet to write a receipt.
+
+The loaded fixture passed all four budgets. Plan took 743 ms, Plan theme list 958 ms, Workflow Get 171 ms, and Worktree List 0.30 ms. The first Task List page took 52 ms. The idle minute recorded 23 `lsof` launches (12 recursive), 72 Git launches (one remote-head probe), one `gh` launch (zero polls of the finished run), and 64 tmux launches.
+
+The workflow runtime and service suites passed 537 non-ignored tests across the broad run and reruns with the scratch daemon and CLI binaries. The pane regression and both performance checks ran separately. The daemon-layer, file-size, and Nightly dispatch checks passed.

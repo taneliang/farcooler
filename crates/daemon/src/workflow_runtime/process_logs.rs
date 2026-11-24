@@ -98,29 +98,48 @@ impl Exec {
 
     /// Logs have exactly the retention of their process/journal receipts. Never age out evidence
     /// independently or delete an admitted process's output before it has written its receipt.
-    pub(super) fn prune_process_logs(&self, workspaces: &[String]) -> Result<()> {
-        let mut active = BTreeSet::new();
-        let mut fixture_receipts = std::collections::BTreeMap::new();
-        for workspace in workspaces {
-            for stored in self.store.workflow_outbox(workspace)? {
-                fixture_receipts.insert(stored.effect.id.clone(), digest(&stored.effect));
-                if stored.active || matches!(stored.dispatch_state.as_str(), "claimed" | "admitted" | "uncertain") {
-                    active.insert(digest(&stored.effect));
-                    active.insert(stored.effect.id);
-                }
-            }
-        }
+    pub(super) fn prune_process_logs(&self) -> Result<()> {
         let receipts = self.root.join("receipts");
+        let mut candidates = Vec::new();
+        // Pick candidates before reading the outbox. A process admitted after that
+        // read can create a new sidecar while this background pass is running.
         for entry in std::fs::read_dir(&receipts)? {
             let entry = entry?;
             let name = entry.file_name().to_string_lossy().into_owned();
             let Some(key) = name.strip_suffix(".output").or_else(|| name.strip_suffix(".log")) else { continue };
             // Other adapters have their own *.fetch.output etc. This owns only process sidecars.
             if !key.starts_with("wf1:") || key.len() != 68 || !key[4..].bytes().all(|b| b.is_ascii_hexdigit()) { continue; }
-            let journal_key = if name.ends_with(".log") { fixture_receipts.get(key).map_or(key, String::as_str) } else { key };
-            if active.contains(key) || receipts.join(format!("{key}.process.json")).try_exists()?
+            let fixture = name.ends_with(".log");
+            if receipts.join(format!("{key}.process.json")).try_exists()?
+                || !fixture && receipts.join(format!("{key}.json")).try_exists()? { continue; }
+            if entry.file_type()?.is_file() { candidates.push((entry.path(), key.to_owned(), fixture)); }
+        }
+        if candidates.is_empty() { return Ok(()); }
+
+        let mut active = BTreeSet::new();
+        let mut fixture_receipts = std::collections::BTreeMap::new();
+        let has_fixtures = candidates.iter().any(|(_, _, fixture)| *fixture);
+        for workspace in self.store.workflow_workspaces()? {
+            for stored in self.store.workflow_outbox(&workspace)? {
+                if has_fixtures {
+                    fixture_receipts.insert(stored.effect.id.clone(), digest(&stored.effect));
+                }
+                if stored.active || matches!(stored.dispatch_state.as_str(), "claimed" | "admitted" | "uncertain") {
+                    active.insert(digest(&stored.effect));
+                    active.insert(stored.effect.id);
+                }
+            }
+        }
+        for (path, key, fixture) in candidates {
+            let journal_key = if fixture { fixture_receipts.get(&key).map_or(key.as_str(), String::as_str) } else { &key };
+            // An effect could have written its receipt and settled since candidate selection.
+            if active.contains(&key) || receipts.join(format!("{key}.process.json")).try_exists()?
                 || receipts.join(format!("{journal_key}.json")).try_exists()? { continue; }
-            if entry.file_type()?.is_file() { std::fs::remove_file(entry.path())?; }
+            match std::fs::remove_file(path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
         }
         Ok(())
     }
@@ -562,6 +581,66 @@ echo "$o"
     }
 
     #[tokio::test]
+    async fn pruning_preserves_output_from_an_admitted_effect_without_a_receipt() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+        enqueue(&mut runtime, "w", "one", coding_definition(false));
+        let state = runtime.state("w").unwrap().unwrap();
+        let effect = runtime.store.workflow_outbox("w").unwrap().into_iter()
+            .find(|row| row.active).unwrap().effect;
+        let claim = runtime.store.workflow_claim_effect("w", &effect.id, "test-owner",
+            state.revision, state.epoch, 2, 7).unwrap().unwrap();
+        assert!(runtime.store.workflow_admit_effect(&claim, 2).unwrap());
+
+        let receipts = runtime.root.join("receipts");
+        let output = receipts.join(format!("{}.output", digest(&effect)));
+        let legacy = receipts.join(format!("{}.log", effect.id));
+        for path in [&output, &legacy] {
+            std::fs::write(path, "still writing").unwrap();
+        }
+        runtime.prune_process_logs().unwrap();
+        assert!(output.exists() && legacy.exists());
+    }
+
+    #[tokio::test]
+    async fn idle_runtime_prunes_orphan_logs_created_after_startup() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+        let receipts = runtime.root.join("receipts");
+        let startup = receipts.join(format!("{}.output", digest(&"startup")));
+        std::fs::write(&startup, "startup orphan").unwrap();
+
+        tokio::time::pause();
+        runtime.pump(now()).await.unwrap();
+        assert!(!startup.exists());
+
+        let orphan = receipts.join(format!("{}.output", digest(&"orphan")));
+        let legacy_orphan = receipts.join(format!("{}.log", digest(&"legacy")));
+        let process = receipts.join(format!("{}.output", digest(&"process")));
+        let journal = receipts.join(format!("{}.output", digest(&"journal")));
+        for file in [&orphan, &legacy_orphan, &process, &journal] {
+            std::fs::write(file, "output after startup").unwrap();
+        }
+        std::fs::write(process.with_extension("process.json"), "{}").unwrap();
+        std::fs::write(journal.with_extension("json"), "{}").unwrap();
+
+        let handle = runtime.command_handle(&runtime.controller()).unwrap();
+        let (stop, signal) = tokio::sync::watch::channel(false);
+        let worker = tokio::spawn(async move { runtime.run(signal).await });
+        assert!(handle.state("w").await.unwrap().is_none());
+        assert!(orphan.exists(), "a read must not trigger another log scan");
+        tokio::time::advance(super::super::build_cleanup::CLEANUP_MAINTENANCE_INTERVAL).await;
+        let pruned = super::super::wait_until(
+            tokio::time::Instant::now() + Duration::from_secs(10), Duration::from_millis(10),
+            || !orphan.exists() && !legacy_orphan.exists(),
+        ).await;
+        stop.send_replace(true);
+        worker.await.unwrap().unwrap();
+        assert!(pruned, "idle maintenance must remove sidecars left after startup");
+        assert!(process.exists() && journal.exists(), "either receipt retains its output");
+    }
+
+    #[tokio::test]
     async fn workflow_failed_gate_keeps_both_streams_and_get_points_to_its_tail() {
         let (_dir, mut runtime) = super::super::coding_tests::configured(false, "check-fail").await;
         let definition = runtime.configured_definition().unwrap();
@@ -581,7 +660,7 @@ echo "$o"
         let fact = path.with_extension("process.json");
         let receipt: serde_json::Value = serde_json::from_slice(&std::fs::read(&fact).unwrap()).unwrap();
         assert_eq!(receipt["log_path"], log["log_path"]);
-        runtime.prune_process_logs(&["w".into()]).unwrap();
+        runtime.prune_process_logs().unwrap();
         assert!(path.exists(), "retained receipts retain their logs");
         let journal = path.with_extension("json");
         let kept: serde_json::Value = serde_json::from_slice(&std::fs::read(&journal).unwrap()).unwrap();
@@ -589,10 +668,10 @@ echo "$o"
         let fixture_log = runtime.root.join("receipts").join(format!("{}.log", log["effect"].as_str().unwrap()));
         std::fs::write(&fixture_log, "old fixture output").unwrap();
         std::fs::remove_file(fact).unwrap();
-        runtime.prune_process_logs(&["w".into()]).unwrap();
+        runtime.prune_process_logs().unwrap();
         assert!(path.exists() && fixture_log.exists(), "the journal still retains both log names");
         std::fs::remove_file(journal).unwrap();
-        runtime.prune_process_logs(&["w".into()]).unwrap();
+        runtime.prune_process_logs().unwrap();
         assert!(!path.exists() && !fixture_log.exists(), "logs go when their receipts go");
     }
 }

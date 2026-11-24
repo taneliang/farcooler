@@ -2,17 +2,12 @@
 use super::*;
 
 impl Exec {
-    /// Recover cleanup intents and maintain retained process evidence.
-    pub(super) fn prune_trees(&self, workspaces: &[String], recovering: bool) {
-        if recovering {
-            for workspace in workspaces {
-                if let Err(error) = self.recover_disk_cleanups(workspace) {
-                    tracing::warn!(%error, "could not retain recovery cleanup intents");
-                }
+    /// Recover interrupted cleanup intents before dispatch starts.
+    pub(super) fn recover_trees(&self, workspaces: &[String]) {
+        for workspace in workspaces {
+            if let Err(error) = self.recover_disk_cleanups(workspace) {
+                tracing::warn!(%error, "could not retain recovery cleanup intents");
             }
-        }
-        if let Err(error) = self.prune_process_logs(workspaces) {
-            tracing::warn!(%error, "could not prune orphan process logs");
         }
     }
 }

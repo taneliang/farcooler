@@ -1139,53 +1139,118 @@ async fn build_cleanup_partial_folder_failure_reports_unknown_bytes() {
     assert!(result.skipped.iter().any(|s| s.contains("bytes freed unknown")), "{result:?}");
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn pane_echo_stays_under_100ms_during_cleanup() {
-    use tokio::io::AsyncWriteExt;
-    let (_dir, mut engine, tree) = building().await;
-    let output = tree.join("target/deep/output");
-    let open = File::open(&output).unwrap();
-    review(&mut engine).await;
-    drop(open);
+    use std::io::Read;
+    use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+    use tokio::io::{AsyncWriteExt, Interest, unix::AsyncFd};
 
-    let (_pane_dir, svc, _) = crate::test_support::fixture().await;
+    let (dir, svc, repo) = crate::test_support::fixture().await;
+    let mut engine = Runtime::open_service(&svc.root_dir().join("workflow"), svc.store.clone()).unwrap();
+    engine.host = Some(svc.worktree_host().unwrap());
+    let board = svc.store.ensure_main_workspace(repo).unwrap();
+    crate::test_support::publish_for_test(&svc, board.id);
+    let workspace = board.id.to_string();
+    let ticket = svc.store.create_task(board.id, "Cleanup fixture", farcooler_store::models::Actor::User).unwrap();
+    assert_eq!(engine.track_tickets(&[(workspace.clone(), ticket.key, "todo".into())]).unwrap(), 1);
+    let state = engine.state(&workspace).unwrap().unwrap();
+    let repository = dir.path().join("repo").canonicalize().unwrap();
+    let tree = dir.path().canonicalize().unwrap().join("finished");
+    let base = adapters::git(&repository, &["rev-parse", "HEAD"]).await.unwrap().trim().to_owned();
+    adapters::git(&repository, &["worktree", "add", "-b", "finished", tree.to_str().unwrap()]).await.unwrap();
+    let output = tree.join("target");
+    let files = 48_000_u64;
+    for batch in 0..48 {
+        let folder = output.join(batch.to_string());
+        std::fs::create_dir_all(&folder).unwrap();
+        for file in 0..files / 48 {
+            std::fs::write(folder.join(file.to_string()), b"x").unwrap();
+        }
+    }
+    svc.store.workflow_cleanup_enqueue(&farcooler_workflow::cleanup::CleanupEffect {
+        id: "echo-cleanup".into(), workspace: workspace.clone(), revision: state.revision,
+        item: "finished".into(), run: "finished-run".into(), restart: None,
+        tree: Some(RunTree { name: "finished".into(), branch: "finished".into(),
+            path: tree.to_string_lossy().into_owned(), base, adopted: false }),
+        folders: vec!["target".into()], uncertain: false, directory: None,
+    }).unwrap();
+    let program = dir.path().join("lsof");
+    std::fs::write(&program, "#!/bin/sh\n: > \"$0.started\"\nsleep 0.35\n: > \"$0.finished\"\nexit 1\n").unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let probe_started = program.with_extension("started");
+    let probe_finished = program.with_extension("finished");
+    let walking = Arc::new(AtomicBool::new(false));
+    engine.cleanup_test_probe = Some(build_cleanup::CleanupTestProbe { program, walking: walking.clone() });
+
     let worktree = svc.list_worktrees().unwrap().remove(0);
     let terminal = svc.create_terminal(worktree.id, "Echo", "shell").await.unwrap();
     let runtime = svc.runtime();
     let pane = runtime.pane_id_of(terminal.id).unwrap();
-    let echo = svc.root_dir().join("echo.txt");
+    let echo = svc.root_dir().join("echo.pipe");
+    assert!(std::process::Command::new("mkfifo").args(["-m", "600"]).arg(&echo).status().unwrap().success());
+    let receiver = OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK).open(&echo).unwrap();
+    // Keep the FIFO open across pipe-pane startup so the async reader never sees a startup EOF.
+    let _keepalive = OpenOptions::new().write(true).custom_flags(libc::O_NONBLOCK).open(&echo).unwrap();
+    let received = AsyncFd::new(receiver).unwrap();
     let pipe = format!("cat > {}", farcooler_core::shell::shell_quote(echo.to_str().unwrap()));
     assert!(svc.tmux.run(&["pipe-pane", "-O", "-t", &pane, &pipe]).await.unwrap().ok());
     // Use the byte echo program even when the foreground shell aliases cat to a pager.
     let setup = "command stty -icanon -echo min 1 time 0; printf '\\nready-for-keys\\n'; exec /bin/cat\n";
     let hex = |text: &str| text.bytes().map(|byte| format!("{byte:02x}")).collect::<String>();
     runtime.send_bytes_hex(terminal.id, &hex(setup)).await.unwrap();
-    let echoed = || std::fs::read_to_string(&echo).unwrap_or_default();
-    assert!(wait_until(tokio::time::Instant::now() + Duration::from_secs(3), Duration::from_millis(5),
-        || echoed().contains("\r\nready-for-keys\r\n")).await);
+    tokio::time::timeout(Duration::from_secs(3), async {
+        let mut readiness = Vec::new();
+        let mut chunk = [0; 256];
+        while !readiness.ends_with(b"\r\nready-for-keys\r\n") {
+            let n = received.async_io(Interest::READABLE, |mut file| file.read(&mut chunk)).await.unwrap();
+            readiness.extend_from_slice(&chunk[..n]);
+        }
+    }).await.unwrap();
 
-    let check = std::sync::Arc::new((tokio::sync::Notify::new(), tokio::sync::Notify::new()));
-    engine.cleanup_check = Some(check.clone());
-    let worker = tokio::spawn(async move { engine.pump(4).await });
-    tokio::time::timeout(Duration::from_secs(15), check.0.notified()).await.unwrap();
     let (mut writer, reader) = tokio::io::duplex(256);
     let input = tokio::spawn(async move { runtime.input_from(terminal.id, reader).await });
-    let mut samples = Vec::new();
-    let mut expected = String::new();
+    let (stop, signal) = tokio::sync::watch::channel(false);
+    let worker = tokio::spawn(async move { engine.run(signal).await });
+
+    // The owner and input stream share one async worker so blocking cleanup
+    // cannot escape detection by running on a different worker.
     let budget = Duration::from_millis(100);
-    for key in ["a", "b", "c", "d", "e"] {
-        expected.push_str(key);
-        let start = tokio::time::Instant::now();
-        writer.write_all(format!("{}\n", hex(key)).as_bytes()).await.unwrap();
-        let seen = wait_until(start + budget, Duration::from_millis(2), || echoed().ends_with(&expected)).await;
-        samples.push((key, seen, start.elapsed()));
-    }
+    let observed = tokio::time::timeout(Duration::from_secs(30), async {
+        let mut echoes = 0;
+        let mut longest = Duration::ZERO;
+        let mut during_probe = 0;
+        for key in (b'a'..=b'z').cycle() {
+            // Schedule one key after the last echo. That keeps a slow key from charging
+            // its time to later keys, while still counting any delay waking this task.
+            let scheduled = tokio::time::Instant::now() + Duration::from_millis(20);
+            tokio::time::sleep_until(scheduled).await;
+            let finished = !output.exists();
+            writer.write_all(format!("{key:02x}\n").as_bytes()).await.unwrap();
+            during_probe += usize::from(probe_started.exists() && !probe_finished.exists());
+            let during_walk = walking.load(Ordering::Relaxed);
+            let mut echoed = [0];
+            let read = received.async_io(Interest::READABLE, |mut file| file.read_exact(&mut echoed));
+            let seen = matches!(tokio::time::timeout(Duration::from_secs(2), read).await, Ok(Ok(())))
+                && echoed == [key];
+            echoes += 1;
+            let elapsed = scheduled.elapsed();
+            longest = longest.max(elapsed);
+            if during_walk || finished || !seen || elapsed > budget {
+                return (echoes, longest, during_probe, during_walk, seen);
+            }
+        }
+        unreachable!()
+    }).await;
     drop(writer);
-    input.await.unwrap().unwrap();
-    check.1.notify_one();
+    let sent = input.await;
+    stop.send_replace(true);
     worker.await.unwrap().unwrap();
-    println!("pane echo samples: {samples:?}");
-    assert!(samples.iter().all(|(_, seen, elapsed)| *seen && *elapsed <= budget),
-        "each key must echo within {budget:?}");
-    assert!(!output.exists(), "the sweep still releases the output");
+    sent.unwrap().unwrap();
+    let records = svc.store.workflow_cleanups(&workspace).unwrap();
+    let (echoes, longest, during_probe, during_walk, seen) = observed.unwrap_or_else(|_| panic!("cleanup must finish: {records:?}"));
+    println!("{echoes} pane echoes, longest {longest:?}, {during_probe} during lsof, walk overlapped: {during_walk}");
+    assert!(seen && longest <= budget, "each key must echo within {budget:?}, slowest {longest:?}");
+    assert!(during_probe > 0 && during_walk, "keys must overlap the open-file probe and the folder walk");
+    let result = records[0].result.as_ref().unwrap();
+    assert_eq!(result.bytes_freed, files, "{result:?}");
 }
