@@ -198,20 +198,19 @@ def self_test():
         put(tree, "services/relay/migrations/25_next.sql")
         expect("a file off the pattern", tree, True, "NNNN_what_it_does.sql")
 
-        text = read(os.path.join(here, "crates/store/src/migrate.rs"))
-        start = text.find("MIGRATIONS")
-        store_last = LABEL.findall(text[start:text.find("];", start)])[-1]
-        tree = fresh()
-        put(tree, "crates/store/src/migrate.rs", read(os.path.join(tree, "crates/store/src/migrate.rs")).replace(
-            "];\n\npub(crate) const CURRENT_SCHEMA_VERSION",
-            f"    (crate::x::migration_{store_last}_again, Older::Welcome),\n];\n\npub(crate) const CURRENT_SCHEMA_VERSION", 1))
-        expect("a store label listed twice", tree, True, "listed twice")
-
-        tree = fresh()
-        put(tree, "crates/store/src/migrate.rs", read(os.path.join(tree, "crates/store/src/migrate.rs")).replace(
-            "];\n\npub(crate) const CURRENT_SCHEMA_VERSION",
-            "    (crate::x::migration_0003_back, Older::Welcome),\n];\n\npub(crate) const CURRENT_SCHEMA_VERSION", 1))
-        expect("a store label going backwards", tree, True, "listed after")
+        migrate = "crates/store/src/migrate.rs"
+        text = read(os.path.join(here, migrate))
+        start = text.index("const MIGRATIONS:")
+        end = text.index("];", start)
+        store_last = LABEL.findall(blank_comments(text[start:end]))[-1]
+        for name, label, needle in [
+            ("a store label listed twice", f"{store_last}_again", "listed twice"),
+            ("a store label going backwards", "0003_back", "listed after"),
+        ]:
+            tree = fresh()
+            entry = f"    (crate::x::migration_{label}, Older::Welcome),\n"
+            put(tree, migrate, text[:end] + entry + text[end:])
+            expect(name, tree, True, needle)
 
         tree = fresh()
         put(tree, "crates/store/src/migrate.rs", "pub const MIGRATIONS: &[M] = &[\n    (migration_0001_a, Older::Refused),\n];\n")
