@@ -33,3 +33,17 @@ The fixture now publishes its initial commit to `refs/heads/main` in that privat
 All eight tests that failed at landing passed in the focused rerun, as did the rebase regression and the verdict-brief test. The rerun used two test slots at the runner's inherited nice value of 10 and a Git config with `init.defaultBranch = master`.
 
 The focused run passed 34 of 35 tests. `a_recorded_verdict_settles_a_turn_whose_end_never_arrives` exceeded its four-second assertion by 0.45 seconds and passed when rerun alone. `cargo clippy --locked --offline -p farcooler-daemon --all-targets -- -D warnings` passed before the follow-up commit.
+
+## Parallel check after rebase
+
+`review_check` derives a Run operation from the admitted agent review. The parallel check took the ordinary Run fallback from `process_base`, which gave it the original provisioning SHA even when the reviewer used the pinned merge base. A new launch now records the parent's review base for the child before either process starts. That child receipt also supplies the base when recovery verifies the check's environment. Older check facts without a child pin still verify against their original launch context.
+
+The new `agent_review_and_parallel_check_see_the_same_rebased_ticket` regression failed before the fix at `6ebff79bb`. The real queue rejected the conflicting candidate, returned the landing SHA to the builder, and the builder rebased onto it while main advanced again. The agent saw the rebased SHA, two ticket commits, and only `shared.txt`. The parallel check instead reported the original SHA, two extra `other landing` commits, and `independent.txt` in its diff.
+
+The first unit-only build omitted the daemon executable the native PTY tests use to collect pane output. With the installed Canary executable supplying only that helper, the pre-fix test reached the range assertion and reproduced the mismatch.
+
+A historical check's recorded exit and output can establish that it rejected a candidate, and its process environment can show that it used the old base. Those facts cannot establish that the old base was the sole cause of the rejection. The existing send-back accounting still applies to recorded outcomes.
+
+Both rebase regressions passed after the fix with the daemon helper built from this branch. The two-slot daemon run passed 119 of 120 tests, including parallel review launch, rejection, cancellation, recovery, the verdict brief, and folded landing gates. The legacy holder fixture picked an Intel Python binary on the ARM runner. It passed on a serial rerun with system Python, along with six additional native review recovery tests.
+
+`cargo clippy --locked --offline -p farcooler-daemon --all-targets -- -D warnings`, the daemon layer check, the file-size check, and `git diff --check` passed.

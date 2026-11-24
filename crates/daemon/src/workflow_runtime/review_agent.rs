@@ -25,7 +25,7 @@ impl Exec {
                 }
                 Ok(Some(pin.base))
             }
-            // Reviews launched before this pin existed still reconcile against their original binding.
+            // Processes launched before their pin existed still reconcile against their original binding.
             Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(error) => Err(error),
         }
@@ -41,6 +41,24 @@ impl Exec {
         let base = self.git_recorded(binding, &self.repository(),
             &["--no-replace-objects", "merge-base", "--all", &head, candidate]).await?;
         if !sha(&base) { return Err(Error::Refused("review needs a single common ancestor")); }
+        self.write_review_base(binding, base)
+    }
+
+    /// Record the same base for the child before launch so its process fact can be verified on recovery.
+    /// An older child without this record keeps the launch context it originally used.
+    pub(super) fn pin_review_check_base(&self, review: &Binding, check: &Binding) -> Result<()> {
+        let base = self.review_base(review)?.ok_or(Error::Refused("missing parent review base"))?;
+        match self.review_base(check)? {
+            Some(pinned) if pinned == base => Ok(()),
+            Some(_) => Err(Error::Refused("parallel check base differs from review base")),
+            None if self.process_log(check).try_exists()? || self.process_fact_recorded(check)? => {
+                Err(Error::Refused("parallel check already has launch evidence"))
+            }
+            None => self.write_review_base(check, base),
+        }
+    }
+
+    fn write_review_base(&self, binding: &Binding, base: String) -> Result<()> {
         let receipts = self.root.join("receipts");
         let mut draft = tempfile::NamedTempFile::new_in(&receipts)?;
         serde_json::to_writer(draft.as_file_mut(), &ReviewBase { binding: digest(binding), base })?;

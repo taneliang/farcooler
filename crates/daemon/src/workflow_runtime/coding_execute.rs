@@ -359,7 +359,10 @@ impl Exec {
     /// Context wins over command environment and is pinned in the process fact.
     pub(super) fn pin_context(&self, command: &mut CodingCommand, binding: &Binding, candidate: &str, receipt: &Path) -> Result<()> {
         let effect = &binding.effect;
-        let base = if matches!(effect.kind, EffectKind::Execute(StageKind::Review(_))) {
+        // An attached review check uses the check adapter with Run process semantics.
+        let review_process = matches!(effect.kind, EffectKind::Execute(StageKind::Review(_)))
+            || (effect.kind == EffectKind::Execute(StageKind::Run) && effect.operation.adapter_version == "coding-check/v1");
+        let base = if review_process {
             self.review_base(binding)?.unwrap_or_else(|| binding.base.clone())
         } else {
             self.process_base(binding, candidate)?
@@ -683,11 +686,13 @@ impl Exec {
                     return self.refuse_unstarted(binding, builder_resources::LOW_DISK.into());
                 }
                 if let Some(check) = self.review_check(binding) {
+                    self.pin_review_check_base(binding, &check)?;
+                    let check_command = self.coding_command(&check)?;
                     // No cleanup while the reviewer reads: both see the same candidate. Both futures are
                     // drained even on failure, so neither writer survives the stage's result.
                     let (review, gate) = tokio::join!(
                         self.run_coding(binding, &binding.effect.id, command, cancel.clone()),
-                        self.run_coding(&check, &binding.effect.id, self.coding_command(&check)?, cancel));
+                        self.run_coding(&check, &binding.effect.id, check_command, cancel));
                     review?; gate?;
                 } else if let Err(error) = self.run_coding(binding, &binding.effect.id, command, cancel).await {
                     // run_coding exposes I/O as retryable only before launch or after quiescence.

@@ -199,12 +199,74 @@ async fn review_after_a_landing_send_back_only_sees_the_rebased_ticket() {
 "#).replace("passed=iteration != '0' and mode != 'review-reject'", "passed=True")).unwrap();
     at_join(&mut runtime, "ticket", &definition).await;
     let original = remote_head(&runtime).await;
-    let before = runtime.state("w").unwrap().unwrap();
     assert_eq!(serde_json::from_slice::<Vec<String>>(&std::fs::read(&seen).unwrap()).unwrap(),
         [original, "build 0".into(), "shared.txt".into()]);
 
-    move_waiting_ticket_main(&dir, &runtime, "independent.txt", "landed elsewhere").await;
-    let rebased_onto = move_waiting_ticket_main(&dir, &runtime, "shared.txt", "conflicting landing").await;
+    let rebased_onto = rebase_after_queue_send_back(&dir, &mut runtime).await;
+    assert_eq!(outbox(&runtime, StageKind::Review(Reviewer::Dispatch)), 2);
+    assert_eq!(serde_json::from_slice::<Vec<String>>(&std::fs::read(&seen).unwrap()).unwrap(),
+        [rebased_onto, "build 0\nbuild 0".into(), "shared.txt".into()]);
+}
+
+#[tokio::test]
+async fn agent_review_and_parallel_check_see_the_same_rebased_ticket() {
+    use super::{coding::AGENT_REVIEWER, coding_native::{TEST_ARGV, tests::native_in}, gate_tests::AGENT};
+    use crate::review_agent::ReviewOptions;
+
+    let (dir, runtime) = lander("conflict").await;
+    let (dir, mut runtime, _fake) = native_in(dir, runtime, "pass", "claude").await;
+    let agent = dir.path().join("range-agent.py");
+    let record = dir.path().join("record-range.py");
+    std::fs::write(&record, r#"import json, os, pathlib, subprocess, sys
+base = os.environ['FARCOOLER_BASE']
+candidate = os.environ['FARCOOLER_CANDIDATE']
+def git(*args):
+    return subprocess.check_output(['/usr/bin/git', *args], text=True).strip()
+pathlib.Path(__file__).with_name(sys.argv[1]).write_text(json.dumps([
+    base, git('log', '--format=%s', base + '..' + candidate), git('diff', '--name-only', base, candidate)]))
+"#).unwrap();
+    let (review, _) = AGENT.split_once("\nelse:\n").unwrap();
+    let review = review.replace("    log =", concat!(
+        "    subprocess.check_call([sys.executable, pathlib.Path(__file__).with_name('record-range.py'), 'agent-range'])\n",
+        "    log =",
+    ));
+    std::fs::write(&agent, format!("{review}{}", r#"
+else:
+    subprocess.check_call([sys.executable, pathlib.Path(__file__).with_name('adapter.py'), 'build'])
+hook('Stop')
+time.sleep(30)
+"#)).unwrap();
+    TEST_ARGV.with(|argv| *argv.borrow_mut() = Some(vec![
+        "/usr/bin/python3".into(), agent.to_string_lossy().into_owned(), "subdir".into(),
+    ]));
+
+    let config = runtime.coding.as_mut().unwrap();
+    let index = config.checks.len();
+    let mut check = config.checks[0].clone();
+    check.argv = vec!["/usr/bin/python3".into(), record.to_string_lossy().into_owned(), "check-range".into()];
+    config.checks.push(check);
+    let mut definition = waiting_definition(&runtime, false);
+    let mut review = runtime.coding.as_ref().unwrap().stage("review", StageKind::Review(Reviewer::Agent), "coding-review/v1", AGENT_REVIEWER);
+    review.operation.arguments.push(ReviewOptions { check: Some(index), ..Default::default() }.argument());
+    definition.stages.insert(3, review);
+    at_join(&mut runtime, "ticket", &definition).await;
+    let observed = |name| serde_json::from_slice::<Vec<String>>(&std::fs::read(dir.path().join(name)).unwrap()).unwrap();
+    let original = [remote_head(&runtime).await, "build 0".into(), "shared.txt".into()];
+    assert_eq!(observed("agent-range"), original);
+    assert_eq!(observed("check-range"), original);
+
+    let rebased_onto = rebase_after_queue_send_back(&dir, &mut runtime).await;
+    assert_eq!(outbox(&runtime, StageKind::Review(Reviewer::Agent)), 2);
+    let expected = [rebased_onto, "build 0\nbuild 0".into(), "shared.txt".into()];
+    assert_eq!(observed("agent-range"), expected);
+    assert_eq!(observed("check-range"), expected);
+}
+
+async fn rebase_after_queue_send_back(dir: &tempfile::TempDir, runtime: &mut Runtime) -> String {
+    let script = dir.path().join("adapter.py");
+    let before = runtime.state("w").unwrap().unwrap();
+    move_waiting_ticket_main(dir, runtime, "independent.txt", "landed elsewhere").await;
+    let rebased_onto = move_waiting_ticket_main(dir, runtime, "shared.txt", "conflicting landing").await;
     let receipt = runtime.submit(&runtime.controller(), Request {
         id: "queue-before-review-rebase".into(), workspace: "w".into(), expected_revision: before.revision,
         sequence: 2, command: Command::Queue { item: "ticket".into() },
@@ -215,11 +277,9 @@ async fn review_after_a_landing_send_back_only_sees_the_rebased_ticket() {
     let source = std::fs::read_to_string(&script).unwrap();
     std::fs::write(&script, source.replace("if stage == 'build':",
         &format!("if stage == 'build':\n    subprocess.check_call(['/usr/bin/git', 'rebase', '--no-autostash', '-X', 'theirs', {rebased_onto:?}])"))).unwrap();
-    move_waiting_ticket_main(&dir, &runtime, "later.txt", "landed after the send-back").await;
-    until(&mut runtime, |s| phase_of(s, "ticket") == Some(Phase::WaitingJoin)).await;
-    assert_eq!(outbox(&runtime, StageKind::Review(Reviewer::Dispatch)), 2);
-    assert_eq!(serde_json::from_slice::<Vec<String>>(&std::fs::read(&seen).unwrap()).unwrap(),
-        [rebased_onto, "build 0\nbuild 0".into(), "shared.txt".into()]);
+    move_waiting_ticket_main(dir, runtime, "later.txt", "landed after the send-back").await;
+    until(runtime, |s| phase_of(s, "ticket") == Some(Phase::WaitingJoin)).await;
+    rebased_onto
 }
 
 #[tokio::test]

@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 /// Builds as the native fixture does. Reviews: the first attempt ends its turn with no verdict, the second
 /// writes one through the same receipt `farcooler workflow verdict` writes.
-const AGENT: &str = r#"import json, os, pathlib, socket, subprocess, sys, time
+pub(super) const AGENT: &str = r#"import json, os, pathlib, socket, subprocess, sys, time
 mode = sys.argv[1]
 session = os.environ['FARCOOLER_NATIVE_SESSION']
 prompt = pathlib.Path(os.environ['TEST_LAUNCHED_PROMPT_FILE']).read_text() if 'TEST_LAUNCHED_PROMPT_FILE' in os.environ else os.environ['TEST_LAUNCHED_PROMPT']
