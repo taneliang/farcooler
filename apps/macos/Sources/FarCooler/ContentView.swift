@@ -904,7 +904,7 @@ private struct LocalDaemonWaitBanner: View {
             }
             .padding(Spacing.tight)
             .frame(maxWidth: .infinity)
-            .background(.regularMaterial)
+            .surface(.floating, in: .floating)
         }
     }
 }

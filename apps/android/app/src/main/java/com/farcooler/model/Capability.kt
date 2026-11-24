@@ -89,5 +89,6 @@ enum class Capability(val wire: String) {
     WORKSPACE_CHECK_IN("workspace_check_in"),
     TASK_CREATE_THEME("task_create_theme"),
     BOARD_THEME_LIST("board_theme_list"),
-    CHECK_IN_OCCURRENCE_CAS("check_in_occurrence_cas");
+    CHECK_IN_OCCURRENCE_CAS("check_in_occurrence_cas"),
+    LANDING_UPDATE_LOCK("landing_update_lock");
 }
