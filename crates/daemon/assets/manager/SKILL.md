@@ -1,8 +1,9 @@
 {{frontmatter}}
 # Managing a workspace's board
 
-A workspace is one workstream in a repository, with its own board and charter, and you are its orchestrator.
-You manage the work. You don't do it. The board is the memory, the charter is the rules, and the person who asked is who you
+A workspace is one workstream in a repository, with its own board and charter,
+and you are its orchestrator. You manage the work. You don't do it. The board
+is the memory, the charter is the rules, and the person who asked is who you
 answer to.
 
 **Never execute a task yourself.** Planning and debugging alongside the owner is
@@ -35,7 +36,8 @@ board and answering what the owner asked is fine. Don't guess a workflow. What
 the owner asked for isn't lost: say it back in your reply, and put it on the
 board once the charter exists.
 
-Read it again every time you pick the work back up (the owner talks to you again, or after a compaction): they edit it, and your memory of it isn't it.
+Read it again every time you pick the work back up (the owner talks to you
+again, or after a compaction): they edit it, and your memory of it isn't it.
 
 The charter overrides anything in this skill except the two rules above.
 That includes the Defaults at the end: each holds until the charter says otherwise.

@@ -98,7 +98,30 @@ struct EmptyActionsTests {
             PlanOverviewView(plan: store.plan, statuses: [:], selected: nil, onOpen: { _ in })
                 .environment(\.orchestratorInvite, Self.invite()),
             width: 600, height: 800)
-        #expect(frames["plan-unthemed-count"] != nil && frames["start-orchestrator"] != nil, "\(frames.keys.sorted())")
+        #expect(frames["start-orchestrator"] != nil, "\(frames.keys.sorted())")
+        #expect(frames["plan-unthemed-count"] == nil)
+        let column = await PlanThemePageTests.frames(
+            PlanHome(board: store, needsYou: PlanNeedsYou(), onOpen: { _ in }), width: 600)
+        #expect(column["plan-column"] != nil)
+        #expect(column["plan-unthemed-count"] == nil)
+    }
+
+    @Test("The Plan overview and column show a positive count of open cards without a theme")
+    func planShowsUnthemedCount() async throws {
+        let calls = PlanViewTests.Calls()
+        calls.plan = Data(#"""
+            {"now_ms":0,"themes":[],"lines":[],"unthemed_open":1,
+             "cards":[{"task":"00000000-0000-0000-0000-000000001002","key":"ov-2","title":"Title of ov-2","status":"backlog"}]}
+            """#.utf8)
+        let store = try await PlanViewTests.store(plan: true, defaults: PlanViewTests.defaults(), calls: calls)
+        await store.plan.reload()
+        let overview = await PlanThemePageTests.frames(
+            PlanOverviewView(plan: store.plan, statuses: store.board.statuses, selected: nil, onOpen: { _ in }),
+            width: 600)
+        #expect(overview["plan-unthemed-count"] != nil, "\(overview.keys.sorted())")
+        let column = await PlanThemePageTests.frames(
+            PlanHome(board: store, needsYou: PlanNeedsYou(), onOpen: { _ in }), width: 600)
+        #expect(column["plan-unthemed-count"] != nil, "\(column.keys.sorted())")
     }
 
     @Test("Beside the conversation column the Plan keeps its sentence and leaves the button to the column")

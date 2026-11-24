@@ -36,7 +36,7 @@ struct PlanOverviewView: View {
             // The plan in hand stays; this says why it may be a little old.
             if plan.hasRead, plan.reconnecting { PlanReconnecting() }
             if plan.hasRead, let line = plan.staleLine { PlanStale(line: line) { Task { await plan.tryAgain() } } }
-            if plan.hasRead, let count = plan.plan.unthemedOpen { PlanUnthemedNotice(count: count) }
+            if plan.hasRead, let count = plan.plan.unthemedOpen, count > 0 { PlanUnthemedNotice(count: count) }
             content
         }
         .padding(.bottom, Spacing.section)
