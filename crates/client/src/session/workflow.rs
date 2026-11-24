@@ -144,7 +144,7 @@ pub(crate) fn decode_presentation(workspace: Uuid, raw: &serde_json::Value, styl
     Ok((state, context, presentation))
 }
 impl Session {
-    async fn workflow_wire(&self, workspace: Uuid, json: String) -> Result<serde_json::Value, SessionError> {
+    pub(super) async fn workflow_wire(&self, workspace: Uuid, json: String) -> Result<serde_json::Value, SessionError> {
         let action = wire::parse(&json).map_err(invalid)?;
         let value = self.value_requiring(action.method(), Some(workspace),
             Some(request::Payload::WorkflowCommand(WorkflowCommand { schema: 1, json })),

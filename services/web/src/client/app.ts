@@ -23,7 +23,7 @@
 
 import { openWorkflow, installWorkflowPort } from './workflow-view'
 import { WorkflowSessionPort } from './workflow-session'
-import init, { connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, needsYouView, openReply, passkeyKeyLine, planView, recoveryView, registrationData, registrationProof, rpId, workFailure, workView, workspaceLayout, workspaceOrchestrator, workspacePageAvailable, type WebRunner } from 'fc-web'
+import init, { connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, needsYouView, openReply, passkeyKeyLine, planView, recoveryView, registrationData, registrationProof, rpId, workFailure, workView, boardFailure, ticketForm, workspaceLayout, workspaceOrchestrator, workspacePageAvailable, type WebRunner } from 'fc-web'
 
 import { compareWords, connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, needsYouFailure, registerFailure, restoreFailure, runnerDeferred, runnerStopped, saveFailure, sealedRefusal, unreachable } from './copy'
 import { askForCopy, assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
@@ -34,6 +34,7 @@ import { type PlanTab, startPlanTab } from './plan-tab'
 import { PlanList } from './plan-list'
 import { scopeBoard, type Space, waitingIn } from './scope'
 import { linkedRunner, mountWork, type WorkView } from './work-screen'
+import { mountBoard } from './board-screen'
 import { drawPicker, saveSpace, savedSpace } from './space-picker'
 import { DetailBoard, type Subject } from './detail'
 import { type Answer, DetailSheet } from './detail-view'
@@ -45,7 +46,7 @@ import { drawCode } from './qr'
 import { type Budget, MAX_LIVE_PANES } from './panes'
 import { readLocal, WorkspaceLayout, writeLocal, type Tab } from './workspace-layout'
 import { WorkspacePanes } from './workspace-panes'
-import { WorkspaceHistory, type Route } from './workspace-history'
+import { workspaceUrl, WorkspaceHistory, type Route } from './workspace-history'
 import { comparisonButtons, type Opened, registerDevice, waitForReply } from './sealed'
 import { type LinkView, Reconnector } from './reconnect'
 import { installSignOut } from './sign-out'
@@ -537,6 +538,7 @@ let workScreen: ReturnType<typeof mountWork> | null = null
 let workflowSheet: ReturnType<typeof openWorkflow> | null = null
 /// The plan tab, while a runner is connected.
 let planTab: PlanTab | null = null
+let ticketBoard: ReturnType<typeof mountBoard> | null = null
 let planList: PlanList | null = null
 
 /// What the plan does to the panes of the runner in front: open a terminal,
@@ -642,6 +644,8 @@ function stopNeeds(): void {
   planList?.close()
   planTab?.stop()
   planTab = null
+  ticketBoard?.dispose()
+  ticketBoard = null
   paneControls = null
   clearInterval(boardTimer)
   fleet?.stop()
@@ -784,12 +788,13 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   const params = new URLSearchParams(location.search)
   const linkedSpace = params.get('workspace')
   const linkedTerminal = params.get('terminal') ?? undefined
+  const linkedWorktree = params.get('worktree') ?? undefined
   try {
     dialed = await session.tailcat.dial(target.token, session.device.nodePriv)
     const runner = await reconnector.open(dialed)
     inventory = await runner.work_inventory()
     initial = JSON.parse(workView(inventory, JSON.stringify({
-      workspace: linkedSpace, terminal: linkedTerminal, preferredWorkspace: savedSpace(target.id),
+      workspace: linkedSpace, terminal: linkedTerminal, worktree: linkedWorktree, preferredWorkspace: savedSpace(target.id),
     })))
   } catch (e) {
     dialed?.close()
@@ -834,6 +839,24 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     const current = reconnector.current
     return current && !reconnector.hasLost(current) ? current : null
   }
+  const board = mountBoard({
+    root: $('board'),
+    dialog: $('board-form') as HTMLDialogElement,
+    current: liveRunner,
+    create: ticketForm,
+    failure: e => boardFailure(e.message, e.code ?? '', e.what ?? ''),
+    href: (id, kind) => workspaceUrl(target.id, kind
+      ? { space: chosenSpace, page: 'terminals', tab: 'terminals', [kind]: id }
+      : { space: chosenSpace, page: 'board', tab: 'board', boardTask: id }),
+    openTicket: id => navigation?.navigate({ space: chosenSpace, page: 'board', tab: 'board', boardTask: id }),
+    openAgent: async id => {
+      await screen?.refresh()
+      paneControls?.open(id)
+    },
+    openWorktree: id => navigation?.navigate({ space: chosenSpace, page: 'terminals', tab: 'terminals', worktree: id }),
+    openActivity: card => openCard(target.id, card),
+  })
+  ticketBoard = board
   planTab = startPlanTab($('plan'), target.label, liveRunner, chosenSpace, {
     openCard: card => openCard(target.id, { id: card.task, key: card.key, title: '' }),
     quote: async text => {
@@ -891,7 +914,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   const controller = new WorkspaceLayout(scope, target.label, workspaceLayout, (view, intent) => {
     mounted.render(view, intent === 'open' || view.effect.kind === 'refresh_pane')
     for (const [id, action] of [
-      ['show-orchestrator', 'orchestrator'], ['show-workflow', 'workflow'], ['show-commands', 'commands'],
+      ['show-board', 'board'], ['show-orchestrator', 'orchestrator'], ['show-workflow', 'workflow'], ['show-commands', 'commands'],
       ['view-conversation', 'conversation'], ['side-conversation', 'conversation'],
       ['view-terminal', 'raw_terminal'], ['side-terminal', 'raw_terminal'], ['close-split', 'close_split'],
     ] as const) {
@@ -983,6 +1006,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
         return
       }
       inventoryWorkspace = route.space
+      board.show(route.page === 'board', view.workspace, view.repository, route.boardTask)
       presentLayout(route.page)
       const pending = pendingTerminal
       pendingTerminal = undefined
@@ -1021,8 +1045,9 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   const resolve = (route: Route): Route => {
     const workspace = spaces.some(space => space.id === route.space)
     const ticket = !!(route.ticket && fleet?.cardsOf(route.ticket.runner)?.deps?.task)
-    return workspacePageAvailable(route.page, workspace, ticket)
-      ? route : { ...route, page: route.tab, ticket: undefined }
+    if (workspacePageAvailable(route.page, workspace, ticket)) return route
+    const tab = workspacePageAvailable(route.tab, workspace, false) ? route.tab : 'terminals'
+    return { space: route.space, tab, page: tab }
   }
   const renderRoute = (route: Route) => {
     const changedSpace = previous === null || chosenSpace !== route.space
@@ -1046,17 +1071,20 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
       planTab?.choose(chosenSpace)
     }
     const changedTerminal = route.terminal !== cameFrom?.terminal || route.slot !== cameFrom?.slot
+    const changedWorktree = route.worktree !== cameFrom?.worktree
     const opensPane = route.page === 'terminals' || route.slot === 'side'
     pendingTerminal = opensPane && route.terminal && (changedSpace || changedTerminal) && !(cameFrom === null && returning)
       ? { id: route.terminal, slot: route.slot ?? 'main' } : undefined
     $('needs').hidden = route.page !== 'needs'
     $('plan').hidden = route.page !== 'plan'
+    $('board').hidden = route.page !== 'board'
     $('pane').hidden = route.page !== 'terminals'
     if (scrollPage && scrollPage !== 'ticket') $(scrollIds[scrollPage]).scrollTop = 0
-    for (const tab of ['terminals', 'needs', 'plan'] as const) {
+    for (const tab of ['terminals', 'needs', 'board', 'plan'] as const) {
       $(`show-${tab}`).setAttribute('aria-pressed', String(tab === route.page))
     }
-    if (changedSpace || pendingTerminal) void screen?.show(route.space, pendingTerminal?.id)
+    board.show(route.page === 'board', changedSpace ? null : currentWork.workspace, currentWork.repository, route.boardTask)
+    if (changedSpace || pendingTerminal || changedWorktree) void screen?.show(route.space, pendingTerminal?.id, route.worktree)
     else if (inventoryWorkspace === route.space) presentLayout(route.page)
     planTab?.show(route.page === 'plan')
     if (lastView) drawNeeds(lastView)
@@ -1223,6 +1251,7 @@ async function boot(): Promise<void> {
   $('reload').addEventListener('click', () => location.reload())
   $('show-terminals').addEventListener('click', () => showTab('terminals'))
   $('show-needs').addEventListener('click', () => showTab('needs'))
+  $('show-board').addEventListener('click', () => showTab('board'))
   $('show-plan').addEventListener('click', () => showTab('plan'))
   $('bar-count').addEventListener('click', () => showTab('needs'))
   window.addEventListener('focus', () => { void checkVersion(); recheckLink() })

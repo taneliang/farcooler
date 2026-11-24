@@ -6,8 +6,24 @@ export interface Route {
   page: Page
   tab: Tab
   terminal?: string
+  worktree?: string
+  boardTask?: string
   slot?: Slot
   ticket?: { runner: string; id: string; key: string; title: string }
+}
+
+export function workspaceUrl(runner: string, route: Route): URL {
+  const { space, page, terminal, worktree, boardTask, ticket } = route
+  const url = destination(runner, space, terminal, worktree)
+  if (page === 'board') {
+    url.searchParams.set('view', 'board')
+    if (boardTask) url.searchParams.set('ticket', boardTask)
+  } else {
+    const hash = new URLSearchParams({ page })
+    if (ticket) hash.set('ticket', ticket.id)
+    url.hash = hash.toString()
+  }
+  return url
 }
 
 export class WorkspaceHistory {
@@ -25,14 +41,14 @@ export class WorkspaceHistory {
   ) {
     const restored = this.read()
     this.parent = !!restored?.parent
-    this.route = resolve(restored?.route ?? fallback)
+    this.route = resolve(restored?.route ?? this.linked())
     this.write(false)
     window.addEventListener('popstate', () => {
       if (linkedRunner() && linkedRunner() !== this.runner) return location.reload()
       this.leaving = false
       const restored = this.read()
       this.parent = !!restored?.parent
-      this.route = resolve(restored?.route ?? fallback)
+      this.route = resolve(restored?.route ?? this.linked())
       this.show(this.route)
     }, { signal: this.listeners.signal })
   }
@@ -63,12 +79,17 @@ export class WorkspaceHistory {
     return value?.workspaceScope === this.scope ? value : null
   }
 
+  private linked(): Route {
+    const params = new URLSearchParams(location.search)
+    const space = params.get('workspace') ?? this.fallback.space
+    if (params.get('view') === 'board') {
+      return { space, page: 'board', tab: 'board', boardTask: params.get('ticket') ?? undefined }
+    }
+    return { ...this.fallback, space, terminal: params.get('terminal') ?? undefined, worktree: params.get('worktree') ?? undefined }
+  }
+
   private write(push: boolean): void {
-    const { space, page, terminal, ticket } = this.route
-    const url = destination(this.runner, space, terminal)
-    const hash = new URLSearchParams({ page })
-    if (ticket) hash.set('ticket', ticket.id)
-    url.hash = hash.toString()
+    const url = workspaceUrl(this.runner, this.route)
     const state = { workspaceScope: this.scope, route: this.route, parent: this.parent }
     if (push) history.pushState(state, '', url)
     else history.replaceState(state, '', url)

@@ -13,6 +13,15 @@ fn main() {
             let [word, code, what]: [String; 3] = serde_json::from_str(&body).unwrap();
             print!("{}", farcooler_client::work_view::failure(&word, &code, &what));
         }
-        _ => panic!("expected /projection or /failure"),
+        Some("/board") => {
+            let (board, scope): (_, String) = serde_json::from_str(&body).unwrap();
+            print!("{}", farcooler_client::web_board::board(&board, &scope));
+        }
+        Some("/ticket") => {
+            let (task, scope, guard, links): (_, String, Option<String>, _) = serde_json::from_str(&body).unwrap();
+            print!("{}", farcooler_client::web_board::ticket(&task, &scope, true, guard.as_deref(), links));
+        }
+        Some("/ticket-form") => print!("{}", farcooler_client::web_board::form(None)),
+        _ => panic!("unknown projection"),
     }
 }

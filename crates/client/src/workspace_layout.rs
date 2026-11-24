@@ -48,6 +48,7 @@ impl Default for Layout {
 enum Page {
     Terminals,
     Needs,
+    Board,
     Plan,
     Ticket,
     Workflow,
@@ -109,6 +110,7 @@ enum Command {
     Shortcuts,
     Terminals,
     Needs,
+    Board,
     Plan,
     Workflow,
     Orchestrator,
@@ -131,6 +133,7 @@ impl Command {
             Self::Shortcuts => "Keyboard Shortcuts",
             Self::Terminals => "Terminals",
             Self::Needs => "Needs You",
+            Self::Board => "Board",
             Self::Plan => "Plan",
             Self::Workflow => "Workflow Runs",
             Self::Orchestrator => "Orchestrator",
@@ -213,7 +216,7 @@ struct Action<'a> {
 }
 
 const COMMANDS: [Command; 17] = [
-    Command::Commands, Command::Shortcuts, Command::Terminals, Command::Needs, Command::Plan,
+    Command::Commands, Command::Shortcuts, Command::Terminals, Command::Needs, Command::Board, Command::Plan,
     Command::Workflow, Command::Orchestrator, Command::Split, Command::CloseSplit, Command::FocusOther,
     Command::Conversation, Command::RawTerminal, Command::ClosePage, Command::StartWork,
     Command::RenameTerminal, Command::CloseTerminal, Command::RecoverTerminal,
@@ -296,7 +299,7 @@ impl Layout {
 
     fn allowed(&self, command: Command, slot: Slot, context: &Context) -> bool {
         match command {
-            Command::Orchestrator | Command::Workflow => context.workspace,
+            Command::Board | Command::Orchestrator | Command::Workflow => context.workspace,
             Command::Split => self.side.is_none(),
             Command::CloseSplit | Command::FocusOther => self.side.is_some(),
             Command::Conversation | Command::RawTerminal => {
@@ -319,6 +322,7 @@ impl Layout {
             Command::Shortcuts => Effect::Shortcuts,
             Command::Terminals => Effect::Navigate { page: Page::Terminals },
             Command::Needs => Effect::Navigate { page: Page::Needs },
+            Command::Board => Effect::Navigate { page: Page::Board },
             Command::Plan => Effect::Navigate { page: Page::Plan },
             Command::Workflow => Effect::Navigate { page: Page::Workflow },
             Command::ClosePage => Effect::ClosePage,
@@ -438,7 +442,7 @@ pub fn json(request: &str) -> String {
 /// Restore a page when its workspace or ticket can still be read.
 pub fn page_available(page: &str, workspace: bool, ticket: bool) -> bool {
     match page {
-        "workflow" => workspace,
+        "board" | "workflow" => workspace,
         "ticket" => ticket,
         _ => true,
     }
@@ -499,6 +503,9 @@ mod tests {
         let missing = step(&view, &page, value!({"kind": "present"}));
         assert_eq!(missing["main"]["terminal"], Value::Null);
         assert!(!page_available("workflow", false, true));
+        assert!(!page_available("board", false, false));
+        assert!(page_available("board", true, false));
+        assert_eq!(run(&view, &page, "board")["effect"], value!({"kind": "navigate", "page": "board"}));
         assert!(!page_available("ticket", true, false));
         assert!(page_available("plan", false, false));
     }

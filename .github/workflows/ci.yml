@@ -1950,12 +1950,14 @@ jobs:
       - run: npx wrangler deploy --dry-run --env canary --outdir /tmp/web-build-canary
       - run: cargo build --locked --manifest-path ../../crates/web/Cargo.toml --example fake_daemon
       - run: node test/browser/plan-render-check.mjs
-      - name: Check starting and recovering work in Chrome
+      - name: Check work and board actions in Chrome
         shell: bash
         run: |
           cargo build --locked --manifest-path ../../Cargo.toml -p farcooler-client --example work_view_bin
           WORK_VIEW_BIN="${CARGO_TARGET_DIR:-../../target}/debug/examples/work_view_bin" \
             node test/browser/work-check.mjs
+          WORK_VIEW_BIN="${CARGO_TARGET_DIR:-../../target}/debug/examples/work_view_bin" \
+            node test/browser/board-check.mjs
       - run: node test/browser/csp-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon --tunnel-delay 100
       - run: node test/browser/sleep-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon --engines chromium --split
 

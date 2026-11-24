@@ -1,6 +1,9 @@
 //! The task board's projection of a runner's task list and its card labels.
 //! The adapters supply the current clock and render the resulting columns and cards.
 
+#[path = "web_board.rs"]
+pub mod web;
+
 use std::collections::{HashMap, HashSet};
 use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;

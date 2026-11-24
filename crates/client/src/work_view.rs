@@ -177,10 +177,15 @@ pub fn view(inventory: &Inventory, selection: &Selection) -> Value {
         t.workspace.as_deref().and_then(by_id)
             .or_else(|| main(tree_for(t).map(|w| w.repository.as_str())))
     };
+    let tree_owner = |tree: &Worktree| {
+        tree.workspace.as_deref().and_then(by_id).or_else(|| main(Some(&tree.repository)))
+    };
+    let requested_tree = selection.worktree.as_deref().and_then(|id| worktrees.iter().find(|tree| tree.id == id));
+    let linked_workspace = requested.and_then(owner).or_else(|| requested_tree.and_then(tree_owner));
     let requested_workspace = selection.workspace.as_deref().and_then(|id| workspaces.iter().find(|w| w.id == id));
-    let missing_workspace = selection.workspace.is_some() && requested_workspace.is_none() && requested.is_none();
+    let missing_workspace = selection.workspace.is_some() && requested_workspace.is_none() && linked_workspace.is_none();
     let workspace = if missing_workspace { None } else {
-        requested.and_then(owner).or(requested_workspace).or_else(|| {
+        linked_workspace.or(requested_workspace).or_else(|| {
             selection.preferred_workspace.as_deref()
                 .and_then(|id| workspaces.iter().find(|w| w.id == id && selection.repository.as_ref().is_none_or(|r| w.repository == *r)))
         }).or_else(|| main(selection.repository.as_deref()))
@@ -188,7 +193,7 @@ pub fn view(inventory: &Inventory, selection: &Selection) -> Value {
     let repository = workspace.map(|w| w.repository.as_str())
         .or(selection.repository.as_deref()).or_else(|| repositories.first().map(|r| r.id.as_str()));
     let owned_trees: Vec<_> = worktrees.iter().filter(|w| {
-        let owner = w.workspace.as_deref().and_then(by_id).or_else(|| main(Some(&w.repository)));
+        let owner = tree_owner(w);
         !missing_workspace && Some(w.repository.as_str()) == repository
             && owner.map(|w| &w.id) == workspace.map(|w| &w.id)
     }).collect();
@@ -199,9 +204,12 @@ pub fn view(inventory: &Inventory, selection: &Selection) -> Value {
         if selection.terminal.is_some() { return None; }
         visible.iter().copied().find(|t| t.state == "running").or_else(|| visible.first().copied())
     });
-    let chosen_tree = selection.worktree.as_deref().and_then(|id| owned_trees.iter().copied().find(|w| w.id == id))
-        .or_else(|| selected.and_then(tree_for).filter(|w| owned_trees.iter().any(|owned| owned.id == w.id)))
-        .or_else(|| owned_trees.first().copied());
+    let chosen_tree = if selection.worktree.is_some() {
+        requested_tree.filter(|w| owned_trees.iter().any(|owned| owned.id == w.id))
+    } else {
+        selected.and_then(tree_for).filter(|w| owned_trees.iter().any(|owned| owned.id == w.id))
+            .or_else(|| owned_trees.first().copied())
+    };
 
     let terminal_rows: Vec<_> = visible.into_iter().map(|t| {
         let running = t.state == "running";
@@ -239,6 +247,8 @@ pub fn view(inventory: &Inventory, selection: &Selection) -> Value {
         "This workspace is no longer on the runner."
     } else if selected.is_none() && selection.terminal.is_some() {
         "This terminal is no longer on the runner."
+    } else if selection.worktree.is_some() && chosen_tree.is_none() {
+        "This checkout is no longer available."
     } else if !readable {
         READ_ONLY
     } else if selection.stream_ended {

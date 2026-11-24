@@ -24,6 +24,7 @@ use crate::changes_json::{stack_json, change_set_json, file_change_json, file_di
 use crate::ssh;
 
 mod board_reads;
+mod web_board;
 mod work;
 pub mod workflow;
 mod link;
@@ -1328,13 +1329,17 @@ impl Session {
     /// One task with its whole record, in the shape `farcooler task show
     /// --json` prints. Gated like `tasks`.
     pub async fn task(&self, task: Uuid) -> Result<serde_json::Value, SessionError> {
+        Ok(crate::tasks_json::detail_json(&self.task_record(task).await?, now_millis()))
+    }
+
+    async fn task_record(&self, task: Uuid) -> Result<farcooler_protocol::v1::TaskDetail, SessionError> {
         require(self.capabilities(), farcooler_protocol::capability::TASKS, "task.get")?;
         let payload = request::Payload::TaskGet(farcooler_protocol::v1::TaskGetRequest {
             task_id: bytes::Bytes::copy_from_slice(task.as_bytes()),
             note_kind: 0,
         });
         match self.value("task.get", Some(task), Some(payload)).await? {
-            result::Value::TaskDetail(d) => Ok(crate::tasks_json::detail_json(&d, now_millis())),
+            result::Value::TaskDetail(d) => Ok(d),
             other => Err(wrong("task_detail", &other)),
         }
     }

@@ -46,6 +46,7 @@ interface Selection {
   repository?: string | null
   worktree?: string | null
   terminal?: string | null
+  worktree?: string | null
   streamEnded?: boolean
 }
 
@@ -78,15 +79,18 @@ const param = (name: string) => new URLSearchParams(location.search).get(name)
 export const linkedRunner = () => param('runner')
 
 function fromUrl(): Selection {
-  return { workspace: param('workspace'), terminal: param('terminal') }
+  return { workspace: param('workspace'), terminal: param('terminal'), worktree: param('worktree') }
 }
 
-export function destination(runner: string, workspace: string | null, terminal?: string): URL {
+export function destination(runner: string, workspace: string | null, terminal?: string, worktree?: string): URL {
   const url = new URL(location.href)
   url.hash = ''
   url.searchParams.set('runner', runner)
   updateParam(url, 'workspace', workspace)
   updateParam(url, 'terminal', terminal)
+  updateParam(url, 'worktree', worktree)
+  url.searchParams.delete('view')
+  url.searchParams.delete('ticket')
   return url
 }
 
@@ -187,10 +191,11 @@ export function mountWork(options: Options) {
     const switchPane = open || openTerminal !== next.terminal
     openTerminal = next.terminal
     draw(next, terminal)
+    if (open && !options.navigation && selection.worktree && next.worktree === selection.worktree && !dialog.open) dialog.showModal()
     if (historyMode && !options.navigation) {
       const workspace = next.workspace ?? selection.workspace ?? null
       selection.workspace = workspace
-      const url = destination(options.runner, workspace, selection.terminal ?? undefined)
+      const url = destination(options.runner, workspace, selection.terminal ?? undefined, selection.worktree ?? undefined)
       if (url.href !== location.href) history[historyMode](null, '', url)
     }
     options.select(next, terminal, options.navigation ? open : switchPane, replace, historyMode)
@@ -354,6 +359,7 @@ export function mountWork(options: Options) {
   }
   function pop(): void {
     if (linkedRunner() && linkedRunner() !== options.runner) return location.reload()
+    if (dialog.open) dialog.close()
     selection = { ...fromUrl(), preferredWorkspace: options.prefer() }
     void project(true)
   }
@@ -362,15 +368,19 @@ export function mountWork(options: Options) {
   return {
     refresh,
     chooseTerminal,
-    show(workspace: string | null, terminal?: string) {
+    async show(workspace: string | null, terminal?: string, worktree?: string) {
       navigationId++
+      if (selection.worktree && selection.worktree !== worktree && dialog.open) dialog.close()
       if (terminal) ended.delete(terminal)
-      selection = { workspace, terminal }
-      return project(false)
+      selection = { workspace, terminal, worktree }
+      await project(false)
+      if (!disposed && selection.worktree === worktree && worktree && view?.worktree === worktree && !dialog.open) {
+        dialog.showModal()
+      }
     },
     focusTerminal(id: string | null) {
       if (!view || (selection.terminal ?? view.terminal) === id) return
-      selection = { workspace: view.workspace, terminal: id, streamEnded: id !== null && ended.has(id) }
+      selection = { ...selection, workspace: view.workspace, terminal: id, streamEnded: id !== null && ended.has(id) }
       void project(false)
     },
     hasTerminal: (id: string) => !!view?.terminals.some(t => t.id === id),

@@ -80,9 +80,10 @@
     <nav class="sidebar" aria-label="Runner">
       <span class="runner" id="runner-name"></span>
       <select class="space" id="space-picker" aria-label="Workspace" hidden></select>
-      <div class="seg" role="group" aria-label="Show">
+      <div class="seg work-tabs" role="group" aria-label="Show">
         <button type="button" id="show-terminals" aria-pressed="true">Terminals</button>
         <button type="button" id="show-needs" aria-pressed="false">Needs You</button>
+        <button type="button" id="show-board" aria-pressed="false" disabled></button>
         <button type="button" id="show-plan" aria-pressed="false">Plan</button>
       </div>
       <div class="workspace-tools">
@@ -107,6 +108,8 @@
         <section class="workspace-leaf" id="workspace-main" tabindex="0" aria-label="Main pane">
           <div class="needs" id="needs" aria-live="polite" hidden></div>
           <div class="plan" id="plan" hidden></div>
+          <div class="board" id="board" hidden></div>
+          <dialog class="board-form" id="board-form"></dialog>
           <div class="pane" id="pane">
             <header class="terminal-manage" id="terminal-manage" hidden>
               <div class="terminal-identity">

@@ -154,6 +154,16 @@ try {
     await page.waitForFunction(() => document.getElementById('space-picker').value === 'delivery')
   })
 
+  await test('a worktree link opens the exact checkout without selecting a different terminal', async page => {
+    const dialog = page.getByRole('dialog', { name: 'Start Work' })
+    await dialog.waitFor()
+    assert.equal(await dialog.getByLabel('Worktree', { exact: true }).inputValue(), 'release')
+    await page.reload()
+    await dialog.waitFor()
+    assert.equal(await dialog.getByLabel('Worktree', { exact: true }).inputValue(), 'release')
+    assert.equal(new URL(page.url()).searchParams.get('terminal'), null)
+  }, { query: '?runner=paired-runner&workspace=delivery&worktree=release' })
+
   for (const width of [320, 1280]) await test(`long labels at ${width}px`, async page => {
     await page.getByText('Writer', { exact: true }).waitFor()
     await page.locator('[data-attached=true]:visible').waitFor()

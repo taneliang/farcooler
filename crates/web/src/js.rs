@@ -308,6 +308,22 @@ impl WebRunner {
         Ok(id.map(|id| id.to_string()))
     }
 
+    pub async fn board(&self, workspace: &str, repository: &str) -> Result<String, JsValue> {
+        let (workspace, repository) = (board_id(workspace)?, board_id(repository)?);
+        Ok(self.0.session.web_board(workspace, repository).await.map_err(|e| web_failure(e.into()))?.to_string())
+    }
+
+    pub async fn board_ticket(&self, workspace: &str, task: &str) -> Result<String, JsValue> {
+        let (workspace, task) = (board_id(workspace)?, board_id(task)?);
+        Ok(self.0.session.web_ticket(workspace, task).await.map_err(|e| web_failure(e.into()))?.to_string())
+    }
+
+    pub async fn board_intent(&self, workspace: &str, intent: &str) -> Result<String, JsValue> {
+        let workspace = board_id(workspace)?;
+        let intent = serde_json::from_str(intent).map_err(|e| failure("protocol", &e.to_string()))?;
+        Ok(self.0.session.web_board_intent(workspace, intent).await.map_err(|e| web_failure(e.into()))?.to_string())
+    }
+
     /// `terminal.list`, as JSON (`work_view::Terminal`).
     pub async fn terminals(&self) -> Result<String, JsValue> {
         let list = self.0.terminals().await.map_err(web_failure)?;
@@ -504,4 +520,19 @@ pub fn work_view(inventory: &str, selection: &str) -> Result<String, JsValue> {
 #[wasm_bindgen(js_name = workFailure)]
 pub fn work_failure(word: &str, code: &str, what: &str) -> String {
     farcooler_client::work_view::failure(word, code, what).into()
+}
+
+
+fn board_id(id: &str) -> Result<Uuid, JsValue> {
+    Uuid::parse_str(id).map_err(|e| failure("protocol", &e.to_string()))
+}
+
+#[wasm_bindgen(js_name = ticketForm)]
+pub fn ticket_form() -> String {
+    farcooler_client::web_board::form(None).to_string()
+}
+
+#[wasm_bindgen(js_name = boardFailure)]
+pub fn board_failure(word: &str, code: &str, what: &str) -> String {
+    farcooler_client::web_board::failure(word, code, what).into()
 }

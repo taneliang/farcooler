@@ -345,3 +345,39 @@ button.danger { color: var(--danger); }
 @media (max-width: 640px) {
   .terminal-list { min-height: 32px; }
 }
+
+.work-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-radius: 16px; }
+.board { flex: 1; min-width: 0; overflow: auto; padding: 24px; overflow-wrap: anywhere; }
+.board h1 { margin: 0; font-size: 26px; line-height: 1.2; }
+.board-toolbar, .board-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.board-toolbar { margin-bottom: 20px; }
+.board-toolbar .board-actions { margin-left: auto; }
+.board-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); align-items: start; gap: 14px; }
+.board-column { background: var(--bg-alt); border: 1px solid var(--rule); border-radius: 12px; padding: 10px; }
+.board-column h2 { display: flex; justify-content: space-between; gap: 10px; margin: 0 0 10px; font-size: 14px; }
+.board-meta, .board-key { color: var(--text-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+.board-column ul, .board-ticket ul { list-style: none; padding: 0; margin: 0; }
+.board-column li + li { margin-top: 8px; }
+.board-column a { display: grid; gap: 5px; padding: 10px; border-radius: 8px; background: var(--card); color: var(--text); text-decoration: none; }
+.board-column a:hover strong { text-decoration: underline; }
+.board-unread { color: var(--button-bg); font-size: 12px; }
+.board-ticket { max-width: 740px; margin: 0 auto; }
+.board-ticket .board-actions { margin: 18px 0 24px; }
+.board-ticket section { padding: 12px 0; border-top: 1px solid var(--rule); }
+.board-ticket h2 { margin: 0 0 8px; font-size: 16px; }
+.board-ticket p { white-space: pre-wrap; margin: 8px 0; }
+.board-ticket li { margin: 6px 0; }
+.board-ticket input { margin-inline-end: 8px; }
+.board-form { width: min(620px, calc(100% - 24px)); padding: 20px; }
+.board-form h2 { margin-top: 0; }
+.board-fields { display: grid; gap: 10px; margin-bottom: 14px; }
+.board-fields label { display: grid; gap: 4px; }
+.board-fields textarea, .board-fields input { padding: 8px; border: 1px solid var(--rule); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
+.board-fields textarea { min-height: 55px; resize: vertical; }
+.board-form .board-actions { margin-top: 14px; justify-content: end; }
+@media (max-width: 640px) {
+  .board { padding: 16px; }
+  .board-toolbar .board-actions { margin-left: 0; }
+}
+.board-ticket > a, .board-actions a { color: var(--button-bg); }
+.board-ticket label { display: flex; align-items: baseline; }

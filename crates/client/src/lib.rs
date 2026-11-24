@@ -35,6 +35,7 @@ pub mod session;
 pub mod ssh;
 pub mod task_starts_json;
 mod task_board_view;
+pub use task_board_view::web as web_board;
 pub mod tasks_json;
 pub mod usage_json;
 pub mod work_view;

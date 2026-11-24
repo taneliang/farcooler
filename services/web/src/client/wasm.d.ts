@@ -57,8 +57,13 @@ declare module 'fc-web' {
   export function workspaceOrchestrator(plan: string): string | undefined
   export function needsYouView(request: string): string
   export function workView(inventory: string, selection: string): string
+  export function boardFailure(word: string, code: string, what: string): string
+  export function ticketForm(): string
   export function workFailure(word: string, code: string, what: string): string
   export class WebRunner {
+    board(workspace: string, repository: string): Promise<string>
+    board_ticket(workspace: string, task: string): Promise<string>
+    board_intent(workspace: string, intent: string): Promise<string>
     work_inventory(): Promise<string>
     work_intent(intent: string): Promise<string | undefined>
     workflow_call(method: string, args: string): Promise<string>

@@ -51,6 +51,21 @@ fn deep_links_select_lost_terminal_and_do_not_fall_through_if_gone() {
 }
 
 #[test]
+fn a_worktree_link_opens_its_owner_and_never_substitutes_a_checkout() {
+    let data = inventory("control");
+    let select = |id: &str| view(&data, &Selection {
+        workspace: Some("main".into()), worktree: Some(id.into()), ..Default::default()
+    });
+    let linked = select("b");
+    assert_eq!(linked["workspace"], "other");
+    assert_eq!(linked["worktree"], "b");
+    let missing = select("removed");
+    assert!(missing["worktree"].is_null());
+    assert!(missing["start"].is_null());
+    assert_eq!(missing["notice"], "This checkout is no longer available.");
+}
+
+#[test]
 fn grant_controls_actions_and_stream_recovery_is_an_attach() {
     let read = view(&inventory("read"), &Selection::default());
     assert_eq!(read["terminals"][0]["access"], "Read-only");
