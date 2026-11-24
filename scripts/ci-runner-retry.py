@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Retry main CI failures and hosted runner acquisition failures once."""
-import hashlib
+"""Retry main CI test failures once and retry hosted runner acquisition."""
 import html
 import json
 import os
@@ -8,12 +7,8 @@ import re
 import subprocess
 
 MESSAGE = "The job was not acquired by Runner of type hosted even after multiple attempts"
-MAC_JOB = re.compile(r"Rust \(macos-latest\)|Rust native test archive \(macOS\)|Rust native tests \(macOS [12]/2\)|Swift \(.*\)|iOS|iOS UI \(smoke\)")
-
-
-def marker(run_id, name):
-    digest = hashlib.sha256(name.encode()).hexdigest()
-    return f"runner-retry-{run_id}-{digest}"
+# Count the original attempt and any manual attempts against this ceiling.
+MAX_ATTEMPTS = 8
 
 
 def failed_tests(log):
@@ -31,6 +26,14 @@ def failed_tests(log):
     return sorted(names)
 
 
+def reservation(run, api):
+    name = f"runner-retry-{run['id']}-attempt-{run['run_attempt']}"
+    artifacts = api(f"actions/artifacts?name={name}&per_page=100")
+    if any(a["name"] == name and not a["expired"] for a in artifacts["artifacts"]):
+        return None
+    return name
+
+
 def failed_retry(event, api):
     run = event["workflow_run"]
     if (run["head_branch"] != "main" or run["event"] != "push"
@@ -40,36 +43,47 @@ def failed_retry(event, api):
     failed = [job for job in jobs if job["conclusion"] == "failure"]
     if not failed:
         return None
-    name = f"failed-retry-{run['id']}"
-    artifacts = api(f"actions/artifacts?name={name}&per_page=100")
-    if any(a["name"] == name and not a["expired"] for a in artifacts["artifacts"]):
-        return None
-    return failed, name
+    name = reservation(run, api)
+    return (failed, name) if name else None
+
+
+def unassigned(job):
+    return (job["conclusion"] == "cancelled" and not job["steps"]
+            and not job.get("runner_name"))
 
 
 def retry_job(event, api):
     run = event["workflow_run"]
     if (run["head_branch"] != "main" or run["event"] != "push"
-            or run["conclusion"] not in ("failure", "cancelled")):
+            or run["conclusion"] not in ("failure", "cancelled")
+            or run["run_attempt"] >= MAX_ATTEMPTS):
         return None
-    # Later attempts contain only rerun jobs. Keep the latest instance of each
-    # job, including siblings left behind by a job-specific rerun.
-    latest = {}
+    name = reservation(run, api)
+    if name is None:
+        return None
+
+    # A job-specific rerun can copy a sibling's cancellation to a new check ID
+    # without copying its annotation. Correlate by name and original completion.
+    history = {}
     for attempt in range(1, run["run_attempt"] + 1):
         jobs = api(f"actions/runs/{run['id']}/attempts/{attempt}/jobs?per_page=100")
-        latest.update((job["name"], job) for job in jobs["jobs"])
-    for job in latest.values():
-        if not MAC_JOB.fullmatch(job["name"]):
-            continue
-        if job["conclusion"] != "cancelled" or job["steps"] or job.get("runner_name"):
-            continue
-        annotations = api(f"check-runs/{job['id']}/annotations?per_page=100")
-        if not any(a["message"] == MESSAGE for a in annotations):
-            continue
-        name = marker(run["id"], job["name"])
-        artifacts = api(f"actions/artifacts?name={name}&per_page=100")
-        if not any(a["name"] == name and not a["expired"] for a in artifacts["artifacts"]):
-            return job["id"], name
+        for job in jobs["jobs"]:
+            history.setdefault(job["name"], {})[job["id"]] = job
+    candidates = []
+    for instances in history.values():
+        job = next(reversed(instances.values()))
+        if unassigned(job):
+            candidates.append((job, instances))
+    # Give older cancellations the first chance at the remaining attempts.
+    for job, instances in sorted(candidates, key=lambda pair: pair[0].get("completed_at") or ""):
+        completed = job.get("completed_at")
+        for previous in reversed(instances.values()):
+            if previous["id"] != job["id"] and (
+                    not completed or previous.get("completed_at") != completed or not unassigned(previous)):
+                continue
+            annotations = api(f"check-runs/{previous['id']}/annotations?per_page=100")
+            if any(a["message"] == MESSAGE for a in annotations):
+                return job["id"], name
     return None
 
 
@@ -84,6 +98,17 @@ def main():
             return [item for page in pages for item in page]
         key = "artifacts" if path.startswith("actions/artifacts?") else "jobs"
         return {key: [item for page in pages for item in page[key]]}
+
+    run = event["workflow_run"]
+    if (run["event"], run["head_branch"], run["conclusion"]) not in (
+            ("push", "main", "failure"), ("push", "main", "cancelled")):
+        return
+    # Completion events can wait in the concurrency queue past a manual rerun.
+    current = json.loads(subprocess.check_output(
+        ["gh", "api", f"repos/{repo}/actions/runs/{run['id']}"]))
+    if current["run_attempt"] != run["run_attempt"] or current["status"] != "completed":
+        print("A newer attempt has already been requested")
+        return
 
     failure = failed_retry(event, api)
     if failure:
@@ -109,16 +134,12 @@ def main():
             print("Automatic failed-jobs retry reserved", file=out)
         return
 
-    # Do not fall through to cancelled siblings when a failure is present.
-    run = event["workflow_run"]
-    if run["conclusion"] == "failure":
-        jobs = api(f"actions/runs/{run['id']}/attempts/{run['run_attempt']}/jobs?per_page=100")
-        if any(job["conclusion"] == "failure" for job in jobs["jobs"]):
-            print("Failed jobs already reserved or past first attempt")
-            return
     selected = retry_job(event, api)
     if selected is None:
-        print("No eligible runner acquisition failure")
+        if run["run_attempt"] >= MAX_ATTEMPTS:
+            print(f"Automatic runner acquisition retries stop at attempt {MAX_ATTEMPTS}")
+        else:
+            print("No eligible runner acquisition failure")
         return
     job, name = selected
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:

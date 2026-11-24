@@ -381,7 +381,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                                 item.last_evidence = Some(evidence.clone());
                             } else {
                                 item.ci_retry = None;
-                                if label == "rejected" {
+                                if label != "passed" {
                                     if let Some(detail) = failure {
                                         if detail.job.is_empty() || detail.job.len() > 1024 || detail.first_line.len() > 4096
                                             || detail.job.chars().any(char::is_control) || detail.first_line.chars().any(char::is_control)

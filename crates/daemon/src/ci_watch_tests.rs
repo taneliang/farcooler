@@ -65,6 +65,41 @@ fn one_run_reads_alone() {
     assert_eq!(read.status, CiStatus::Failed);
 }
 
+#[tokio::test]
+async fn the_retry_controller_keeps_only_its_own_attempt_pending() {
+    use std::cell::Cell;
+    let run = parse_run(br#"{
+        "id":45191956221,"name":"CI","head_sha":"6a02832c7","event":"push",
+        "html_url":"","created_at":"2026-11-23T14:13:54Z","updated_at":"2026-11-23T14:54:35Z",
+        "status":"completed","conclusion":"cancelled"
+    }"#).unwrap();
+    let finished = crate::ci_canary::epoch_secs(&run.updated_at).unwrap();
+    for (title, status, age, next_attempt, pending) in [
+        ("unrelated", "queued", 10, 2, true), // Completion event is still being delivered.
+        ("unrelated", "queued", RETRY_EVENT_WAIT_SECS, 2, false),
+        ("unrelated", "missing", 10, 2, false),
+        ("Retry CI 45191956221 attempt 2", "queued", 3600, 2, true),
+        ("Retry CI 45191956221 attempt 2", "completed", 10, 3, true),
+        ("Retry CI 45191956221 attempt 2", "completed", 10, 2, false),
+    ] {
+        let source_reads = Cell::new(0);
+        let observed = retry_pending(&run, Some(2), finished + age, |path| {
+            let value = if path.starts_with("actions/workflows/") {
+                if status == "missing" { return std::future::ready(RetryRead::error(b"gh: Not Found (HTTP 404)")); }
+                serde_json::json!({"workflow_runs":[{"id":45_199_285_951_u64,"display_title":title,"status":status}]})
+            } else {
+                assert_eq!(path, "actions/runs/45191956221");
+                let reads = source_reads.get();
+                source_reads.set(reads + 1);
+                serde_json::json!({"id":run.id,"head_sha":run.head_sha,"status":"completed",
+                    "head_branch":"main","conclusion":"cancelled","run_attempt":if reads == 0 { 2 } else { next_attempt }})
+            };
+            std::future::ready(RetryRead::Data(serde_json::to_vec(&value).unwrap()))
+        }).await;
+        assert_eq!(observed, pending, "{title} {status} age {age}, next attempt {next_attempt}");
+    }
+}
+
 /// A commit with no runs yet reads none, and a run still going reads running
 /// whatever has passed beside it.
 #[test]

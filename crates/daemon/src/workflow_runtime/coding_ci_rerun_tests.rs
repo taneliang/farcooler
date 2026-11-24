@@ -129,3 +129,72 @@ async fn ci_rerun_restart_with_no_send_proof_stays_uncertain_and_does_not_send()
     assert_eq!(sends(dir.path()), 0);
     assert_eq!(outbox(&runtime, StageKind::RerunCi), 1);
 }
+
+#[tokio::test]
+async fn pushed_landing_waits_for_runner_retry_and_keeps_the_reason_when_it_is_exhausted() {
+    use std::os::unix::fs::PermissionsExt;
+    for final_conclusion in ["success", "cancelled", "failure"] {
+        let (dir, runtime) = lander("pass").await;
+        let script = dir.path().join("ci-retry");
+        std::fs::write(&script, r#"#!/usr/bin/python3
+import json, os, pathlib, subprocess, sys
+counter = pathlib.Path(os.environ['POLL'])
+poll = int(counter.read_text()) if counter.exists() else 0
+if len(sys.argv) == 1:
+    poll += 1
+    counter.write_text(str(poll))
+terminal = os.environ['FINAL']
+attempt, status, conclusion = {
+    1: (1, 'completed', 'failure'),
+    2: (2, 'completed', 'cancelled'),
+    3: (3, 'in_progress', None),
+}.get(poll, (3 if terminal == 'success' else 8, 'completed', terminal))
+candidate = subprocess.check_output(['/usr/bin/git', '--git-dir', os.environ['REMOTE'], 'rev-parse', 'refs/heads/main']).decode().strip()
+run = dict(id=45191956221, name='CI', head_sha=candidate, status=status, conclusion=conclusion,
+           head_branch='main', run_attempt=attempt, html_url='fixture://ci/45191956221',
+           created_at='2026-11-23T14:13:54Z', updated_at='2026-11-23T14:54:35Z', event='push')
+if len(sys.argv) == 1:
+    assert candidate == os.environ['FARCOOLER_CANDIDATE']
+    pathlib.Path(os.environ['FARCOOLER_RECEIPT']).write_text(json.dumps(
+        dict(binding=os.environ['FARCOOLER_OPERATION_BINDING'], repository='offline/repository', run=run)))
+elif 'ci-runner-retry.yml' in sys.argv[4]:
+    print(json.dumps(dict(workflow_runs=[dict(id=123, display_title=f'Retry CI 45191956221 attempt {attempt}',
+        status='in_progress' if poll <= 2 else 'completed')])))
+elif '/attempts/8/jobs?' in sys.argv[4]:
+    print('Swift (app build + bundle checks)')
+else:
+    assert sys.argv[4].endswith('/actions/runs/45191956221'), sys.argv
+    print(json.dumps(run))
+"#).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let polls = dir.path().join("poll");
+        let mut config = runtime.coding.clone().unwrap();
+        config.ci.workflow = "CI".into();
+        config.ci.command.argv = vec![script.to_string_lossy().into_owned()];
+        config.ci.command.environment.extend([
+            ("CI_GH".into(), script.to_string_lossy().into_owned()),
+            ("POLL".into(), polls.to_string_lossy().into_owned()),
+            ("FINAL".into(), final_conclusion.into()),
+        ]);
+        let root = runtime.root.clone();
+        drop(runtime);
+        std::fs::write(root.join("coding.json"), serde_json::to_vec(&config).unwrap()).unwrap();
+        let mut runtime = Runtime::open(&root).unwrap();
+        let definition = batched_push(&runtime, "any", 5000);
+        at_join(&mut runtime, "one", &definition).await;
+        command(&runtime, Command::Queue { item: "one".into() });
+        let terminal = if final_conclusion == "success" { Phase::Done } else { Phase::Failed };
+        let state = until(&mut runtime, |s| phase_of(s, "one") == Some(terminal.clone())).await;
+        assert_eq!(std::fs::read_to_string(polls).unwrap(), "4", "interim attempts cannot settle the wait");
+        assert_eq!(outbox(&runtime, StageKind::Push), 1);
+        assert_eq!(outbox(&runtime, StageKind::AwaitCi), 1);
+        if final_conclusion != "success" {
+            let group = state.items.values().find(|item| item.group_of.is_some()).unwrap();
+            assert_eq!(group.pushed.as_deref(), Some(remote_head(&runtime).await.as_str()));
+            let failure = group.group_failure.as_ref().unwrap();
+            assert_eq!(failure.job, "Swift (app build + bundle checks)");
+            let verdict = if final_conclusion == "cancelled" { "was cancelled" } else { "failed" };
+            assert_eq!(failure.first_line, format!("CI run 45191956221, attempt 8 {verdict}. This job never acquired a runner."));
+        }
+    }
+}

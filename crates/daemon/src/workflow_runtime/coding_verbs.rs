@@ -217,7 +217,8 @@ impl Exec {
             else { format!("{}.verb.json", digest(&binding.effect)) };
         let evidence = Evidence { candidate: fact.candidate, manifest, receipt, policy_pin: binding.effect.policy_pin.clone() };
         if *kind == StageKind::AwaitCi && (binding.effect.ci_retry.is_some()
-            || fact.detail.get("run").is_some_and(|r| !r.is_null())) {
+            || fact.detail.get("run").is_some_and(|r| !r.is_null())
+            || fact.detail.get("failure").is_some_and(|f| !f.is_null())) {
             return Ok(Outcome::CiResult { label: fact.label, evidence,
                 run: fact.detail.get("run").filter(|r| !r.is_null()).map(|r| serde_json::from_value(r.clone())).transpose()?,
                 failure: fact.detail.get("failure").filter(|f| !f.is_null()).map(|f| serde_json::from_value(f.clone())).transpose()? });
@@ -468,20 +469,68 @@ impl Exec {
                 }
             };
             let mut detail = serde_json::json!({ "polls": poll + 1, "run": run });
-            if label == "rejected" {
-                let path = self.root.join("receipts").join(format!("{}.poll-{poll}.provider.json", digest(&binding.effect)));
-                let receipt: CodingCiReceipt = serde_json::from_slice(&self.bytes(&path)?)?;
-                if let Some(mut failure) = receipt.failure {
-                    failure.job = failure.job.chars().filter(|c| !c.is_control()).take(256).collect();
-                    failure.first_line = failure.first_line.chars().filter(|c| !c.is_control()).take(1000).collect();
-                    failure.split = false;
-                    if !failure.job.is_empty() { detail["failure"] = serde_json::to_value(failure)?; }
-                }
+            if label != "passed" {
+                detail["failure"] = serde_json::to_value(self.ci_failure(binding, label, run.as_ref(), poll).await?)?;
             }
             self.write_fact(binding, label, &candidate, detail)?;
             return self.reconcile_verb(binding, &StageKind::AwaitCi).await;
         }
         unreachable!("the poll count is unbounded")
+    }
+
+    async fn ci_failure(&self, binding: &Binding, label: &str, run: Option<&CiRun>, poll: u32) -> Result<farcooler_workflow::GroupFailure> {
+        let path = self.root.join("receipts").join(format!("{}.poll-{poll}.provider.json", digest(&binding.effect)));
+        let receipt: Option<CodingCiReceipt> = match self.bytes(&path) {
+            Ok(raw) => Some(serde_json::from_slice(&raw)?),
+            Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error),
+        };
+        let conclusion = receipt.as_ref().and_then(|r| r.run["conclusion"].as_str());
+        let relevant = match label {
+            "cancelled" => conclusion == Some("cancelled"),
+            "rejected" => conclusion.is_some_and(|c| c != "success" && c != "cancelled"),
+            _ => true,
+        };
+        let run = run.filter(|_| relevant);
+        let subject = run.map_or_else(|| "a required CI workflow".to_string(), |r| format!("CI run {}, attempt {}", r.id, r.attempt));
+        let reason = match label {
+            "cancelled" if run.is_none() => "A required CI workflow was cancelled.".into(),
+            "cancelled" => format!("{subject} was cancelled."),
+            "timeout" => format!("Timed out waiting for a final result from {subject}."),
+            _ if run.is_none() => "A required CI workflow failed.".into(),
+            _ => format!("{subject} failed."),
+        };
+        if label == "rejected" && let Some(mut failure) = receipt.and_then(|r| r.failure) {
+            failure.job = failure.job.chars().filter(|c| !c.is_control()).take(256).collect();
+            failure.first_line = failure.first_line.chars().filter(|c| !c.is_control()).take(1000).collect();
+            if failure.first_line.trim().is_empty() { failure.first_line = reason.clone(); }
+            failure.split = false;
+            if !failure.job.is_empty() { return Ok(failure); }
+        }
+        let config = self.coding.as_ref().ok_or(Error::Refused("missing coding config"))?;
+        if let Some(run) = run
+            && (label == "cancelled" || (label == "rejected" && run.failed_jobs.is_empty()))
+            && config.ci.command.environment.get("CI_GH").is_some_and(|p| Path::new(p).is_absolute())
+        {
+            let path = format!("repos/{}/actions/runs/{}/attempts/{}/jobs?per_page=100", config.ci.repository, run.id, run.attempt);
+            let filter = r#"[.[].jobs[] | select(.conclusion == "cancelled" and (.steps | length) == 0 and (.runner_name // "") == "") | .name][0] // empty"#;
+            if let Ok((Some(0), raw)) = self.ci_gh(binding, "cancelled-job",
+                &["api", "--paginate", "--slurp", &path, "--jq", filter]).await
+            {
+                let job: String = String::from_utf8_lossy(&raw).trim().chars().filter(|c| !c.is_control()).take(256).collect();
+                if !job.is_empty() {
+                    return Ok(farcooler_workflow::GroupFailure {
+                        job, first_line: format!("{reason} This job never acquired a runner."), split: false,
+                    });
+                }
+            }
+        }
+        Ok(farcooler_workflow::GroupFailure {
+            job: run.and_then(|r| r.failed_jobs.first()).map(|job| job.chars().filter(|c| !c.is_control()).take(256).collect::<String>())
+                .filter(|job| !job.is_empty()).unwrap_or_else(|| "CI".into()),
+            first_line: reason,
+            split: false,
+        })
     }
     /// One look at CI on `sha`, over every workflow the step waits on. The configured workflow must have a run; each
     /// other one a CI wait names (ov-1071) counts once the push started it. GitHub starts every workflow a push
@@ -548,7 +597,20 @@ impl Exec {
                 failed_steps: provided.failed_steps.unwrap_or_default().into_iter().take(256)
                     .filter(FailedStep::valid).collect() });
         if facts.as_ref().is_some_and(|r| !r.valid()) { return Err(Error::Refused("invalid CI run facts")); }
-        Ok(Some((crate::ci_watch::summarize(&format!("sha:{sha}"), &[(run, None)]).status, facts)))
+        let attempt = facts.as_ref().map(|r| u64::from(r.attempt));
+        let pending = config.ci.command.environment.get("CI_GH").is_some_and(|p| Path::new(p).is_absolute())
+            && crate::ci_watch::retry_pending(&run, attempt, self.clock_ms().div_euclid(1000), |path| async move {
+                use crate::ci_watch::RetryRead;
+                let endpoint = format!("repos/{}/{path}", config.ci.repository);
+                match self.ci_gh(binding, "retry-look", &["api", "-X", "GET", &endpoint]).await {
+                    Ok((Some(0), raw)) => RetryRead::Data(raw),
+                    Ok((Some(_), raw)) => RetryRead::error(&raw),
+                    _ => RetryRead::Unavailable,
+                }
+            }).await;
+        let status = if pending { CiStatus::Queued }
+            else { crate::ci_watch::summarize(&format!("sha:{sha}"), &[(run, None)]).status };
+        Ok(Some((status, facts)))
     }
 
     /// Apply every member's commits, in order, onto the base in a fresh tree. The tree is made new

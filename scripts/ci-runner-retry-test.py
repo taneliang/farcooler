@@ -18,7 +18,8 @@ class RetryTest(unittest.TestCase):
         self.event = {"workflow_run": {"id": 123, "head_branch": "main", "event": "push",
                                        "run_attempt": 2, "conclusion": "failure"}}
         self.shards = [dict(id=i, name=f"Rust native tests (macOS {n}/2)",
-                            conclusion="cancelled", steps=[], runner_name="")
+                            conclusion="cancelled", steps=[], runner_name="",
+                            completed_at="2026-11-23T14:29:20Z")
                        for n, i in [(1, 456), (2, 789)]]
         self.attempts = {1: [dict(j, conclusion="success", steps=[{"name": "test"}],
                                   runner_name="runner") for j in self.shards],
@@ -33,7 +34,7 @@ class RetryTest(unittest.TestCase):
         attempt = int(path.split("/attempts/")[1].split("/")[0])
         return {"jobs": self.attempts[attempt]}
 
-    def test_later_attempt_siblings_and_once_bound(self):
+    def test_later_attempt_siblings_and_retry_bound(self):
         # Execute the workflow's actual POST command against a recording gh.
         workflow = pathlib.Path('.github/workflows/ci-runner-retry.yml').read_text()
         command = next(line.strip()[5:] for line in workflow.splitlines()
@@ -47,12 +48,16 @@ class RetryTest(unittest.TestCase):
                 job, name = retry.retry_job(self.event, self.api)
                 self.assertEqual(job, expected)
                 self.markers.add(name)  # upload-artifact precedes POST
+                self.assertIsNone(retry.retry_job(self.event, self.api))
                 subprocess.run(['/bin/sh', '-c', command], check=True,
                                env={'PATH': d, 'LOG': str(log), 'JOB': str(job),
                                     'GITHUB_REPOSITORY': 'owner/repo'})
                 self.event['workflow_run']['run_attempt'] += 1
                 self.attempts[self.event['workflow_run']['run_attempt']] = [
-                    dict(self.shards[0 if job == 456 else 1], id=job + 1000)]
+                    dict(self.shards[0 if job == 456 else 1], id=job + 1000,
+                         completed_at="2026-11-23T14:59:20Z")]
+            self.assertEqual(retry.retry_job(self.event, self.api)[0], 1456)
+            self.event['workflow_run']['run_attempt'] = retry.MAX_ATTEMPTS
             self.assertIsNone(retry.retry_job(self.event, self.api))
             self.assertEqual(log.read_text().splitlines(), [
                 'api --method POST repos/owner/repo/actions/jobs/456/rerun',
@@ -93,6 +98,8 @@ class RetryTest(unittest.TestCase):
 
             def gh(args, **kwargs):
                 path = args[-1]
+                if path.endswith('/runs/123'):
+                    return json.dumps(dict(status='completed', run_attempt=self.event['workflow_run']['run_attempt'])).encode()
                 if path.endswith('/logs'):
                     return 'test example::broken ... FAILED\n'
                 if 'artifacts?' in path:
@@ -114,6 +121,53 @@ class RetryTest(unittest.TestCase):
                     self.assertFalse((root / 'output').exists())
             finally:
                 os.chdir(old)
+
+    def test_agentkit_removal_carried_cancellation_gets_a_retry(self):
+        # Run 45191956221. Attempt 2 copied the build's cancellation without
+        # its check annotation. Only the Mac tests had actually been rerun.
+        build = dict(id=137752581918, name="Swift (app build + bundle checks)",
+                     conclusion="cancelled", steps=[], runner_name="",
+                     completed_at="2026-11-23T14:29:20Z")
+        tests = dict(id=137752581792, name="Swift (AgentKit + Mac tests)",
+                     conclusion="cancelled", steps=[], runner_name="",
+                     completed_at=build["completed_at"])
+        copied = dict(build, id=137765399570, runner_name=None)
+        self.event["workflow_run"].update(id=45191956221, conclusion="cancelled")
+        self.attempts = {
+            1: [tests, build],
+            2: [dict(tests, id=137765397217, conclusion="success",
+                     steps=[{"name": "Set up job"}], runner_name="GitHub Actions 1000021234"), copied],
+        }
+
+        def api(path):
+            if path.startswith("check-runs/"):
+                return [{"message": retry.MESSAGE}] if str(build["id"]) in path else []
+            return self.api(path)
+
+        selection = retry.retry_job(self.event, api)
+        self.assertIsNotNone(selection)
+        self.assertEqual(selection[0], copied["id"])
+
+        # A later, unrelated cancellation of the same job cannot inherit the
+        # original acquisition annotation.
+        self.attempts[3] = [dict(copied, id=137778665576, completed_at="2026-11-23T15:10:34Z")]
+        self.event["workflow_run"]["run_attempt"] = 3
+        self.assertIsNone(retry.retry_job(self.event, api))
+        self.attempts[3][0].update(conclusion="success", steps=[{"name": "Set up job"}],
+                                  runner_name="GitHub Actions 1000021238")
+        self.event["workflow_run"].update(run_attempt=3, conclusion="success")
+        self.assertIsNone(retry.retry_job(self.event, api))
+
+    def test_stale_completion_does_not_reserve_a_retry(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d)
+            event = root / "event"
+            event.write_text(json.dumps(self.event))
+            env = {"GITHUB_REPOSITORY": "owner/repo", "GITHUB_EVENT_PATH": str(event)}
+            with mock.patch.dict(os.environ, env), mock.patch.object(
+                    retry.subprocess, "check_output", return_value=b'{"status":"completed","run_attempt":3}') as gh:
+                retry.main()
+            gh.assert_called_once_with(["gh", "api", "repos/owner/repo/actions/runs/123"])
 
     def test_parse_real_failure_lines(self):
         # Run 43985211994, job 133713551594, including nextest ANSI colors.

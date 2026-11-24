@@ -2,7 +2,7 @@
 use super::*;
 
 impl Exec {
-    async fn ci_gh(&self, binding: &Binding, tag: &str, args: &[&str]) -> Result<(Option<i32>, Vec<u8>)> {
+    pub(super) async fn ci_gh(&self, binding: &Binding, tag: &str, args: &[&str]) -> Result<(Option<i32>, Vec<u8>)> {
         let ci = &self.coding.as_ref().ok_or(Error::Refused("missing coding config"))?.ci;
         let gh = ci.command.environment.get("CI_GH").filter(|p| Path::new(p).is_absolute())
             .ok_or(Error::Refused("missing pinned CI_GH"))?;

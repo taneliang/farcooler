@@ -66,10 +66,17 @@ pub async fn run(svc: Arc<Service>, watcher: Arc<Watcher>) {
 #[derive(Default)]
 pub struct Memo {
     shas: HashMap<String, String>,
-    jobs: HashMap<u64, (String, Option<String>, Vec<GhJob>)>,
+    jobs: HashMap<u64, CachedJobs>,
     /// Subjects GitHub didn't answer for, or had no run for: how many reads
     /// in a row, and when to ask again (review train-1005c M2).
     misses: HashMap<(Uuid, String), (u32, i64)>,
+}
+
+struct CachedJobs {
+    status: String,
+    conclusion: Option<String>,
+    updated_at: String,
+    jobs: Vec<GhJob>,
 }
 
 /// How long after `misses` reads in a row that GitHub couldn't or didn't
@@ -170,6 +177,98 @@ fn run_state(run: &GhRun) -> &'static str {
     board_ci::job_state(&run.status, run.conclusion.as_deref())
 }
 
+/// How long a completion event has to create its retry workflow run.
+const RETRY_EVENT_WAIT_SECS: i64 = 15 * 60;
+
+pub(crate) enum RetryRead {
+    Data(Vec<u8>),
+    Missing,
+    Unavailable,
+}
+
+impl RetryRead {
+    pub(crate) fn error(stderr: &[u8]) -> Self {
+        // gh's error when this repository does not have the retry workflow.
+        if String::from_utf8_lossy(stderr).contains("(HTTP 404)") { Self::Missing } else { Self::Unavailable }
+    }
+}
+
+/// GitHub reports each attempt as completed even while our retry workflow is
+/// being scheduled or submitting the rerun. Follow that workflow by source
+/// run ID and attempt, then read the source again after the controller settles.
+pub(crate) async fn retry_pending<F, Fut>(
+    run: &GhRun,
+    attempt: Option<u64>,
+    now_secs: i64,
+    read: F,
+) -> bool
+where
+    F: Fn(String) -> Fut,
+    Fut: std::future::Future<Output = RetryRead>,
+{
+    if run.name != "CI" || run.event != "push" || run.status != "completed"
+        || !matches!(run.conclusion.as_deref(), Some("failure" | "cancelled"))
+    { return false; }
+
+    #[derive(Deserialize)]
+    struct Source {
+        id: u64,
+        head_sha: String,
+        head_branch: String,
+        status: String,
+        conclusion: Option<String>,
+        run_attempt: u64,
+        #[serde(default)]
+        updated_at: String,
+    }
+    #[derive(Deserialize)]
+    struct Controller {
+        id: u64,
+        display_title: String,
+        status: String,
+    }
+    #[derive(Deserialize)]
+    struct Controllers {
+        workflow_runs: Vec<Controller>,
+    }
+
+    let recent = |stamp: &str| crate::ci_canary::epoch_secs(stamp)
+        .is_some_and(|finished| now_secs.saturating_sub(finished) < RETRY_EVENT_WAIT_SECS);
+    let source_path = format!("actions/runs/{}", run.id);
+    let source = || async {
+        let RetryRead::Data(raw) = read(source_path.clone()).await else { return None };
+        serde_json::from_slice::<Source>(&raw).ok()
+            .filter(|s| s.id == run.id && s.head_sha == run.head_sha)
+    };
+    let Some(current) = source().await else { return recent(&run.updated_at) };
+    if current.status != "completed" || current.conclusion != run.conclusion
+        || attempt.is_some_and(|n| current.run_attempt != n)
+        || (!run.updated_at.is_empty() && !current.updated_at.is_empty() && current.updated_at != run.updated_at) {
+        return true;
+    }
+    if current.head_branch != "main" { return false; }
+
+    let title = format!("Retry CI {} attempt {}", run.id, current.run_attempt);
+    let mut path = "actions/workflows/ci-runner-retry.yml/runs?event=workflow_run&per_page=100".to_string();
+    let updated_at = if current.updated_at.is_empty() { &run.updated_at } else { &current.updated_at };
+    if crate::ci_canary::epoch_secs(updated_at).is_some() {
+        path.push_str(&format!("&created=%3E%3D{updated_at}"));
+    }
+    let raw = match read(path).await {
+        RetryRead::Data(raw) => raw,
+        RetryRead::Missing => return false,
+        RetryRead::Unavailable => return recent(updated_at),
+    };
+    let controller = serde_json::from_slice::<Controllers>(&raw).ok()
+        .and_then(|runs| runs.workflow_runs.into_iter().filter(|r| r.display_title == title).max_by_key(|r| r.id));
+    match controller {
+        None => recent(updated_at),
+        Some(controller) if controller.status != "completed" => true,
+        Some(_) => source().await.is_none_or(|fresh| fresh.status != "completed"
+            || fresh.run_attempt != current.run_attempt),
+    }
+}
+
 /// What the runs (each with its jobs, when they were read) say about a
 /// subject. Jobs are named "workflow / job"; a run whose jobs couldn't be read
 /// stands as one line of its own.
@@ -229,6 +328,10 @@ pub fn api_args(path: &str, fields: &[String], jq: &str) -> Vec<String> {
 
 /// One `gh api` read in `tree`, or `None` for every way it can fail.
 async fn gh_get(svc: &Service, tree: &Path, args: &[String]) -> Option<Vec<u8>> {
+    gh_output(svc, tree, args).await.filter(|o| o.status.success()).map(|o| o.stdout)
+}
+
+async fn gh_output(svc: &Service, tree: &Path, args: &[String]) -> Option<std::process::Output> {
     let mut gh = crate::stack::gh(tree).await.ok()?;
     let _permit = svc.gh_permit().await;
     let out = tokio::time::timeout(
@@ -242,27 +345,25 @@ async fn gh_get(svc: &Service, tree: &Path, args: &[String]) -> Option<Vec<u8>> 
             .output(),
     )
     .await;
-    match out {
-        Ok(Ok(o)) if o.status.success() => Some(o.stdout),
-        _ => None,
-    }
+    out.ok()?.ok()
 }
 
 /// A run with its jobs, from `memo` while the run is unchanged.
 async fn with_jobs(
     svc: &Service,
     tree: &Path,
-    memo: &mut HashMap<u64, (String, Option<String>, Vec<GhJob>)>,
+    memo: &mut HashMap<u64, CachedJobs>,
     run: GhRun,
 ) -> (GhRun, Option<Vec<GhJob>>) {
     if run.id == 0 {
         // The placeholder for a Canary run that has not started (`ci_canary`).
         return (run, None);
     }
-    if let Some((s, c, jobs)) = memo.get(&run.id) {
-        if memo_holds(&run.status) && (s, c) == (&run.status, &run.conclusion) {
-            return (run, Some(jobs.clone()));
-        }
+    if let Some(cached) = memo.get(&run.id)
+        && memo_holds(&run.status) && cached.status == run.status
+        && cached.conclusion == run.conclusion && cached.updated_at == run.updated_at
+    {
+        return (run, Some(cached.jobs.clone()));
     }
     let path = format!("repos/{{owner}}/{{repo}}/actions/runs/{}/jobs", run.id);
     let jobs = gh_get(svc, tree, &api_args(&path, &["per_page=100".into()], JOBS_JQ)).await.and_then(|b| parse_jobs(&b));
@@ -272,7 +373,9 @@ async fn with_jobs(
         if memo.len() >= MEMO_MAX {
             memo.clear();
         }
-        memo.insert(run.id, (run.status.clone(), run.conclusion.clone(), jobs.clone()));
+        memo.insert(run.id, CachedJobs {
+            status: run.status.clone(), conclusion: run.conclusion.clone(), updated_at: run.updated_at.clone(), jobs: jobs.clone(),
+        });
     }
     (run, jobs)
 }
@@ -338,8 +441,20 @@ async fn read_subject(svc: &Service, tree: &Path, subject: &str, memo: &mut Memo
     };
     let Some(runs) = runs else { return unknown(subject) };
     let mut read = Vec::new();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
     for run in runs {
-        read.push(with_jobs(svc, tree, &mut memo.jobs, run).await);
+        let (mut run, jobs) = with_jobs(svc, tree, &mut memo.jobs, run).await;
+        if retry_pending(&run, None, now, |path| async move {
+            match gh_output(svc, tree, &["api".into(), format!("repos/{{owner}}/{{repo}}/{path}")]).await {
+                Some(out) if out.status.success() => RetryRead::Data(out.stdout),
+                Some(out) => RetryRead::error(&out.stderr),
+                None => RetryRead::Unavailable,
+            }
+        }).await {
+            run.status = "queued".into();
+            run.conclusion = None;
+        }
+        read.push((run, jobs));
     }
     summarize(subject, &read)
 }
