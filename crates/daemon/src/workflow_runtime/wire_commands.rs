@@ -646,6 +646,23 @@ mod tests {
     fn m(id:&str,revision:u64,sequence:u64) -> Mutation { Mutation { id:id.into(),revision,epoch:1,sequence } }
     fn ok(value:&serde_json::Value) { assert!(value.pointer("/receipt/result/Ok").is_some(),"{value}"); }
     #[test]
+    fn legacy_workflow_keeps_live_items_when_only_reply_history_is_large() {
+        let state = serde_json::json!({
+            "schema": 1, "workspace": "fixture", "revision": 17, "epoch": 2,
+            "seen": [], "source_sequences": {"wire:owner": 9},
+            "items": {"tracked": {"definition": Definition::ticket(), "phase": "Running"}}
+        });
+        let reply = serde_json::json!({
+            "schema": 1, "state": state, "stops": {},
+            "context": {"capabilities": {"decision_principal": "owner"}},
+            "publication_history": [{"body": "x".repeat(PLAN_WORKFLOW_BYTES)}]
+        });
+        let encoded = encode_legacy_get(reply);
+        assert!(encoded.len() <= PLAN_WORKFLOW_BYTES);
+        let decoded: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded["state"], state);
+    }
+    #[test]
     fn workflow_get_summary_hides_definitions_and_finished_groups_without_changing_tickets() {
         let input = serde_json::json!({"configuration":{"pin":"config", "definition":{"stages":[]}, "adapter":{}},
             "state":{"revision":17,"epoch":2,"source_sequences":{"wire:owner":9},"seen":["old"],
