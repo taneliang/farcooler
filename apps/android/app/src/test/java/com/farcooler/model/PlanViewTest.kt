@@ -28,9 +28,7 @@ class PlanViewTest {
 
     @Test
     fun `the engine landing queue uses the shared golden including long titles and failures`() {
-        val fixture = Json.parseToJsonElement(repositoryFile("test/fixtures/landing-queue.json")).jsonObject
-        val request = fixture.getValue("request").jsonObject
-        val plan = Plan.decode(request.getValue("plan").toString())
+        val plan = Plan.decode(repositoryFile("test/fixtures/plan-landing-queue.json"))
         val view = PlanViews.of(plan)!!
         val groups = view.landingGroups!!
         assertEquals(4, groups.size)
@@ -61,8 +59,8 @@ class PlanViewTest {
         val running = view.building.first { it.key == "ov-310" }
         assertEquals("Builder · sonnet", running.agent?.who)
         assertEquals("Prepare workspace · Approval required", running.notes.single { it.kind == PlanViewNoteKind.Run }.text)
-        assertEquals(listOf(PlanViewWaitingKind.NotRanked), view.waiting.map { it.kind })
-        assertEquals(2, view.waitingCount)
+        assertEquals(listOf(PlanViewWaitingKind.NotRanked, PlanViewWaitingKind.OnYou), view.waiting.map { it.kind })
+        assertEquals(5, view.waitingCount)
         assertTrue(view.agents.header.startsWith("3 agents, including the orchestrator"))
         assertEquals("Orchestrator · opus", view.agents.rows.first().who)
         assertEquals("Mac look and feel", view.themes.finished.single().name)

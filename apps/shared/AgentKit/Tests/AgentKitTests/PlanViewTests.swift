@@ -41,7 +41,7 @@ struct PlanViewTests {
 
         #expect(view.landings.isEmpty, "historical landing rows are not projected")
 
-        #expect(view.waiting.map(\.kind) == [.notRanked] && !view.namesWaitingGroups)
+        #expect(view.waiting.map(\.kind) == [.notRanked, .onYou] && view.namesWaitingGroups)
         #expect(view.waiting.first?.id == "plan-not-ranked")
         #expect(view.agents.rows.map(\.id) == ["pane:orch", "pane:i1", "pane:b1"])
         #expect(view.agents.rows.first?.cost == "\u{2248}$14.20")
@@ -52,10 +52,8 @@ struct PlanViewTests {
 
     @Test("engine landing groups remain in the shared view")
     func engineLandingGroups() throws {
-        let data = try Data(contentsOf: PlanPhoneFixtures.root.appendingPathComponent("test/fixtures/landing-queue.json"))
-        let fixture = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-        let request = try #require(fixture["request"] as? [String: Any])
-        let plan = try PlanModel.decode(JSONSerialization.data(withJSONObject: try #require(request["plan"])))
+        let data = try Data(contentsOf: PlanPhoneFixtures.root.appendingPathComponent("test/fixtures/plan-landing-queue.json"))
+        let plan = try PlanModel.decode(data)
         let view = try #require(WirePlanView.build(plan: plan))
         let groups = try #require(view.landingGroups)
         #expect(groups.count == 4)
