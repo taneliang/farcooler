@@ -157,3 +157,19 @@ Process-log pruning runs on a blocking worker in the first cleanup round and on 
 The loaded fixture passed all four budgets. Plan took 743 ms, Plan theme list 958 ms, Workflow Get 171 ms, and Worktree List 0.30 ms. The first Task List page took 52 ms. The idle minute recorded 23 `lsof` launches (12 recursive), 72 Git launches (one remote-head probe), one `gh` launch (zero polls of the finished run), and 64 tmux launches.
 
 The workflow runtime and service suites passed 537 non-ignored tests across the broad run and reruns with the scratch daemon and CLI binaries. The pane regression and both performance checks ran separately. The daemon-layer, file-size, and Nightly dispatch checks passed.
+
+## Verification on landing base `5bfcd67e8`
+
+Git replayed all nine ticket commits without conflicts. The patch series and the resulting `ci_watch.rs` matched the prior candidate.
+
+| Loaded RPC | Rebased latency | Budget |
+| --- | ---: | ---: |
+| Plan | 300 ms | < 2 s |
+| Plan theme list | 572 ms | < 2 s |
+| Workflow Get | 134 ms | < 1 s |
+| Task List, first page | 23 ms | — |
+| Worktree List | 0.22 ms | < 2 s |
+
+The loaded reads launched zero tmux clients. The idle minute recorded 13 `lsof` launches (12 recursive), 33 Git launches (one remote-head probe), zero `gh` launches, and two tmux launches. The census checked that the finished CI result was still available and passed all spawn bounds. The pane test echoed 15 keys during the cleanup sweep, including 14 during `lsof`, and also overlapped the filesystem accounting walk. Its slowest echo was 8.1 ms.
+
+Nextest ran 5,119 tests across the daemon unit suite, three daemon socket integration suites, and the CLI, store, and workflow suites. The parallel run passed 5,115. All four failures passed on a serial rerun with the same binaries and private test setup. They covered two native owner exit races, recovery after a vanished native tmux server, and keeping four native builders alive through a landing. The migration lint and its self-test, daemon-layer, file-size, doc-comment, and Nightly dispatch checks passed.
