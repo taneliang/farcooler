@@ -60,7 +60,14 @@ if (missing.length) {
 for (const name of WASM) {
   const raw = readFileSync(join(wasmDir, `${name}.wasm`))
   const file = `a/${name}.${hashOf(raw)}.wasm`
-  const br = brotliCompressSync(raw, { params: { [constants.BROTLI_PARAM_QUALITY]: 11, [constants.BROTLI_PARAM_SIZE_HINT]: raw.length } })
+  const br = brotliCompressSync(raw, {
+    params: {
+      [constants.BROTLI_PARAM_QUALITY]: 11,
+      // Tailcat benefits from the standard Brotli window of 16 MiB.
+      [constants.BROTLI_PARAM_LGWIN]: name === 'tailcat' ? 24 : 22,
+      [constants.BROTLI_PARAM_SIZE_HINT]: raw.length,
+    },
+  })
   writeFileSync(join(out, `${file}.br`), br)
   files[`${name}.wasm`] = `/${file}`
 }
