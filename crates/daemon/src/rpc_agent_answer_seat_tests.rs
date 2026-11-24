@@ -34,8 +34,6 @@ struct Seats {
     checkout: (Uuid, String),
     /// Processes this test started, ended on drop.
     started: Vec<i32>,
-    /// The stand-ins it spawned, reaped on drop.
-    children: Vec<std::process::Child>,
     /// Processes outside the runner it started, ended on drop.
     outside: Vec<Outside>,
 }
@@ -48,17 +46,13 @@ impl Drop for Seats {
                 libc::kill(*pid, libc::SIGTERM);
             }
         }
-        for child in &mut self.children {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
     }
 }
 
 async fn seats() -> Seats {
     let (dir, svc, repo) = crate::test_support::fixture().await;
     let checkout = svc.store.list_worktrees_for_repository(repo).unwrap().into_iter().find(|w| w.is_main_checkout).unwrap();
-    Seats { dir, svc, checkout: (checkout.id, checkout.worktree_path.clone()), started: Vec::new(), children: Vec::new(), outside: Vec::new() }
+    Seats { dir, svc, checkout: (checkout.id, checkout.worktree_path.clone()), started: Vec::new(), outside: Vec::new() }
 }
 
 impl Seats {
@@ -73,14 +67,13 @@ impl Seats {
         (claude, at.join("stand_in.pl"), at.join("pid"))
     }
 
-    /// A caller with a claude above it, in no pane of this runner.
+    /// A caller with a claude above it, in no pane of this runner: a tool
+    /// command of a claude run in a terminal of its own, as the owner's in
+    /// Terminal is. Not under the test's own chain, which may end at pid 1
+    /// with no terminal (the gate's), and a claude there is unknown (ov-1303).
     fn under_claude_outside(&mut self) -> i32 {
-        let (claude, script, pid) = self.claude("outside");
-        let agent = std::process::Command::new(&claude).arg(&script).arg(&pid).spawn().expect("the stand-in claude");
-        self.children.push(agent);
-        let caller = read_pid(&pid);
-        self.started.push(caller);
-        caller
+        let (claude, _, _) = self.claude("outside");
+        self.keep(Outside::tool_of_one_in_a_terminal(&claude, 6647))
     }
 
     /// A caller with a claude above it, in a shell pane of this runner.
