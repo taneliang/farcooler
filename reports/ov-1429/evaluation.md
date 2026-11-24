@@ -173,3 +173,21 @@ Git replayed all nine ticket commits without conflicts. The patch series and the
 The loaded reads launched zero tmux clients. The idle minute recorded 13 `lsof` launches (12 recursive), 33 Git launches (one remote-head probe), zero `gh` launches, and two tmux launches. The census checked that the finished CI result was still available and passed all spawn bounds. The pane test echoed 15 keys during the cleanup sweep, including 14 during `lsof`, and also overlapped the filesystem accounting walk. Its slowest echo was 8.1 ms.
 
 Nextest ran 5,119 tests across the daemon unit suite, three daemon socket integration suites, and the CLI, store, and workflow suites. The parallel run passed 5,115. All four failures passed on a serial rerun with the same binaries and private test setup. They covered two native owner exit races, recovery after a vanished native tmux server, and keeping four native builders alive through a landing. The migration lint and its self-test, daemon-layer, file-size, doc-comment, and Nightly dispatch checks passed.
+
+## Verification on landing base `d7b824fc9`
+
+The workflow RPC keeps the landing base's bundle export branch and ov-1429's cached starter settings for ordinary Get. All 11 draft-approval integration tests passed, including bundle export with oversized state, detailed draft refusals, and starter settings on an unpublished workflow.
+
+| Loaded RPC | Rebased latency | Budget |
+| --- | ---: | ---: |
+| Plan | 1,698 ms | < 2 s |
+| Plan theme list | 1,751 ms | < 2 s |
+| Workflow Get | 438 ms | < 1 s |
+| Task List, first page | 24 ms | — |
+| Worktree List | 0.94 ms | < 2 s |
+
+The loaded fixture passed all four bounds and made zero tmux calls during the reads. The idle minute recorded 20 `lsof` launches (nine recursive), 66 Git launches (one remote-head probe), one `gh` launch (zero polls of the finished run), and 64 tmux launches.
+
+The pane test's first run overlapped compilation and measured a 291 ms echo before it observed either cleanup phase. After compilation finished, the standalone rerun echoed 10 keys with a maximum of 73.1 ms. Eight echoes overlapped `lsof`, and the test also observed an echo during the filesystem walk and verified the cleanup receipt.
+
+Nextest ran 4,837 tests across the daemon, CLI, store, and workflow suites and selected socket integrations. The first run passed 4,772. The fallback app directory exceeded the macOS Unix socket path limit. All 65 initial failures passed on a serial rerun with a shorter private app directory and the same binaries. Migration lint and its self-test, daemon-layer, file-size, doc-comment, and Nightly dispatch checks passed.
