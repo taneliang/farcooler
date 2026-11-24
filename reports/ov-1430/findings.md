@@ -58,3 +58,12 @@ The workflow-read regression stalls the unrelated pane's argument read until the
 - The workflow read met its one-second deadline while a process-argument query was blocked. The six-run restart honored the configured two starts per minute. The process-worker, pane-delivery, watchdog, native quiescence, and heavy-queue checks passed.
 - The Mac app and test bundle built. All 82 focused Swift tests across 12 suites passed, including the stalled read that publishes “Runner not responding” before the read ends.
 - The two web suites that consume the conversation-words fixture passed all 41 tests.
+
+## Landing-gate repair
+
+- The Mac now reads the runner timeout message from the shared client presenter. The shared-core lint and its self-test passed without a baseline change.
+- The Mac Rust test selection now includes the process-read workers and pane delivery tests that exercise Darwin process queries. Its check and the quick landing gate passed.
+- Clippy passed with `--all-targets -- -D warnings` for the daemon, CLI, and client. The shared phrases, chat, and attachment web suites passed all 43 tests.
+- The shared words fixture passed through the linked Rust bridge in AgentKit. All 51 focused Mac tests passed, including the app publishing “Runner not responding” while the read was still open.
+- The first nextest invocation inherited the workflow’s hook socket, which overrides the fixtures’ socket paths. I stopped that invocation and verified its private tmux namespace had no running servers or scratch daemons. The rerun cleared workflow environment variables before starting the test harness.
+- The isolated nextest run passed all 5,129 enabled tests, with 23 skipped and two passing on retry. One retry followed host sleep. The workflow-read, six-run restart, process-worker, pane-delivery, and watchdog regressions passed. The temporary-file and tmux leak checks passed.

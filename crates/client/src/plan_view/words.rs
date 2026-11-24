@@ -178,6 +178,8 @@ pub struct Words {
     pub confirm_browser_access: String,
     /// Display name supplied by the shared model words.
     pub gpt_6_2_sol: String,
+    /// The connection status when a runner read times out.
+    pub runner_not_responding: String,
 }
 
 impl Words {
@@ -190,6 +192,7 @@ impl Words {
             blocked_doing: "waiting on you".to_string(),
             handle_waited_on: "A workflow or a run still names someone who had that handle. Choose another handle, or ask the Owner to cancel those runs and publish a workflow that doesn\u{2019}t name them.".to_string(),
             confirm_browser_access: "Confirm this browser\u{2019}s access to {runner}.".to_string(),
+            runner_not_responding: "Runner not responding".to_string(),
         }
     }
 }

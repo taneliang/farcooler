@@ -19,6 +19,7 @@
       "claude_registry": "FSEvents registration, delivery, shutdown and process incarnation.",
       "code_identity": "Darwin process/signature and terminal identity APIs.",
       "proc_table": "Darwin process/signature and terminal identity APIs.",
+      "process_reads": "Bounded worker lanes for Darwin process-state and argument queries.",
       "proc_cwd": "Darwin process/signature and terminal identity APIs.",
       "foreground": "Darwin process/signature and terminal identity APIs.",
       "native_hold": "Darwin process-group holds, responsibility tracking and pause rollback.",
@@ -30,6 +31,7 @@
       "git_sandbox": "Darwin sandbox and Keychain-aware git subprocess environment.",
       "git_launch": "Darwin sandbox and Keychain-aware git subprocess environment.",
       "service": "Native agent PTYs, launch/shell behavior, private paths and lifecycle.",
+      "watch": "Pane delivery while a Darwin process query is blocked.",
       "workflow_runtime": "Native agent PTYs, launch/shell behavior, private paths and lifecycle."
     },
     "farcooler-core": {

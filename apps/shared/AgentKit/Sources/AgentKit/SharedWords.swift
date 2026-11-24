@@ -14,6 +14,7 @@ public enum SharedWords {
             var blockedDoing: String
             var handleWaitedOn: String
             var confirmBrowserAccess: String
+            var runnerNotResponding: String?
 
             enum CodingKeys: String, CodingKey {
                 case gpt62Sol = "gpt_6_2_sol"
@@ -22,6 +23,7 @@ public enum SharedWords {
                 case blockedDoing = "blocked_doing"
                 case handleWaitedOn = "handle_waited_on"
                 case confirmBrowserAccess = "confirm_browser_access"
+                case runnerNotResponding = "runner_not_responding"
             }
         }
         var words: Words?
@@ -56,6 +58,9 @@ public enum SharedWords {
     }
 
     public static var gpt62Sol: String? { words?.gpt62Sol }
+
+    /// The connection status when a runner read times out.
+    public static var runnerNotResponding: String { words?.runnerNotResponding ?? "" }
 
     /// The Agents card's title when nothing is running.
     public static var agentsNone: String { words?.agentsNone ?? "" }

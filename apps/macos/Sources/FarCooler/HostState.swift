@@ -26,7 +26,10 @@ enum HostState: Equatable {
     /// Checked again slowly, as `.removed` is, so being added back is seen.
     case noAccess
 
-    static let runnerNotRespondingReason = "Runner not responding"
+    static let runnerNotRespondingReason: String = {
+        PlanViewBridge.install()
+        return SharedWords.runnerNotResponding
+    }()
 
     var isUsable: Bool { self == .connected }
 
