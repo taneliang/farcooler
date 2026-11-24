@@ -47,7 +47,7 @@ impl Store {
     /// Only the exclusive runtime's recovery pass may revive an interrupted cleanup
     /// whose path has retained ownership evidence. Ordinary build output is never replayed.
     pub fn workflow_cleanup_recover(&self, effect: &CleanupEffect, reason: &str) -> Result<()> {
-        let resumed = CleanupResult { retry: true, bytes_freed: 0, skipped: vec![reason.into()] };
+        let resumed = CleanupResult { retry: true, skipped: vec![reason.into()], ..CleanupResult::default() };
         self.conn().execute("UPDATE engine_build_cleanup SET result=?3 WHERE workspace=?1 AND id=?2 AND result=?4",
             params![effect.workspace, effect.id, serde_json::to_string(&resumed)?, serde_json::to_string(&interrupted())?])?;
         Ok(())
@@ -113,5 +113,5 @@ impl Store {
 }
 
 fn interrupted() -> CleanupResult {
-    CleanupResult { retry: false, bytes_freed: 0, skipped: vec!["cleanup attempt interrupted; bytes freed unknown; deletion will not be replayed".into()] }
+    CleanupResult { skipped: vec!["cleanup attempt interrupted; bytes freed unknown; deletion will not be replayed".into()], ..CleanupResult::default() }
 }

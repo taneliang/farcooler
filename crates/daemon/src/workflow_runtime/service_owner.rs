@@ -109,7 +109,7 @@ impl Runtime {
             disk_usage:Default::default(), #[cfg(test)] user_home:None, #[cfg(test)] build_free_bytes:Some(u64::MAX), #[cfg(test)] cleanup_check:None },
             notice_wake:None,configuration_locks:Default::default(),shutdown:None,
             instance:Uuid::now_v7(),
-            last_occupancy:None,trees_recovered:false,cancel_refused:Default::default(),recovery:Default::default(),restart_pacing:Default::default(),scheduling:Default::default(),inbox,send,next_lease:None,next_cleanup:None,orphan_cleanup_retries:Vec::new(),continuous:false,
+            last_occupancy:None,trees_recovered:false,cancel_refused:Default::default(),recovery:Default::default(),restart_pacing:Default::default(),scheduling:Default::default(),inbox,send,next_lease:None,next_cleanup:None,orphan_cleanup_retries:Default::default(),continuous:false,
             #[cfg(test)] sweeps:0, #[cfg(test)] fail_observe:Default::default(), #[cfg(test)] drained:0,
             _writer:writer,_repository_writer:None,_landing_writer:None })
     }

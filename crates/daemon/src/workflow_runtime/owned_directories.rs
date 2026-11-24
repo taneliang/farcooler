@@ -51,7 +51,7 @@ impl Exec {
             || !self.store.workflow_cleanup_owner_settled(effect, &directory.owner_effect)? { return Ok(false); }
         if !self.store.workflow_cleanup_begin(effect, previous)? { return Ok(false); }
         let path = PathBuf::from(&directory.path);
-        let mut result = CleanupResult { bytes_freed: 0, skipped: Vec::new(), retry: false };
+        let mut result = CleanupResult::default();
         let deletion = async {
             // Keep accepting recorded output under the engine root, including scratch
             // created before agent scratch moved to the sandbox's writable area.

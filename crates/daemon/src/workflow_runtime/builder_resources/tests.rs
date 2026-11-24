@@ -342,21 +342,29 @@ async fn waiting_adopted_worktree_releases_build_output_and_reclaims_older_outpu
 
 #[tokio::test]
 async fn waiting_adopted_worktree_checks_source_readers_and_external_processes() {
-    let (_dir, mut runtime, tree, workspace) = adopted(true).await;
-    let reader = File::open(tree.join(".git")).unwrap();
-    let mut shell = tokio::process::Command::new("/bin/sleep").arg("120").current_dir(&tree)
-        .kill_on_drop(true).spawn().unwrap();
-    wait_for_adopted_review(&mut runtime, &workspace).await;
-    assert!(tree.join("target/debug/deps/built").exists());
-    shell.kill().await.unwrap();
-    assert!(runtime.release_builds(std::slice::from_ref(&workspace)).await.unwrap(),
-        "a source reader still holds the tree: {:?}", runtime.store.workflow_cleanups(&workspace).unwrap());
-    drop(reader);
-    let mut shell = tokio::process::Command::new("/bin/sleep").arg("120").current_dir(&tree)
-        .kill_on_drop(true).spawn().unwrap();
-    assert!(runtime.release_builds(std::slice::from_ref(&workspace)).await.unwrap(), "a process cwd holds the tree");
-    assert!(tree.join("target/debug/deps/built").exists());
-    shell.kill().await.unwrap();
-    assert!(!runtime.release_builds(std::slice::from_ref(&workspace)).await.unwrap());
-    assert!(!tree.join("target/debug/deps/built").exists());
+    for hold_source_file in [true, false] {
+        let (_dir, mut runtime, tree, workspace) = adopted(true).await;
+        let reader = hold_source_file.then(|| File::open(tree.join(".git")).unwrap());
+        let shell = (!hold_source_file).then(|| tokio::process::Command::new("/bin/sleep")
+            .arg("120").current_dir(&tree).kill_on_drop(true).spawn().unwrap());
+        // A held tree must be refused before reaching the post-inventory check.
+        runtime.cleanup_check = Some(std::sync::Arc::new((Default::default(), Default::default())));
+        tokio::time::timeout(Duration::from_secs(60), wait_for_adopted_review(&mut runtime, &workspace)).await.unwrap();
+        runtime.cleanup_check = None;
+        let output = tree.join("target/debug/deps/built");
+        assert!(output.exists());
+        assert!(runtime.next_cleanup.unwrap() > tokio::time::Instant::now() + Duration::from_secs(60));
+        let pending = runtime.store.workflow_pending_cleanups(&workspace).unwrap();
+        let deferred = pending.iter().find_map(|record| record.result.as_ref()
+            .filter(|result| result.skipped.iter().any(|note| note.contains("open files under folder")))
+            .and_then(|result| result.retry_at_ms)).expect("held checkout has a deferred retry");
+
+        drop(reader);
+        if let Some(mut shell) = shell { shell.kill().await.unwrap(); }
+        let workspace = std::slice::from_ref(&workspace);
+        runtime.release_builds_at(workspace, deferred - 1, || Ok(())).await.unwrap();
+        assert!(output.exists(), "another cleanup pass must respect the backoff");
+        assert!(runtime.release_builds_at(workspace, deferred, || Ok(())).await.unwrap().is_none());
+        assert!(!output.exists(), "the deferred pass reclaims a released checkout");
+    }
 }

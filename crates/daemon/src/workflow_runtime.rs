@@ -1,7 +1,7 @@
 //! Workflow runtime for private fixtures and the sole ordinary Service owner.
 //! The local capability boundary is intended for authenticated embedding, not wire grants.
 pub(crate) mod execution;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{File, OpenOptions};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -323,7 +323,7 @@ pub struct Runtime {
     next_lease: Option<i64>,
     /// Pending transient cleanup must wake both idle and occupied dispatch loops (ov-1203).
     next_cleanup: Option<tokio::time::Instant>,
-    orphan_cleanup_retries: Vec<PathBuf>,
+    orphan_cleanup_retries: BTreeMap<PathBuf, tokio::time::Instant>,
     continuous: bool,
     #[cfg(test)]
     sweeps: usize,
@@ -435,7 +435,7 @@ impl Runtime {
         let store = Store::open(root.join("workflow.sqlite"))
             .map_err(|_| Error::Refused("cannot open fixture database"))?;
         let (send, inbox) = mpsc::channel(32);
-        let runtime = Self { inbox, send, next_lease: None, next_cleanup: None, orphan_cleanup_retries: Vec::new(), continuous: false,
+        let runtime = Self { inbox, send, next_lease: None, next_cleanup: None, orphan_cleanup_retries: BTreeMap::new(), continuous: false,
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
             exec: Exec { yielding: crate::yielding::Yielding::at(&root), activities: Default::default(), places: std::sync::Arc::new(std::sync::Mutex::new(Places::load(&root)?)), root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, host: None,
                 seeding: Default::default(), tree_locks: Default::default(), disk_usage: Default::default(), #[cfg(test)] user_home: None, #[cfg(test)] build_free_bytes: Some(u64::MAX), #[cfg(test)] cleanup_check: None },
@@ -670,25 +670,32 @@ impl Runtime {
                 let mut orphans = std::mem::take(&mut self.orphan_cleanup_retries);
                 let mut task = BackgroundTask::new(async move {
                     let workspaces = exec.store.workflow_workspaces()?;
-                    let retry = exec.release_builds(&workspaces).await?;
+                    let deadline = exec.release_builds(&workspaces).await?;
+                    let now = tokio::time::Instant::now();
                     if recover_trees {
                         match exec.private_trees() {
-                            Ok(trees) => orphans = trees,
+                            Ok(trees) => orphans.extend(trees.into_iter().map(|tree| (tree, now))),
                             Err(error) => tracing::warn!(%error, "could not list legacy workflow trees"),
                         }
                     }
-                    let swept = !orphans.is_empty();
-                    let pending = match exec.release_orphan_builds(&orphans).await {
-                        Ok(pending) => pending,
+                    let mut due = Vec::new();
+                    orphans.retain(|tree, retry_at| {
+                        if *retry_at > now { return true; }
+                        due.push(tree.clone());
+                        false
+                    });
+                    match exec.release_orphan_builds(&due).await {
+                        Ok(pending) => orphans.extend(pending),
                         Err(error) => {
                             tracing::warn!(%error, "could not sweep legacy build output");
-                            orphans
+                            let retry_at = tokio::time::Instant::now() + build_cleanup::CLEANUP_RETRY;
+                            orphans.extend(due.iter().cloned().map(|tree| (tree, retry_at)));
                         }
-                    };
-                    if (recover_trees || swept) && exec.service_mode {
+                    }
+                    if (recover_trees || !due.is_empty()) && exec.service_mode {
                         drop(exec.refresh_disk_usage());
                     }
-                    Ok((retry, pending))
+                    Ok((deadline, orphans))
                 });
                 task.start();
                 cleanup = Some(task);
@@ -721,10 +728,9 @@ impl Runtime {
                 Event::CleanupRetry => { cleanup_requested = true; }
                 Event::CleanupFinished(result) => {
                     cleanup = None;
-                    let (retry, orphans) = result?;
+                    let (deadline, orphans) = result?;
                     self.orphan_cleanup_retries = orphans;
-                    self.next_cleanup = (retry || !self.orphan_cleanup_retries.is_empty())
-                        .then(|| tokio::time::Instant::now() + Duration::from_secs(1));
+                    self.next_cleanup = deadline.into_iter().chain(self.orphan_cleanup_retries.values().copied()).min();
                     // A pending effect may have been waiting for cleanup to release its tree.
                     scan = self.continuous && !stopping;
                 }
@@ -1185,7 +1191,7 @@ struct Running {
 enum Event {
     Tick,
     CleanupRetry,
-    CleanupFinished(Result<(bool, Vec<PathBuf>)>),
+    CleanupFinished(Result<(Option<tokio::time::Instant>, BTreeMap<PathBuf, tokio::time::Instant>)>),
     Finished(usize, Result<Outcome>),
     Shutdown,
     Message(Option<Inbox>),

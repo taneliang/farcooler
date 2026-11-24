@@ -3,6 +3,7 @@ use super::*;
 use farcooler_workflow::cleanup::{CleanupEffect, CleanupResult, DEFAULT_BUILD_FOLDERS, valid_folder};
 use std::{collections::BTreeMap, sync::{Arc, Mutex, Weak}};
 use tokio::sync::{OwnedMutexGuard, OwnedRwLockWriteGuard, RwLock};
+use tokio::time::Instant;
 
 mod generated;
 
@@ -11,6 +12,8 @@ const LEGACY_BUILD_FOLDERS: &[&str] = &["crates/web/target", "apps/macos/.build"
 const LEGACY_PUBLISHED_DEFAULTS: &[&str] = &["target", "apps/android/app/build", "apps/*/build", ".build"];
 
 const OUTPUT_INTERRUPTED: &str = "build output cleanup interrupted; bytes freed unknown";
+pub(super) const CLEANUP_RETRY: Duration = Duration::from_secs(1);
+const CHECKOUT_RETRY: Duration = Duration::from_secs(5 * 60);
 
 pub(super) const GROUP_INTERRUPTED: &str = "group tree cleanup interrupted; bytes freed unknown";
 
@@ -48,7 +51,7 @@ pub(super) struct CleanupFences {
     _repository: Option<OwnedMutexGuard<()>>,
 }
 
-/// Retry on a monotonic deadline, only while a transient cleanup blocker remains.
+/// Retry on a monotonic deadline, only while a cleanup blocker remains.
 pub(super) async fn wait_for_retry(deadline: Option<tokio::time::Instant>) {
     match deadline {
         Some(time) => tokio::time::sleep_until(time).await,
@@ -74,16 +77,16 @@ impl Exec {
 
     /// A legacy checkout can outlast all its run records. The private namespace
     /// identifies candidates, but only linked checkouts with no live user qualify.
-    pub(super) async fn release_orphan_builds(&self, trees: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    pub(super) async fn release_orphan_builds(&self, trees: &[PathBuf]) -> Result<BTreeMap<PathBuf, Instant>> {
         let mut bytes_freed = 0u64;
-        let mut pending = Vec::new();
+        let mut pending = BTreeMap::new();
         for tree in trees {
             let paths: BTreeSet<_> = DEFAULT_BUILD_FOLDERS.iter().chain(LEGACY_BUILD_FOLDERS)
                 .filter_map(|folder| checked_folder(tree, folder).ok().flatten())
                 .chain(cargo_cache_folders(tree)).collect();
             if paths.is_empty() { continue; }
             let Ok(guard) = self.tree_lock(tree).try_write_owned() else {
-                pending.push(tree.clone());
+                pending.insert(tree.clone(), Instant::now() + CLEANUP_RETRY);
                 continue;
             };
             if !self.store.workflow_cleanup_has_authority()? { break; }
@@ -95,13 +98,13 @@ impl Exec {
             if !top.ok || Path::new(top.stdout.trim_end()) != tree { continue; }
             let held = Arc::new(CleanupFences { _tree: guard, _repository: None });
             for path in paths {
-                let mut retry = false;
+                let mut retry = None;
                 match self.release_folder(tree, &path, held.clone(), &mut retry, true).await {
                     Ok(bytes) => bytes_freed = bytes_freed.saturating_add(bytes),
                     Err(reason) => tracing::debug!(?path, %reason, "legacy build output retained"),
                 }
-                if retry {
-                    pending.push(tree.clone());
+                if let Some(delay) = retry {
+                    pending.insert(tree.clone(), Instant::now() + delay);
                     break;
                 }
             }
@@ -130,27 +133,35 @@ impl Exec {
         Ok(false)
     }
 
-    /// True while a transient blocker still needs a later dispatch wakeup.
-    pub(super) async fn release_builds(&self, workspaces: &[String]) -> Result<bool> {
+    /// Return the earliest dispatch wakeup needed by a pending cleanup.
+    pub(super) async fn release_builds(&self, workspaces: &[String]) -> Result<Option<Instant>> {
         self.release_builds_checked(workspaces, || Ok(())).await
     }
-    pub(super) async fn release_builds_checked(&self, workspaces: &[String], mut before_result: impl FnMut() -> Result<()>) -> Result<bool> {
+    pub(super) async fn release_builds_checked(&self, workspaces: &[String], mut before_result: impl FnMut() -> Result<()>) -> Result<Option<Instant>> {
         self.release_builds_at(workspaces, now(), &mut before_result).await
     }
-    pub(super) async fn release_builds_at(&self, workspaces: &[String], at: i64, mut before_result: impl FnMut() -> Result<()>) -> Result<bool> {
-        let mut retry = false;
+    pub(super) async fn release_builds_at(&self, workspaces: &[String], at: i64, mut before_result: impl FnMut() -> Result<()>) -> Result<Option<Instant>> {
+        let start = Instant::now();
+        let mut deadline = None;
+        let mut schedule = |time| deadline = deadline.into_iter().chain(Some(time)).min();
         for workspace in workspaces {
             for record in self.store.workflow_pending_cleanups(workspace)? {
                 let effect = record.effect;
+                if let Some(until) = record.result.as_ref().and_then(|result| result.retry_at_ms).filter(|until| *until > at) {
+                    schedule(start + Duration::from_millis(until.saturating_sub(at) as u64));
+                    continue;
+                }
                 if let Some(directory) = &effect.directory {
-                    retry |= self.release_owned_directory(&effect, directory, record.result.as_ref(), at).await?;
+                    if self.release_owned_directory(&effect, directory, record.result.as_ref(), at).await? {
+                        schedule(Instant::now() + CLEANUP_RETRY);
+                    }
                     continue;
                 }
                 let tree = effect.tree.as_ref().map_or_else(|| self.item_tree_for(workspace, &effect.item, effect.restart.as_deref()), |t| PathBuf::from(&t.path));
                 // Retry rather than settle a skip. A cancellation can end the item before its
                 // already-running future is joined, and a waiting branch can also be in use.
                 let Ok(held) = self.tree_lock(&tree).try_write_owned() else {
-                    retry = true;
+                    schedule(Instant::now() + CLEANUP_RETRY);
                     continue;
                 };
                 if !self.store.workflow_cleanup_begin(&effect, record.result.as_ref())? { continue; }
@@ -158,7 +169,7 @@ impl Exec {
                     r.skipped.iter().any(|s| s == GROUP_INTERRUPTED));
                 let mut result = match self.release_build_attempt(&effect, &tree, held, || {}, reconcile).await {
                     Ok(result) => result,
-                    Err(error) => CleanupResult { retry: false, bytes_freed: 0, skipped: vec![format!("cleanup unavailable: {error}")] },
+                    Err(error) => CleanupResult { skipped: vec![format!("cleanup unavailable: {error}")], ..CleanupResult::default() },
                 };
                 // A preflight refusal must not discard the reconciliation mode: .git may be
                 // gone already, and only a later safe reconciliation can finish this intent.
@@ -182,10 +193,14 @@ impl Exec {
                 }
                 before_result()?;
                 self.store.workflow_cleanup_result(&effect, &result)?;
-                retry |= result.retry;
+                if result.retry {
+                    let delay = result.retry_at_ms.map_or(CLEANUP_RETRY, |until|
+                        Duration::from_millis(until.saturating_sub(now()).max(0) as u64));
+                    schedule(Instant::now() + delay);
+                }
             }
         }
-        Ok(retry)
+        Ok(deadline)
     }
     #[cfg(test)]
     pub(super) async fn release_build_checked(&self, effect: &CleanupEffect, after_check: impl FnOnce()) -> Result<CleanupResult> {
@@ -196,7 +211,7 @@ impl Exec {
     async fn release_build_attempt(&self, effect: &CleanupEffect, tree: &Path, tree_guard: OwnedRwLockWriteGuard<()>,
         after_check: impl FnOnce(), reconcile: bool) -> Result<CleanupResult>
     {
-        let skip = |why: &str| CleanupResult { retry: false, bytes_freed: 0, skipped: vec![why.into()] };
+        let skip = |why: &str| CleanupResult { skipped: vec![why.into()], ..CleanupResult::default() };
         // The service shares this fence with provision_named, adoption and worktree.create.
         // The per-tree fence also protects against dispatching effects in either runtime.
         // A service missing its shared repository fence must fail closed.
@@ -265,11 +280,11 @@ impl Exec {
         after_check();
         if group_recovery || effect.tree.is_none() && self.finished_landing_group(effect)? {
             return Ok(match self.release_group_tree(tree, held, effect, group_recovery).await {
-                Ok(bytes_freed) => CleanupResult { retry: false, bytes_freed, skipped: Vec::new() },
-                Err(why) => CleanupResult { retry: true, bytes_freed: 0, skipped: vec![why] },
+                Ok(bytes_freed) => CleanupResult { bytes_freed, ..CleanupResult::default() },
+                Err(why) => CleanupResult { retry: true, skipped: vec![why], ..CleanupResult::default() },
             });
         }
-        let mut result = CleanupResult { retry: false, bytes_freed: 0, skipped: Vec::new() };
+        let mut result = CleanupResult::default();
         let mut paths = BTreeSet::new();
         for folder in build_folders(&effect.folders, adopted.is_some()) {
             for path in folder_paths(tree, folder) {
@@ -291,15 +306,18 @@ impl Exec {
         for path in paths {
             if removed.iter().any(|p| path.starts_with(p)) { continue; }
             let label = path.strip_prefix(tree).unwrap().to_string_lossy().into_owned();
-            let mut retry = false;
+            let mut retry = None;
             let selective = adopted.is_some() || discovered.contains(&path);
             let answer = self.release_folder(tree, &path, held.clone(), &mut retry, selective).await;
-            result.retry |= retry;
+            result.retry |= retry.is_some();
             match answer {
                 Ok(bytes) => { result.bytes_freed = result.bytes_freed.saturating_add(bytes); removed.push(path); }
                 Err(why) => result.skipped.push(format!("{label}: {why}")),
             }
-            if retry && adopted.is_some() { break; }
+            if retry == Some(CHECKOUT_RETRY) {
+                result.retry_at_ms = Some(now().saturating_add(CHECKOUT_RETRY.as_millis() as i64));
+                break;
+            }
         }
         if !result.retry && self.ended_group(effect)? && effect.tree.is_none() {
             let released = self.release_group_tree(tree, held, effect, false).await;
@@ -311,7 +329,7 @@ impl Exec {
         if result.skipped.iter().any(|s| s.contains(OUTPUT_INTERRUPTED)) { result.bytes_freed = 0; }
         Ok(result)
     }
-    async fn release_folder(&self, tree: &Path, path: &Path, held: Arc<CleanupFences>, retry: &mut bool,
+    async fn release_folder(&self, tree: &Path, path: &Path, held: Arc<CleanupFences>, retry: &mut Option<Duration>,
         check_whole_checkout: bool) -> std::result::Result<u64, String> {
         let relative = path.strip_prefix(tree).map_err(|e| e.to_string())?;
         check_output_index(tree, relative, check_whole_checkout).await?;
@@ -319,6 +337,9 @@ impl Exec {
         let device = tree.symlink_metadata().map_err(|e| e.to_string())?.dev();
         let generated_reports = relative.file_name().is_some_and(|n| n == "build");
         let artifacts = if check_whole_checkout {
+            // A source reader or a shell's cwd can hold the tree. Check before
+            // opening candidate files and walking potentially large outputs.
+            check_open_files(tree).await.inspect_err(|_| *retry = Some(CHECKOUT_RETRY))?;
             let output = path.to_path_buf();
             let checkout = tree.to_path_buf();
             let plan = tokio::task::spawn_blocking(move || generated::ArtifactPlan::inspect(&checkout, &output, device))
@@ -328,18 +349,15 @@ impl Exec {
         } else {
             None
         };
-        // Selective deletion revalidates individual files after this check.
-        // No deletion has started: an unavailable check is safe to retry.
-        *retry = true;
         #[cfg(test)]
         if let Some(check) = &self.cleanup_check {
             check.0.notify_one();
             check.1.notified().await;
         }
-        // An editor's source file or a shell's cwd can hold an adopted or
-        // legacy checkout even when the output folder itself has no readers.
-        check_open_files(if check_whole_checkout { tree } else { path }).await?;
-        *retry = false;
+        // Recheck after inventory in case a process started using the tree
+        // during the scan. Keep the short retry for output-folder checks.
+        let (scope, delay) = if check_whole_checkout { (tree, CHECKOUT_RETRY) } else { (path, CLEANUP_RETRY) };
+        check_open_files(scope).await.inspect_err(|_| *retry = Some(delay))?;
         // A completed git add can leave both the artifact inode and the
         // open-file check unchanged. Recheck the index before unlinking.
         check_output_index(tree, relative, check_whole_checkout).await?;

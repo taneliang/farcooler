@@ -799,9 +799,7 @@ async fn build_cleanup_recovery_releases_a_group_tree_retained_by_an_older_engin
     // An older engine settled folder cleanup but deliberately left this checkout behind.
     let record = runtime.store.workflow_cleanups("w").unwrap().into_iter().rev().find(|r| r.effect.item == group).unwrap();
     assert!(runtime.store.workflow_cleanup_begin(&record.effect, None).unwrap());
-    runtime.store.workflow_cleanup_result(&record.effect, &farcooler_workflow::cleanup::CleanupResult {
-        bytes_freed: 0, skipped: Vec::new(), retry: false,
-    }).unwrap();
+    runtime.store.workflow_cleanup_result(&record.effect, &Default::default()).unwrap();
     let reader = File::open(tree.join("target/binary")).unwrap();
     let root = runtime.root.clone();
     drop(runtime);
@@ -950,25 +948,30 @@ async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output(
     let reader = File::open(orphan_trees[0].join("uncommitted.txt")).unwrap();
     let lock = runtime.tree_lock(&orphan_trees[1]).read_owned().await;
     runtime.pump(100).await.unwrap();
-    assert_eq!(runtime.orphan_cleanup_retries.len(), 2);
+    let held_deadline = runtime.orphan_cleanup_retries[&orphan_trees[0]];
+    let lock_deadline = runtime.orphan_cleanup_retries[&orphan_trees[1]];
+    assert!(held_deadline.duration_since(lock_deadline) > Duration::from_secs(60));
+    assert!(runtime.next_cleanup.unwrap() <= lock_deadline);
     for tree in &orphan_trees {
         assert!(tree.join(layouts[0].0).is_file());
     }
     assert!(orphan_caches.iter().all(|path| path.is_file()));
     drop(reader);
     drop(lock);
-    let (stop, shutdown) = tokio::sync::watch::channel(false);
-    let task = tokio::spawn(async move { runtime.run(shutdown).await.unwrap(); });
-    tokio::time::timeout(Duration::from_secs(30), async {
-        while orphan_caches.iter().any(|path| path.exists())
-            || orphan_trees.iter().any(|tree| tree.join("target/rust-tests.tar.zst").exists()
-                || layouts.iter().any(|(file, _)| tree.join(file).exists())) {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    }).await.unwrap();
-    stop.send(true).unwrap();
-    task.await.unwrap();
+    // Make the engine lock retry due while the checkout check is still deferred.
+    runtime.orphan_cleanup_retries.insert(orphan_trees[1].clone(), tokio::time::Instant::now());
+    runtime.pump(100).await.unwrap();
+    assert!(!orphan_trees[1].join(layouts[0].0).exists());
+    assert!(orphan_trees[0].join(layouts[0].0).exists());
+    assert_eq!(runtime.orphan_cleanup_retries[&orphan_trees[0]], held_deadline);
+    assert!(!runtime.orphan_cleanup_retries.contains_key(&orphan_trees[1]));
+    runtime.orphan_cleanup_retries.insert(orphan_trees[0].clone(), tokio::time::Instant::now());
+    runtime.pump(100).await.unwrap();
+    assert!(orphan_trees.iter().all(|tree| !runtime.orphan_cleanup_retries.contains_key(tree)));
+    assert!(orphan_caches.iter().all(|path| !path.exists()));
     for tree in &orphan_trees {
+        assert!(!tree.join("target/rust-tests.tar.zst").exists());
+        assert!(layouts.iter().all(|(file, _)| !tree.join(file).exists()));
         assert!(tree.join(".git").is_file());
         assert_eq!(std::fs::read(tree.join("uncommitted.txt")).unwrap(), b"keep this");
     }
