@@ -52,14 +52,26 @@ The first pass through all three daemon variants took 386.98 s with default
 dependencies already primed and feature variants still cold. All checks passed.
 The workflow command uses the shared machine lock and four Cargo jobs.
 
-## Draft handoff
+## Draft filing
 
-The [Main bundle](../../.claude/agent/reports/ov-1071/workflow-main.json)
-contains the check and re-pinned operations. The installed Canary CLI reached
-Main but the runner refused the workflow read with `scope denied: known caller
-required`. The live approval draft remains unfiled. From an authenticated Main
-session, export the selected bundle with the ov-1456 `workflow bundle` command
-and apply the Clippy stage and command to that bundle. Use the runner’s
-current hook pins and recompute the operation pins. File the updated bundle
-with `workspace workflow-draft --file` once the script is available on Main.
-The owner reviews the draft before it takes effect.
+The [checked-in bundle](../../.claude/agent/reports/ov-1071/workflow-main.json)
+now points to the content-addressed Claude and Codex hook files present on
+Canary. Their byte digests match the file pins. All 13 stage and group
+operations pin the resulting adapter,
+`wf1:e5aa796034a2ccdec6cc62e601bc10855be67db7434130487815900825622205`.
+The five Python suites passed all 78 tests again with the refreshed bundle,
+including the planted Clippy error and the skip for a docs-only diff.
+
+Canary CLI `0.1.0+5f08afc22` reached Overnight Main on Nov 24
+(`01a0e3c7-3e2c-7ed0-b31c-0cc0d7401571`). It returned
+`scope denied: known caller required` for `workflow get`, the
+configuration-only read used by `workspace re-pin`, and
+`workspace workflow-draft-status`. The installed CLI predates ov-1456’s
+`workflow bundle` command. The filing verdict is **blocked**. This builder
+could not verify the selected configuration against the checked-in bundle,
+and obtained no draft ID or Needs Decision card.
+
+An authenticated Main orchestrator or owner session is required to read the
+selected bundle and file the change. The filing evidence is the draft ID,
+the Needs Decision card ID, the expected published pin, and the draft’s
+`pending` state.
