@@ -239,6 +239,7 @@ fn the_plan() -> pb::Plan {
             input_tokens: 2_900_000, output_tokens: 100_000, cost_micros: Some(20_000_000), runs: 9, ..Default::default()
         }),
         suggested_reviewers: vec![],
+        unthemed_open: None,
     }
 }
 
@@ -338,6 +339,12 @@ impl DispatchLink for Runner {
         let plan = self.plan.clone().unwrap_or_else(the_plan);
         Ok(pb::Result {
             value: Some(match (method.as_str(), payload) {
+                ("board_theme.list", Some(request::Payload::BoardThemeList(p))) => {
+                    let mut themes: Vec<_> = plan.themes.iter().filter_map(|v| v.theme.as_ref()).filter(|t| p.after_id.is_empty() || t.id > p.after_id).map(|t| pb::BoardThemeName { id: t.id.clone(), name: t.name.clone() }).collect();
+                    themes.sort_by(|a, b| a.id.cmp(&b.id));
+                    themes.truncate(100);
+                    result::Value::BoardThemeList(pb::BoardThemeList { themes })
+                }
                 ("plan.get", _) => result::Value::Plan(plan),
                 ("workflow.get", _) => result::Value::WorkflowReply(pb::WorkflowReply {
                     schema: 1,
@@ -427,6 +434,7 @@ impl DispatchLink for Runner {
                 ("repository.list", _) => result::Value::RepositoryList(pb::RepositoryList {
                     items: vec![pb::Repository { id: id_bytes(REPO), display_name: "overnight".into(), ..Default::default() }],
                 }),
+                ("workspace.list", _) => result::Value::WorkspaceList(pb::WorkspaceList::default()),
                 (other, _) => panic!("sent {other}"),
             }),
         })
@@ -1320,4 +1328,62 @@ async fn theme_card_writes_on_a_large_board() {
     say(&mut link, "theme cards Visual --add ov-2").await.unwrap();
     let Some(request::Payload::BoardThemeCards(cards)) = &last(&link).payload else { panic!() };
     assert_eq!(cards.add, vec![tid(0x1002)]);
+}
+
+#[test]
+fn theme_lookup_names_ids_and_lists_choices() {
+    let plan = pb::Plan { themes: vec![theme(1, "Visual language", &[], 0)], ..Default::default() };
+    assert!(find_theme(&plan, "visual language").is_ok());
+    assert!(find_theme(&plan, &Uuid::from_u128(0x3001).to_string()).is_ok());
+    let error = find_theme(&plan, "missing").unwrap_err().to_string();
+    assert!(error.contains("Visual language"));
+}
+
+#[test]
+fn overview_shows_unthemed_count_even_without_a_plan() {
+    let plan = pb::Plan { unthemed_open: Some(3), ..Default::default() };
+    assert!(overview_text::overview(&plan, NOW).contains("3 open cards without a theme"));
+    let single = pb::Plan { unthemed_open: Some(1), ..Default::default() };
+    assert!(overview_text::overview(&single, NOW).contains("1 open card without a theme"));
+    let empty = pb::Plan { unthemed_open: Some(0), ..Default::default() };
+    let text = overview_text::overview(&empty, NOW);
+    assert!(text.contains("0 open cards without a theme"));
+    assert!(text.contains(NOTHING_PLANNED));
+}
+
+#[tokio::test]
+async fn create_theme_lookup_ignores_oversized_historical_plan() {
+    let mut link = runner();
+    let mut plan = the_plan();
+    plan.lines = (0..840).map(|_| pb::TicketLine { reason: "x".repeat(300), branch: "b".repeat(300), worktree_path: "p".repeat(1000), ..Default::default() }).collect();
+    let envelope = pb::WireEnvelope { body: Some(pb::wire_envelope::Body::Response(pb::Response { outcome: Some(pb::response::Outcome::Result(pb::Result { value: Some(result::Value::Plan(plan.clone())) })), ..Default::default() })), ..Default::default() };
+    assert!(farcooler_protocol::framing::encode(&envelope).is_err());
+    let theme = plan.themes[0].theme.as_ref().unwrap().clone();
+    link.plan = Some(plan);
+    let ws = tid(1);
+    assert_eq!(theme_for_create(&mut link, &ws, &theme.name).await.unwrap(), theme.id);
+    assert_eq!(theme_for_create(&mut link, &ws, &Uuid::from_slice(&theme.id).unwrap().to_string()).await.unwrap(), theme.id);
+    assert!(theme_for_create(&mut link, &ws, "missing").await.unwrap_err().to_string().contains(&theme.name));
+    assert!(link.sent.iter().all(|r| r.method == "board_theme.list"));
+}
+
+#[tokio::test]
+async fn create_theme_lookup_pages_names() {
+    let mut link = runner();
+    let mut plan = the_plan();
+    plan.themes = (1..=201).map(|n| theme(n, &format!("Theme {n}"), &[], 0)).collect();
+    let expected = plan.themes[200].theme.as_ref().unwrap().id.clone();
+    link.plan = Some(plan);
+    assert_eq!(theme_for_create(&mut link, &tid(1), "Theme 201").await.unwrap(), expected);
+    assert_eq!(link.sent.len(), 3);
+}
+
+#[tokio::test]
+async fn create_lookup_refuses_an_unknown_theme_on_a_repository_without_main() {
+    let mut link = runner();
+    let board = Board { workspace: None, ..the_board() };
+    let error = board_and_theme_for_create(&mut link, board, "missing").await.unwrap_err();
+    assert_eq!(error.to_string(), "No theme here is called \"missing\". Themes: (none)");
+    assert_eq!(link.sent.len(), 1);
+    assert_eq!(link.sent[0].method, "workspace.list");
 }

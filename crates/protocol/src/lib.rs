@@ -797,6 +797,8 @@ pub mod capability {
     pub const AGENT_STOP: &str = "agent_stop";
     /// Fixed, owner-authorized hourly workspace check-ins.
     pub const WORKSPACE_CHECK_IN: &str = "workspace_check_in";
+    pub const TASK_CREATE_THEME: &str = "task_create_theme";
+    pub const BOARD_THEME_LIST: &str = "board_theme_list";
     pub const CHECK_IN_OCCURRENCE_CAS: &str = "check_in_occurrence_cas";
 
     /// Every capability this build has, in a stable order.
@@ -822,7 +824,7 @@ pub mod capability {
             PR_ACTIONS, PR_NUDGE, REP_CONNECTORS, CLAUDE_SIGN_IN, MEMBER_OWN_LOGINS,
             WORKSPACE_CHARTER, BOARD_THEME_MOVE, MEMBER_ROLES, PASSKEY_KEYS,
             MEMBER_DEVICES_READ, CRASH_REPORTS, WORKSPACE_MAINTAINERS, PERSON_ACCESS,
-            CEREMONY_AUTHORITY, STEP_UP, PHONE_APPROVAL, AGENT_STOP, WORKSPACE_CHECK_IN, CHECK_IN_OCCURRENCE_CAS,
+            CEREMONY_AUTHORITY, STEP_UP, PHONE_APPROVAL, AGENT_STOP, WORKSPACE_CHECK_IN, CHECK_IN_OCCURRENCE_CAS, TASK_CREATE_THEME, BOARD_THEME_LIST,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever
@@ -1099,6 +1101,7 @@ pub mod method {
         WorktreeListDir = "worktree.list_dir" => WORKTREE_FILES,
         WorktreeReadFile = "worktree.read_file" => WORKTREE_FILES,
         TerminalRename = "terminal.rename" => TERMINAL_NAMES,
+        BoardThemeList = "board_theme.list" => BOARD_THEME_LIST,
         PlanGet = "plan.get" => BOARD_PLAN,
         PlanEvents = "plan.events" => BOARD_PLAN,
         BoardThemeCreate = "board_theme.create" => BOARD_PLAN,

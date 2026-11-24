@@ -20,6 +20,7 @@ mod error_response;
 mod screen_revision;
 mod runner_settings;
 mod status_work;
+mod task_create;
 mod terminal_view;
 use error_response::error_response;
 use screen_revision::screen_revision;
@@ -535,7 +536,7 @@ fn scope_of(method: Method) -> Scope {
         // `host_admin` (`rpc_plan::pb_line`). Its writes sit with the board
         // writes, for the same reason: an orchestrator has to be able to write
         // its own plan, and they touch no git data.
-        Method::PlanGet | Method::PlanEvents => Scope::Read,
+        Method::PlanGet | Method::PlanEvents | Method::BoardThemeList => Scope::Read,
         Method::LineOrder
         | Method::BoardThemeCreate
         | Method::BoardThemeUpdate
@@ -2043,13 +2044,14 @@ impl Rpc {
             // data rather than at review.
             //
             // The arms live in `rpc_board`; every route is named here.
-            "task.list" | "task.get" | "task.get_by_key" | "task.search" | "task.create" | "task.update"
+            "task.list" | "task.get" | "task.get_by_key" | "task.search" | "task.update"
             | "task.set_status" | "task.block" | "task.set_wait" | "task.set_line"
             | "task.worker" | "workspace.mark_read" => crate::rpc_board::dispatch(svc, &self.watcher, &self.peer, (self.caller_pid, &self.caller_pane, self.stepped.get()), req).await,
+            "task.create" => task_create::dispatch(svc, &self.watcher, req).await,
             // A note is a board route; a person's answer on a workflow draft's card is also its approval (ov-971).
             "task.note" => crate::workflow_drafts::note(self, crate::rpc_board::dispatch(svc, &self.watcher, &self.peer, (self.caller_pid, &self.caller_pane, self.stepped.get()), req).await?).await,
             // The plan layer (ov-268); the arms live in `rpc_plan`.
-            "plan.get" | "plan.events" | "board_theme.create" | "board_theme.update" | "board_theme.move"
+            "plan.get" | "plan.events" | "board_theme.list" | "board_theme.create" | "board_theme.update" | "board_theme.move"
             | "board_theme.cards" | "line.set" | "line.order" | "agent.record" | "agent.work" | "agent.end"
             | "ruling.add" | "ruling.set" | "ruling.keep_all" => {
                 crate::rpc_plan::dispatch(svc, &self.watcher, self.peer.scope, req).await

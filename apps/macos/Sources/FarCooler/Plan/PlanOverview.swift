@@ -36,6 +36,7 @@ struct PlanOverviewView: View {
             // The plan in hand stays; this says why it may be a little old.
             if plan.hasRead, plan.reconnecting { PlanReconnecting() }
             if plan.hasRead, let line = plan.staleLine { PlanStale(line: line) { Task { await plan.tryAgain() } } }
+            if plan.hasRead, let count = plan.plan.unthemedOpen { PlanUnthemedNotice(count: count) }
             content
         }
         .padding(.bottom, Spacing.section)
@@ -136,6 +137,16 @@ enum PlanMetrics {
     static let tile: CGFloat = 240
     /// The theme bar's height.
     static let bar: CGFloat = 4
+}
+
+struct PlanUnthemedNotice: View {
+    let count: Int
+
+    var body: some View {
+        let cards = count == 1 ? "card" : "cards"
+        PlanNotice(title: "\(count) open \(cards) without a theme", detail: nil)
+            .identified("plan-unthemed-count")
+    }
 }
 
 /// "Nothing is planned on this board yet.", and what to do about it (ov-519):

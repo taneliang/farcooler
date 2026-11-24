@@ -66,6 +66,7 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::Landing(_) => "landing",
         result::Value::Plan(_) => "plan",
         result::Value::PlanEventList(_) => "plan_event_list",
+        result::Value::BoardThemeList(_) => "board_theme_list",
         result::Value::BoardRuling(_) => "board_ruling",
         result::Value::RulingsKept(_) => "rulings_kept",
         result::Value::RepositoryLanding(_) => "repository_landing",

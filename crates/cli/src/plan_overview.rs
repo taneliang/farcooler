@@ -108,15 +108,21 @@ fn ordinal(n: u32) -> String {
 /// What the Mac's overview shows, in text, so an orchestrator reads the same
 /// picture the owner sees.
 pub(super) fn overview(plan: &pb::Plan, now: i64) -> String {
+    let mut out: Vec<String> = Vec::new();
+    if let Some(count) = plan.unthemed_open {
+        let cards = if count == 1 { "card" } else { "cards" };
+        out.push(format!("{count} open {cards} without a theme"));
+    }
     if plan.themes.is_empty()
         && plan.lines.is_empty()
         && plan.rulings.is_empty()
         && plan.landings.is_empty()
         && plan.agents.is_empty()
+        && plan.unthemed_open.unwrap_or_default() == 0
     {
-        return NOTHING_PLANNED.to_string();
+        out.push(NOTHING_PLANNED.to_string());
+        return out.join("\n");
     }
-    let mut out: Vec<String> = Vec::new();
 
     let mut next: Vec<&pb::TicketLine> = plan.lines.iter().filter(|l| l.plan_rank.is_some()).collect();
     next.sort_by_key(|l| l.plan_rank);

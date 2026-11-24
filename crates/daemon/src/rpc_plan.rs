@@ -2,8 +2,8 @@
 //! behind `board_plan`, and the line's (`line.*`, `agent.*`) behind
 //! `board_line`.
 //!
-//! Beside the board: nothing here touches `task_ops`. Each write announces
-//! `plan_changed` once, and none emits `task_changed` itself.
+//! Beside the board: each write announces `plan_changed` once. Filing a new
+//! card under a theme shares the board's validation and task announcement.
 //!
 //! The arms live here; `Rpc::dispatch` names every route in one arm, so its
 //! coverage test still reads each name out of that file.
@@ -36,12 +36,34 @@ fn payload_missing() -> DomainError {
     DomainError::InvalidArgument { what: "payload" }
 }
 
+pub(crate) fn create_themed_task(
+    svc: &Service, watcher: &Watcher, req: &pb::TaskCreate, theme: &[u8],
+) -> Result<pb::Task> {
+    let theme = crate::wire::parse_id(theme).ok_or(DomainError::InvalidArgument { what: "theme_id" })?;
+    crate::task_ops::create_with(svc, watcher, req, |repository, workspace, update, actor| {
+        let workspace = match workspace {
+            Some(id) => id,
+            None => svc.store.main_workspace(repository)?.id,
+        };
+        let task = svc.store.create_task_in_theme(workspace, theme, update, actor)?;
+        watcher.announce_plan_changed(workspace, actor);
+        Ok(task)
+    })
+}
+
 /// One plan route, as `Rpc::dispatch` hands it over. `scope` is the
 /// connection's, which decides whether a ticket's worktree path is shown.
 pub(crate) async fn dispatch(svc: &Arc<Service>, watcher: &Arc<Watcher>, scope: Scope, req: Request) -> Result<result::Value> {
     let admin = scope == Scope::HostAdmin;
     let control = matches!(scope, Scope::Control | Scope::HostAdmin);
     match req.method.as_str() {
+        "board_theme.list" => {
+            let Some(request::Payload::BoardThemeList(p)) = req.payload else { return Err(payload_missing()) };
+            let workspace = required_id(&p.workspace_id)?;
+            let after = if p.after_id.is_empty() { None } else { Some(required_id(&p.after_id)?) };
+            let themes = svc.store.board_theme_names(workspace, after)?.into_iter().map(|(id, name)| pb::BoardThemeName { id: id_bytes(id), name }).collect();
+            Ok(result::Value::BoardThemeList(pb::BoardThemeList { themes }))
+        }
         "plan.get" => {
             let Some(request::Payload::PlanGet(p)) = req.payload else { return Err(payload_missing()) };
             let workspace = required_id(&p.workspace_id)?;
@@ -604,6 +626,7 @@ fn pb_plan(svc: &Service, p: &Plan, admin: bool) -> Result<pb::Plan> {
         rulings: p.rulings.iter().map(crate::rpc_rulings::pb_ruling).collect(),
         ci: p.ci.iter().map(crate::rpc_landings::pb_ci).collect(),
         board_counts: Some(pb_counts(&p.board_counts)),
+        unthemed_open: Some(p.unthemed_open),
         cost: Some(pb_cost(&p.cost)),
         review_waits: Vec::new(),
         lines: p.lines.iter().map(|l| pb_line(l, admin)).collect(),

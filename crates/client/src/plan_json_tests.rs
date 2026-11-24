@@ -219,6 +219,7 @@ fn the_plan() -> pb::Plan {
         }),
         review_waits: vec![],
         suggested_reviewers: vec![],
+        unthemed_open: None,
     }
 }
 
@@ -448,4 +449,10 @@ fn a_ticket_s_engine_run_reaches_the_json_and_is_left_out_when_unsaid() {
     assert_eq!(json["lines"][at]["run"]["send_back_refused"], "gate: the back-edge limit was reached");
     assert_eq!(json["lines"][at]["run"]["gate_principal"], "owner");
     assert!(json["lines"][(at + 1) % plan.lines.len()].get("run").is_none());
+}
+
+#[test]
+fn unthemed_count_is_exposed_when_known() {
+    let plan = pb::Plan { unthemed_open: Some(4), ..Default::default() };
+    assert_eq!(plan_json(&plan)["unthemed_open"], 4);
 }

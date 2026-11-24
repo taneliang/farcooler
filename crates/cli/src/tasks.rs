@@ -69,6 +69,8 @@ const SECTIONS: [&str; 10] =
 
 #[path = "task_starts.rs"]
 mod starts;
+#[path = "task_create.rs"]
+mod create;
 
 #[derive(Subcommand)]
 pub enum TaskCmd {
@@ -138,40 +140,7 @@ pub enum TaskCmd {
         repo: Option<String>,
     },
     /// Put a new task on the board, with whatever is understood so far.
-    Create {
-        /// One line, for the board. At most 200 characters.
-        #[arg(long)]
-        title: String,
-        /// What this task is for, in prose. Revisable at any time.
-        #[arg(long)]
-        intent: Option<String>,
-        /// One checkable thing. Repeatable.
-        #[arg(long = "accept")]
-        accept: Vec<String>,
-        /// One thing this task may not do. Repeatable.
-        #[arg(long = "constraint")]
-        constraint: Vec<String>,
-        /// A word to file this task under. Repeatable.
-        #[arg(long = "label")]
-        label: Vec<String>,
-        /// The worktree this task will use, if it already has one.
-        #[arg(long)]
-        worktree: Option<String>,
-        /// Which workspace's board, by name, task prefix or id. Defaults to
-        /// the pane's own workspace (FARCOOLER_WORKSPACE), then to the
-        /// repository's Main.
-        #[arg(long)]
-        workspace: Option<String>,
-        /// Which repository. Defaults to the pane's own, then to the only one
-        /// there is.
-        #[arg(long)]
-        repo: Option<String>,
-        /// Who this write is from: `user`, `manager`, or `agent:<terminal id>`.
-        /// Read from FARCOOLER_ACTOR when not given, and `user` when neither
-        /// says — always sent, never left for the runner to assume.
-        #[arg(long)]
-        actor: Option<String>,
-    },
+    Create(create::CreateArgs),
     /// Revise what is currently understood, and move the task.
     ///
     /// The mutable half. This writes no note: intent and acceptance are meant
@@ -479,53 +448,7 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
             println!("{}", crate::task_usage::task_usage(&mut link, repo.as_deref(), &key, json).await?);
         }
 
-        TaskCmd::Create {
-            title,
-            intent,
-            accept,
-            constraint,
-            label,
-            worktree,
-            workspace,
-            repo,
-            actor,
-        } => {
-            let actor = actor_for(actor.as_deref())?;
-            let board =
-                board_for(&mut link, repo.as_deref(), workspace.as_deref(), std::env::var(WORKSPACE_ENV).ok())
-                    .await?;
-            let worktree_id = match worktree.as_deref() {
-                Some(name) => Some(crate::resolve_worktree_id(&mut link, name).await?),
-                None => None,
-            };
-            let create = task_create_request(
-                &board,
-                pb::TaskCreate {
-                    repository_id: bytes::Bytes::new(),
-                    title: title.trim().to_string(),
-                    intent: intent.unwrap_or_default(),
-                    acceptance: accept.iter().map(|t| new_acceptance(t)).collect(),
-                    constraints: constraint,
-                    labels: label,
-                    worktree_id: worktree_id.map(id_bytes),
-                    actor: actor.to_string(),
-                    workspace_id: None,
-                },
-            );
-            let r = link
-                .call(create)
-                .await
-                .map_err(|e| refused(e, "a task needs a title of at most 200 characters"))?;
-            let result::Value::Task(created) = expect_value(r.value)? else {
-                return Err(crate::daemon_link::UNREADABLE.into());
-            };
-
-            if json {
-                println!("{}", task_json(&created, now_millis()));
-                return Ok(());
-            }
-            println!("{}  {}", created.key, created.title);
-        }
+        TaskCmd::Create(args) => create::run(&mut link, args, json).await?,
 
         TaskCmd::Set {
             key,
@@ -1589,25 +1512,6 @@ fn task_list_request(board: &Board, status: Option<TaskStatus>, stale_after: Opt
         }),
     );
     if asking_a_workspace { needs_workstreams(r) } else { r }
-}
-
-/// `task.create` of `create` onto `board`: its repository, and its workspace
-/// when it names one, which then names `workstreams` for `task_list_request`'s
-/// reason. A runner too old to know the field would drop it and file the task
-/// on Main. `create`'s own repository and workspace are ignored; the board
-/// says both.
-fn task_create_request(board: &Board, create: pb::TaskCreate) -> pb::Request {
-    let workspace = board.workspace.as_ref().map(|w| w.id.clone());
-    let filing_on_a_workspace = workspace.is_some();
-    let r = with(
-        req_for("task.create", board.repository),
-        request::Payload::TaskCreate(pb::TaskCreate {
-            repository_id: id_bytes(board.repository),
-            workspace_id: workspace,
-            ..create
-        }),
-    );
-    if filing_on_a_workspace { needs_workstreams(r) } else { r }
 }
 
 /// `task.move` of `tasks` to `workspace`, as `actor`.
@@ -3762,7 +3666,7 @@ mod tests {
     #[tokio::test]
     async fn task_create_files_onto_the_panes_workspace() {
         let created = |board: &Board| {
-            let req = task_create_request(board, pb::TaskCreate { title: "t".into(), ..Default::default() });
+            let req = create::request(board, pb::TaskCreate { title: "t".into(), ..Default::default() });
             let needs = req.required_capabilities.iter().any(|c| c == farcooler_protocol::capability::WORKSTREAMS);
             let Some(request::Payload::TaskCreate(p)) = req.payload else { panic!("payload") };
             assert_eq!(p.title, "t");

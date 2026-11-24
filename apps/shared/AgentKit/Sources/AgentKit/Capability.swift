@@ -84,5 +84,7 @@ public enum Capability: String, CaseIterable, Sendable {
     case phoneApproval = "phone_approval"
     case agentStop = "agent_stop"
     case workspaceCheckIn = "workspace_check_in"
+    case taskCreateTheme = "task_create_theme"
+    case boardThemeList = "board_theme_list"
     case checkInOccurrenceCas = "check_in_occurrence_cas"
 }

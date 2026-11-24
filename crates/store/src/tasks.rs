@@ -30,7 +30,7 @@ use farcooler_core::{DomainError, Result};
 
 use crate::error::map_err;
 use crate::models::{
-    Actor, NoteHit, NoteKind, Task, TaskBlock, TaskNote, TaskStatus, TaskUpdate, acceptance_to_json,
+    Actor, NoteHit, NoteKind, Task, TaskBlock, TaskNote, TaskStatus, TaskUpdate, Workspace, acceptance_to_json,
     get_uuid, row_to_note_hit, row_to_task, row_to_task_block, row_to_task_note, strings_to_json,
     uuid_blob,
 };
@@ -356,6 +356,56 @@ pub(crate) fn move_in(
     Ok((moved, after))
 }
 
+/// Insert a complete card and its creation note in the caller's transaction.
+pub(crate) fn insert_task(tx: &Connection, workspace: &Workspace, update: &TaskUpdate, actor: Actor) -> Result<Task> {
+    let key = next_key_under(tx, &workspace.task_prefix).map_err(map_err)?;
+    let now = now_millis();
+    let task = Task {
+        id: Uuid::now_v7(),
+        key,
+        repository_id: workspace.repository_id,
+        workspace_id: workspace.id,
+        title: update.title.clone(),
+        status: TaskStatus::Backlog,
+        status_since: now,
+        intent: update.intent.clone(),
+        acceptance: update.acceptance.clone(),
+        constraints: update.constraints.clone(),
+        worktree_id: update.worktree_id,
+        labels: update.labels.clone(),
+        resource_version: 1,
+        created_at: now,
+        // Equal, so a card nothing else has happened to reads "Added".
+        updated_at: now,
+        wait: None,
+    };
+
+    tx.execute(
+        "INSERT INTO tasks
+         (id, repository_id, workspace_id, key, title, status, status_since, created_at,
+          resource_version, intent, acceptance, constraints, labels, worktree_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9, ?10, ?11, ?12, ?13)",
+        params![
+            uuid_blob(task.id),
+            uuid_blob(task.repository_id),
+            uuid_blob(task.workspace_id),
+            task.key,
+            task.title,
+            task.status.as_str(),
+            task.status_since,
+            now,
+            task.intent,
+            acceptance_to_json(&task.acceptance),
+            strings_to_json(&task.constraints),
+            strings_to_json(&task.labels),
+            task.worktree_id.map(uuid_blob),
+        ],
+    )
+    .map_err(map_err)?;
+    insert_note(tx, task.id, NoteKind::Created, actor, &task.title, &json!({}), None)?;
+    Ok(task)
+}
+
 impl Store {
     // ---- the task row: current understanding ----
 
@@ -369,51 +419,17 @@ impl Store {
     /// author column -- who made a task is history, not current understanding,
     /// and history lives in notes.
     pub fn create_task(&self, workspace: Uuid, title: &str, actor: Actor) -> Result<Task> {
+        let update = TaskUpdate { title: title.to_string(), intent: String::new(), acceptance: Vec::new(), constraints: Vec::new(), labels: Vec::new(), worktree_id: None };
+        self.create_task_complete(workspace, &update, actor)
+    }
+
+    /// Create a card with its initial understanding and creation note.
+    pub fn create_task_complete(&self, workspace: Uuid, update: &TaskUpdate, actor: Actor) -> Result<Task> {
         let workspace = self.get_workspace(workspace)?;
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
-        let key = next_key_under(&tx, &workspace.task_prefix).map_err(map_err)?;
-        let now = now_millis();
-        let task = Task {
-            id: Uuid::now_v7(),
-            key,
-            repository_id: workspace.repository_id,
-            workspace_id: workspace.id,
-            title: title.to_string(),
-            status: TaskStatus::Backlog,
-            status_since: now,
-            intent: String::new(),
-            acceptance: Vec::new(),
-            constraints: Vec::new(),
-            worktree_id: None,
-            labels: Vec::new(),
-            resource_version: 1,
-            created_at: now,
-            // Equal, so a card nothing else has happened to reads "Added".
-            updated_at: now,
-            wait: None,
-        };
-
-        tx.execute(
-            "INSERT INTO tasks
-             (id, repository_id, workspace_id, key, title, status, status_since, created_at,
-              resource_version)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)",
-            params![
-                uuid_blob(task.id),
-                uuid_blob(task.repository_id),
-                uuid_blob(task.workspace_id),
-                task.key,
-                task.title,
-                task.status.as_str(),
-                task.status_since,
-                now,
-            ],
-        )
-        .map_err(map_err)?;
-        insert_note(&tx, task.id, NoteKind::Created, actor, title, &json!({}), None)?;
+        let task = insert_task(&tx, &workspace, update, actor)?;
         tx.commit().map_err(map_err)?;
-
         Ok(task)
     }
 

@@ -122,6 +122,7 @@ pub fn member_ruling(method: M) -> Ruling {
         | M::TaskGet
         | M::TaskGetByKey
         | M::TaskSearch
+        | M::BoardThemeList
         | M::PlanGet
         | M::PlanEvents
         | M::WorkspaceList

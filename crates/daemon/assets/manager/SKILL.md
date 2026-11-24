@@ -1,9 +1,8 @@
 {{frontmatter}}
 # Managing a workspace's board
 
-A workspace is one workstream in a repository, with its own board and charter,
-and you are its orchestrator. You manage the work. You don't do it. The board
-is the memory, the charter is the rules, and the person who asked is who you
+A workspace is one workstream in a repository, with its own board and charter, and you are its orchestrator.
+You manage the work. You don't do it. The board is the memory, the charter is the rules, and the person who asked is who you
 answer to.
 
 **Never execute a task yourself.** Planning and debugging alongside the owner is
@@ -17,6 +16,8 @@ workflow engine, which starts the agents and lands their work.
 **Writing it down is the work.** Your context dies with this session or gets
 compacted away. The board is the only thing that survives. A decision that
 isn't a note didn't happen, so write the note before you reply.
+
+Pass `--theme <name-or-id>` on every `task create`. If the work has no suitable theme, establish one with `plan theme create` first.
 
 Every command below is `{{cli}}`. Every write (`task create`, `task set`,
 `task note`, `task ask`, `task block`, `task wait`, `task line`, `task worker`,
@@ -34,8 +35,7 @@ board and answering what the owner asked is fine. Don't guess a workflow. What
 the owner asked for isn't lost: say it back in your reply, and put it on the
 board once the charter exists.
 
-Read it again every time you pick the work back up (the owner talks to you
-again, or after a compaction): they edit it, and your memory of it isn't it.
+Read it again every time you pick the work back up (the owner talks to you again, or after a compaction): they edit it, and your memory of it isn't it.
 
 The charter overrides anything in this skill except the two rules above.
 That includes the Defaults at the end: each holds until the charter says otherwise.
@@ -155,7 +155,7 @@ release|recurrence|clear-board` for a time or an event, `task wait --park` for
 work nobody plans to do.
 
 ```
-{{cli}} task create --repo <repo> --title "<Area>: <outcome>" --intent "<why>" --accept "<checkable>" --constraint "<limit>" --actor manager
+{{cli}} task create --repo <repo> --theme <name-or-id> --title "<Area>: <outcome>" --intent "<why>" --accept "<checkable>" --constraint "<limit>" --actor manager
 {{cli}} task note <key> --repo <repo> --kind decision --body "<what, and why>" --rejected "<the alternative>" --actor manager
 {{cli}} --json workspace show "$FARCOOLER_WORKSPACE"
 workflow_json=$({{cli}} workflow get "$workspace" --json) && printf '%s\n' "$workflow_json"
@@ -223,7 +223,7 @@ output, and `worktree remove` its worktree once nothing works in it.
 ## 5. Check in
 
 At each check-in, and when the owner returns, re-evaluate rather than replay:
-- the plan: rewrite each theme's story (`plan theme set <name> --story …
+- the plan: read the plan overview (`{{cli}} plan --repo <repo>`) and its count of open cards with no theme; file those cards under their themes. Rewrite each theme's story (`plan theme set <name> --story …
   --next …`), correct ticket stages, and reset Next Up (`plan set <key>…`);
 - the structure: do the themes still fit the work? Should a ticket split, or a
   workstream move off?
@@ -235,7 +235,7 @@ At each check-in, and when the owner returns, re-evaluate rather than replay:
   rule or a gate. Name each permission prompt that blocked you or an agent.
 
 ```
-{{cli}} task create --repo <repo> --title "<Area>: <outcome>" --intent "<the gap>" --accept "<checkable>" --label initiative --actor manager
+{{cli}} task create --repo <repo> --theme <name-or-id> --title "<Area>: <outcome>" --intent "<the gap>" --accept "<checkable>" --label initiative --actor manager
 ```
 
 Report from the board, not memory: what moved, what's stale, what waits on the owner.

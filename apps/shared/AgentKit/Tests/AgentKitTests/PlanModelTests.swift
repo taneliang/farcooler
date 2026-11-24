@@ -91,6 +91,13 @@ struct PlanModelTests {
         return try PlanModel.decode(JSONSerialization.data(withJSONObject: object))
     }
 
+    @Test("Unthemed open count is decoded when supplied")
+    func unthemedOpenCount() throws {
+        let data = Data(#"{"now_ms":0,"themes":[],"lines":[],"cards":[],"unthemed_open":7}"#.utf8)
+        let plan = try PlanModel.decode(data)
+        #expect(plan.unthemedOpen == 7)
+    }
+
     // MARK: The wire
 
     private static func id(_ n: Int) -> String { String(format: "00000000-0000-0000-0000-%012d", n) }

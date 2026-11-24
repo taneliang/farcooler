@@ -240,6 +240,8 @@ public struct PlanModel: Decodable, Equatable, Sendable {
     /// What the runner last read of CI for each subject the board names: its
     /// landing groups' pushed SHAs.
     public var ci: [PlanCIRead]
+    /// Open cards without a theme. Nil from an older runner.
+    public var unthemedOpen: Int?
     /// How many of the board's cards are in each status (ov-306).
     public var boardCounts: PlanCounts?
     /// The week's tokens and the harness and model comparison (ov-307); nil
@@ -273,6 +275,7 @@ public struct PlanModel: Decodable, Equatable, Sendable {
         self.rulings = rulings
         self.landings = landings
         self.ci = ci
+        self.unthemedOpen = nil
         self.boardCounts = boardCounts
         self.cost = cost
         self.offTheLine = offTheLine
@@ -290,6 +293,7 @@ public struct PlanModel: Decodable, Equatable, Sendable {
         rulings = try c.decodeIfPresent([PlanRuling].self, forKey: .rulings) ?? []
         landings = try c.decodeIfPresent([PlanLanding].self, forKey: .landings) ?? []
         ci = try c.decodeIfPresent([PlanCIRead].self, forKey: .ci) ?? []
+        unthemedOpen = try c.decodeIfPresent(Int.self, forKey: .unthemedOpen)
         boardCounts = try c.decodeIfPresent(PlanCounts.self, forKey: .boardCounts)
         cost = try c.decodeIfPresent(PlanCostRead.self, forKey: .cost)
         offTheLine = try c.decodeIfPresent([PlanFlaggedCard].self, forKey: .offTheLine) ?? []
@@ -299,7 +303,7 @@ public struct PlanModel: Decodable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case nowMs, themes, lines, cards, rulings, landings, ci, boardCounts, cost, offTheLine, landedNotClosed, agents, agentsSpend
+        case nowMs, themes, lines, cards, rulings, landings, ci, boardCounts, unthemedOpen, cost, offTheLine, landedNotClosed, agents, agentsSpend
     }
 
     public static let empty = PlanModel()

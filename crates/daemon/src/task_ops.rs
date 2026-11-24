@@ -23,7 +23,7 @@
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1 as pb;
 use farcooler_store::models::{
-    AcceptanceItem, Actor, NoteHit, NoteKind, Task, TaskBlock, TaskNote, TaskStatus,
+    AcceptanceItem, Actor, NoteHit, NoteKind, Task, TaskBlock, TaskNote, TaskStatus, TaskUpdate,
 };
 use farcooler_store::TaskScope;
 use uuid::Uuid;
@@ -464,32 +464,23 @@ pub fn search(svc: &Service, req: &pb::TaskSearchRequest) -> Result<pb::TaskNote
 
 /// `task.create`: a new card in the backlog, with whatever is understood so
 /// far already on it.
-///
-/// Two store calls, because `Store::create_task` takes only a title — it is
-/// the call that mints the key and writes the `Created` note, and the rest of
-/// the row is a revision like any other. One RPC rather than two so that a
-/// client never has to show a card that exists with no intent on it; one
-/// announce, at the end, because those two writes are one act.
-///
-/// **Every conversion that can fail runs BEFORE the first write, and that
-/// ordering is the point.** Validating a field after `create_task` has
-/// committed is not a rare interleaving — a client reaches it deterministically
-/// by sending a malformed acceptance-item id or `worktree_id`, and what it
-/// leaves behind is worse than the error it gets back: a titled task with a
-/// `Created` note and no intent, sitting on the board, with NO announce, so
-/// nothing tells any client it appeared. The caller reads `InvalidArgument`,
-/// fixes its request, retries, and now there are two — the first one having
-/// burned a key number. So a malformed request is refused having written
-/// nothing at all.
-///
-/// The window this does NOT close is `update_task` failing after `create_task`
-/// succeeded. That is left open deliberately: closing it needs a store call
-/// that writes the whole row at once, which is a change to `farcooler-store`
-/// rather than to this seam.
 pub fn create(svc: &Service, watcher: &Watcher, req: &pb::TaskCreate) -> Result<pb::Task> {
-    // The board, read and checked before anything is written. A named
-    // workspace is looked up; otherwise the repository must be readable, and
-    // its Main is made below if it has none yet.
+    create_with(svc, watcher, req, |repository, workspace, update, actor| {
+        let workspace = match workspace {
+            Some(id) => id,
+            None => svc.store.ensure_main_workspace(repository)?.id,
+        };
+        svc.store.create_task_complete(workspace, update, actor)
+    })
+}
+
+/// Validate a create request and announce the saved card after its write commits.
+pub(crate) fn create_with(
+    svc: &Service,
+    watcher: &Watcher,
+    req: &pb::TaskCreate,
+    save: impl FnOnce(Uuid, Option<Uuid>, &TaskUpdate, Actor) -> Result<Task>,
+) -> Result<pb::Task> {
     let named = req
         .workspace_id
         .as_ref()
@@ -500,7 +491,7 @@ pub fn create(svc: &Service, watcher: &Watcher, req: &pb::TaskCreate) -> Result<
         None => required_id(&req.repository_id)?,
     };
     let actor = actor_from_wire(&req.actor)?;
-    let update = farcooler_store::models::TaskUpdate {
+    let update = TaskUpdate {
         title: checked_title(&req.title)?.to_string(),
         intent: req.intent.clone(),
         acceptance: req
@@ -513,26 +504,7 @@ pub fn create(svc: &Service, watcher: &Watcher, req: &pb::TaskCreate) -> Result<
         worktree_id: optional_id(req.worktree_id.as_ref(), "worktree_id")?,
     };
 
-    // Nothing above this line has written anything. A task is filed on a
-    // workspace: the one the request named, or else the repository's Main,
-    // made here if it has none yet. `create_task` takes a WORKSPACE id, and a
-    // repository id handed to it would type-check and fail as `NotFound`.
-    let workspace = match named {
-        Some(workspace) => workspace.id,
-        None => svc.store.ensure_main_workspace(repository)?.id,
-    };
-    let created = svc.store.create_task(workspace, &update.title, actor)?;
-    // Skipped when there is nothing to revise, so the common case is one write
-    // and the task comes back at version 1 rather than at 2 for no reason.
-    // `fill_in_new_task` and not `update_task`: this is the rest of the act of
-    // filing it, and a card filed with an intent must read "Added", not
-    // "Updated" a millisecond after it appeared.
-    let task = if update == blank_update(&created.title) {
-        created
-    } else {
-        svc.store.fill_in_new_task(created.id, created.resource_version, &update)?
-    };
-
+    let task = save(repository, named.map(|workspace| workspace.id), &update, actor)?;
     announce(watcher, &task, actor);
     if let Some(lane) = task.worktree_id {
         watcher.announce_worktree_changed(lane);
@@ -540,20 +512,6 @@ pub fn create(svc: &Service, watcher: &Watcher, req: &pb::TaskCreate) -> Result<
     // New Task, for the devices that want it (ov-94).
     watcher.task_event(&task, TaskEvent::Created, actor);
     crate::task_starts::pb_one(svc, &task)
-}
-
-/// What a freshly created task's revisable half already is, so `create` can
-/// tell "nothing else was sent" from "everything else was sent empty on
-/// purpose" — which are the same thing here, and both mean do not write again.
-fn blank_update(title: &str) -> farcooler_store::models::TaskUpdate {
-    farcooler_store::models::TaskUpdate {
-        title: title.to_string(),
-        intent: String::new(),
-        acceptance: Vec::new(),
-        constraints: Vec::new(),
-        labels: Vec::new(),
-        worktree_id: None,
-    }
 }
 
 /// `task.update`: revise what is currently understood.
@@ -938,13 +896,7 @@ mod tests {
         assert_eq!(found.len(), 1, "the new key too");
     }
 
-    /// `task.create` is two store writes, and the second must not date
-    /// itself as an edit: a card filed with an intent reads "Added", not
-    /// "Updated". Asserted on `edited_at` rather than on the two clocks
-    /// agreeing, because the two writes usually land in one millisecond and
-    /// the clocks would agree by luck -- which is how the real-daemon test in
-    /// crates/client stays green with this call site broken. The control is
-    /// a real revision through `task.update`, which does date itself.
+    /// Filing with an intent reads "Added" until a real revision dates it.
     #[tokio::test]
     async fn filing_a_task_with_an_intent_is_not_an_edit() {
         let dir = tempfile::tempdir().unwrap();
@@ -970,7 +922,7 @@ mod tests {
         )
         .unwrap();
         let id = Uuid::from_slice(&filed.id).unwrap();
-        assert_eq!(filed.intent, "so the card says why", "the second write landed");
+        assert_eq!(filed.intent, "so the card says why", "the intent was stored");
         assert_eq!(farcooler_store::testing::edited_at(&svc.store, id), None, "filing read as an edit");
         assert_eq!(filed.updated_at, filed.created_at);
 

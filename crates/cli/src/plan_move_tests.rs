@@ -39,7 +39,7 @@ async fn a_move_that_cannot_be_made_sends_nothing() {
     let err = say(&mut link, "theme move beta --to 4").await.unwrap_err();
     assert_eq!(err.to_string(), "There are 3 themes here, so --to takes 1 to 3.");
     let err = say(&mut link, "theme move nope --to 1").await.unwrap_err();
-    assert_eq!(err.to_string(), "No theme here is called \"nope\".");
+    assert!(err.to_string().contains("No theme here is called \"nope\". Themes: Alpha"));
     link.capabilities.retain(|c| c != capability::BOARD_THEME_MOVE);
     let err = say(&mut link, "theme move beta --to 1").await.unwrap_err();
     assert_eq!(err.to_string(), "This runner needs an update to move a theme.");

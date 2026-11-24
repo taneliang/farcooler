@@ -98,6 +98,42 @@ fn refusal(r: Result<result::Value, ClientError>) -> (i32, String) {
     }
 }
 
+#[tokio::test]
+async fn task_create_files_into_a_theme_over_the_socket() {
+    let h = start(Scope::HostAdmin).await;
+    let repo = a_repository(&h);
+    let theme = h.service.store.create_theme(
+        repo.workspace,
+        &farcooler_store::plan::NewTheme { name: "Visual language".into(), outcome: String::new() },
+        &[],
+        Actor::Manager,
+    ).unwrap();
+    let mut link = connect(&h).await;
+    let create = |theme_id| {
+        let mut req = request("task.create");
+        req.target_resource_id = Some(id(repo.id));
+        req.required_capabilities.push(farcooler_protocol::capability::TASK_CREATE_THEME.into());
+        req.payload = Some(payload::Payload::TaskCreate(pb::TaskCreate {
+            repository_id: id(repo.id),
+            workspace_id: Some(id(repo.workspace)),
+            theme_id: Some(id(theme_id)),
+            title: "Mac: a jump".into(),
+            actor: "manager".into(),
+            ..Default::default()
+        }));
+        req
+    };
+
+    let missing = link.call(create(Uuid::now_v7())).await;
+    assert!(matches!(missing, Err(ClientError::Daemon { what, .. }) if what == "theme_id"));
+    let Some(result::Value::Task(task)) = link.call(create(theme.id)).await.unwrap().value else {
+        panic!("expected the new task");
+    };
+    let plan = plan(&mut link, repo.workspace).await;
+    assert_eq!(plan.themes[0].task_ids, [task.id]);
+    assert_eq!(plan.unthemed_open, Some(0));
+}
+
 /// A theme, a ticket on the line and the plan, written and read back; a write
 /// announces `plan_changed` and never `task_changed`.
 #[tokio::test]

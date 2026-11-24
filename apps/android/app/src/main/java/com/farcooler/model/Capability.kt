@@ -87,5 +87,7 @@ enum class Capability(val wire: String) {
     PHONE_APPROVAL("phone_approval"),
     AGENT_STOP("agent_stop"),
     WORKSPACE_CHECK_IN("workspace_check_in"),
+    TASK_CREATE_THEME("task_create_theme"),
+    BOARD_THEME_LIST("board_theme_list"),
     CHECK_IN_OCCURRENCE_CAS("check_in_occurrence_cas");
 }

@@ -5,7 +5,7 @@
 # hand. Format: <ceiling> <path>
 11505 crates/daemon/src/service.rs
 8719 crates/daemon/src/watch.rs
-4780 crates/cli/src/tasks.rs
+4777 crates/cli/src/tasks.rs
 3705 crates/cli/src/main.rs
 3346 services/relay/src/index.ts
 3305 crates/client/src/ffi.rs

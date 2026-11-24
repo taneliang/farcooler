@@ -66,6 +66,7 @@ struct PlanColumnView: View {
             .identified("plan-open-engine")
             if plan.hasRead, plan.reconnecting { PlanReconnecting() }
             if plan.hasRead, let line = plan.staleLine { PlanStale(line: line) { Task { await plan.tryAgain() } } }
+            if plan.hasRead, let count = plan.plan.unthemedOpen { PlanUnthemedNotice(count: count) }
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)

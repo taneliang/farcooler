@@ -353,3 +353,51 @@ fn the_drill_goes_red_when_a_read_depends_on_the_layer() {
     let err = drill_with(&store, main, &tasks, &joined).unwrap_err();
     assert_eq!(err, "a board read changed when the layer went");
 }
+
+#[test]
+fn create_in_theme_is_atomic_and_unthemed_counts_every_open_card() {
+    let (store, main, _) = board(0);
+    let theme = store.create_theme(main, &NewTheme { name: "T".into(), outcome: String::new() }, &[], Actor::Manager).unwrap();
+    let update = crate::models::TaskUpdate {
+        title: "themed".into(), intent: "why".into(), acceptance: vec![],
+        constraints: vec!["limit".into()], labels: vec!["initiative".into()], worktree_id: None,
+    };
+    // A failure while recording the theme event must roll back the entire card.
+    store.conn().execute_batch("CREATE TRIGGER fail_theme_event BEFORE INSERT ON line_events BEGIN SELECT RAISE(ABORT, 'test failure'); END;").unwrap();
+    assert!(store.create_task_in_theme(main, theme.id, &update, Actor::Manager).is_err());
+    store.conn().execute_batch("DROP TRIGGER fail_theme_event;").unwrap();
+    assert_eq!(store.plan(main, 0).unwrap().board_counts.backlog, 0);
+    let card = store.create_task_in_theme(main, theme.id, &update, Actor::Manager).unwrap();
+    assert_eq!(card.intent, "why");
+    assert_eq!(store.get_task(card.id).unwrap().labels, ["initiative"]);
+    assert!(theme_events(&store, theme.id).iter().any(|e| e.kind == "cards" && e.body == format!("Added {}.", card.key)));
+    store.create_task(main, "unfiled", Actor::Manager).unwrap();
+    let closed = store.create_task(main, "closed", Actor::Manager).unwrap();
+    store.set_task_status(closed.id, Done, Actor::Manager).unwrap();
+    let missing = store.create_task_in_theme(main, Uuid::now_v7(), &update, Actor::Manager);
+    assert_eq!(refused(missing), "theme_id");
+    let plan = store.plan(main, 0).unwrap();
+    assert_eq!(plan.unthemed_open, 1);
+    assert_eq!(plan.themes[0].tasks, [card.id]);
+    assert_eq!(plan.board_counts.backlog, 2);
+
+    store.update_theme(theme.id, &ThemeUpdate { state: Some(ThemeState::Dropped), ..Default::default() }, Actor::Manager).unwrap();
+    let dropped = store.create_task_in_theme(main, theme.id, &update, Actor::Manager);
+    assert_eq!(refused(dropped), "theme_id");
+    assert_eq!(store.plan(main, 0).unwrap().unthemed_open, 2);
+}
+
+#[test]
+fn theme_names_are_bounded_and_paginated() {
+    let (store, main, _) = board(0);
+    for n in 0..201 {
+        store.create_theme(main, &NewTheme { name: format!("Theme {n}"), outcome: String::new() }, &[], Actor::Manager).unwrap();
+    }
+    let first = store.board_theme_names(main, None).unwrap();
+    let second = store.board_theme_names(main, Some(first.last().unwrap().0)).unwrap();
+    let third = store.board_theme_names(main, Some(second.last().unwrap().0)).unwrap();
+    assert_eq!((first.len(), second.len(), third.len()), (100, 100, 1));
+    assert!(first.last().unwrap().0 < second.first().unwrap().0);
+    assert!(second.last().unwrap().0 < third.first().unwrap().0);
+    assert!(store.board_theme_names(Uuid::nil(), None).unwrap().is_empty());
+}

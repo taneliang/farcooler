@@ -186,6 +186,8 @@ pub struct Plan {
     pub ci: Vec<CiRead>,
     /// How many of the board's cards are in each status, every card counted.
     pub board_counts: StatusCounts,
+    /// Open cards outside the themes shown on the plan.
+    pub unthemed_open: u64,
     /// The week's tokens, and finished cards' cost by harness and model.
     pub cost: PlanCost,
     /// The agents still at work (`plan_agents.rs`). Empty from `Store::plan`:
@@ -410,8 +412,12 @@ impl Store {
         }
         let conn = self.conn();
         let mut board_counts = StatusCounts::default();
+        let mut unthemed_open = 0;
         for card in statuses.values() {
             board_counts.add(card.status);
+            if !matches!(card.status, TaskStatus::Done | TaskStatus::Cancelled) && !theme_of.contains_key(&card.task_id) {
+                unthemed_open += 1;
+            }
         }
         let cards = named.keys().filter_map(|id| statuses.get(id).cloned()).collect();
         let cost = cost_of(&conn, workspace, &statuses, now_ms)?;
@@ -424,6 +430,7 @@ impl Store {
             landings,
             ci,
             board_counts,
+            unthemed_open,
             cost,
             agents: Vec::new(),
             agents_spend: Spend::default(),

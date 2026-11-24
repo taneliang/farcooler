@@ -334,15 +334,17 @@ async fn run_on<L: DispatchLink>(
 /// board's, and `task create` files on Main in the same case. With the
 /// workspace's id.
 async fn on_a_board<L: DispatchLink>(link: &mut L, board: &Board) -> Result<(Board, bytes::Bytes), Failed> {
-    let board = if board.workspace.is_some() || !board.has_workspaces {
-        board.clone()
-    } else {
-        let main = workspaces_on(link, Some(board.repository)).await?.into_iter().find(|w| w.is_main);
-        Board { workspace: main, ..board.clone() }
-    };
+    let board = board_with_main(link, board.clone()).await?;
     let Some(workspace) = &board.workspace else { return Err("Name a board with --workspace.".into()) };
     let ws = workspace.id.clone();
     Ok((board, ws))
+}
+
+async fn board_with_main<L: DispatchLink>(link: &mut L, mut board: Board) -> Result<Board, Failed> {
+    if board.workspace.is_none() && board.has_workspaces {
+        board.workspace = workspaces_on(link, Some(board.repository)).await?.into_iter().find(|w| w.is_main);
+    }
+    Ok(board)
 }
 
 fn unreadable() -> Failed {
@@ -399,6 +401,35 @@ async fn get_plan<L: DispatchLink>(link: &mut L, workspace: &bytes::Bytes, all: 
         result::Value::Plan(plan) => Ok(plan),
         _ => Err(unreadable()),
     }
+}
+
+pub(crate) async fn board_and_theme_for_create<L: DispatchLink>(
+    link: &mut L, board: Board, name: &str,
+) -> Result<(Board, bytes::Bytes), Failed> {
+    let board = board_with_main(link, board).await?;
+    let Some(workspace) = &board.workspace else {
+        return Err(missing_theme(name, Vec::new()));
+    };
+    let theme = theme_for_create(link, &workspace.id, name).await?;
+    Ok((board, theme))
+}
+
+async fn theme_for_create<L: DispatchLink>(link: &mut L, workspace: &bytes::Bytes, name: &str) -> Result<bytes::Bytes, Failed> {
+    let mut plan = pb::Plan::default();
+    let mut after = bytes::Bytes::new();
+    loop {
+        let mut r = with(req_for("board_theme.list", crate::uuid_of(workspace)), request::Payload::BoardThemeList(pb::BoardThemeListRequest { workspace_id: workspace.clone(), after_id: after.clone() }));
+        r.required_capabilities.push(capability::BOARD_THEME_LIST.to_string());
+        let answer = link.call(r).await.map_err(|e| refused_here(e, "The runner couldn't read the themes."))?;
+        let result::Value::BoardThemeList(page) = expect_value(answer.value)? else { return Err(unreadable()) };
+        let count = page.themes.len();
+        for theme in page.themes {
+            after = theme.id.clone();
+            plan.themes.push(pb::BoardThemeView { theme: Some(pb::BoardTheme { id: theme.id, name: theme.name, ..Default::default() }), ..Default::default() });
+        }
+        if count < 100 { break; }
+    }
+    Ok(find_theme(&plan, name)?.theme.as_ref().ok_or_else(unreadable)?.id.clone())
 }
 
 async fn events_of<L: DispatchLink>(
@@ -561,16 +592,25 @@ fn find_theme<'a>(plan: &'a pb::Plan, name: &str) -> Result<&'a pb::BoardThemeVi
     if let Some(v) = plan.themes.iter().find(|v| named(v).is_some_and(|n| n == wanted)) {
         return Ok(v);
     }
-    if let Some(v) = plan.themes.iter().find(|v| v.theme.as_ref().is_some_and(|t| short_bytes(&t.id) == wanted)) {
+    if let Some(v) = plan.themes.iter().find(|v| v.theme.as_ref().is_some_and(|t| short_bytes(&t.id) == wanted || id_text(&t.id) == wanted)) {
         return Ok(v);
     }
     let starting: Vec<&pb::BoardThemeView> =
         plan.themes.iter().filter(|v| !wanted.is_empty() && named(v).is_some_and(|n| n.starts_with(&wanted))).collect();
     match starting.as_slice() {
         [one] => Ok(one),
-        [] => Err(format!("No theme here is called {name:?}.").into()),
+        [] => {
+            let names = plan.themes.iter().filter_map(|v| v.theme.as_ref())
+                .map(|t| format!("{} ({})", t.name, short_bytes(&t.id))).collect::<Vec<_>>();
+            Err(missing_theme(name, names))
+        }
         many => Err(format!("{name:?} starts {} themes. Say more of the name.", many.len()).into()),
     }
+}
+
+fn missing_theme(name: &str, names: Vec<String>) -> Failed {
+    let choices = if names.is_empty() { "(none)".into() } else { names.join(", ") };
+    format!("No theme here is called {name:?}. Themes: {choices}").into()
 }
 
 /// The tickets `plan set` names, in order: each one waiting on the line and

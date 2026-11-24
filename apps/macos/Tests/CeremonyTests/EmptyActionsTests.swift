@@ -89,9 +89,16 @@ struct EmptyActionsTests {
     }
 
     @Test("An empty Plan with no orchestrator offers Start Orchestrator")
-    func planOffersStart() async {
-        let drawn = await Self.plan(Self.invite())
-        #expect(drawn.contains("start-orchestrator"), "\(drawn.ids)")
+    func planOffersStart() async throws {
+        let calls = PlanViewTests.Calls()
+        calls.plan = Data(#"{"now_ms":0,"themes":[],"lines":[],"cards":[],"unthemed_open":0}"#.utf8)
+        let store = try await PlanViewTests.store(plan: true, defaults: PlanViewTests.defaults(), calls: calls)
+        await store.plan.reload()
+        let frames = await PlanThemePageTests.frames(
+            PlanOverviewView(plan: store.plan, statuses: [:], selected: nil, onOpen: { _ in })
+                .environment(\.orchestratorInvite, Self.invite()),
+            width: 600, height: 800)
+        #expect(frames["plan-unthemed-count"] != nil && frames["start-orchestrator"] != nil, "\(frames.keys.sorted())")
     }
 
     @Test("Beside the conversation column the Plan keeps its sentence and leaves the button to the column")

@@ -228,6 +228,7 @@ message Request {
     BoardThemeUpdate board_theme_update = 162;
     BoardThemeCards board_theme_cards = 163;
     PlanEventsRequest plan_events = 169;
+    BoardThemeListRequest board_theme_list = 630;
     // Decided for you (ov-304), the plan layer's rulings, behind
     // `board_rulings`. Experimental with the layer: 180-189 are theirs, the
     // rest held by `reserved` below, so withdrawing them never frees a tag for another meaning. Read
@@ -500,6 +501,7 @@ message Result {
     BoardThemeView board_theme_view = 160;
     Plan plan = 162;
     PlanEventList plan_event_list = 163;
+    BoardThemeList board_theme_list = 630;
     // `ruling.add` and `ruling.set`, behind `board_rulings`: the ruling.
     BoardRuling board_ruling = 180;
     // `repository.landing` (ov-313), behind `landing`: what the runner read of
@@ -3892,6 +3894,8 @@ message TaskCreate {
   // `Request.required_capabilities` by a client that sets it: an older daemon
   // drops the field and files the task on the repository's only board.
   optional bytes workspace_id = 9;
+  // File the new card in this workspace theme atomically.
+  optional bytes theme_id = 10;
 }
 
 // Revise what is currently understood. The mutable half of the design.
@@ -4968,6 +4972,8 @@ message Plan {
   // asks someone or has been reviewed, and one with nobody to suggest, is left
   // out; so is every ticket below Control scope (these are GitHub logins).
   repeated TicketReviewers suggested_reviewers = 20;
+  // Open cards with no theme, including cards outside the plan.
+  optional uint64 unthemed_open = 21;
 }
 
 // One reviewer pull requests of a board are waiting on (ov-579).
@@ -5042,6 +5048,14 @@ message HarnessModelCost {
   // turn of the pair was priced.
   optional int64 cost_micros = 5;
 }
+
+// A bounded page of workspace theme names, ordered by id.
+message BoardThemeListRequest {
+  bytes workspace_id = 1;
+  bytes after_id = 2;
+}
+message BoardThemeName { bytes id = 1; string name = 2; }
+message BoardThemeList { repeated BoardThemeName themes = 1; }
 
 // `plan.get`, at `read`.
 message PlanGetRequest {

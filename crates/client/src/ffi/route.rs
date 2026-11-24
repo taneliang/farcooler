@@ -206,6 +206,8 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         | Method::TerminalSetRole
         // Naming a terminal (ov-234): the phones show the name and do not set it.
         | Method::TerminalRename => None,
+        // The CLI uses this lookup when filing a card.
+        Method::BoardThemeList => None,
         // The plan layer's writes (ov-268): the CLI makes them, the
         // orchestrator being the layer's one writer. A phone reads `plan.get`
         // and `plan.events`, routed above, and never routes a write.

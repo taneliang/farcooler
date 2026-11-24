@@ -15,9 +15,9 @@ use uuid::Uuid;
 use farcooler_core::{DomainError, Result};
 
 use crate::error::map_err;
-use crate::models::{Actor, get_uuid, uuid_blob};
+use crate::models::{Actor, Task, TaskUpdate, get_uuid, uuid_blob};
 use crate::store::Store;
-use crate::tasks::now_millis;
+use crate::tasks::{insert_task, now_millis};
 use crate::ticket_lines::{LineSubject, line_event};
 
 #[cfg(test)]
@@ -383,13 +383,40 @@ impl Store {
         Ok(after)
     }
 
+    /// File a new card and record its theme membership in the same transaction.
+    pub fn create_task_in_theme(&self, workspace: Uuid, theme: Uuid, update: &TaskUpdate, actor: Actor) -> Result<Task> {
+        let workspace = self.get_workspace(workspace)?;
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(map_err)?;
+        let exists: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM board_themes WHERE id = ?1 AND workspace_id = ?2 AND state <> 'dropped')",
+            params![uuid_blob(theme), uuid_blob(workspace.id)],
+            |r| r.get(0),
+        ).map_err(map_err)?;
+        if !exists {
+            return Err(DomainError::InvalidArgument { what: "theme_id" });
+        }
+        let task = insert_task(&tx, &workspace, update, actor)?;
+        add_theme_cards(&tx, theme, &[task.id], actor)?;
+        tx.commit().map_err(map_err)?;
+        Ok(task)
+    }
+
+    /// A bounded page of non-dropped theme names in a workspace.
+    pub fn board_theme_names(&self, workspace: Uuid, after: Option<Uuid>) -> Result<Vec<(Uuid, String)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT id, name FROM board_themes WHERE workspace_id = ?1 AND state <> 'dropped' AND (?2 IS NULL OR id > ?2) ORDER BY id LIMIT 100").map_err(map_err)?;
+        let rows = stmt.query_map(params![uuid_blob(workspace), after.map(uuid_blob)], |r| Ok((get_uuid(r, 0)?, r.get(1)?))).map_err(map_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
+    }
+
     /// A theme by id.
     pub fn board_theme(&self, theme: Uuid) -> Result<BoardTheme> {
         theme_in(&self.conn(), theme)
     }
 }
 
-fn add_theme_cards(tx: &Connection, theme: Uuid, tasks: &[Uuid], actor: Actor) -> Result<()> {
+pub(crate) fn add_theme_cards(tx: &Connection, theme: Uuid, tasks: &[Uuid], actor: Actor) -> Result<()> {
     for task in tasks {
         let from: Option<Vec<u8>> = tx
             .query_row("SELECT theme_id FROM board_theme_tasks WHERE task_id = ?1", params![uuid_blob(*task)], |r| r.get(0))
