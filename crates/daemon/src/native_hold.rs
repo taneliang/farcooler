@@ -638,7 +638,3 @@ pub(crate) async fn ask(socket: &Path, op: &'static str, wait: Duration) -> Answ
 #[cfg(test)]
 #[path = "native_hold_tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "../../../test/daemon_binary.rs"]
-pub(crate) mod test_binary;

@@ -106,13 +106,9 @@ pub fn fanout_binary() -> Option<std::path::PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let found = fanout_binary_beside(&exe);
     #[cfg(test)]
-    let found = found.or_else(test_binary::daemon_binary);
+    let found = found.or_else(crate::test_binary::daemon_binary);
     found
 }
-
-#[cfg(test)]
-#[path = "../../../../test/daemon_binary.rs"]
-mod test_binary;
 
 /// The choice `fanout_binary` makes, given the executable it is made from, so
 /// it can be tested without one.

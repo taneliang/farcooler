@@ -163,7 +163,7 @@ mod tests {
         impl Drop for Reap<'_> { fn drop(&mut self) { farcooler_tmux::reap_server(self.0.socket()); } }
         let _reap = Reap(&tmux);
         let hold = dir.join("p.hold.sock");
-        let program = crate::native_hold::pane_command(&crate::native_hold::test_binary::daemon_binary().unwrap(), &hold,
+        let program = crate::native_hold::pane_command(&crate::test_binary::daemon_binary().unwrap(), &hold,
             "sh -c 'while :; do echo tick >> ticks; sleep 0.02; done'");
         let window = tmux.create_terminal_window(id, id, "pause", dir.to_str().unwrap(), &program).await.unwrap();
         let pane = tmux.list_tagged_panes().await.unwrap().into_iter().find(|p| p.pane_id == window.pane_id).unwrap();
@@ -204,7 +204,7 @@ mod tests {
 
         let dir = farcooler_core::scratch::dir("native-pause-timeout");
         let hold = dir.join("review.sock");
-        let mut reviewer = std::process::Command::new(crate::native_hold::test_binary::daemon_binary().unwrap())
+        let mut reviewer = std::process::Command::new(crate::test_binary::daemon_binary().unwrap())
             .args([crate::native_hold::FLAG, hold.to_str().unwrap(), "--", "/bin/sh", "-c",
                 "while [ ! -f proceed ]; do sleep 0.02; done; echo running > result"])
             .current_dir(&dir).spawn().unwrap();

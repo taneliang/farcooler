@@ -1,4 +1,8 @@
 //! Daemon composition: git worktree transactions, domain services, lifecycle.
+#[cfg(test)]
+#[path = "../../../test/daemon_binary.rs"]
+mod test_binary;
+
 pub(crate) mod activity_source;
 pub mod cutover_gate;
 pub mod cutover_admin;

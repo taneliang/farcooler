@@ -12,7 +12,7 @@ fn hold(script: &str) -> Hold { hold_with(script, &[]) }
 fn hold_with(script: &str, env: &[(&str, &str)]) -> Hold {
     let dir = tempfile::Builder::new().prefix("h").tempdir_in("/tmp").unwrap();
     let socket = dir.path().join("t.hold.sock");
-    let mut child = std::process::Command::new(crate::native_hold::test_binary::daemon_binary().expect("build farcoolerd before this test"))
+    let mut child = std::process::Command::new(crate::test_binary::daemon_binary().expect("build farcoolerd before this test"))
         .args([FLAG, socket.to_str().unwrap(), "--", "/bin/sh", "-c", script])
         .envs(env.iter().copied()).current_dir(dir.path()).stdin(std::process::Stdio::null()).spawn().unwrap();
     for _ in 0..500 {

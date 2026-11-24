@@ -388,7 +388,7 @@ async fn a_native_gate_pauses_only_the_builder_and_preserves_a_manual_pause() {
     impl Drop for Reap<'_> { fn drop(&mut self) { farcooler_tmux::reap_server(self.0.socket()); } }
     let _reap = Reap(&tmux);
     let mut panes = Vec::new();
-    let binary = crate::native_hold::test_binary::daemon_binary().unwrap();
+    let binary = crate::test_binary::daemon_binary().unwrap();
     let socket = dir.join("first.sock");
     for file in ["first", "other"] {
         let terminal = uuid::Uuid::now_v7();
