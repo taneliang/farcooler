@@ -134,6 +134,42 @@ async fn task_create_files_into_a_theme_over_the_socket() {
     assert_eq!(plan.unthemed_open, Some(0));
 }
 
+#[tokio::test]
+async fn a_board_reorder_is_visible_to_a_second_client() {
+    let h = start(Scope::Control).await;
+    let repo = a_repository(&h);
+    let [first, second] = ["Mac: first", "Mac: second"]
+        .map(|title| h.service.store.create_task(repo.workspace, title, Actor::User).unwrap());
+    let mut writer = connect(&h).await;
+    let mut reader = connect(&h).await;
+    let mut reorder = request("task.reorder");
+    reorder.required_capabilities.push(farcooler_protocol::capability::BOARD_ORDER.into());
+    reorder.payload = Some(payload::Payload::TaskReorder(pb::TaskReorder {
+        task_id: id(second.id),
+        placement: Some(pb::task_reorder::Placement::Before(id(first.id))),
+        actor: "user".into(),
+    }));
+    assert!(matches!(writer.call(reorder).await.unwrap().value, Some(result::Value::Empty(_))));
+
+    let (plans, tasks) = events(&mut reader, Duration::from_millis(600)).await;
+    assert_eq!(plans.len(), 1);
+    assert_eq!(plans[0].workspace_id, id(repo.workspace));
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].task_id, id(second.id));
+    assert_eq!(tasks[0].workspace_id, Some(id(repo.workspace)));
+
+    let mut list = request("task.list");
+    list.payload = Some(payload::Payload::TaskList(pb::TaskListRequest {
+        repository_id: id(repo.id),
+        workspace_id: Some(id(repo.workspace)),
+        ..Default::default()
+    }));
+    let Some(result::Value::TaskList(tasks)) = reader.call(list).await.unwrap().value else {
+        panic!("expected the board");
+    };
+    assert_eq!(tasks.items.iter().map(|task| task.id.clone()).collect::<Vec<_>>(), [id(second.id), id(first.id)]);
+}
+
 /// Theme and line writes announce plan changes. Changing the order also
 /// invalidates the board read used by clients.
 #[tokio::test]
