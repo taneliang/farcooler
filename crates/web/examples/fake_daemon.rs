@@ -453,6 +453,16 @@ fn main() {
                 ("host.health", _) => vec![support::answer(&req, result::Value::Host(farcooler_protocol::v1::Host {
                     id: id_bytes(Uuid::from_u128(1)), ..Default::default()
                 }))],
+                ("task.list", Some(request::Payload::TaskList(list))) => {
+                    let items = if list.workspace_id.as_deref() == Some(BILLING.as_bytes()) {
+                        task_detail().task.into_iter().collect()
+                    } else {
+                        Vec::new()
+                    };
+                    vec![support::answer(&req, result::Value::TaskList(farcooler_protocol::v1::TaskList {
+                        items, ..Default::default()
+                    }))]
+                }
                 ("task.get", _) => vec![support::answer(&req, result::Value::TaskDetail(task_detail()))],
                 ("task.note", Some(request::Payload::TaskNoteAppend(n))) => {
                     let mut log = std::fs::OpenOptions::new().create(true).append(true).open(typed_log.with_file_name("notes")).unwrap();
