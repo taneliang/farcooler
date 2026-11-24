@@ -177,7 +177,10 @@ async fn a_draft_naming_a_stranger_is_refused_and_one_naming_a_member_is_filed()
         crate::workflow_drafts::propose(&svc, &watcher, workspace, "Ask before the checks.", definition, AdapterConfiguration::Coding(config.clone()))
     };
     for stranger in ["member:nobody", "member:Alice", "role:admin"] {
-        assert!(matches!(draft(stranger), Err(DomainError::InvalidArgument { what: "decider" })), "{stranger}");
+        let result = draft(stranger);
+        assert!(matches!(&result, Err(DomainError::Refused { said }) if said ==
+            "Draft definition stage \"build\" field progression.AwaitApproval.principal must name a decider who can answer this gate."
+        ), "{stranger}: {result:?}");
     }
     draft("member:alice").unwrap();
 }
