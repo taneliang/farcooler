@@ -142,6 +142,7 @@ export function mountWork(options: Options) {
   let openTerminal: string | null = null
   let drawId = 0
   let readId = 0
+  let navigationId = 0
   let busy = false
   let disposed = false
   let replaced: string | undefined
@@ -300,12 +301,18 @@ export function mountWork(options: Options) {
   async function send(intent: Intent): Promise<void> {
     const runner = options.current()
     if (!runner || busy || disposed) return
+    const navigation = navigationId
+    const destination = { workspace: view?.workspace, worktree: view?.worktree }
     lock(true)
     notify('')
     try {
       const id = await runner.work_intent(JSON.stringify(intent))
       if (disposed) return
       if (intent.action === 'close' || intent.action === 'restart') replaced = intent.terminal
+      if (navigation !== navigationId) {
+        await refresh()
+        return
+      }
       switch (intent.action) {
         case 'create':
           selection = { workspace: intent.workspace, repository: intent.repository, worktree: id }
@@ -315,11 +322,11 @@ export function mountWork(options: Options) {
         case 'start':
         case 'restart':
           if (intent.action === 'start') options.started()
-          selection = { workspace: view?.workspace, terminal: id }
+          selection = { workspace: destination.workspace, terminal: id }
           if (dialog.open) dialog.close()
           break
         case 'close':
-          selection = { workspace: view?.workspace, worktree: view?.worktree }
+          selection = destination
           break
       }
       const opensTerminal = intent.action === 'start' || intent.action === 'restart'
@@ -356,6 +363,7 @@ export function mountWork(options: Options) {
     refresh,
     chooseTerminal,
     show(workspace: string | null, terminal?: string) {
+      navigationId++
       if (terminal) ended.delete(terminal)
       selection = { workspace, terminal }
       return project(false)

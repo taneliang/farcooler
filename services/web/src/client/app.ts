@@ -597,7 +597,8 @@ let sheet: DetailSheet | null = null
 /// answer it are the Needs You item's own, while one waits on the person.
 function openCard(runner: string, task: { id: string; key: string; title: string }): void {
   if (fleet?.cardsOf(runner)?.deps?.task && navigation) {
-    navigation.navigate({ ...navigation.route, page: 'ticket', ticket: { runner, ...task } }, true)
+    const { space, tab } = navigation.route
+    navigation.navigate({ space, tab, page: 'ticket', ticket: { runner, ...task } }, true)
   }
 }
 
@@ -740,7 +741,6 @@ function showLink(view: LinkView, label: string): void {
 
 async function connectTo(session: Session, target: Granted): Promise<void> {
   status(`Connecting to ${target.label}…`)
-  let runner: WebRunner
   let screen: ReturnType<typeof mountWork> | undefined
   let mineFleet: Fleet | null = null
   const reconnector = new Reconnector<WebRunner, TunnelConn>({
@@ -769,7 +769,6 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     // cannot be asked once it is freed.
     setTimeout(() => {
       if (!reconnector.hasLost(from) && reconnector.current === from) {
-        panes?.problem('This terminal’s stream ended. Select it to open it again.', id)
         screen?.streamEnded(id)
       }
     }, 100)
@@ -780,10 +779,18 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   }, localStorage)
   link = reconnector
   let dialed: TunnelConn | null = null
+  let inventory: string
+  let initial: WorkView
+  const params = new URLSearchParams(location.search)
+  const linkedSpace = params.get('workspace')
+  const linkedTerminal = params.get('terminal') ?? undefined
   try {
-    const conn = await session.tailcat.dial(target.token, session.device.nodePriv)
-    dialed = conn
-    runner = await reconnector.open(conn)
+    dialed = await session.tailcat.dial(target.token, session.device.nodePriv)
+    const runner = await reconnector.open(dialed)
+    inventory = await runner.work_inventory()
+    initial = JSON.parse(workView(inventory, JSON.stringify({
+      workspace: linkedSpace, terminal: linkedTerminal, preferredWorkspace: savedSpace(target.id),
+    })))
   } catch (e) {
     dialed?.close()
     const word = (e as Error).message
@@ -792,24 +799,6 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
         ? { label: 'Add Again', run: () => void addAgain(session) }
         : { label: 'Connect', run: () => void connectTo(session, target) }
     status(`Can’t connect to ${target.label}`, connectFailure(word, target.label), action)
-    return
-  }
-
-  let inventory: string
-  let initial: WorkView
-  const params = new URLSearchParams(location.search)
-  const linkedSpace = params.get('workspace')
-  const linkedTerminal = params.get('terminal') ?? undefined
-  try {
-    inventory = await runner.work_inventory()
-    initial = JSON.parse(workView(inventory, JSON.stringify({
-      workspace: linkedSpace, terminal: linkedTerminal, preferredWorkspace: savedSpace(target.id),
-    })))
-  } catch (e) {
-    status(`Can’t list ${target.label}’s terminals`, connectFailure((e as Error).message, target.label), {
-      label: 'Connect',
-      run: () => void connectTo(session, target),
-    })
     return
   }
 
@@ -824,7 +813,8 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   spaces = initial.workspaces
   const fallbackSpace = initial.workspace ?? linkedSpace
   chosenSpace = fallbackSpace
-  const scope = `fc-workspace:${JSON.stringify([session.device.account, target.id])}`
+  const workspaceOwner = [session.device.account, target.id]
+  const scope = `fc-workspace:${JSON.stringify(workspaceOwner)}`
   const returning = history.state?.workspaceScope === scope
   const mine = new Fleet(
     drawNeeds,
@@ -1056,7 +1046,8 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
       planTab?.choose(chosenSpace)
     }
     const changedTerminal = route.terminal !== cameFrom?.terminal || route.slot !== cameFrom?.slot
-    pendingTerminal = route.terminal && (changedSpace || changedTerminal) && !(cameFrom === null && returning)
+    const opensPane = route.page === 'terminals' || route.slot === 'side'
+    pendingTerminal = opensPane && route.terminal && (changedSpace || changedTerminal) && !(cameFrom === null && returning)
       ? { id: route.terminal, slot: route.slot ?? 'main' } : undefined
     $('needs').hidden = route.page !== 'needs'
     $('plan').hidden = route.page !== 'plan'
@@ -1079,7 +1070,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     if (scrollPage) restoreScroll(scrollPage)
     if (cameFrom?.page === 'ticket' && route.page !== 'ticket') {
       const task = opener?.task ? `[data-task="${CSS.escape(opener.task)}"]` : null
-      const sameCard = task ? [...document.querySelectorAll<HTMLElement>(`button${task},${task} button`)].find(el => el.getClientRects().length) : null
+      const sameCard = task ? [...document.querySelectorAll<HTMLButtonElement>('button')].find(el => el.closest(task) && el.getClientRects().length) : null
       const back = opener?.element instanceof HTMLElement && opener.element.getClientRects().length ? opener.element : sameCard ?? $(`show-${route.tab}`)
       back.focus({ preventScroll: true })
       opener = null

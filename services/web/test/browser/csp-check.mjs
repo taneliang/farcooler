@@ -751,7 +751,8 @@ async function everyRunner(page) {
   second.enroll(runner.keyA())
   const studio = { id: 'r1', label: 'studio', user: me, host_key: runner.hostKey, token: 'test', why: '' }
   await edit(page, { runners: [studio] })
-  await page.reload()
+  // The previous walk may have used a different granted runner ID.
+  await page.goto(origin)
   await statusSays(page, 'Connect to studio')
   await page.click('#status-action')
   await page.waitForFunction(() => Boolean(history.state?.workspaceScope), null, { timeout: 120_000 })
@@ -761,10 +762,8 @@ async function everyRunner(page) {
       { id: 'r2', label: 'build-box', user: me, host_key: second.hostKey, token: 'test2', why: '' },
     ],
   })
-  // This fixture installs new runner IDs. Start at the app root so the
-  // earlier runner's deep link does not carry into this check.
-  await page.goto(origin)
   const before = touches
+  await page.reload()
   await statusSays(page, 'Connect to studio')
   await page.click('#status-action')
   await page.waitForSelector('#work:not([hidden])', { timeout: 120_000 })
@@ -847,6 +846,11 @@ async function workspaceWalk(page) {
   if (notice !== 'Sandbox has no terminals yet. Use Start Work to open one.' || (await titles()).length) {
     failures.push(`the empty workspace lists ${JSON.stringify(await titles())} and says ${JSON.stringify(notice)}`)
   }
+  await page.click('#show-commands')
+  await page.locator('#workspace-commands').getByRole('button', { name: 'Start Work', exact: true }).click()
+  await page.locator('#start-work[open]').getByRole('button', { name: 'New Worktree' }).waitFor()
+  await page.click('#work-done')
+
   await page.selectOption('#space-picker', { label: 'Main (1)' })
   await page.click('#show-needs')
   await page.waitForFunction(() => document.querySelectorAll('#needs .need').length === 1, null, { timeout: 30_000 })
@@ -1455,7 +1459,10 @@ try {
     if (!(e instanceof WalkDone)) {
       // Where it stopped: the screen on show says more than a timeout does.
       const shown = await Promise.all(
-        session.context.pages().map(p => p.evaluate(() => [...document.querySelectorAll('main > section:not([hidden]), #status:not([hidden])')].map(e => `${e.id}: ${e.textContent?.trim().slice(0, 200)}`).join(' | ')).catch(() => 'closed')),
+        session.context.pages().map(p => p.evaluate(() => {
+          const surfaces = document.querySelectorAll('main > section:not([hidden]), #status:not([hidden]), dialog[open]')
+          return [location.hash, ...[...surfaces].map(e => `${e.id}: ${e.textContent?.trim().slice(0, 200)}`)].join(' | ')
+        }).catch(() => 'closed')),
       ).catch(() => [])
       const where = e.stack?.split('\n').find(line => line.includes('csp-check.mjs:'))?.trim() ?? ''
       failures.push(`the walk stopped: ${String(e.message).split('\n')[0]} ${where}; on screen: ${shown.join(' || ')}`)

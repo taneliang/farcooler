@@ -105,7 +105,7 @@ export class PaneSet<R> {
     await this.attach(terminal, pane, runner, ended)
   }
 
-  discard(id: string): void {
+  forget(id: string): void {
     this.panes.get(id)?.dispose()
     this.panes.delete(id)
     this.visible = this.visible.filter(visible => visible !== id)

@@ -82,7 +82,7 @@ export class WorkspacePanes {
       const mount = this.mounts.get(id)
       if (!mount) continue
       if (this.models.get(id)!.agent !== (mount.pane instanceof AgentPane)) {
-        this.set.discard(id)
+        this.set.forget(id)
         mount.root.remove()
         this.mounts.delete(id)
       } else if (mount.root.parentElement !== this.stage(id)) this.stage(id).append(mount.root)
@@ -123,14 +123,15 @@ export class WorkspacePanes {
   }
 
   async quote(text: string): Promise<boolean> {
-    await this.work
     const id = this.view?.side?.terminal
-    const pane = id ? this.mounts.get(id)?.pane : null
+    await this.work
+    if (!id || this.view?.side?.terminal !== id) return false
+    const pane = this.mounts.get(id)?.pane
     return pane instanceof AgentPane && pane.prefill(text)
   }
 
   forget(id: string): void {
-    this.set.discard(id)
+    this.set.forget(id)
     this.mounts.get(id)?.root.remove()
     this.mounts.delete(id)
   }

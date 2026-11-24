@@ -102,24 +102,24 @@
         <p class="link-detail" id="link-detail"></p>
         <button id="link-action" type="button" hidden>Reconnect</button>
       </div>
-        <header class="terminal-manage" id="terminal-manage" hidden>
-          <div class="terminal-identity">
-            <strong id="terminal-name"></strong>
-            <span id="terminal-state"></span>
-            <span class="terminal-access" id="terminal-access"></span>
-          </div>
-          <div class="terminal-actions">
-            <button class="quiet" type="button" id="terminal-rename" hidden></button>
-            <button class="quiet" type="button" id="terminal-close" hidden></button>
-            <button type="button" id="terminal-recover" hidden></button>
-          </div>
-        </header>
       <p class="note" id="work-status" role="status" hidden></p>
       <div class="workspace-panes">
         <section class="workspace-leaf" id="workspace-main" tabindex="0" aria-label="Main pane">
           <div class="needs" id="needs" aria-live="polite" hidden></div>
           <div class="plan" id="plan" hidden></div>
           <div class="pane" id="pane">
+            <header class="terminal-manage" id="terminal-manage" hidden>
+              <div class="terminal-identity">
+                <strong id="terminal-name"></strong>
+                <span id="terminal-state"></span>
+                <span class="terminal-access" id="terminal-access"></span>
+              </div>
+              <div class="terminal-actions">
+                <button class="quiet" type="button" id="terminal-rename" hidden></button>
+                <button class="quiet" type="button" id="terminal-close" hidden></button>
+                <button type="button" id="terminal-recover" hidden></button>
+              </div>
+            </header>
             <p class="note" id="pane-note" hidden></p>
             <div class="pane-bar" id="pane-bar" hidden>
               <span class="pane-title" id="pane-title"></span>
