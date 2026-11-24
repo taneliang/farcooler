@@ -17,14 +17,14 @@ async fn a_large_first_sync_does_not_disconnect_the_control_session() {
     exercise(750 * 1024, 0).await;
 }
 
-/// An unmarked read with too much live state refuses the call and keeps the link.
+/// Clearing the archive alone cannot fit this older app's Plan read.
 #[tokio::test]
-async fn unmarked_workflow_refuses_when_live_items_exceed_the_frame() {
+async fn released_app_plan_loads_when_live_items_exceed_the_frame() {
     exercise(1200 * 1024, 0).await;
 }
 
 #[tokio::test]
-async fn unmarked_workflow_refuses_when_metadata_exceeds_the_frame() {
+async fn released_app_plan_loads_when_workflow_metadata_exceeds_the_frame() {
     exercise(8 * 1024, 1200 * 1024).await;
 }
 
@@ -75,16 +75,30 @@ async fn exercise(item_bytes: usize, metadata_bytes: usize) {
     let repo = service.store.create_repository(service.host_id, root.id, "fixture", "/fixture/.git", "").unwrap();
     let workspace = service.store.ensure_main_workspace(repo.id).unwrap().id;
     let mut state = large_state(workspace, item_bytes);
+    let cap = farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES;
+    if item_bytes > cap {
+        let mut tracker = state.items["seed"].clone();
+        tracker.definition = Definition::ticket();
+        tracker.pin = tracker.definition.pin();
+        for n in 0..50 {
+            let id = format!("tracker-{n}");
+            tracker.run = id.clone();
+            tracker.resource = id.clone();
+            state.items.insert(id, tracker.clone());
+        }
+    }
     state.source_sequences.insert("wire:owner".into(), 42);
     if metadata_bytes > 0 {
         state.source_sequences.extend((0..metadata_bytes / 100)
             .map(|n| (format!("old-source-{n}-{}", "x".repeat(100)), 1)));
+        state.seen.extend(state.source_sequences.keys().cloned());
     }
-    let cap = farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES;
     assert_eq!(serde_json::to_vec(&state.items).unwrap().len() > cap, item_bytes > cap);
     assert_eq!(serde_json::to_vec(&state.source_sequences).unwrap().len() > cap, metadata_bytes > cap);
-    let json = serde_json::to_string(&state).unwrap();
-    eprintln!("scratch workflow state: {} bytes, {} items", json.len(), state.items.len());
+    let mut without_archive = state.clone();
+    without_archive.archive.clear();
+    let workflow_oversized = serde_json::to_vec(&without_archive).unwrap().len() > cap;
+    assert_eq!(workflow_oversized, item_bytes > cap || metadata_bytes > cap);
     // Fixture-only seed, before the daemon opens the database. The state is a
     // collection of approval-waiting runs, with repeated definitions as on the
     // reported runner; nothing can launch an effect or touch a real repository.
@@ -101,24 +115,48 @@ async fn exercise(item_bytes: usize, metadata_bytes: usize) {
     let (_relay, mut client) = tokio::time::timeout(Duration::from_secs(5),
         common::spawn_with(dir.path(), &["--scope", "control"])).await.expect("stdio hello within five seconds");
     assert_eq!(client.server_hello().granted_scope, Scope::Control as i32);
+    let mut plan = rpc("plan.get");
+    plan.payload = Some(request::Payload::PlanGet(pb::PlanGetRequest {
+        workspace_id: workspace.as_bytes().to_vec().into(), ..Default::default()
+    }));
+    let result::Value::Plan(plan) = client.call(plan).await.unwrap().value.unwrap() else {
+        panic!("wrong legacy Plan reply");
+    };
     let mut get = rpc("workflow.get");
     get.target_resource_id = Some(workspace.as_bytes().to_vec().into());
     get.required_capabilities.push(farcooler_protocol::capability::WORKFLOW_COMMANDS.into());
     get.payload = Some(request::Payload::WorkflowCommand(pb::WorkflowCommand {
         schema: 1, json: serde_json::to_string(&Action::Get).unwrap(),
     }));
-    let read = tokio::time::timeout(Duration::from_secs(5), client.call(get.clone())).await.unwrap();
-    let workflow_oversized = json.len() > cap;
-    if workflow_oversized {
-        oversized(read);
-    } else {
-        let reply = read.expect("released workflow read").value.unwrap();
-        let result::Value::WorkflowReply(reply) = reply else { panic!("wrong reply") };
-        let value: serde_json::Value = serde_json::from_str(&reply.json).unwrap();
-        assert_eq!(value["state"], serde_json::to_value(&state).unwrap(), "complete workflow state");
-        assert!(value["publication_history"].is_array());
-        eprintln!("workflow reply: {} bytes", reply.json.len());
-    }
+    let read_workflow = async {
+        let reply = client.call(get.clone()).await?.value.unwrap();
+        let result::Value::WorkflowReply(workflow) = &reply else { panic!("wrong reply") };
+        let value: serde_json::Value = serde_json::from_str(&workflow.json).unwrap();
+        if workflow_oversized {
+            let view: State = serde_json::from_value(value["state"].clone()).unwrap();
+            assert_eq!(view.revision, state.revision);
+            assert!(view.archive.is_empty());
+            assert_eq!(view.source_sequences.get("wire:owner"), Some(&42));
+            assert!(view.items.values().all(|item| !item.definition.is_ticket()));
+            let omitted = value["items_omitted"].as_u64().unwrap_or_default() as usize;
+            assert_eq!(view.items.len() + omitted, state.items.len());
+            if metadata_bytes > cap {
+                assert!(view.seen.is_empty());
+                assert_eq!(view.source_sequences.len(), 1);
+                assert_eq!(view.items, state.items);
+            } else {
+                assert!(view.items.len() < state.items.len());
+            }
+        } else {
+            assert_eq!(value["state"], serde_json::to_value(&state).unwrap(), "complete workflow state");
+            assert!(value["publication_history"].is_array());
+        }
+        Ok(reply)
+    };
+    let legacy = tokio::time::timeout(
+        Duration::from_secs(5), farcooler_client::plan_json::with_workflow(&plan, workspace, Some(read_workflow)),
+    ).await.unwrap().expect("released app Plan load");
+    assert!(!legacy["workflow"]["runs"].as_array().unwrap().is_empty());
     get.accepts.push(farcooler_protocol::accepts::WORKFLOW_PLAN.into());
     let result::Value::WorkflowReply(reply) = client.call(get).await.expect("marked Plan workflow read").value.unwrap() else {
         panic!("wrong Plan workflow reply");
@@ -147,7 +185,7 @@ async fn exercise(item_bytes: usize, metadata_bytes: usize) {
     assert!(began.elapsed() < Duration::from_secs(5));
     let log = std::fs::read_to_string(dir.path().join("logs/farcoolerd.log")).unwrap();
     let warnings: Vec<_> = log.lines().filter(|line| line.contains("response exceeds frame cap")).collect();
-    assert_eq!(warnings.len(), 1 + usize::from(workflow_oversized));
+    assert_eq!(warnings.len(), 1);
     for warning in warnings { eprintln!("{warning}"); }
 }
 
