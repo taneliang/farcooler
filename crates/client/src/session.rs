@@ -28,6 +28,7 @@ mod changes;
 mod web_board;
 mod web_review;
 mod board_order;
+pub use board_order::task_reorder_request;
 mod work;
 pub mod workflow;
 mod link;
@@ -1171,37 +1172,6 @@ impl Session {
         let (list, required) = task_list_request(self.capabilities(), repository, workspace);
         let whole = self.task_pages(repository, list, required).await?;
         Ok(crate::tasks_json::board_json(&whole, now_millis()))
-    }
-
-    async fn task_pages(
-        &self, target: Uuid, mut list: farcooler_protocol::v1::TaskListRequest, required: Vec<String>,
-    ) -> Result<farcooler_protocol::v1::TaskList, SessionError> {
-        // A page at a time (ov-1298): a long-lived board no longer fits one frame. A runner too old to page
-        // answers with every task and no next page. A page whose cursor went (its task deleted or moved
-        // between reads) is refused, and the read starts again, once.
-        let mut whole = farcooler_protocol::v1::TaskList::default();
-        let mut restarted = false;
-        loop {
-            list.page_after = Some(whole.next_page_after.take().unwrap_or_default());
-            let payload = request::Payload::TaskList(list.clone());
-            let page = match self.value_requiring("task.list", Some(target), Some(payload), required.clone()).await {
-                Ok(result::Value::TaskList(page)) => page,
-                Ok(other) => return Err(wrong("task_list", &other)),
-                Err(_) if !restarted && list.page_after.as_ref().is_some_and(|a| !a.is_empty()) => {
-                    restarted = true;
-                    whole = Default::default();
-                    continue;
-                }
-                Err(e) => return Err(e),
-            };
-            if whole.reads.is_none() { whole.reads = page.reads; }
-            whole.items.extend(page.items);
-            match page.next_page_after.filter(|next| !next.is_empty() && Some(next) != list.page_after.as_ref()) {
-                Some(next) => whole.next_page_after = Some(next),
-                None => break,
-            }
-        }
-        Ok(whole)
     }
 
     /// One task with its whole record, in the shape `farcooler task show
