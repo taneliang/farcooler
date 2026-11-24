@@ -1,6 +1,7 @@
 use super::*;
 use std::process::{Command, Stdio};
 use std::os::unix::process::CommandExt;
+use tokio::io::{AsyncBufReadExt, BufReader};
 
 /// A builder: a shell with a compiler-like child, in a group of its own.
 fn builder() -> std::process::Child {
@@ -42,6 +43,8 @@ async fn a_legacy_wrapper_launched_after_the_pause_snapshot_does_not_block_landi
 enum HeavyBuilder { Current, Legacy, LateLegacy }
 
 async fn landing_after_heavy_builder(builder: HeavyBuilder) {
+    const HANG_GUARD: Duration = Duration::from_secs(30);
+
     let legacy = !matches!(builder, HeavyBuilder::Current);
     let late = matches!(builder, HeavyBuilder::LateLegacy);
     let dir = tempfile::tempdir().unwrap();
@@ -82,7 +85,7 @@ runpy.run_path(sys.argv.pop(1), run_name='__main__')
     let mut holder = command(legacy, late).args(["--", "/bin/sh", "-c", "touch ready; while [ ! -f release ]; do sleep 0.02; done"])
         .spawn().unwrap();
     let wait_ready = || {
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + HANG_GUARD;
         while !dir.path().join("ready").exists() && std::time::Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -91,45 +94,65 @@ runpy.run_path(sys.argv.pop(1), run_name='__main__')
     if !late && !wait_ready() { end(holder); panic!("the builder did not acquire the lock"); }
     let y = Yielding::new(None, dir.path().join(heavy_queue::NAME));
     let _builder = y.builder(group(&holder));
-    let gate = if late {
+    if late {
         let mut state = y.0.state.lock().unwrap();
         let mut ready = false;
         stop_builders_with_snapshot(&mut state, &y.0.queue, || {
-            let raw = crate::proc_table::snapshot();
+            let raw = crate::proc_table::snapshot()?;
             // Release the shell only after discovery has its process list.
             std::io::Write::write_all(&mut holder.stdin.take().unwrap(), b"start\n").unwrap();
             ready = wait_ready();
-            raw
+            Some(raw)
         });
+        let held = state.builders.values().any(|builder| builder.held_since.is_some());
         drop(state);
-        if !ready { end(holder); panic!("the late wrapper did not publish its ticket"); }
-        None
-    } else { Some(y.admit_gate().await.unwrap()) };
-    let notes = dir.path().join("landing.log");
-    let mut landing = command(false, false).env("FARCOOLER_OPERATION_BINDING", "landing").stderr(File::create(&notes).unwrap())
-        .args(["--", "touch", "landed"]).spawn().unwrap();
-    let waiting_on_holder = || std::fs::read_to_string(&notes).unwrap().lines()
-        .any(|line| line.contains("held by") && line.contains("touch ready"));
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-    while !waiting_on_holder()
-        && !dir.path().join("landed").exists()
-        && tokio::time::Instant::now() < deadline {
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        if !ready || held {
+            end(holder);
+            assert!(ready, "the late wrapper did not publish its ticket");
+            panic!("the pause sweep left the late ticket holder paused");
+        }
     }
-    let was_waiting = waiting_on_holder() && !dir.path().join("landed").exists()
-        && !crate::proc_table::stopped_or_gone(holder.id() as i32);
-    let holder_state = states(&holder);
-    std::fs::write(dir.path().join("release"), "").unwrap();
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
-    let passed = loop {
-        if let Some(status) = landing.try_wait().unwrap() { break status.success(); }
-        if tokio::time::Instant::now() >= deadline { end(landing); break false; }
-        tokio::time::sleep(Duration::from_millis(10)).await;
+    // The forced sweep can resume the late holder while leaving the queue
+    // latch held. Normal gate admission settles the pause and releases it.
+    let gate = match y.admit_gate().await {
+        Ok(gate) => gate,
+        Err(error) => {
+            end(holder);
+            panic!("could not admit the landing gate: {error}");
+        }
     };
+    let mut landing_command = command(false, false);
+    landing_command.env("FARCOOLER_OPERATION_BINDING", "landing")
+        .stderr(Stdio::piped()).args(["--", "touch", "landed"]);
+    let mut landing = tokio::process::Command::from(landing_command).spawn().unwrap();
+    let mut stderr = BufReader::new(landing.stderr.take().unwrap()).lines();
+    let mut notes = Vec::new();
+    let mut observed_wait = None;
+    let landed = dir.path().join("landed");
+    let result = tokio::time::timeout(HANG_GUARD, async {
+        while let Some(line) = stderr.next_line().await? {
+            let waiting_on_holder = line.contains("held by") && line.contains("touch ready");
+            notes.push(line);
+            // The wrapper flushes this message from inside the lock wait.
+            if waiting_on_holder && observed_wait.is_none() {
+                let was_waiting = !landed.exists()
+                    && !crate::proc_table::stopped_or_gone(holder.id() as i32);
+                observed_wait = Some((was_waiting, states(&holder)));
+                std::fs::write(dir.path().join("release"), "")?;
+            }
+        }
+        landing.wait().await
+    }).await;
+    if let Some(pid) = landing.id() {
+        let _ = crate::effect_runner::Group::new(pid).kill();
+        let _ = landing.wait().await;
+    }
+    let (was_waiting, holder_state) = observed_wait.unwrap_or_else(|| (false, states(&holder)));
     drop(gate);
     end(holder);
-    assert!(was_waiting && passed, "landing must wait on a runnable builder; states {holder_state:?}, landing output: {}",
-        std::fs::read_to_string(notes).unwrap());
+    assert!(was_waiting && matches!(result, Ok(Ok(status)) if status.success()) && landed.exists(),
+        "landing must wait on a runnable builder and finish after release.\nBuilder states {holder_state:?}\nLanding result {result:?}\n{}",
+        notes.join("\n"));
 }
 
 #[tokio::test]
