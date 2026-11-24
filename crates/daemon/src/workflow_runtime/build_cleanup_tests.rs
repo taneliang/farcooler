@@ -877,6 +877,52 @@ pub(super) fn incremental_cargo_output(package: &Path, target: &Path) -> Vec<Pat
     ["dep-graph.bin", "query-cache.bin", "work-products.bin"].map(|file| session.join(file)).to_vec()
 }
 
+pub(super) fn android_build_output(tree: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let build = tree.join("apps/android/app/build");
+    let mut artifacts = Vec::new();
+    let mut personal = Vec::new();
+    for (folder, kind, name, ext) in [
+        ("outputs/apk/debug", "APK", "app-debug", "apk"),
+        ("intermediates/linked_resources_binary_format/debug/processDebugResources",
+            "LINKED_RESOURCES_BINARY_FORMAT", "linked-resources-binary-format-debug", "ap_"),
+    ] {
+        let folder = build.join(folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let name = format!("{name}.{ext}");
+        let replacement = format!("replacement.{ext}");
+        let outside = format!("outside.{ext}");
+        // These all carry the ZIP signature. Only package files named by their
+        // own directory's completed metadata are eligible for reclamation.
+        let package = b"PK\x03\x04test package";
+        let output = folder.join(&name);
+        std::fs::write(&output, package).unwrap();
+        for path in [folder.join(format!("personal.{ext}")), folder.parent().unwrap().join(&outside)] {
+            std::fs::write(&path, package).unwrap();
+            personal.push(path);
+        }
+        let replaced = folder.join(&replacement);
+        std::fs::write(&replaced, package).unwrap();
+        let source = folder.join("Local.kt");
+        std::fs::write(&source, b"// local work").unwrap();
+        personal.push(source);
+        let elements = [name, replacement, format!("../{outside}"), "Local.kt".into()]
+            .map(|name| serde_json::json!({"type": "SINGLE", "filters": [], "outputFile": name}));
+        std::fs::write(folder.join("output-metadata.json"), serde_json::to_vec(&serde_json::json!({
+            "version": 3,
+            "artifactType": {"type": kind, "kind": "Directory"},
+            "applicationId": "com.example.cleanup",
+            "variantName": "debug",
+            "elements": elements,
+        })).unwrap()).unwrap();
+        let original = replaced.metadata().unwrap().modified().unwrap();
+        std::fs::write(&replaced, b"PK\x03\x04personal replacement").unwrap();
+        File::open(&replaced).unwrap().set_modified(original).unwrap();
+        personal.push(replaced);
+        artifacts.push(output);
+    }
+    (artifacts, personal)
+}
+
 #[tokio::test]
 async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output() {
     let (dir, runtime, group, active_tree) = building_group(None).await;
@@ -887,9 +933,10 @@ async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output(
         ("apps/shared/AgentKit/.build/arm64-apple-macosx/debug/AgentKit.swiftmodule", b"\xe2\x9c\xa8\x0etest"),
     ];
     std::fs::write(runtime.repository().join(".git/info/exclude"),
-        "/target/\n/crates/web/target/\n/apps/macos/.build/\n/apps/shared/AgentKit/.build/\n").unwrap();
+        "/target/\n/crates/web/target/\n/apps/macos/.build/\n/apps/shared/AgentKit/.build/\n/apps/android/app/build/\n").unwrap();
     let mut orphan_trees = Vec::new();
     let mut orphan_caches = Vec::new();
+    let mut orphan_android = Vec::new();
     for (separator, digit) in [('-', "a"), (':', "b")] {
         let tree = runtime.root.join(format!("tree-wf1{separator}{}", digit.repeat(64)));
         adapters::git(&runtime.repository(), &["worktree", "add", "--detach", tree.to_str().unwrap(), "HEAD"]).await.unwrap();
@@ -922,6 +969,7 @@ async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output(
         if separator == '-' {
             orphan_caches.extend(incremental_cargo_output(&dir.path().join("cargo-fixture"), &tree.join("target")));
         }
+        orphan_android.push(android_build_output(&tree));
         std::fs::write(tree.join("uncommitted.txt"), b"keep this").unwrap();
         orphan_trees.push(tree);
     }
@@ -949,10 +997,12 @@ async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output(
         dep.display(), live_output.display())).unwrap();
     seed_nextest_archive(&active_tree);
     let active_caches = incremental_cargo_output(&dir.path().join("cargo-fixture"), &active_tree.join("target"));
+    let (active_android, _) = android_build_output(&active_tree);
     runtime.release_orphan_builds(std::slice::from_ref(&active_tree)).await.unwrap();
     assert!(live_output.is_file());
     assert!(active_tree.join("target/rust-tests.tar.zst").is_file());
     assert!(active_caches.iter().all(|path| path.is_file()));
+    assert!(active_android.iter().all(|path| path.is_file()));
 
     let root = runtime.root.clone();
     drop(runtime);
@@ -971,6 +1021,7 @@ async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output(
         assert!(tree.join(layouts[0].0).is_file());
     }
     assert!(orphan_caches.iter().all(|path| path.is_file()));
+    assert!(orphan_android.iter().all(|(artifacts, _)| artifacts.iter().all(|path| path.is_file())));
     drop(reader);
     drop(lock);
     // Make the engine lock retry due while the checkout check is still deferred.
@@ -984,6 +1035,10 @@ async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output(
     runtime.pump(100).await.unwrap();
     assert!(orphan_trees.iter().all(|tree| !runtime.orphan_cleanup_retries.contains_key(tree)));
     assert!(orphan_caches.iter().all(|path| !path.exists()));
+    for (artifacts, personal) in orphan_android {
+        assert!(artifacts.iter().all(|path| !path.exists()));
+        assert!(personal.iter().all(|path| path.is_file()));
+    }
     for tree in &orphan_trees {
         assert!(!tree.join("target/rust-tests.tar.zst").exists());
         assert!(layouts.iter().all(|(file, _)| !tree.join(file).exists()));

@@ -75,8 +75,11 @@ impl Exec {
             if !build_cleanup::build_folders(&folders, adopted).any(|folder| build_cleanup::folder_paths(&tree, folder)
                 .any(|path| matches!(path, Ok(Some(_)))))
                 && !(build_cleanup::default_build_folders(&folders) && build_cleanup::cargo_cache_folders(&tree).next().is_some()) { continue; }
+            // The expanded artifact inventory can release output a previous
+            // engine left after settling its recovery attempt for this run.
+            let policy = if adopted { "idle-adopted-build-release/v2" } else { "idle-build-release/v1" };
             self.store.workflow_cleanup_enqueue(&CleanupEffect {
-                id: digest(&("idle-build-release/v1", workspace, id, &item.run, item.fence)),
+                id: digest(&(policy, workspace, id, &item.run, item.fence)),
                 workspace: workspace.into(), revision: state.revision, item: id.clone(), run: item.run.clone(),
                 restart: item.restart.clone(), tree: item.tree.clone(), folders, uncertain: false, directory: None,
             })?;

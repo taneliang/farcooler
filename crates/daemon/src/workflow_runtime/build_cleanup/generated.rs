@@ -1,5 +1,5 @@
 //! Legacy and adopted trees can contain a person's files even inside ignored
-//! build directories. Inventory recognized compiler artifacts individually.
+//! build directories. Inventory recognized build artifacts individually.
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, Metadata, OpenOptions};
@@ -13,7 +13,7 @@ const CACHE_TAG: &[u8] = b"Signature: 8a477f597d28d172789f06886806bc55";
 pub(super) struct ArtifactPlan(Vec<(PathBuf, Metadata)>);
 
 #[derive(Clone, Copy)]
-enum Layout { Cargo, Swift }
+enum Layout { Cargo, Swift, Android }
 
 /// Cargo writes this standard cache tag even when CARGO_TARGET_DIR names a
 /// directory the workflow definition does not list.
@@ -27,7 +27,7 @@ pub(super) fn cargo_cache(path: &Path) -> bool {
 impl ArtifactPlan {
     pub(super) fn inspect(tree: &Path, folder: &Path, device: u64) -> io::Result<Self> {
         let mut inventory = Inventory::default();
-        inventory.scan(tree, folder, device)?;
+        inventory.scan(tree, folder, folder, device)?;
         let mut plan = Self(Vec::new());
         let gate_archive = tree.join("target/rust-tests.tar.zst");
         for (path, meta) in inventory.files {
@@ -35,6 +35,8 @@ impl ArtifactPlan {
                 Some(Layout::Cargo)
             } else if inventory.swift.get(&path).is_some_and(|window| window.contains(&meta)) {
                 Some(Layout::Swift)
+            } else if inventory.android.get(&path).is_some_and(|window| window.contains(&meta)) {
+                Some(Layout::Android)
             } else {
                 None
             };
@@ -125,13 +127,14 @@ impl BuildWindow {
 struct Inventory {
     cargo: BTreeMap<PathBuf, BuildWindow>,
     swift: BTreeMap<PathBuf, BuildWindow>,
+    android: BTreeMap<PathBuf, BuildWindow>,
     incremental: BTreeMap<PathBuf, Metadata>,
     fingerprints: BTreeMap<PathBuf, BTreeMap<String, PathBuf>>,
     files: Vec<(PathBuf, Metadata)>,
 }
 
 impl Inventory {
-    fn scan(&mut self, tree: &Path, path: &Path, device: u64) -> io::Result<()> {
+    fn scan(&mut self, tree: &Path, folder: &Path, path: &Path, device: u64) -> io::Result<()> {
         let meta = path.symlink_metadata()?;
         if meta.dev() != device || path.file_name().is_some_and(|name|
             name.eq_ignore_ascii_case(".git") || name.eq_ignore_ascii_case("reports")) {
@@ -142,7 +145,7 @@ impl Inventory {
                 incremental_outputs(path, &mut self.incremental);
             }
             for entry in fs::read_dir(path)? {
-                self.scan(tree, &entry?.path(), device)?;
+                self.scan(tree, folder, &entry?.path(), device)?;
             }
         } else if meta.is_file() {
             let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
@@ -150,6 +153,8 @@ impl Inventory {
                 self.cargo_outputs(tree, path, stem, &meta);
             } else if name == "output-file-map.json" || name.ends_with("-OutputFileMap.json") {
                 self.swift_outputs(tree, path, &meta);
+            } else if name == "output-metadata.json" {
+                self.android_outputs(folder, path, &meta);
             }
             self.files.push((path.to_owned(), meta));
         }
@@ -196,6 +201,41 @@ impl Inventory {
                         self.swift.insert(tree.join(output), window);
                     }
                 }
+            }
+        }
+    }
+
+    fn android_outputs(&mut self, folder: &Path, path: &Path, meta: &Metadata) {
+        let Some(parent) = path.parent() else { return };
+        let Ok(relative) = parent.strip_prefix(folder) else { return };
+        let mut dirs = relative.iter().map(|dir| dir.to_str().unwrap_or_default());
+        // AGP writes a BuiltArtifacts record alongside the packages it produces.
+        // Match the output layout and the recorded type, then use only explicit
+        // sibling filenames so a metadata entry cannot redirect the sweep.
+        let (kind, extension) = match (dirs.next(), dirs.next()) {
+            (Some("outputs" | "intermediates"), Some("apk")) => ("APK", "apk"),
+            (Some("intermediates"), Some("processed_res")) => ("PROCESSED_RES", "ap_"),
+            (Some("intermediates"), Some("linked_resources_binary_format")) => ("LINKED_RESOURCES_BINARY_FORMAT", "ap_"),
+            (Some("intermediates"), Some("linked_resources_proto_format")) => ("LINKED_RESOURCES_PROTO_FORMAT", "ap_"),
+            _ => return,
+        };
+        let Some(record) = read_metadata(path).and_then(|data| serde_json::from_str::<Value>(&data).ok()) else { return };
+        if !matches!(record["version"].as_u64(), Some(1..=3))
+            || record["artifactType"]["type"].as_str() != Some(kind)
+            || record["artifactType"]["kind"] != "Directory"
+            || !record["applicationId"].is_string()
+            || record["variantName"].as_str().is_none_or(str::is_empty) {
+            return;
+        }
+        let Some(elements) = record["elements"].as_array() else { return };
+        // Keep later edits and replacements even if they retain the old mtime.
+        let end = changed(meta).min((meta.mtime(), meta.mtime_nsec()));
+        let window = BuildWindow { start: None, end };
+        for name in elements.iter().filter_map(|element| element["outputFile"].as_str()) {
+            let file = Path::new(name);
+            if file.file_name().is_some_and(|basename| basename == name)
+                && file.extension().is_some_and(|ext| ext == extension) {
+                self.android.insert(parent.join(file), window);
             }
         }
     }
@@ -392,6 +432,7 @@ impl Layout {
             Self::Cargo => matches!(extension, "" | "a" | "bin" | "dylib" | "o" | "rlib" | "rmeta" | "so" | "wasm"),
             Self::Swift => matches!(extension, "" | "a" | "dia" | "dylib" | "o" | "pcm" | "pch" | "sdkstatcache"
                 | "so" | "swiftdeps" | "swiftmodule" | "xctest"),
+            Self::Android => matches!(extension, "apk" | "ap_"),
         };
         if !candidate { return Ok(false); }
         let mut magic = [0u8; 8];
@@ -416,6 +457,7 @@ impl Layout {
             (Self::Swift, "sdkstatcache") => prefix == b"STAT",
             (Self::Swift, "dia") => prefix == b"DIAG",
             (Self::Swift, "pcm" | "pch") => prefix == b"CPCH" || compiled,
+            (Self::Android, _) => prefix == b"PK\x03\x04",
             _ => compiled || universal_macho,
         })
     }
@@ -448,7 +490,7 @@ mod tests {
 
         let device = tree.metadata().unwrap().dev();
         let mut inventory = Inventory::default();
-        inventory.scan(&tree, &folder, device).unwrap();
+        inventory.scan(&tree, &folder, &folder, device).unwrap();
         let object = |stem: &str| inventory.files.iter().map(|(path, _)| path)
             .find(|path| path.file_stem().and_then(|name| name.to_str())
                 .is_some_and(|name| name == stem || name == format!("{stem}.swift"))

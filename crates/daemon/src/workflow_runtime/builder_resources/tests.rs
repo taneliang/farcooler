@@ -179,7 +179,7 @@ async fn adopted(wait_for_review: bool) -> (tempfile::TempDir, Runtime, PathBuf,
     let repository = runtime.store.create_repository(host, root.id, "adopted", repo.join(".git").to_str().unwrap(), "").unwrap();
     let workspace = runtime.store.create_workspace(repository.id, "Adopted", "ad").unwrap().id.to_string();
     runtime.host = Some(WorktreeHost { dir: dir.path().join("trees"), install_id: "test".into(), locks: Default::default() });
-    ignore_target(&runtime);
+    std::fs::write(repo.join(".git/info/exclude"), "/target/\n/apps/android/app/build/\n").unwrap();
     // Canonical, as a person's worktree path is: on macOS the temp dir sits behind the /var -> /private/var link, and
     // the build cleanup skips a non-canonical tree, so without this the test passed there and failed on Linux (ov-1263).
     let tree = dir.path().canonicalize().unwrap().join("adopted");
@@ -265,8 +265,11 @@ async fn waiting_adopted_worktree_releases_build_output_and_reclaims_older_outpu
     }
     let package = dir.path().join("cargo-fixture");
     let current_caches = super::super::build_cleanup_tests::incremental_cargo_output(&package, &tree.join("target"));
+    let (android, android_personal) = super::super::build_cleanup_tests::android_build_output(&tree);
     wait_for_adopted_review(&mut runtime, &workspace).await;
     assert!(current_caches.iter().all(|path| !path.exists()));
+    assert!(android.iter().all(|path| !path.exists()));
+    assert!(android_personal.iter().all(|path| path.is_file()));
     assert!(!tree.join("target/debug/libcleanup_fixture.rlib").exists());
     for (path, contents) in personal {
         assert_eq!(std::fs::read(tree.join(path)).unwrap(), contents);
@@ -275,6 +278,17 @@ async fn waiting_adopted_worktree_releases_build_output_and_reclaims_older_outpu
     assert!(!tree.join("target/debug/deps/built").exists(), "{records:?}");
     assert!(tree.join("result.txt").is_file());
     assert!(records.iter().any(|record| record.result.as_ref().is_some_and(|r| r.bytes_freed > 12)));
+    let (old_android, old_android_personal) = super::super::build_cleanup_tests::android_build_output(&tree);
+    let mut previous = records.iter().find(|record| record.effect.tree.is_some()).unwrap().effect.clone();
+    let state = runtime.state(&workspace).unwrap().unwrap();
+    let item = &state.items[&previous.item];
+    previous.id = digest(&("idle-build-release/v1", &workspace, &previous.item, &item.run, item.fence));
+    runtime.store.workflow_cleanup_enqueue(&previous).unwrap();
+    assert!(runtime.store.workflow_cleanup_begin(&previous, None).unwrap());
+    runtime.store.workflow_cleanup_result(&previous, &farcooler_workflow::cleanup::CleanupResult {
+        skipped: vec!["apps/android/app/build: no verified build artifacts".into()],
+        ..Default::default()
+    }).unwrap();
     // Exercise Cargo's actual cache tag and dep-info, including when the
     // target directory is selected only through CARGO_TARGET_DIR.
     let target = tree.join(".artifacts");
@@ -327,6 +341,8 @@ async fn waiting_adopted_worktree_releases_build_output_and_reclaims_older_outpu
     for artifact in old_artifacts {
         assert!(!artifact.exists(), "retained {}", artifact.display());
     }
+    assert!(old_android.iter().all(|path| !path.exists()));
+    assert!(old_android_personal.iter().all(|path| path.is_file()));
     for path in [linked, exported] {
         assert_eq!(std::fs::read(path).unwrap(), personal_archive);
     }
