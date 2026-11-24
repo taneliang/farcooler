@@ -4,16 +4,20 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shlex
+import signal
+import sys
 import subprocess
 import tempfile
-import unittest
-import sys
-import signal
 import time
+import unittest
 
 spec = importlib.util.spec_from_file_location("benchmark", Path(__file__).with_name("landing-benchmark.py"))
 benchmark = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(benchmark)
+
+# A hang guard for real subprocesses, independent of the deadline under test.
+PROCESS_CEILING = 120
 
 
 class BenchmarkTests(unittest.TestCase):
@@ -23,7 +27,14 @@ class BenchmarkTests(unittest.TestCase):
             ready = root / "ready"
             collector_ready = root / "collector-ready"
             (root / "scripts").mkdir()
-            (root / "scripts/landing-gate").write_text('echo $$ > ready\nexec sleep 30\n')
+            (root / "scripts/landing-gate").write_text(
+                f'exec {shlex.quote(sys.executable)} scripts/trial.py\n')
+            (root / "scripts/trial.py").write_text(
+                'import os, signal\n'
+                'from pathlib import Path\n'
+                'Path("ready.tmp").write_text(str(os.getpid()))\n'
+                'Path("ready.tmp").replace("ready")\n'
+                'while True: signal.pause()\n')
             (root / "reports/ov-1110").mkdir(parents=True)
             (root / "reports/ov-1110/historical-gate.txt").write_text("")
             # Signal only once the collector enters its protected wait, not merely
@@ -55,12 +66,13 @@ sys.exit(b.main())
                                          "FARCOOLER_LOCK_WAIT_LIMIT_SECONDS", "CANDIDATES"}},
                                      stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             try:
-                until = time.monotonic() + 10
+                until = time.monotonic() + PROCESS_CEILING
                 while not (ready.exists() and collector_ready.exists()) and child.poll() is None and time.monotonic() < until:
                     time.sleep(0.01)
                 self.assertTrue(ready.exists() and collector_ready.exists(), "real trial did not start")
                 child.terminate()
-                self.assertEqual(child.wait(timeout=10), 130, child.stderr.read().decode())
+                _, stderr = child.communicate(timeout=PROCESS_CEILING)
+                self.assertEqual(child.returncode, 130, stderr.decode())
                 result = json.loads((output / "trial-1/result.json").read_text())
                 self.assertTrue(result["interrupted"])
                 self.assertFalse(result["complete_green"])
@@ -90,7 +102,7 @@ sys.exit(b.main())
                       'p=Path(sys.argv[1]); p.mkdir(); '
                       'landing_policy.record_timing(p,"rust",step,"pass",1,3.25)')
             command = [sys.executable, "-c", script, str(root / "trial/steps")]
-            result = benchmark.measure(command, Path(__file__).parent, root / "trial", 5)
+            result = benchmark.measure(command, Path(__file__).parent, root / "trial", PROCESS_CEILING)
             self.assertEqual(result["exit_code"], 0)
             self.assertEqual(result["steps"][0]["seconds"], 2.25)
             self.assertFalse(result["complete_green"])
@@ -101,23 +113,29 @@ sys.exit(b.main())
             (root / "lane-gate-summary.txt").write_text("lane-gate: all steps passed\nlanding-gate: PASS\n")
             command = ["bash", "-c", "sleep 0.1; echo '| rust | nextest | pass | 0.02 | 1 passed |'; "
                        "echo 'lane-gate: all steps passed'; echo 'landing-gate: PASS'"]
-            result = benchmark.measure(command, root, root / "trial", 5)
+            result = benchmark.measure(command, root, root / "trial", PROCESS_CEILING)
             self.assertGreaterEqual(result["wall_seconds"], 0.1)
             self.assertTrue(result["complete_green"])
             self.assertEqual(result["steps"][0]["seconds"], 0.02)
             self.assertTrue(result["load_samples"])
-            empty = benchmark.measure(["bash", "-c", "true"], root, root / "empty", 5)
+            empty = benchmark.measure(["bash", "-c", "true"], root, root / "empty", PROCESS_CEILING)
             self.assertFalse(empty["complete_green"])
 
     def test_nonzero_partial_and_deadline_never_count_as_fast_green(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             for i, script in enumerate(("echo 'lane-gate: all steps passed'; echo 'landing-gate: PASS'; exit 1",
-                                       "echo PARTIAL; echo 'lane-gate: all steps passed'; echo 'landing-gate: PASS'",
-                                       "sleep 10")):
-                result = benchmark.measure(["bash", "-c", script], root, root / str(i), 0.1)
+                                       "echo PARTIAL; echo 'lane-gate: all steps passed'; echo 'landing-gate: PASS'")):
+                result = benchmark.measure(["bash", "-c", script], root, root / str(i), PROCESS_CEILING)
+                self.assertFalse(result["timed_out"])
                 self.assertFalse(result["complete_green"])
+
+            # A failsafe keeps this test bounded even if deadline enforcement breaks.
+            command = [sys.executable, "-c", f"import signal; signal.alarm({PROCESS_CEILING}); signal.pause()"]
+            result = benchmark.measure(command,
+                                       root, root / "deadline", 0.1)
             self.assertTrue(result["timed_out"])
+            self.assertFalse(result["complete_green"])
 
     def test_acceptance_requires_three_stable_green_wrappers_under_limit(self):
         good = {"wall_seconds": 899, "complete_green": True}

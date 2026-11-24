@@ -10,6 +10,9 @@ import time
 import unittest
 
 GATE = Path(__file__).resolve().parent / 'lane-gate.py'
+START_CEILING = 300
+EXIT_CEILING = 300
+REAP_CEILING = 120
 
 
 def processes():
@@ -39,53 +42,53 @@ def observe(root, known):
 class SelfTestLifetime(unittest.TestCase):
     def exercise(self, kill):
         with tempfile.TemporaryDirectory(prefix='lane-lifetime-') as temp:
+            ready = Path(temp) / 'ready'
+            log = Path(temp) / 'output'
             env = {**os.environ, 'TMPDIR': temp, 'HEAVY_LOCK_HELD': '1',
-                   'FC_SELF_TEST_READY': str(Path(temp) / 'ready')}
+                   'FC_SELF_TEST_READY': str(ready)}
             env.pop('FC_SELF_TEST_PAUSE', None)
             if kill:
                 env['FC_SELF_TEST_PAUSE'] = '1'
             known = {}
-            with open(Path(temp) / 'output', 'w') as output:
+            with log.open('w') as output:
                 owner = subprocess.Popen([sys.executable, str(GATE), '--self-test'], env=env,
                                          stdout=output, stderr=subprocess.STDOUT)
                 try:
-                    deadline = time.monotonic() + 120
-                    saw_fixture = False
-                    while time.monotonic() < deadline and owner.poll() is None:
+                    deadline = time.monotonic() + START_CEILING
+                    while not ready.exists() and owner.poll() is None and time.monotonic() < deadline:
                         observe(owner.pid, known)
-                        if (Path(temp) / 'ready').exists():
-                            saw_fixture = True
-                            runner_pid, fixture_pid = map(int, (Path(temp) / 'ready').read_text().split())
-                            rows = processes()
-                            if fixture_pid in rows:
-                                known[fixture_pid] = rows[fixture_pid][1]
-                            if kill:
-                                while time.monotonic() < deadline:
-                                    status = subprocess.run(['ps', '-p', str(runner_pid), '-o', 'stat='],
-                                                            capture_output=True, text=True, check=True).stdout.strip()
-                                    if status.startswith('T'):
-                                        break
-                                    time.sleep(.05)
-                                self.assertTrue(status.startswith('T'), 'fixture runner did not stop')
-                                owner.kill()
-                            break
                         time.sleep(.05)
-                    self.assertTrue(saw_fixture, 'real guard fixture never started')
-                    if not kill:
-                        deadline = time.monotonic() + 180
-                        while owner.poll() is None and time.monotonic() < deadline:
-                            observe(owner.pid, known)
-                            time.sleep(.1)
-                    owner.wait(timeout=10)
-                    if not kill:
-                        self.assertEqual(owner.returncode, 0, (Path(temp) / 'output').read_text())
-                    deadline = time.monotonic() + 10
-                    while time.monotonic() < deadline:
+                    self.assertTrue(ready.exists(), f'real guard fixture never started\n{log.read_text()}')
+                    runner_pid, fixture_pid = map(int, ready.read_text().split())
+                    rows = processes()
+                    if fixture_pid in rows:
+                        known[fixture_pid] = rows[fixture_pid][1]
+                    if kill:
+                        # The runner publishes PIDs just before it stops itself.
+                        deadline = time.monotonic() + START_CEILING
+                        while True:
+                            status = subprocess.run(['ps', '-p', str(runner_pid), '-o', 'stat='],
+                                                    capture_output=True, text=True).stdout.strip()
+                            if status.startswith('T'):
+                                break
+                            if owner.poll() is not None or time.monotonic() >= deadline:
+                                self.fail(f'fixture runner did not stop\n{log.read_text()}')
+                            time.sleep(.05)
+                        owner.kill()
+                    # Observe descendants until the owner's exit so survivors
+                    # that are subsequently reparented can still be checked.
+                    deadline = time.monotonic() + EXIT_CEILING
+                    while owner.poll() is None and time.monotonic() < deadline:
+                        observe(owner.pid, known)
+                        time.sleep(.1)
+                    self.assertEqual(owner.poll(), -signal.SIGKILL if kill else 0, log.read_text())
+                    deadline = time.monotonic() + REAP_CEILING
+                    while True:
                         rows = observe(owner.pid, known)
                         alive = {pid: cmd for pid, cmd in known.items()
                                  if pid in rows and rows[pid][1] == cmd and
                                  any(name in cmd for name in ('guard_fixture', 'nextest.py', 'cargo test'))}
-                        if not alive:
+                        if not alive or time.monotonic() >= deadline:
                             break
                         time.sleep(.1)
                     self.assertFalse(alive, f'self-test left processes alive: {alive}')
