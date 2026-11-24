@@ -806,6 +806,8 @@ pub mod capability {
     pub const TASK_CREATE_THEME: &str = "task_create_theme";
     pub const BOARD_THEME_LIST: &str = "board_theme_list";
     pub const CHECK_IN_OCCURRENCE_CAS: &str = "check_in_occurrence_cas";
+    /// Landing effects take the local update interlock through settlement.
+    pub const LANDING_UPDATE_LOCK: &str = "landing_update_lock";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -831,6 +833,7 @@ pub mod capability {
             WORKSPACE_CHARTER, BOARD_THEME_MOVE, MEMBER_ROLES, PASSKEY_KEYS,
             MEMBER_DEVICES_READ, CRASH_REPORTS, WORKSPACE_MAINTAINERS, PERSON_ACCESS,
             CEREMONY_AUTHORITY, STEP_UP, PHONE_APPROVAL, AGENT_STOP, WORKSPACE_CHECK_IN, CHECK_IN_OCCURRENCE_CAS, TASK_CREATE_THEME, BOARD_THEME_LIST,
+            LANDING_UPDATE_LOCK,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever
@@ -881,7 +884,7 @@ pub mod capability {
     /// so a process that never checks (a test's server, a path someone adds
     /// later) says no rather than yes. `passkey_keys` is offered once the
     /// daemon has read its sshd's version.
-    pub const WITHHELD_UNTIL_OFFERED: &[&str] = &[PASSKEY_KEYS];
+    pub const WITHHELD_UNTIL_OFFERED: &[&str] = &[PASSKEY_KEYS, LANDING_UPDATE_LOCK];
 
     /// Capabilities this process has but does not offer: until offered,
     /// `WITHHELD_UNTIL_OFFERED`.

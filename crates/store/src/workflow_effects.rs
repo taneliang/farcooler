@@ -1,8 +1,75 @@
 //! Durable effect admission metadata only. This module performs no external I/O.
 //! Claimed-but-not-admitted work can be reclaimed; admitted work requires reconciliation.
 use farcooler_workflow::{State, Phase, owns_resource, valid_id};
-use rusqlite::{Transaction, TransactionBehavior, OptionalExtension, params};
+use rusqlite::{Connection, Transaction, TransactionBehavior, OptionalExtension, params};
 use crate::{Store, workflow::Result};
+
+/// Read the admission records used by runners that predate the update interlock.
+pub fn legacy_landing_active(database: &std::path::Path) -> rusqlite::Result<bool> {
+    let conn = Connection::open_with_flags(database, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    conn.busy_timeout(std::time::Duration::ZERO)?;
+    match admitted_landing(&conn) {
+        // A commit may briefly exclude readers. Retry or refuse the update
+        // until it can be checked against a consistent snapshot.
+        Err(err) if writer_busy(&err) => Ok(true),
+        result => result,
+    }
+}
+
+/// Reserve SQLite's writer slot before checking for admitted landings. Older
+/// runners commit admission before launching an effect, so holding this
+/// connection through their shutdown prevents a new admission in the gap.
+/// This transaction changes no rows and rolls back when the connection closes.
+pub fn try_legacy_landing_fence(database: &std::path::Path) -> rusqlite::Result<Option<Connection>> {
+    let conn = Connection::open_with_flags(database, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+    conn.busy_timeout(std::time::Duration::ZERO)?;
+    match conn.execute_batch("BEGIN IMMEDIATE") {
+        Ok(()) => {}
+        Err(err) if writer_busy(&err) => return Ok(None),
+        Err(err) => return Err(err),
+    }
+    if admitted_landing(&conn)? { Ok(None) } else { Ok(Some(conn)) }
+}
+
+fn writer_busy(err: &rusqlite::Error) -> bool {
+    matches!(err.sqlite_error_code(), Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked))
+}
+
+fn admitted_landing(conn: &Connection) -> rusqlite::Result<bool> {
+    let has_outbox: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'workflow_outbox')",
+        [], |row| row.get(0),
+    )?;
+    if !has_outbox { return Ok(false); }
+    // Cancellation changes the original admission to uncertain before its
+    // process stops. Keep waiting while the corresponding Stop is pending.
+    conn.query_row(
+        "SELECT EXISTS (
+             SELECT 1 FROM workflow_outbox o
+             JOIN workflow_states s ON s.workspace = o.workspace
+             WHERE (o.dispatch_state = 'admitted' OR (
+                 o.dispatch_state = 'uncertain' AND EXISTS (
+                     SELECT 1 FROM workflow_outbox stop
+                     WHERE stop.workspace = o.workspace AND stop.active = 1
+                       AND stop.dispatch_state IN ('pending', 'claimed', 'admitted')
+                       AND json_extract(stop.payload, '$.kind.Stop.operation') = o.id
+                 )
+             )) AND (
+                 json_extract(o.payload, '$.kind.Execute') IN ('Land', 'Push', 'PushCandidate', 'PushBranch')
+                 OR (
+                     (json_extract(o.payload, '$.kind.Execute') IN ('Run', 'Check')
+                      OR json_extract(o.payload, '$.kind.Execute.Review') IN ('Agent', 'Dispatch'))
+                     AND EXISTS (
+                         SELECT 1 FROM json_each(s.state, '$.items') i
+                         WHERE i.key = json_extract(o.payload, '$.item')
+                           AND json_type(i.value, '$.group_of') = 'object'
+                     )
+                 )
+             )
+         )",
+        [], |row| row.get(0),
+    )
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EffectClaim {

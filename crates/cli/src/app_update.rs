@@ -110,15 +110,24 @@ async fn request_update(
     let home = socket.parent().expect("app socket has a runtime directory");
     let _reservation = if home.try_exists()? {
         let reservation = farcooler_daemon::landing_update::announce_update(home)?;
-        if wait {
-            drop(crate::daemon_link::wait_for_landing(home, || {
+        let mut reported = false;
+        loop {
+            if farcooler_daemon::landing_update::try_update(home)?.is_some()
+                && !crate::daemon_link::legacy_landing_active(home).await?
+            {
+                break;
+            }
+            if !wait {
+                return Err(format!(
+                    "{} must wait for in-flight landing checks or pushes to finish. Run `{} app update --wait` to wait.",
+                    names.app, names.cli
+                ).into());
+            }
+            if !reported {
                 eprintln!("Waiting for in-flight landing checks or pushes to finish before updating {}.", names.app);
-            }).await?);
-        } else if farcooler_daemon::landing_update::try_update(home)?.is_none() {
-            return Err(format!(
-                "{} must wait for in-flight landing checks or pushes to finish. Run `{} app update --wait` to wait.",
-                names.app, names.cli
-            ).into());
+                reported = true;
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
         // Keep new landings queued while the app updates. The relaunched app
         // can share this reservation and acquire the effect lock for its ensure.

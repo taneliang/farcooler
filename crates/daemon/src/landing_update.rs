@@ -38,6 +38,18 @@ pub fn try_update(home: &Path) -> io::Result<Option<File>> {
     try_lock(home, EFFECT_LOCK, FlockOperation::NonBlockingLockExclusive)
 }
 
+/// The legacy runner holds its socket's owner lock until workflow shutdown
+/// has joined. A listener can disappear before its workflow stops dispatching.
+pub fn runner_stopped(socket: &Path) -> io::Result<bool> {
+    let path = socket.with_extension("lock");
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(true),
+        Err(err) => return Err(err),
+    };
+    Ok(lock(file, FlockOperation::NonBlockingLockExclusive)?.is_some())
+}
+
 const EFFECT_LOCK: &str = "landing-update.lock";
 const WAITER_LOCK: &str = "landing-update-waiters.lock";
 
@@ -52,7 +64,10 @@ fn open_lock(home: &Path, name: &str) -> io::Result<File> {
 }
 
 fn try_lock(home: &Path, name: &str, operation: FlockOperation) -> io::Result<Option<File>> {
-    let file = open_lock(home, name)?;
+    lock(open_lock(home, name)?, operation)
+}
+
+fn lock(file: File, operation: FlockOperation) -> io::Result<Option<File>> {
     match flock(&file, operation) {
         Ok(()) => Ok(Some(file)),
         Err(err) if err == rustix::io::Errno::WOULDBLOCK => Ok(None),

@@ -248,11 +248,20 @@ async fn ensure_in(
     database: &std::path::Path,
     on_wait: impl FnOnce(),
 ) -> Result<(Ensured, String), Box<dyn std::error::Error>> {
+    ensure_in_with_start(socket, database, on_wait, spawn_daemon).await
+}
+
+pub(crate) async fn ensure_in_with_start(
+    socket: &Path,
+    database: &Path,
+    on_wait: impl FnOnce(),
+    start: impl FnOnce() -> Result<(), Box<dyn std::error::Error>>,
+) -> Result<(Ensured, String), Box<dyn std::error::Error>> {
     let link = match dial(socket).await {
         Ok(link) => link,
         Err(ClientError::Connect(_)) => {
             if cutover_stranded_here(database) { return Err(CUTOVER_STRANDED.into()); }
-            spawn_daemon()?;
+            start()?;
             let started = wait_for(socket).await?;
             return Ok((Ensured::Started, started.daemon_build().to_string()));
         }
@@ -271,8 +280,8 @@ async fn ensure_in(
                 return Err("the daemon on this runner is refusing every session and did not identify itself".into());
             };
             terminate(pid)?;
-            wait_until_gone(socket).await?;
-            spawn_daemon()?;
+            wait_until_gone(socket, false).await?;
+            start()?;
             let started = wait_for(socket).await?;
             return Ok((Ensured::Replaced, started.daemon_build().to_string()));
         }
@@ -288,19 +297,33 @@ async fn ensure_in(
     drop(link);
     let home = database.parent().expect("database has a runtime directory");
     let _waiting = farcooler_daemon::landing_update::announce_update(home)?;
-    let _landing = wait_for_landing(home, on_wait).await?;
-    // The runner may have changed while we waited.
-    let mut link = dial(socket).await?;
-    let running = link.daemon_build().to_string();
-    if let Some(kept) = keep_running(&running, database) {
-        return Ok((kept, running));
-    }
+    let mut on_wait = Some(on_wait);
+    let (_landing, mut link, legacy) = loop {
+        if let Some(landing) = farcooler_daemon::landing_update::try_update(home)? {
+            // The runner may have changed while we waited.
+            let link = dial(socket).await?;
+            let running = link.daemon_build();
+            if let Some(kept) = keep_running(running, database) {
+                return Ok((kept, running.to_string()));
+            }
+            if has_landing_update_lock(&link) {
+                break (landing, link, None);
+            }
+            if let Some(fence) = farcooler_store::workflow_effects::try_legacy_landing_fence(database)? {
+                break (landing, link, Some(fence));
+            }
+        }
+        if let Some(report) = on_wait.take() { report(); }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    };
+    let running = link.daemon_build();
     tracing::info!(running, ours = farcooler_protocol::BUILD, "replacing the local daemon");
     stop(&mut link).await?;
     drop(link);
-    wait_until_gone(socket).await?;
+    wait_until_gone(socket, legacy.is_some()).await?;
+    drop(legacy);
 
-    spawn_daemon()?;
+    start()?;
     let started = wait_for(socket).await?;
     let build = started.daemon_build().to_string();
     if !farcooler_protocol::build_identity::same_build(&build, farcooler_protocol::BUILD) {
@@ -330,19 +353,22 @@ fn keep_running(build: &str, database: &Path) -> Option<Ensured> {
     }
 }
 
-/// Drain admitted landings while the caller holds an update reservation.
-pub(crate) async fn wait_for_landing(home: &Path, on_wait: impl FnOnce()) -> std::io::Result<std::fs::File> {
-    use farcooler_daemon::landing_update::try_update;
+fn has_landing_update_lock(link: &Link) -> bool {
+    link.daemon_capabilities().iter().any(|cap| cap == farcooler_protocol::capability::LANDING_UPDATE_LOCK)
+}
 
-    if let Some(hold) = try_update(home)? {
-        return Ok(hold);
-    }
-    on_wait();
-    loop {
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        if let Some(hold) = try_update(home)? {
-            return Ok(hold);
-        }
+/// Preflight the app update against an older runner, without starting it or
+/// keeping its database locked while Sparkle downloads. Ensure fences the
+/// old runner separately at the actual handoff.
+pub(crate) async fn legacy_landing_active(home: &Path) -> Result<bool, Box<dyn std::error::Error>> {
+    let socket = home.join("farcoolerd.sock");
+    match dial(&socket).await {
+        Ok(link) if !has_landing_update_lock(&link) =>
+            Ok(farcooler_store::workflow_effects::legacy_landing_active(&home.join("farcooler.db"))?),
+        Ok(_) | Err(ClientError::Daemon { .. }) => Ok(false),
+        Err(ClientError::Connect(err)) if matches!(err.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused) =>
+            Ok(false),
+        Err(err) => Err(Box::new(err)),
     }
 }
 
@@ -421,15 +447,21 @@ async fn peer_of(socket: &std::path::Path) -> Option<i32> {
 }
 
 /// Poll until nothing answers the socket.
-async fn wait_until_gone(socket: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+async fn wait_until_gone(socket: &Path, legacy_fenced: bool) -> Result<(), Box<dyn std::error::Error>> {
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    while std::time::Instant::now() < deadline {
-        if tokio::net::UnixStream::connect(socket).await.is_err() {
+    loop {
+        if tokio::net::UnixStream::connect(socket).await.is_err()
+            && (!legacy_fenced || farcooler_daemon::landing_update::runner_stopped(socket)?)
+        {
             return Ok(());
+        }
+        // Once a legacy stop is requested, keep its admission fence until
+        // the workflow owner has joined, even if the listener closed earlier.
+        if !legacy_fenced && std::time::Instant::now() >= deadline {
+            return Err("the running daemon did not stop within 5s".into());
         }
         tokio::time::sleep(Duration::from_millis(40)).await;
     }
-    Err("the running daemon did not stop within 5s".into())
 }
 
 fn spawn_daemon() -> Result<(), Box<dyn std::error::Error>> {

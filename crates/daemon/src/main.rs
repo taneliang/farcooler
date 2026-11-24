@@ -478,6 +478,7 @@ async fn run(selected: &paths::RuntimeSelection) -> Result<(), i32> {
         }
     };
 
+    farcooler_protocol::capability::offer(farcooler_protocol::capability::LANDING_UPDATE_LOCK);
     let result = tokio::select! {
         served = server.serve_with_pid(sessions) => served.map_err(|e| {
             tracing::error!(error = %e, "listener stopped");

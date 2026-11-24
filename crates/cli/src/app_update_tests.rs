@@ -133,6 +133,136 @@ async fn a_busy_landing_refuses_an_update_unless_the_caller_asks_to_wait() {
     assert_eq!(app.requests(), vec![serde_json::json!({ "op": "update", "relaunch": true })]);
 }
 
+// The pre-interlock runner announces no capability and does not take either
+// landing lock. It commits admission and settlement in the shared outbox.
+#[derive(Clone, Default)]
+struct LegacyRunner(std::sync::Arc<tokio::sync::Notify>);
+
+impl farcooler_transport::Handler for LegacyRunner {
+    fn peer(&self) -> farcooler_transport::Peer {
+        farcooler_transport::Peer { client_id: None, scope: farcooler_protocol::v1::Scope::HostAdmin }
+    }
+
+    async fn handle(&self, request: farcooler_protocol::v1::Request) -> farcooler_protocol::v1::Response {
+        use farcooler_protocol::v1::{Response, Result, response::Outcome};
+        assert_eq!(request.method, "daemon.shutdown");
+        self.0.notify_one();
+        Response { request_id: request.request_id, outcome: Some(Outcome::Result(Result { value: None })) }
+    }
+}
+
+#[tokio::test]
+async fn an_update_drains_a_legacy_check_and_fences_admission_through_runner_replacement() {
+    use std::os::fd::AsRawFd;
+    use farcooler_transport::{HandshakeConfig, UnixListenerServer};
+    use rusqlite::{Connection, params};
+    use tokio::sync::oneshot;
+
+    let app = FakeApp::start(vec![
+        vec![serde_json::json!({ "event": "installing", "from": about("2329", "8476e3b", 10), "to": latest("2330") })],
+        vec![serde_json::json!({ "event": "about", "app": about("2330", "abcdeff", 11) })],
+    ]);
+    let names = canary();
+    let socket = app._dir.path().join("farcoolerd.sock");
+    let database = app._dir.path().join("farcooler.db");
+    drop(farcooler_store::Store::open(&database).unwrap());
+    let writer = Connection::open(&database).unwrap();
+    writer.execute_batch(
+        "PRAGMA foreign_keys = OFF;
+         INSERT INTO workflow_states VALUES ('w', 1, 1, '{\"items\":{\"group\":{\"group_of\":{}}}}');",
+    ).unwrap();
+    let enqueue = |id, kind| {
+        writer.execute(
+            "INSERT INTO workflow_outbox (workspace, id, revision, payload, payload_hash, active)
+             VALUES ('w', ?1, 1, ?2, '', 1)",
+            params![id, serde_json::json!({ "item": "group", "kind": { "Execute": kind } }).to_string()],
+        ).unwrap();
+    };
+    let admit = |id: &str| writer.execute("UPDATE workflow_outbox SET dispatch_state = 'admitted' WHERE id = ?1", [id]);
+    let settle = |id: &str| {
+        writer.execute("UPDATE workflow_outbox SET dispatch_state = 'settled', active = 0 WHERE id = ?1", [id]).unwrap();
+    };
+    enqueue("gate", "Run");
+    enqueue("push", "Push");
+    enqueue("next", "Push");
+    admit("gate").unwrap();
+
+    let mut check = tokio::process::Command::new("/bin/sh").args(["-c", "read result && printf '%s' \"$result\""])
+        .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).kill_on_drop(true)
+        .spawn().unwrap();
+    let mut input = check.stdin.take().unwrap();
+
+    let old = LegacyRunner::default();
+    let listener = UnixListenerServer::bind(&socket).unwrap();
+    let owner = std::fs::File::create(socket.with_extension("lock")).unwrap();
+    // SAFETY: the test owns this scratch runner's descriptor.
+    assert_eq!(unsafe { libc::flock(owner.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) }, 0);
+    let (closed, listener_closed) = oneshot::channel();
+    let legacy = tokio::spawn(async move {
+        let handler = old.clone();
+        tokio::select! {
+            result = listener.serve(move |_| Some((HandshakeConfig { daemon_version: "pre-interlock".into() }, handler.clone()))) =>
+                panic!("legacy listener exited early: {result:?}"),
+            _ = old.0.notified() => {}
+        }
+        drop(listener);
+        closed.send(()).unwrap();
+    });
+
+    let error = request_update(&app.socket, &names, false, true, false).await.unwrap_err();
+    assert!(error.to_string().contains("wait for in-flight landing checks or pushes to finish"));
+    let mut updating = std::pin::pin!(request_update(&app.socket, &names, false, true, true));
+    assert!(tokio::time::timeout(Duration::from_millis(20), &mut updating).await.is_err());
+    assert!(app.requests().is_empty(), "the old runner's check is still in flight");
+    input.write_all(b"passed\n").await.unwrap();
+    let output = check.wait_with_output().await.unwrap();
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"passed");
+    settle("gate");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::select! {
+            result = &mut updating => panic!("update returned before the app received it: {result:?}"),
+            _ = async {
+                while app.requests().is_empty() {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            } => {}
+        }
+    }).await.unwrap();
+
+    // A legacy runner can admit work while the app downloads. The relaunched
+    // app's ensure must check again and fence the gap between idle and exit.
+    admit("push").unwrap();
+    let (wait, waiting) = oneshot::channel();
+    let mut replacement = None;
+    let ensuring = crate::daemon_link::ensure_in_with_start(&socket, &database, || wait.send(()).unwrap(), || {
+        let settled: i64 = writer.query_row(
+            "SELECT count(*) FROM workflow_outbox WHERE dispatch_state = 'settled'", [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(settled, 2, "the replacement can read both recorded results");
+        let server = UnixListenerServer::bind(&socket)?;
+        replacement = Some(tokio::spawn(async move {
+            server.serve(|_| Some((HandshakeConfig { daemon_version: farcooler_protocol::BUILD.into() }, LegacyRunner::default()))).await
+        }));
+        Ok(())
+    });
+    let finish_old_runner = async {
+        waiting.await.expect("ensure must wait for the admitted push");
+        settle("push");
+        listener_closed.await.unwrap();
+        writer.busy_timeout(Duration::ZERO).unwrap();
+        assert_eq!(admit("next").unwrap_err().sqlite_error_code(), Some(rusqlite::ErrorCode::DatabaseBusy));
+        drop(owner);
+    };
+    let (ensured, (), updated) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(ensuring, finish_old_runner, updating)
+    }).await.unwrap();
+    assert_eq!(ensured.unwrap().0, crate::daemon_link::Ensured::Replaced);
+    assert!(matches!(updated.unwrap(), UpdateReport::Updated { .. }));
+    legacy.await.unwrap();
+    replacement.unwrap().abort();
+}
+
 #[tokio::test]
 async fn an_app_update_keeps_landings_queued_until_the_app_answers() {
     use std::os::fd::AsRawFd;
