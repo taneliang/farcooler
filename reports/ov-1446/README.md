@@ -21,7 +21,9 @@ The full step 3 in [the parity inventory](../ov-1439/parity.md) would exceed the
 
 The scripted fake-runner check creates a ticket, edits it, refuses a stale save, starts it, follows both destination links, and returns to the ticket through Back, reload, and a direct link. A second browser context observes the merged read state. The workstation smoke check opens a Board ticket beside the orchestrator and verifies the draft survives navigation. Rust socket tests exercise ticket writes, shared reads and Engine Start through the daemon dispatcher, and read a workspace with more than 1 MiB of ticket data.
 
-The Board’s Rust projection and socket tests passed. The web unit and workflow suites, Board, Work, Plan and workstation browser checks, both TypeScript checks, the WASM build and shared-core lint passed.
+The Rust client suite passed 407 tests with one ignored. The Rust web, web unit and workflow suites, Board, Work, Plan and workstation browser checks, both TypeScript checks, the WASM build, Clippy and shared-core lint passed.
+
+The web build disables inlining for the browser’s Go Tailcat module. The measured Brotli download is 5,003,167 bytes for Stable and 5,000,563 bytes for Canary, within the existing 5,500,000-byte limit.
 
 The captures use the parity project’s ticket titles and the long brief from ov-1446.
 
