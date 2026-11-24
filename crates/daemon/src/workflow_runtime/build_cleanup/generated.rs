@@ -244,7 +244,7 @@ fn cargo_build_window(dep_info: &Path, stem: &str, dep: &Metadata,
     if fingerprint.canonicalize().ok()? != *fingerprint { return None; }
     let start = changed(&open_regular(&fingerprint.join("invoked.timestamp")).ok()?.metadata().ok()?);
     if changed(dep) < start { return None; }
-    for entry in fs::read_dir(&fingerprint).ok()?.filter_map(Result::ok) {
+    for entry in fs::read_dir(fingerprint).ok()?.filter_map(Result::ok) {
         let filename = entry.file_name();
         let Some(marker) = filename.to_str().and_then(|name| name.strip_suffix(".json")) else { continue };
         if !marker.ends_with(&format!("-{name}")) { continue; }
@@ -298,7 +298,7 @@ fn rustc_cache_header(file: &mut File) -> Option<Vec<u8>> {
     let mut end = [0; RUSTC_END.len()];
     file.seek(SeekFrom::End(-(end.len() as i64))).ok()?;
     file.read_exact(&mut end).ok()?;
-    (&end == RUSTC_END).then(|| [prefix.as_slice(), &version].concat())
+    (end == RUSTC_END).then(|| [prefix.as_slice(), &version].concat())
 }
 
 fn incremental_outputs(session: &Path, outputs: &mut BTreeMap<PathBuf, Metadata>) {

@@ -437,7 +437,7 @@ pub(super) fn folder_paths<'a>(tree: &'a Path, folder: &'a str) -> impl Iterator
     // Older defaults stored a wildcard. Only its known literal replacements may be reclaimed.
     let legacy = folder == "apps/*/build";
     let replacements = if legacy { &DEFAULT_BUILD_FOLDERS[2..6] } else { &[] };
-    replacements.iter().copied().chain(Some(folder).filter(|_| !legacy)).map(move |folder| {
+    replacements.iter().copied().chain((!legacy).then_some(folder)).map(move |folder| {
         if !valid_folder(folder) || folder.contains('*') {
             return Err(std::io::Error::other("cleanup requires a literal folder"));
         }
