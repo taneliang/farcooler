@@ -75,3 +75,33 @@ An authenticated Main orchestrator or owner session is required to read the
 selected bundle and file the change. The filing evidence is the draft ID,
 the Needs Decision card ID, the expected published pin, and the draft’s
 `pending` state.
+
+### Return pass, Nov 25
+
+Canary again returned `scope-denied` (`known caller required`) for both
+`workspace workflow-draft-status` and the selected-configuration read in
+`workspace re-pin --out`, after the sandbox allowed the socket connection.
+The installed CLI still rejects `workflow bundle` as an unknown subcommand.
+The status and proposal RPCs use the same caller admission check. The proposal
+also replaces any pending draft on Main, so the status and live bundle are
+needed before submitting this full definition. **Filing remains blocked.**
+The pending draft ID, decision card and expected published pin are unavailable.
+
+The return pass reran all five affected gate suites. All 78 tests passed,
+including the planted-lint and docs-only cases. Suites ran in sequence at
+niceness 10 with four Cargo jobs and build output under `$FARCOOLER_SCRATCH`.
+
+From an admitted session with the ov-1456 CLI, export Main using
+`farcooler workflow bundle 01a0e3c7-3e2c-7ed0-b31c-0cc0d7401571 --json`
+and check its pending drafts with `workspace workflow-draft-status`. Verify
+the checked-in proposal against the export before filing. If the export has
+additional changes, carry those forward into the proposal.
+
+```sh
+farcooler --json workspace workflow-draft 01a0e3c7-3e2c-7ed0-b31c-0cc0d7401571 \
+  --file .claude/agent/reports/ov-1071/workflow-main.json \
+  --reason 'ov-1460: Run landing Clippy on changed crates before review.'
+```
+
+Record `draft.id`, `draft.card`, `draft.drafted_against` (the expected
+published pin) and `draft.state` from the JSON reply.
