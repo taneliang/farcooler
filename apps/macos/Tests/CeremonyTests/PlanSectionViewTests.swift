@@ -110,7 +110,9 @@ struct PlanSectionViewTests {
         for id in ["plan-landing-empty", "plan-waiting-empty"] { #expect(quiet[id] != nil, "\(id) in \(quiet.keys.sorted())") }
         #expect(quiet["plan-in-review"] == nil && quiet["plan-building"] == nil, "In Review and Building say nothing with nothing")
         let none = try await Self.drawn(.emptyNext, width: 600)
-        #expect(none["plan-waiting-empty"] != nil && none["plan-landing-empty"] != nil, "Next and Landing are empty")
+        #expect(none["plan-landing-empty"] != nil)
+        #expect(none["plan-next-up"] == nil && none["plan-not-ranked"] != nil)
+        #expect(none["plan-ticket-ov-474"] != nil)
         #expect(none["plan-agents"] != nil && none["plan-agents-empty"] == nil)
         let store = try await Self.store(.quiet)
         let view = try Self.view(store)
