@@ -20,6 +20,7 @@ swift-test-guard, nextest --profile ci). That used to be recalled by hand from
     scripts/lane-gate.py                      # this worktree against origin/main
     scripts/lane-gate.py --dry-run            # the plan only: nothing runs
     scripts/lane-gate.py --quick-only         # pre-review checks; no build or landing verdict
+    scripts/lane-gate.py --clippy-only        # pre-review Clippy on changed crates
     scripts/lane-gate.py --only wire,relay    # or --skip relay
     scripts/lane-gate.py --base main --log-dir /tmp/gate-logs
     scripts/lane-gate.py --self-test
@@ -80,6 +81,7 @@ import os
 import pathlib
 import platform
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -890,6 +892,87 @@ def md(cell):
     return cell.replace("|", "\\|").replace("`", "'")
 
 
+def changed_rust_packages(repo, files, env):
+    metadata = subprocess.check_output(["cargo", "metadata", "--locked", "--no-deps",
+                                        "--format-version", "1"], cwd=repo, env=env, text=True)
+    metadata = json.loads(metadata)
+    members = set(metadata["workspace_members"])
+    roots = {p["name"]: pathlib.Path(p["manifest_path"]).parent.relative_to(repo)
+             for p in metadata["packages"] if p["id"] in members}
+    # Prefer the innermost crate if the workspace has nested members.
+    by_depth = sorted(roots, key=lambda name: len(roots[name].parts), reverse=True)
+    packages, shared = set(), []
+    for file in files:
+        path = pathlib.Path(file)
+        owner = next((name for name in by_depth if roots[name] in path.parents), None)
+        if owner:
+            packages.add(owner)
+        else:
+            shared.append(repo / path)
+    if shared:
+        # Some test modules live in test/ and are included by workspace crates.
+        selector = load_module("rust_select", repo / "scripts/rust-select.py")
+        includes = selector.includes(repo, roots)
+        for path in shared:
+            packages.update(includes.get(path.resolve(), ()))
+    return packages
+
+
+def check_clippy(args):
+    import landing_policy
+
+    started = time.monotonic()
+    landing_policy.readonly_git(os.environ)
+    repo = pathlib.Path(args.worktree).resolve()
+    files = [path for path in changed_files(repo, args.base) if path.endswith(".rs")]
+    if not files:
+        print("lane-gate: Clippy skipped (no Rust files changed)")
+        return 0
+    tmp = pathlib.Path(os.environ.get("FARCOOLER_SCRATCH") or tempfile.gettempdir())
+    ctx = make_ctx(repo, tmp, args.base)
+    env = base_env(repo, tmp, ctx)
+    env.update(hl.lean_cargo_env(repo))
+    env.setdefault("CARGO_BUILD_JOBS", "4")
+    if scratch := os.environ.get("FARCOOLER_SCRATCH"):
+        env.setdefault("CARGO_TARGET_DIR", str(pathlib.Path(scratch) / "target"))
+    packages = changed_rust_packages(repo, files, env)
+    if not packages:
+        print("lane-gate: Clippy skipped (no changed Rust files belong to a current workspace crate)")
+        return 0
+
+    workflow = {"ci": (repo / ".github/workflows/ci.yml").read_text()}
+    steps = landing_policy.clippy_steps(steps_for("rust", workflow, ctx))
+    commands = []
+    workspace_steps = 0
+    for step in steps:
+        argv = shlex.split(step.run)
+        if argv[2:3] == ["--workspace"]:
+            workspace_steps += 1
+            scope = [arg for name in sorted(packages) for arg in ("-p", name)]
+            argv[2:3] = scope
+        elif argv[2:3] == ["-p"] and len(argv) >= 4:
+            if argv[3] not in packages:
+                continue
+        else:
+            raise ValueError(f"cannot scope the landing Clippy command: {step.run.strip()}")
+        commands.append((step, argv))
+    if workspace_steps != 1:
+        raise ValueError("expected exactly one workspace Clippy command in the landing plan")
+
+    locked = hl.lock_wanted(args.no_lock)
+    with (machine_lock(repo, "pre-review Clippy") if locked and not args.dry_run else contextlib.nullcontext()):
+        for step, argv in commands:
+            print(f"  {'plan' if args.dry_run else 'run '} {shlex.join(argv)}", flush=True)
+            if not args.dry_run:
+                rc = subprocess.run(argv, cwd=repo / (step.cwd or "."), env={**env, **step.env}).returncode
+                if rc:
+                    print(f"lane-gate: Clippy failed after {time.monotonic() - started:.2f}s (exit {rc})", flush=True)
+                    return rc if rc > 0 else 128 - rc
+    if not args.dry_run:
+        print(f"lane-gate: Clippy passed in {time.monotonic() - started:.2f}s", flush=True)
+    return 0
+
+
 def main(argv):
     ap = argparse.ArgumentParser(description="Run the CI jobs a change reaches.")
     ap.add_argument("--full-rust", action="store_true", help="run the whole Rust suite even when the change only reaches some crates, plain or --landing (ov-1268)")
@@ -908,7 +991,9 @@ def main(argv):
     ap.add_argument("--strict-leaks", action="store_true", help="a new system temp entry or plist fails the run, even though sibling lanes share this Mac")
     ap.add_argument("--keep-target", action="store_true", help="keep the worktree's target/ after a fully green gate (by default a lane worktree's is removed then)")
     ap.add_argument("--fail-fast", action="store_true", help="stop at the first failed step (for landing gates)")
-    ap.add_argument("--quick-only", action="store_true", help="run just the build-free landing checks before review")
+    review = ap.add_mutually_exclusive_group()
+    review.add_argument("--quick-only", action="store_true", help="run just the build-free landing checks before review")
+    review.add_argument("--clippy-only", action="store_true", help="run landing Clippy commands on changed workspace crates before review")
     ap.add_argument("--wait-for-unlock", action="store_true", help="wait for an unlocked screen before Mac builds")
     ap.add_argument("--disk-preflight", action="store_true", help="landing disk admission only; no builds or lock wait")
     ap.add_argument("--self-test", action="store_true")
@@ -919,6 +1004,12 @@ def main(argv):
         return self_test()
     hl.survive_dead_output()  # a waiting gate outlives the terminal or pipe that started it (ov-839)
     try:
+        if args.clippy_only:
+            try:
+                return check_clippy(args)
+            except (ValueError, subprocess.CalledProcessError) as e:
+                print(f"lane-gate: Clippy planning failed: {e}", file=sys.stderr)
+                return 1
         return gate(args)
     except OSError as e:
         if not hl.disk_full(e):

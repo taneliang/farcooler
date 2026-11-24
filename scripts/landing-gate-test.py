@@ -570,6 +570,83 @@ class LandingTests(unittest.TestCase):
         with patch.object(lane.subprocess, "run", side_effect=OSError("missing cargo")):
             self.assertIn("full workspace", lane.rust_impact(ROOT, [("M", "crates/cli/src/main.rs")]))
 
+    def test_main_clippy_check_rejects_a_changed_crate_before_review(self):
+        bundle = json.loads((ROOT / ".claude/agent/reports/ov-1071/workflow-main.json").read_text())
+        stages = bundle["definition"]["stages"]
+        review = next(i for i, stage in enumerate(stages) if "Review" in stage["kind"])
+        stage = stages[review - 1]
+        self.assertEqual(stage["id"], "clippy")
+        self.assertEqual(stage["kind"], "Check")
+        self.assertEqual(stage["routes"]["rejected"], {"Step": "build"})
+        command = bundle["adapter"]["config"]["checks"][int(stage["operation"]["arguments"][1])]
+
+        with tempfile.TemporaryDirectory(dir=os.environ.get("FARCOOLER_SCRATCH")) as tmp:
+            repo = Path(tmp).resolve()
+
+            def write(name, content):
+                path = repo / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content)
+
+            def git(*args):
+                return subprocess.check_output(
+                    ["git", "-c", "commit.gpgsign=false", "-c", "user.name=Fixture",
+                     "-c", "user.email=fixture@example.invalid", *args], cwd=repo, text=True).strip()
+
+            def commit(message, *paths):
+                git("add", "--", *paths)
+                git("commit", "-qm", message)
+
+            good = "pub fn select(x: Option<u8>) -> Option<u8> { x.filter(|&v| v > 0) }\n"
+            bad = "pub fn select(x: Option<u8>) -> Option<u8> { x.and_then(|v| if v > 0 { Some(v) } else { None }) }\n"
+            source = "crates/daemon/src/lib.rs"
+            git("init", "-q")
+            for name in ("lane-gate.py", "landing_policy.py", "heavy_lock.py", "process_guard.py"):
+                (repo / "scripts").mkdir(exist_ok=True)
+                shutil.copyfile(ROOT / "scripts" / name, repo / "scripts" / name)
+            write(".github/workflows/ci.yml", (ROOT / ".github/workflows/ci.yml").read_text())
+            write("Cargo.toml", '[workspace]\nresolver = "2"\nmembers = ["crates/*"]\n')
+            for crate in ("daemon", "untouched"):
+                write(f"crates/{crate}/Cargo.toml",
+                      f'[package]\nname = "farcooler-{crate}"\nversion = "0.1.0"\nedition = "2021"\n'
+                      '[features]\ntailcat = []\ntailcat-helper = []\n')
+            write(source, good)
+            write("crates/untouched/src/lib.rs", bad)
+            commit("base", ".github", "Cargo.toml", "crates")
+            base = git("rev-parse", "HEAD")
+            env = {**os.environ, **command["environment"], "PATH": os.environ["PATH"],
+                   "HOME": os.environ["HOME"], "FARCOOLER_BASE": base,
+                   "FARCOOLER_OPERATION_BINDING": "fixture", "CARGO_NET_OFFLINE": "true",
+                   "GIT_OPTIONAL_LOCKS": "0", "CI": "1", "CARGO_TARGET_DIR": str(repo / "build")}
+            write(".gitignore", "/build/\n/Cargo.lock\n")
+
+            def check():
+                return subprocess.run(command["argv"], cwd=repo, env=env,
+                                      capture_output=True, text=True)
+
+            write("docs.md", "A non-Rust candidate\n")
+            commit("docs", "docs.md")
+            skipped = check()
+            self.assertEqual(skipped.returncode, 0, skipped.stdout + skipped.stderr)
+            self.assertIn("no Rust files changed", skipped.stdout)
+            self.assertFalse((repo / "build").exists())
+
+            for lint in (bad, '#[cfg(feature = "tailcat")]\n' + bad):
+                write(source, lint)
+                commit("introduce Clippy lint", source)
+                rejected = check()
+                self.assertNotEqual(rejected.returncode, 0, rejected.stdout + rejected.stderr)
+                self.assertIn("clippy::manual_filter", rejected.stderr)
+                self.assertIn("crates/daemon/src/lib.rs", rejected.stderr)
+
+            write(source, good + "// Repair the candidate.\n")
+            commit("repair Clippy lint", source)
+            repaired = check()
+            self.assertEqual(repaired.returncode, 0, repaired.stdout + repaired.stderr)
+            self.assertIn("cargo clippy -p farcooler-daemon --all-targets -- -D warnings", repaired.stdout)
+            self.assertIn("cargo clippy -p farcooler-daemon --features tailcat --all-targets -- -D warnings", repaired.stdout)
+            self.assertNotIn("farcooler-untouched", repaired.stdout + repaired.stderr)
+
     def test_real_wrapper_uses_pinned_combined_diff_and_never_builds_reports(self):
         with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as stub_dir:
             repo = Path(tmp)

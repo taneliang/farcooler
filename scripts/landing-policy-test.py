@@ -114,15 +114,17 @@ class LandingTests(unittest.TestCase):
         workflows = {"ci": (ROOT / ".github/workflows/ci.yml").read_text()}
         ctx = lane.make_ctx(ROOT, ROOT, "HEAD")
         plans = {"wire": lane.steps_for("wire", workflows, ctx)}
-        fixture = next(step for step in plans["wire"]
-                       if step.run.strip() == "python3 scripts/rust-select-test.py")
+        fixtures = [step for step in plans["wire"] if step.run.strip() in {
+            "python3 scripts/rust-select-test.py", "python3 scripts/landing-gate-test.py"}]
+        self.assertEqual(len(fixtures), 2)
         for review in (False, True):
             with self.subTest(review=review):
                 quick, remaining = policy.split_quick(plans, ["wire"], "HEAD", lane.Step,
                                                       typeshare_ready=True, review=review)
                 self.assertEqual(quick["wire"][0].run.strip(), "./scripts/shared-core-lint.py")
-                self.assertNotIn(fixture, quick["wire"])
-                self.assertIn(fixture, remaining["wire"])
+                for fixture in fixtures:
+                    self.assertNotIn(fixture, quick["wire"])
+                    self.assertIn(fixture, remaining["wire"])
 
     def test_gate_script_consumers_and_unknowns_stay_covered(self):
         for path, required in (("scripts/lane-gate.py", set(lane.JOBS)),

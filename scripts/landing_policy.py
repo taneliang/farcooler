@@ -276,6 +276,7 @@ def workflow_checks(plans, files, step_type):
 # have taken more than a minute on the landing runner (see reports/ov-1443).
 DEFERRED_WIRE = {
     "python3 scripts/rust-select-test.py",
+    "python3 scripts/landing-gate-test.py",
     "HEAVY_LOCK_HELD=1 ./scripts/lane-gate.py --self-test",
     "python3 scripts/lane-gate-lifetime-test.py",
     "python3 scripts/gate-evidence-test.py",
@@ -575,6 +576,10 @@ def families(chosen):
     return [jobs for family, jobs in sorted(groups.items(), key=lambda item: priority.get(item[0], 4))]
 
 
+def clippy_steps(steps):
+    return [step for step in steps if step.run.lstrip().startswith("cargo clippy ")]
+
+
 def run(chosen, plans, rows, repo, tmp, ctx, logdir, args, run_one_job):
     """Bounded parallel families, ordered steps, deterministic complete results."""
     import copy
@@ -602,7 +607,7 @@ def run(chosen, plans, rows, repo, tmp, ctx, logdir, args, run_one_job):
     # lock still protects artifacts; test execution can overlap lint compilation.
     chosen, plans = list(chosen), dict(plans)
     if "rust" in chosen:
-        lints = [s for s in plans["rust"] if s.run.lstrip().startswith("cargo clippy ")]
+        lints = clippy_steps(plans["rust"])
         if lints:
             plans["rust-lints"] = lints
             plans["rust"] = [s for s in plans["rust"] if s not in lints]
