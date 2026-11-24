@@ -65,6 +65,8 @@ pub enum WorkflowCmd {
     /// Pipe --json stdout directly to a parser. If you store it in a shell variable,
     /// use printf '%s\n' "$value" to pass it on. Shell echo can interpret JSON escapes.
     Get { workspace: Uuid, #[arg(long)] full: bool },
+    /// Export the published definition and adapter as JSON for workspace workflow-draft --file.
+    Bundle { workspace: Uuid },
     /// Read one ticket's process logs, from every run, failed or not: the tails `get` leaves out for archived
     /// and removed tickets and for a live ticket's earlier steps. Each names its whole log file too.
     Logs { workspace: Uuid, item: String },
@@ -164,7 +166,7 @@ impl WorkflowCmd {
     pub fn action(self) -> Result<(Uuid, Action), Box<dyn std::error::Error>> {
         Ok(match self {
             Self::Rollback { .. } => return Err("rollback is prepared from current state".into()),
-            Self::Get { workspace, .. } => (workspace,Action::Get),
+            Self::Get { workspace, .. } | Self::Bundle { workspace } => (workspace, Action::Get),
             Self::Logs { workspace, item } => (workspace,Action::Logs { item }),
             Self::Enqueue { workspace,item,pin,identity } => (workspace,Action::Enqueue { mutation:identity.mutation(),item,pin }),
             Self::Approve { workspace,item,run,pin,candidate,identity } => (workspace,Action::Approve { mutation:identity.mutation(),item,run,pin,candidate }),
@@ -359,6 +361,30 @@ pub async fn get_published(link:&mut crate::Link, workspace:Uuid) -> Result<serd
     let result::Value::WorkflowReply(reply) = expect_value(reply.value)? else { return Err("unexpected workflow reply".into()) };
     Ok(serde_json::from_str(&reply.json)?)
 }
+/// Export the exact published bundle, including on runners that support the earlier re-pin projection.
+async fn export_bundle(link: &mut crate::Link, workspace: Uuid, json: bool) -> Fallible {
+    use farcooler_daemon_contracts::landing_templates::Bundle;
+    if !link.daemon_capabilities().iter().any(|c| c == capability::WORKFLOW_COMMANDS) {
+        return Err("runner lacks workflow commands".into());
+    }
+    let mut req = full_request(workspace)?;
+    req.accepts.extend([farcooler_protocol::workflow_commands::BUNDLE_VIEW.into(), "workflow_repin_v1".into()]);
+    let reply = read_deadline(link.call(req)).await??;
+    let result::Value::WorkflowReply(reply) = expect_value(reply.value)? else { return Err("unexpected workflow reply".into()) };
+    if reply.schema != 1 { return Err("unsupported workflow reply schema".into()); }
+    let value: serde_json::Value = serde_json::from_str(&reply.json)?;
+    let bundle: Bundle = if let Some(config) = value.get("configuration") {
+        if config.is_null() { return Err("This workspace has no published workflow.".into()); }
+        if config["adapter"].is_null() { return Err("This workspace's published workflow has no adapter to draft from.".into()); }
+        serde_json::from_value(serde_json::json!({ "definition": config["definition"], "adapter": config["adapter"] }))?
+    } else {
+        serde_json::from_value(value)?
+    };
+    if json { println!("{}", serde_json::to_string(&bundle)?); }
+    else { println!("{}", serde_json::to_string_pretty(&bundle)?); }
+    Ok(())
+}
+
 /// The `workflow.watch` request: the item, and nothing a viewer could type or size.
 pub fn watch_request(workspace:Uuid, item:&str) -> pb::Request {
     let json = serde_json::json!({ "item": item }).to_string();
@@ -411,6 +437,10 @@ pub async fn workflow(runner:Option<&str>,cmd:WorkflowCmd,json:bool) -> Fallible
             })?;
         println!("{}", if passed { "Recorded: passed." } else { "Recorded: not passed." });
         return Ok(());
+    }
+    if let WorkflowCmd::Bundle { workspace } = cmd {
+        let mut link = crate::connect_to(runner).await?;
+        return export_bundle(&mut link, workspace, json).await;
     }
     let full = matches!(&cmd, WorkflowCmd::Get { full:true, .. });
     if let WorkflowCmd::Rollback { workspace, reason } = cmd {

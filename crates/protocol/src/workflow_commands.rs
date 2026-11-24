@@ -3,6 +3,8 @@ pub use farcooler_workflow::{CloseResolution, Definition, valid_rework_reason};
 use serde::{Deserialize, Serialize};
 
 pub const MAX_BYTES: usize = 60 * 1024;
+/// Ask workflow.get for the published definition and adapter in draft-file format.
+pub const BUNDLE_VIEW: &str = "workflow_bundle_v1";
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Mutation {

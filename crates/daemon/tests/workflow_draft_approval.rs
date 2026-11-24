@@ -556,3 +556,83 @@ async fn an_update_that_changes_the_engines_hooks_files_a_repin_draft_and_strand
     drop(link);
     host.close().await;
 }
+
+#[tokio::test]
+async fn ov1456_bundle_exports_live_settings_and_can_draft_a_change() {
+    if as_a_person("ov1456_bundle_exports_live_settings_and_can_draft_a_change").await { return; }
+    let (dir, config) = configured().await;
+    let host = Host::open(dir.path()).await;
+    let (ws, mut link) = (host.workspace, host.connect().await);
+    let live = bundle(&config, "ticket-push", "make check");
+    let receipt = call(&mut link, ws, Action::Publish {
+        reason: None, notifications: None, adapter: Some(Box::new(live.adapter.clone())),
+        expected_pin: None, definition: live.definition.clone(),
+        mutation: Mutation { id: "live".into(), revision: 0, epoch: 1, sequence: 1 },
+    }).await;
+    assert!(receipt.pointer("/receipt/result/Ok").is_some(), "{receipt}");
+    let published = pin(&host);
+    let revision = host.service.store.workflow_state_revision(&ws.to_string()).unwrap().unwrap_or(0);
+    let tracked = call(&mut link, ws, Action::Track {
+        mutation: Mutation { id: "track".into(), revision, epoch: 1, sequence: 2 },
+        item: "history".into(), column: None,
+    }).await;
+    assert!(tracked.pointer("/receipt/result/Ok").is_some(), "{tracked}");
+    let mut state = host.service.store.workflow_state(&ws.to_string()).unwrap().unwrap();
+    state.seen.extend((0..4000).map(|n| format!("{n}-{}", "history".repeat(42))));
+    host.service.store.workflow_state_for_tests(&state).unwrap();
+
+    let mut req = farcooler_transport::request("workflow.get");
+    req.target_resource_id = Some(bytes::Bytes::copy_from_slice(ws.as_bytes()));
+    req.payload = Some(request::Payload::WorkflowCommand(pb::WorkflowCommand { schema: 1, json: r#"{"action":"Get"}"#.into() }));
+    let full = link.call(req.clone()).await.unwrap_err();
+    assert!(matches!(&full, farcooler_transport::ClientError::Daemon { what, .. } if what == "response_too_large"), "{full:?}");
+    req.accepts.push("workflow_bundle_v1".into());
+    let result::Value::WorkflowReply(reply) = link.call(req).await.unwrap().value.unwrap() else { panic!("wrong result") };
+    assert!(reply.json.len() < 60 * 1024);
+    let exported: lt::Bundle = serde_json::from_str(&reply.json).unwrap();
+    assert_eq!(exported, live);
+    use farcooler_daemon::workflow_runtime::CodingConfigExt;
+    use farcooler_protocol::workflow_config::AdapterConfiguration;
+    use farcooler_workflow::{StageKind, Target};
+    let AdapterConfiguration::Coding(before) = exported.adapter;
+    let mut after = before.clone();
+    after.checks.push(CodingCommand {
+        argv: vec!["/bin/sh".into(), "-c".into(), "scripts/lane-gate.py --quick-only".into()],
+        environment: Default::default(), timeout_ms: 600_000,
+    });
+    let mut definition = farcooler_daemon::workflow_starter::repin_definition(&exported.definition, &before, &after).unwrap();
+    let mut quick = after.stage("quick-checks", StageKind::Check, "coding-check/v1", &(after.checks.len() - 1).to_string());
+    quick.routes.insert("rejected".into(), Target::Step("build".into()));
+    quick.limit = 4;
+    let build = definition.stages.iter().position(|stage| stage.id == "build").unwrap();
+    definition.stages.insert(build + 1, quick);
+    let changed = lt::Bundle { definition, adapter: AdapterConfiguration::Coding(after) };
+    let draft = propose(&mut link, ws, changed, "Run quick checks after Build.").await;
+    assert_eq!(draft["draft"]["state"], "pending");
+    assert_eq!(host.service.store.get_task(card_of(&draft)).unwrap().status, TaskStatus::NeedsDecision);
+    assert_eq!(pin(&host), published);
+    drop(link);
+    host.close().await;
+}
+
+#[tokio::test]
+async fn ov1456_draft_refusal_names_the_stage_and_operation_pin() {
+    if as_a_person("ov1456_draft_refusal_names_the_stage_and_operation_pin").await { return; }
+    let (dir, config) = configured().await;
+    let host = Host::open(dir.path()).await;
+    let (ws, mut link) = (host.workspace, host.connect().await);
+    let mut bad = bundle(&config, "ticket-push", "make check");
+    let stage = &mut bad.definition.stages[0];
+    let stage_id = stage.id.clone();
+    stage.operation.arguments[0] = "foreign-pin".into();
+    let action = Action::Propose { reason: "Check the draft.".into(), definition: bad.definition, adapter: Box::new(bad.adapter) };
+    let mut req = farcooler_transport::request(action.method());
+    req.target_resource_id = Some(bytes::Bytes::copy_from_slice(ws.as_bytes()));
+    req.payload = Some(request::Payload::WorkflowCommand(pb::WorkflowCommand { schema: 1, json: serde_json::to_string(&action).unwrap() }));
+    let refusal = link.call(req).await.unwrap_err().to_string();
+    assert!(refusal.contains(&stage_id) && refusal.contains("operation.arguments[0]")
+        && refusal.contains("adapter pin"), "{refusal}");
+    assert!(!refusal.contains("foreign-pin"), "{refusal}");
+    drop(link);
+    host.close().await;
+}

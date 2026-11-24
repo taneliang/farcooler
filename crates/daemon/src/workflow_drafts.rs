@@ -227,15 +227,26 @@ pub(crate) fn bundle_diff(before: Option<serde_json::Value>, after: serde_json::
 pub fn propose(svc: &Service, watcher: &crate::watch::Watcher, workspace: Uuid, reason: &str, definition: Definition, adapter: AdapterConfiguration) -> Result<Draft> {
     // A member-led orchestrator reads `workflow.get` with every environment value hidden; proposing that back would
     // publish the literal marker as the value (R-111, L9). It is refused, never kept or filled in.
-    if hides_a_value(&adapter) { return Err(DomainError::InvalidArgument { what: "adapter" }); }
+    if hides_a_value(&adapter) {
+        return Err(DomainError::refused("Draft adapter environment contains hidden values. Export the bundle as the owner.".into()));
+    }
     let reason = reason.trim();
-    if reason.is_empty() || reason.chars().count() > MAX_REASON { return Err(DomainError::InvalidArgument { what: "reason" }); }
+    if reason.is_empty() || reason.chars().count() > MAX_REASON {
+        return Err(DomainError::refused(format!("Draft reason must contain 1 to {MAX_REASON} characters.")));
+    }
     // A draft that couldn't publish is refused now, not when someone taps Approve.
-    definition.validate().map_err(|_| DomainError::InvalidArgument { what: "definition" })?;
+    definition.validate_detailed().map_err(|detail| DomainError::refused(format!("Draft definition {detail}.")))?;
     let AdapterConfiguration::Coding(config) = &adapter;
-    crate::workflow_runtime::CodingConfigExt::validate_definition(config, &definition).map_err(|_| DomainError::InvalidArgument { what: "definition" })?;
+    use crate::workflow_runtime::CodingConfigExt;
+    config.validate().map_err(|error| DomainError::refused(format!("Draft adapter {}.", error.validation_rule())))?;
+    crate::workflow_runtime::PinnedDefinition::validate_pinned_definition(config, &definition)
+        .map_err(|error| DomainError::refused(format!("Draft definition {}.", error.validation_rule())))?;
     // A gate can only wait on someone who could answer it (ov-1002).
-    crate::workflow_deciders::refuse_unknown(&svc.store, &definition).map_err(|_| DomainError::InvalidArgument { what: "decider" })?;
+    if let Some((stage, field, _)) = crate::workflow_deciders::unknown_decider(&svc.store, &definition) {
+        return Err(DomainError::refused(format!(
+            "Draft definition stage {stage:?} field {field} must name a decider who can answer this gate."
+        )));
+    }
     let current = svc.store.workflow_configuration(&workspace.to_string()).map_err(|_| DomainError::OperationFailed)?;
     let bundle = crate::landing_templates::Bundle { definition, adapter };
     let before = current.as_ref().map(|c| serde_json::json!({"definition": c.definition, "adapter": c.adapter}));

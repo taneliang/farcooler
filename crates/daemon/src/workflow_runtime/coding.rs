@@ -34,30 +34,42 @@ impl CommandValidation for CodingCommand {
         Ok(())
     }
 }
-pub(super) trait PinnedDefinition {
+pub(crate) trait PinnedDefinition {
     fn validate_pinned_definition(&self, definition: &Definition) -> Result<()>;
     /// The steps of a group item, which is a definition of its own.
     fn validate_pinned_group(&self, definition: &Definition) -> Result<()>;
 }
 impl CodingConfigExt for CodingConfig {
     fn validate(&self) -> Result<()> {
-        if self.repository.canonicalize()? != self.repository || (!self.repository.join(".git").is_dir() || self.repository.join(".git").canonicalize()? != self.repository.join(".git"))
-            || !sha(&self.base) || !self.landing_ref.starts_with("refs/heads/")
-            || self.landing_ref.contains("..") || !valid_id(&self.landing_ref)
-            || self.checks.len() > 8
-            || self.ci.repository.is_empty() || self.ci.workflow.is_empty() || self.ci.event.is_empty()
-        { return Err(Error::Refused("invalid coding configuration")); }
-        if let Some(landing) = &self.landing { validate_landing_identity(landing)?; }
+        let repository = || -> Result<()> {
+            let git = self.repository.join(".git");
+            if self.repository.canonicalize()? != self.repository || !git.is_dir() || git.canonicalize()? != git {
+                return Err(Error::Refused("must name the runner's canonical checkout with a local .git directory"));
+            }
+            Ok(())
+        };
+        repository().map_err(|error| error.at_field("repository"))?;
+        if !sha(&self.base) { return Err(Error::Validation("base must be a 40-character commit hash".into())); }
+        if !self.landing_ref.starts_with("refs/heads/") || self.landing_ref.contains("..") || !valid_id(&self.landing_ref) {
+            return Err(Error::Validation("landing_ref must be a valid branch ref".into()));
+        }
+        if self.checks.len() > 8 { return Err(Error::Validation("checks may contain at most eight commands".into())); }
+        for (field, value) in [("ci.repository", &self.ci.repository), ("ci.workflow", &self.ci.workflow), ("ci.event", &self.ci.event)] {
+            if value.is_empty() { return Err(Error::Validation(format!("{field} must be set"))); }
+        }
+        if let Some(landing) = &self.landing {
+            validate_landing_identity(landing).map_err(|error| error.at_field("landing"))?;
+        }
         match &self.harness {
-            CodingHarness::Command(command) => command.validate()?,
+            CodingHarness::Command(command) => command.validate().map_err(|error| error.at_field("harness.Command"))?,
             CodingHarness::Native { preset, settings, project_hooks, plugin_dir, prompt, process, codex_hooks } => {
                 if crate::orchestrator::harness_of(preset).is_none() || prompt.len() > 4096
                     || !process.argv.is_empty() || plugin_dir.is_some()
                 { return Err(Error::Refused("native launch requires existing settings; plugins need separate allocation")); }
                 // Empty argv is intentional: the retained builder, not config text,
                 // supplies the native launch command.
-                let mut policy = process.clone(); policy.argv = vec!["/bin/sh".into()]; policy.validate()?;
-                if let Some(settings) = settings { settings.verify()?; }
+                let mut policy = process.clone(); policy.argv = vec!["/bin/sh".into()]; policy.validate().map_err(|error| error.at_field("harness.Native.process"))?;
+                if let Some(settings) = settings { settings.verify().map_err(|error| error.at_field("harness.Native.settings"))?; }
                 if preset.split(':').next() == Some("claude") && settings.is_none() {
                     return Err(Error::Refused("claude requires pinned existing hook settings"));
                 }
@@ -66,7 +78,7 @@ impl CodingConfigExt for CodingConfig {
                     if !["codex", "cursor"].iter().any(|h| project_hooks_path(h).is_some_and(|r| hooks.path == self.repository.join(r))) {
                         return Err(Error::Refused("foreign project hook path"));
                     }
-                    hooks.verify()?;
+                    hooks.verify().map_err(|error| error.at_field("harness.Native.project_hooks"))?;
                 }
                 // The runner's own copy of Codex's hooks (ov-1088), which the engine writes into each worktree. One
                 // inside the repository is a committed file by another name, and two Codex hooks files can't both be it.
@@ -75,7 +87,7 @@ impl CodingConfigExt for CodingConfig {
                     if project_hooks.as_ref().is_some_and(|h| h.path == self.repository.join(CODEX_HOOKS)) {
                         return Err(Error::Refused("two codex hooks files"));
                     }
-                    hooks.verify()?;
+                    hooks.verify().map_err(|error| error.at_field("harness.Native.codex_hooks"))?;
                 }
                 if !launchable(self, preset) { return Err(Error::Refused("native project hooks must be pinned")); }
             }
@@ -88,7 +100,7 @@ impl CodingConfigExt for CodingConfig {
             if !sound_repository || !valid_id(&pr.base) || pr.base.starts_with('-') || pr.base.contains("..")
                 || self.landing.as_ref().is_none_or(|l| l.target != format!("refs/heads/{}", pr.base)) || pr.gh.argv.len() != 1 || pr.gh.argv[0].contains('\'')
             { return Err(Error::Refused("invalid pull request configuration")); }
-            pr.gh.validate()?;
+            pr.gh.validate().map_err(|error| error.at_field("pull_request.gh"))?;
             if let Some(remote) = &pr.remote {
                 let path = std::path::Path::new(remote).is_absolute()
                     && remote.len() <= 500 && !remote.bytes().any(|b| b.is_ascii_control() || b == b' ' || b == b'?' || b == b'#');
@@ -97,12 +109,14 @@ impl CodingConfigExt for CodingConfig {
                 }
             }
         }
-        for check in &self.checks { check.validate()?; }
+        for (index, check) in self.checks.iter().enumerate() {
+            check.validate().map_err(|error| error.at_field(&format!("checks[{index}]")))?;
+        }
         if let Some(reviewer) = &self.reviewer {
             if !valid_id(&reviewer.identity) { return Err(Error::Refused("invalid reviewer identity")); }
-            reviewer.command.validate()?;
+            reviewer.command.validate().map_err(|error| error.at_field("reviewer.command"))?;
         }
-        self.ci.command.validate()
+        self.ci.command.validate().map_err(|error| error.at_field("ci.command"))
     }
     fn operation(&self, version: &str, argument: &str) -> OperationSpec {
         coding_pins::operation(self, version, argument)
@@ -170,8 +184,8 @@ impl PinnedDefinition for CodingConfig {
 trait Pinned { fn pinned(&self, definition: &Definition, in_group: bool) -> Result<()>; }
 impl Pinned for CodingConfig {
     fn pinned(&self, definition: &Definition, in_group: bool) -> Result<()> {
-        if in_group { definition.validate_group() } else { definition.validate() }
-            .map_err(|_| Error::Refused("invalid definition"))?;
+        if in_group { definition.validate_group().map_err(|_| Error::Refused("invalid group definition"))?; }
+        else { definition.validate_detailed().map_err(Error::Validation)?; }
         if !definition.policies.is_empty() {
             self.ci.command.environment.get("CI_GH").filter(|p| std::path::Path::new(p).is_absolute())
                 .ok_or(Error::Refused("CI rerun policies need a pinned CI_GH"))?;
@@ -181,10 +195,11 @@ impl Pinned for CodingConfig {
         let (mut branched, mut opened, mut merged) = (false, false, false);
         let mut candidate_branched = false;
         for stage in &definition.stages {
+            let problem = |field, rule| Error::Validation(format!("stage {:?} field {field}: {rule}", stage.id));
             let gate_index = |i: Option<&String>| i.and_then(|s| s.parse::<usize>().ok()).filter(|i| *i < self.checks.len())
-                .ok_or(Error::Refused("unknown configured check"));
-            let landing = self.landing.as_ref().ok_or(Error::Refused("landing verbs need a landing identity"));
-            let pull_request = self.pull_request.as_ref().ok_or(Error::Refused("pull request verbs need a pull request identity"));
+                .ok_or_else(|| problem("operation.arguments[1]", "check index must name a configured check"));
+            let landing = self.landing.as_ref().ok_or_else(|| problem("kind", "landing verbs need an adapter landing identity"));
+            let pull_request = self.pull_request.as_ref().ok_or_else(|| problem("kind", "pull request verbs need an adapter pull request identity"));
             let expected = match &stage.kind {
                 StageKind::Provision if !provisioned && !built => { provisioned = true; self.operation("coding-worktree/v1", "") },
                 StageKind::Build if provisioned && !landed => { built = true; self.operation("coding-harness/v1", "") },
@@ -199,26 +214,26 @@ impl Pinned for CodingConfig {
                 // An agent the engine starts, which only a native harness can launch. No review command runs (ov-969).
                 StageKind::Review(Reviewer::Agent) if built && !landed => {
                     if !matches!(self.harness, CodingHarness::Native { .. }) {
-                        return Err(Error::Refused("an agent's review gate needs a native harness"));
+                        return Err(problem("kind", "an agent's review gate needs a native harness"));
                     }
                     let mut expected = self.operation("coding-review/v1", AGENT_REVIEWER);
                     // Options of the workflow's own (ov-1071): each model a path rule names is one the step lists, so
                     // the launchable check below covers it.
                     if let Some(text) = stage.operation.arguments.get(2) {
-                        let options = crate::review_agent::ReviewOptions::read(text).ok_or(Error::Refused("unsound review options"))?;
+                        let options = crate::review_agent::ReviewOptions::read(text).ok_or_else(|| problem("operation.arguments[2]", "unsound review options"))?;
                         if options.check.is_some_and(|i| i >= self.checks.len()) {
-                            return Err(Error::Refused("foreign parallel review check"));
+                            return Err(problem("operation.arguments[2]", "foreign parallel review check"));
                         }
                         let listed = definition.models.get(&stage.id);
                         if options.models.iter().any(|(_, model)| !listed.is_some_and(|l| l.contains(model))) {
-                            return Err(Error::Refused("a review's path rule names a model its step doesn't list"));
+                            return Err(problem("operation.arguments[2]", "a review's path rule names a model its step doesn't list"));
                         }
                         expected.arguments.push(text.clone());
                     }
                     expected
                 },
                 StageKind::Review(_) if built && (!landed || definition.max_reworks == 0) =>
-                    self.operation("coding-review/v1", &self.reviewer.as_ref().ok_or(Error::Refused("missing reviewer"))?.identity),
+                    self.operation("coding-review/v1", &self.reviewer.as_ref().ok_or_else(|| problem("kind", "missing reviewer"))?.identity),
                 StageKind::Land if built && !landed => { landed = true; self.operation("coding-land/v1", &self.landing_ref) },
                 StageKind::Ci if landed => self.operation("coding-ci/v1", &self.ci.repository),
                 // A route reads the ticket's change and answers a label the definition routes. Its rules are the
@@ -226,15 +241,15 @@ impl Pinned for CodingConfig {
                 StageKind::Route if built && !landed && !in_group => {
                     let rules = stage.operation.arguments.get(1).filter(|a| crate::path_routes::PathRules::read(a).is_some()
                         || crate::review_agent::ReviewRoute::read(a).is_some())
-                        .ok_or(Error::Refused("unsound path rules"))?;
+                        .ok_or_else(|| problem("operation.arguments[1]", "unsound path rules"))?;
                     self.operation("coding-route/v1", rules)
                 },
                 StageKind::Join { group, .. } if built && !in_group => self.operation("coding-join/v1", group),
                 StageKind::AwaitBase if in_group && !based && !pushed => {
                     based = true; landing?;
                     let mode = stage.operation.arguments.get(1).filter(|m| matches!(m.as_str(), "any" | "green"))
-                        .ok_or(Error::Refused("unknown base wait"))?;
-                    let (every, patience) = wait_times(&stage.operation).ok_or(Error::Refused("unsound wait times"))?;
+                        .ok_or_else(|| problem("operation.arguments[1]", "unknown base wait"))?;
+                    let (every, patience) = wait_times(&stage.operation).ok_or_else(|| problem("operation.arguments[2..4]", "unsound wait times"))?;
                     self.wait_operation("coding-await-base/v1", mode, every, patience)
                 },
                 StageKind::Fold if in_group && based && !folded && !pushed => { folded = true; self.operation("coding-fold/v1", "") },
@@ -255,46 +270,57 @@ impl Pinned for CodingConfig {
                 StageKind::OpenPr if branched && !opened => {
                     opened = true;
                     let mode = stage.operation.arguments.get(1).filter(|m| matches!(m.as_str(), "draft" | "ready"))
-                        .ok_or(Error::Refused("unknown pull request mode"))?;
+                        .ok_or_else(|| problem("operation.arguments[1]", "unknown pull request mode"))?;
                     self.operation("coding-open-pr/v1", mode)
                 },
                 StageKind::PrReady if opened => self.operation("coding-pr-ready/v1", ""),
                 StageKind::AwaitPr if opened && !merged => {
                     merged = true;
-                    let (every, patience) = wait_times(&stage.operation).ok_or(Error::Refused("unsound wait times"))?;
+                    let (every, patience) = wait_times(&stage.operation).ok_or_else(|| problem("operation.arguments[2..4]", "unsound wait times"))?;
                     self.wait_operation("coding-await-pr/v1", "", every, patience)
                 },
                 StageKind::AwaitCi if pushed || merged || candidate_branched => {
-                    let (every, patience) = wait_times(&stage.operation).ok_or(Error::Refused("unsound wait times"))?;
+                    let (every, patience) = wait_times(&stage.operation).ok_or_else(|| problem("operation.arguments[2..4]", "unsound wait times"))?;
                     let mut expected = self.wait_operation("coding-await-ci/v1", &self.ci.repository, every, patience);
                     // The other workflows the step waits on besides the configured one (ov-1071).
                     if let Some(text) = stage.operation.arguments.get(4) {
                         if also_workflows(text).is_none_or(|also| also.contains(&self.ci.workflow)) {
-                            return Err(Error::Refused("unsound CI workflows"));
+                            return Err(problem("operation.arguments[4]", "unsound CI workflows"));
                         }
                         expected.arguments.push(text.clone());
                     }
                     expected
                 },
-                _ => return Err(Error::Refused("unsupported operation or unsafe prerequisites")),
+                _ => return Err(problem("kind", "unsupported operation or unsafe prerequisites")),
             };
-            if stage.operation != expected {
-                return Err(Error::Refused("definition does not pin configured operations"));
+            if stage.operation.adapter_version != expected.adapter_version {
+                return Err(problem("operation.adapter_version", "does not match the stage's configured operation"));
+            }
+            if stage.operation.arguments != expected.arguments {
+                let actual = &stage.operation.arguments;
+                let index = actual.iter().zip(&expected.arguments).position(|(a, b)| a != b)
+                    .unwrap_or_else(|| actual.len().min(expected.arguments.len()));
+                let rule = if index == 0 { "must match the adapter pin" } else { "does not match the configured operation" };
+                return Err(Error::Validation(format!("stage {:?} field operation.arguments[{index}]: {rule}", stage.id)));
+            }
+            if stage.operation.environment != expected.environment {
+                return Err(problem("operation.environment", "does not match the configured operation"));
             }
         }
         if in_group { return Ok(()); }
         super::coding_review_policy::validate(self, definition)?;
         // A model the runtime can't launch never reaches a run: a typo, or a harness whose hooks aren't pinned (ov-966).
-        if definition.models.values().flatten().any(|model| !launchable(self, model)) {
-            return Err(Error::Refused("a listed model's harness isn't set up on this runtime"));
+        if let Some((step, _)) = definition.models.iter().find(|(_, models)| models.iter().any(|model| !launchable(self, model))) {
+            return Err(Error::Validation(format!("stage {step:?} field models: a listed harness isn't set up on this runner")));
         }
         // Every group works on the one landing target, so they take turns for it.
         for name in definition.groups.keys() {
             let group = &definition.groups[name];
             if self.landing_resource().as_ref() != Some(&group.exclusive) {
-                return Err(Error::Refused("group does not hold the landing target"));
+                return Err(Error::Validation(format!("group {name:?} field exclusive must hold the adapter landing target")));
             }
-            self.pinned(&definition.group_definition(name).ok_or(Error::Refused("invalid definition"))?, true)?;
+            let child = definition.group_definition(name).expect("validated group");
+            self.pinned(&child, true).map_err(|error| error.at_field(&format!("group {name:?}")))?;
         }
         Ok(())
     }
@@ -304,7 +330,7 @@ impl FileValidation for LaunchFile {
         // A missing or unreadable file is a changed one too, and says which (ov-1259).
         let same = self.path.canonicalize().is_ok_and(|p| p == self.path)
             && bounded_file(&self.path).is_ok_and(|bytes| digest(&bytes) == self.digest);
-        if !same { return Err(Error::Changed(self.path.clone())); }
+        if !same { return Err(Error::Changed { path: self.path.clone(), field: None }); }
         Ok(())
     }
 }

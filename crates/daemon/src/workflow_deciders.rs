@@ -26,20 +26,26 @@ pub(crate) fn named(definition: &Definition) -> Vec<&str> { definition.deciders(
 /// An approval step may also wait on `orchestrator`, as a ticket's does; an orchestrator's review gate only on
 /// `orchestrator`, so no member can be named through one (review F4, F5). The error is the name, for the person drafting it.
 pub(crate) fn refuse_unknown(store: &Store, definition: &Definition) -> Result<(), String> {
+    unknown_decider(store, definition).map_or(Ok(()), |(_, _, name)| Err(name.to_owned()))
+}
+
+pub(crate) fn unknown_decider<'a>(store: &Store, definition: &'a Definition) -> Option<(&'a str, &'static str, &'a str)> {
     for stage in steps(definition) {
         let ok = |name: &str| well_formed(name) && name.strip_prefix("member:").is_none_or(|h| store.member(h).is_ok());
         if let Progression::AwaitApproval { principal } = &stage.progression
             && principal != "orchestrator" && !ok(principal)
         {
-            return Err(principal.clone());
+            return Some((&stage.id, "progression.AwaitApproval.principal", principal));
         }
         match &stage.kind {
-            StageKind::Review(Reviewer::Person(p)) if !ok(p) => return Err(p.clone()),
-            StageKind::Review(Reviewer::Orchestrator(p)) if p != "orchestrator" => return Err(p.clone()),
+            StageKind::Review(Reviewer::Person(p)) if !ok(p) => return Some((&stage.id, "kind.Review.Person", p)),
+            StageKind::Review(Reviewer::Orchestrator(p)) if p != "orchestrator" => {
+                return Some((&stage.id, "kind.Review.Orchestrator", p));
+            }
             _ => {}
         }
     }
-    Ok(())
+    None
 }
 
 /// The first member `definition` names who is no longer on this runner, if one is: a run under it would wait on

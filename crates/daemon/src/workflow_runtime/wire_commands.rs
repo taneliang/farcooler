@@ -7,20 +7,7 @@ use farcooler_store::{workflow::{Receipt, WorkflowActor}, workflow_publication::
 /// replaced by `HIDDEN`, and the names stay, so a member sees what a gate is given without what it is given.
 /// The definitions are left whole: their pins are checked by the apps, and they carry no environment values.
 pub(super) fn hide_environment(reply: &mut serde_json::Value) {
-    fn walk(value: &mut serde_json::Value) {
-        match value {
-            serde_json::Value::Object(fields) => for (name, field) in fields.iter_mut() {
-                match (name.as_str(), field) {
-                    ("environment", serde_json::Value::Object(environment)) =>
-                        for v in environment.values_mut() { *v = HIDDEN.into(); },
-                    (_, field) => walk(field),
-                }
-            },
-            serde_json::Value::Array(items) => items.iter_mut().for_each(walk),
-            _ => {}
-        }
-    }
-    if let Some(adapter) = reply.pointer_mut("/configuration/adapter") { walk(adapter); }
+    if let Some(adapter) = reply.pointer_mut("/configuration/adapter") { hide_adapter_environment(adapter); }
     if let Some(history) = reply.get_mut("publication_history").and_then(|v|v.as_array_mut()) {
         for entry in history {
             if let Some(actor) = entry.get_mut("actor").and_then(|v|v.as_object_mut()) {
@@ -28,6 +15,19 @@ pub(super) fn hide_environment(reply: &mut serde_json::Value) {
                 actor.remove("pane");
             }
         }
+    }
+}
+fn hide_adapter_environment(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(fields) => for (name, field) in fields.iter_mut() {
+            match (name.as_str(), field) {
+                ("environment", serde_json::Value::Object(environment)) =>
+                    for v in environment.values_mut() { *v = HIDDEN.into(); },
+                (_, field) => hide_adapter_environment(field),
+            }
+        },
+        serde_json::Value::Array(items) => items.iter_mut().for_each(hide_adapter_environment),
+        _ => {}
     }
 }
 /// What a hidden environment value reads as.
@@ -145,6 +145,29 @@ impl CommandHandle {
         value["context"] = admission.context(epoch);
         if !admission.is_owner() { hide_environment(&mut value); }
         Ok(value)
+    }
+    /// Read one selected bundle without loading execution state, history, or runner suggestions.
+    pub(crate) async fn read_bundle(&self, admission: Admission) -> Result<String> {
+        if self.is_closed() { return Err(Error::Refused("runtime inbox closed")); }
+        admission.recheck().and_then(|()| admission.permits(&Action::Get)).map_err(Error::Domain)?;
+        let reader = self.reader.clone();
+        let workspace = admission.workspace();
+        let configuration = tokio::task::spawn_blocking(move || reader.store.workflow_configuration(&workspace))
+            .await.map_err(|_| Error::Refused("workflow read worker failed"))??;
+        admission.recheck().and_then(|()| admission.permits(&Action::Get)).map_err(Error::Domain)?;
+        if self.is_closed() { return Err(Error::Refused("runtime inbox closed")); }
+        let configuration = configuration.ok_or_else(|| Error::Domain(farcooler_core::DomainError::refused(
+            "This workspace has no published workflow.".into())))?;
+        let adapter = configuration.adapter.ok_or_else(|| Error::Domain(farcooler_core::DomainError::refused(
+            "This workspace's published workflow has no adapter to draft from.".into())))?;
+        let mut bundle = serde_json::to_value(crate::landing_templates::Bundle { definition: configuration.definition, adapter })?;
+        if !admission.is_owner() { hide_adapter_environment(&mut bundle["adapter"]); }
+        let json = bundle.to_string();
+        if json.len() > MAX_BYTES {
+            return Err(Error::Domain(farcooler_core::DomainError::refused(
+                "The published workflow bundle exceeds 60 KiB.".into())));
+        }
+        Ok(json)
     }
     /// `Logs`: one item's retained process tails, read like `read_get`, off the single writer (ov-1298).
     pub(crate) async fn read_logs(&self, admission:Admission, item:String) -> Result<serde_json::Value> {

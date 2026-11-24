@@ -137,9 +137,15 @@ pub struct Definition {
 }
 impl Definition {
     pub fn execution_limits(&self) -> crate::scheduling::Limits { self.limits.clone().unwrap_or_default() }
-    pub fn validate(&self) -> Result<(), Refusal> { self.check(false) }
+    pub fn validate(&self) -> Result<(), Refusal> {
+        self.validate_detailed().map_err(|_| Refusal::Definition)
+    }
+    /// The same definition rules, with their location for a caller editing a draft.
+    pub fn validate_detailed(&self) -> Result<(), String> { self.check(false) }
     /// A group's steps, which may split the group and may not join another.
-    pub fn validate_group(&self) -> Result<(), Refusal> { self.check(true) }
+    pub fn validate_group(&self) -> Result<(), Refusal> {
+        self.check(true).map_err(|_| Refusal::Definition)
+    }
     /// The definition a group item runs: the group's steps, as a definition of their own.
     pub fn group_definition(&self, name: &str) -> Option<Definition> {
         let group = self.groups.get(name)?;
@@ -162,97 +168,123 @@ impl Definition {
         }
         names
     }
-    fn check(&self, in_group: bool) -> Result<(), Refusal> {
+    fn check(&self, in_group: bool) -> Result<(), String> {
         let limits = self.execution_limits();
-        if self.start_policy.as_ref().is_some_and(|p| !p.valid()) { return Err(Refusal::Definition); }
-        let mut ids = BTreeSet::new();
-        if !matches!(self.schema, 1 | 2) || self.source.is_empty() || self.source.len() > 256
-            || self.stages.is_empty() || self.stages.len() > limits.stages || self.max_reworks > limits.reworks
-            || self.send_backs.is_some_and(|n| n > limits.send_backs)
-        { return Err(Refusal::Definition); }
-        crate::hooks::validate_policies(&self.script_policies)?;
+        if self.start_policy.as_ref().is_some_and(|p| !p.valid()) {
+            return Err("start_policy must name a valid automatic start policy".into());
+        }
+        if !matches!(self.schema, 1 | 2) { return Err("schema must be 1 or 2".into()); }
+        if self.source.is_empty() || self.source.len() > 256 {
+            return Err("source must contain 1 to 256 bytes".into());
+        }
+        if self.stages.is_empty() || self.stages.len() > limits.stages {
+            return Err(format!("stages must contain 1 to {} entries", limits.stages));
+        }
+        if self.max_reworks > limits.reworks { return Err("max_reworks exceeds the execution limit".into()); }
+        if self.send_backs.is_some_and(|n| n > limits.send_backs) {
+            return Err("send_backs exceeds the execution limit".into());
+        }
+        crate::hooks::validate_policies(&self.script_policies).map_err(|_| "script_policies contains an invalid or duplicate hook")?;
         self.validate_models()?;
-        self.validate_ci_policies()?;
+        self.validate_ci_policies().map_err(|_| "policies must contain valid, distinct rerun policies for CI wait stages")?;
         if self.build_folders.as_ref().is_some_and(|paths| paths.len() > 32
-            || paths.iter().any(|p| !crate::cleanup::valid_folder(p))) { return Err(Refusal::Definition); }
+            || paths.iter().any(|p| !crate::cleanup::valid_folder(p))) {
+            return Err("build_folders must contain at most 32 safe relative paths".into());
+        }
+        let mut ids = BTreeSet::new();
         let mut candidate_available = matches!(self.stages[0].kind, StageKind::Tracker);
         let routed = self.schema == 2;
-        for stage in &self.stages {
-            if stage.kind == StageKind::RerunCi { return Err(Refusal::Definition); }
-            if !valid_id(&stage.id) || !ids.insert(&stage.id)
-                || stage.max_attempts == 0 || stage.max_attempts > limits.attempts
-            { return Err(Refusal::Definition); }
-            if !valid_id(&stage.operation.adapter_version) || stage.operation.arguments.len() > 32
-                || stage.operation.arguments.iter().any(|a| a.len() > 4096 || a.contains('\0'))
-                || stage.operation.environment.len() > 32
-                || stage.operation.environment.iter().any(|(k, v)| !valid_id(k) || v.len() > 4096 || v.contains('\0'))
-            { return Err(Refusal::Definition); }
-            // Landing verbs are routed (schema 2); the ones that act on a group's members are for groups.
-            if !routed && is_verb(&stage.kind) { return Err(Refusal::Definition); }
-            if !in_group && matches!(stage.kind, StageKind::Fold | StageKind::AwaitBase | StageKind::Push | StageKind::PushCandidate) {
-                return Err(Refusal::Definition);
+        for (index, stage) in self.stages.iter().enumerate() {
+            if !valid_id(&stage.id) { return Err(format!("stages[{index}].id is not a valid stage identifier")); }
+            let problem = |field, rule| stage_problem(stage, field, rule);
+            if !ids.insert(&stage.id) { return Err(problem("id", "stage IDs must be unique")); }
+            if stage.max_attempts == 0 || stage.max_attempts > limits.attempts {
+                return Err(problem("max_attempts", "attempts must be positive and within the execution limit"));
             }
-            // A route reads a ticket's own change, which a group has no single answer for.
-            if in_group && matches!(stage.kind, StageKind::Route) { return Err(Refusal::Definition); }
-            // A pull request belongs to one ticket's branch, so these are not steps of a batch.
-            if in_group && is_pr_verb(&stage.kind) { return Err(Refusal::Definition); }
+            if !valid_id(&stage.operation.adapter_version) {
+                return Err(problem("operation.adapter_version", "adapter version must be a valid identifier"));
+            }
+            if stage.operation.arguments.len() > 32 || stage.operation.arguments.iter().any(|a| a.len() > 4096 || a.contains('\0')) {
+                return Err(problem("operation.arguments", "arguments are limited to 32 entries of 4096 bytes without NUL"));
+            }
+            if stage.operation.environment.len() > 32
+                || stage.operation.environment.iter().any(|(k, v)| !valid_id(k) || v.len() > 4096 || v.contains('\0')) {
+                return Err(problem("operation.environment", "environment entries need valid names and bounded values without NUL"));
+            }
+            if stage.kind == StageKind::RerunCi { return Err(problem("kind", "CI reruns must be defined as a policy")); }
+            if !routed && is_verb(&stage.kind) { return Err(problem("kind", "landing operations require schema 2")); }
+            if !in_group && matches!(stage.kind, StageKind::Fold | StageKind::AwaitBase | StageKind::Push | StageKind::PushCandidate) {
+                return Err(problem("kind", "this operation requires a group"));
+            }
+            if in_group && (matches!(stage.kind, StageKind::Route) || is_pr_verb(&stage.kind)) {
+                return Err(problem("kind", "this operation requires an individual ticket"));
+            }
             match stage.kind {
                 // Routed definitions check candidate availability along their edges instead.
                 _ if routed => {}
                 StageKind::Build | StageKind::Action(_) => candidate_available = true,
                 StageKind::Check | StageKind::Review(_) | StageKind::Land | StageKind::Ci
                     | StageKind::Tracker | StageKind::Evaluate(_) if !candidate_available => {
-                    return Err(Refusal::Definition);
+                    return Err(problem("kind", "this operation requires a candidate"));
                 }
                 _ => {}
             }
             if let Progression::AwaitApproval { principal } = &stage.progression {
-                if !valid_id(principal) { return Err(Refusal::Definition); }
+                if !valid_id(principal) { return Err(problem("progression.AwaitApproval.principal", "invalid approval principal")); }
             }
             if let StageKind::Action(binding) | StageKind::Evaluate(binding) = &stage.kind {
-                if !valid_id(binding) { return Err(Refusal::Definition); }
+                if !valid_id(binding) { return Err(problem("kind", "invalid operation binding")); }
             }
             if let StageKind::Join { group, .. } = &stage.kind {
-                if !valid_id(group) || group.len() > 64 || stage.progression != Progression::Automatic {
-                    return Err(Refusal::Definition);
+                if !valid_id(group) || group.len() > 64 {
+                    return Err(problem("kind.Join.group", "invalid group identifier"));
+                }
+                if stage.progression != Progression::Automatic {
+                    return Err(problem("progression", "a join must progress automatically"));
                 }
             }
             if let StageKind::Review(Reviewer::Person(p) | Reviewer::Orchestrator(p)) = &stage.kind {
-                if !valid_id(p) { return Err(Refusal::Definition); }
+                if !valid_id(p) { return Err(problem("kind.Review", "invalid review principal")); }
             }
         }
-        if self.schema == 2 {
+        if routed {
             self.validate_routes(in_group)?;
             return if in_group { Ok(()) } else { self.validate_groups() };
         }
-        if !self.groups.is_empty() || self.stages.iter().any(|s| !s.routes.is_empty() || s.limit != 0
-            || matches!(s.kind, StageKind::Join { .. }))
-        { return Err(Refusal::Definition); }
+        if !self.groups.is_empty() { return Err("groups requires schema 2".into()); }
+        for stage in &self.stages {
+            if !stage.routes.is_empty() { return Err(stage_problem(stage, "routes", "routes require schema 2")); }
+            if stage.limit != 0 { return Err(stage_problem(stage, "limit", "back edge limits require schema 2")); }
+            if matches!(stage.kind, StageKind::Join { .. }) {
+                return Err(stage_problem(stage, "kind", "a join requires schema 2"));
+            }
+        }
         // Sequence order is definition policy, not a global coding/reviewer policy.
         let target = self.rework_target.as_ref().map(|id| self.stages.iter().position(|s| &s.id == id));
         if self.max_reworks == 0 {
-            if target.is_some() { return Err(Refusal::Definition); }
+            if target.is_some() { return Err("rework_target requires a nonzero max_reworks".into()); }
         } else {
-            let Some(Some(target)) = target else { return Err(Refusal::Definition); };
-            if !matches!(self.stages[target].kind, StageKind::Build | StageKind::Action(_)) {
-                return Err(Refusal::Definition);
-            }
+            let Some(Some(target)) = target else { return Err("rework_target must name a stage".into()); };
+            let valid_target = matches!(self.stages[target].kind, StageKind::Build | StageKind::Action(_));
             let evaluators: Vec<_> = self.stages.iter().enumerate().filter(|(_, s)|
                 matches!(s.kind, StageKind::Review(_) | StageKind::Evaluate(_))).collect();
-            if evaluators.is_empty() || evaluators.iter().any(|(index, _)| target >= *index) {
-                return Err(Refusal::Definition);
+            if !valid_target || evaluators.is_empty() || evaluators.iter().any(|(index, _)| target >= *index) {
+                return Err("rework_target must be a build or action before all review and evaluation stages".into());
             }
         }
         Ok(())
     }
     /// Each list names a step that starts an agent (a build, or an agent's review gate), holds distinct
     /// models, and each is a plain `harness[:model]`.
-    fn validate_models(&self) -> Result<(), Refusal> {
-        for (step, models) in &self.models {
-            let agent = self.stages.iter().any(|s| &s.id == step && starts_agent(&s.kind));
+    fn validate_models(&self) -> Result<(), String> {
+        for (ordinal, (step, models)) in self.models.iter().enumerate() {
+            let Some(stage) = self.stages.iter().find(|s| &s.id == step && valid_id(step)) else {
+                return Err(format!("models entry {} must name a stage", ordinal + 1));
+            };
             let distinct = models.iter().collect::<BTreeSet<_>>().len() == models.len();
-            if !agent || models.is_empty() || models.len() > self.execution_limits().models || !distinct || !models.iter().all(|m| valid_model(m)) {
-                return Err(Refusal::Definition);
+            if !starts_agent(&stage.kind) || models.is_empty() || models.len() > self.execution_limits().models
+                || !distinct || !models.iter().all(|m| valid_model(m)) {
+                return Err(stage_problem(stage, "models", "an agent stage must list a bounded set of distinct harness or harness:model names"));
             }
         }
         Ok(())
@@ -266,59 +298,76 @@ impl Definition {
         Ok(self.models.iter().map(|(step, list)| (step.clone(), picks.get(step).unwrap_or(&list[0]).clone())).collect())
     }
     /// Every join names a group, every group has a join, and each group's steps are sound.
-    fn validate_groups(&self) -> Result<(), Refusal> {
-        let joined: BTreeSet<&str> = self.stages.iter().filter_map(|s| match &s.kind {
-            StageKind::Join { group, .. } => Some(group.as_str()), _ => None }).collect();
-        // Every join names a group, and every group has a join: nothing is declared and left unused.
-        if joined.len() != self.groups.len() || !self.groups.keys().all(|g| joined.contains(g.as_str())) {
-            return Err(Refusal::Definition);
+    fn validate_groups(&self) -> Result<(), String> {
+        let mut joined = BTreeSet::new();
+        for stage in &self.stages {
+            if let StageKind::Join { group, .. } = &stage.kind {
+                if !self.groups.contains_key(group) {
+                    return Err(stage_problem(stage, "kind.Join.group", "the group is not defined"));
+                }
+                joined.insert(group);
+            }
         }
-        for name in self.groups.keys() {
-            let group = &self.groups[name];
-            if group.limit == Some(0) || !valid_id(&group.exclusive) { return Err(Refusal::Definition); }
-            self.group_definition(name).ok_or(Refusal::Definition)?.validate_group()?;
+        for (index, (name, group)) in self.groups.iter().enumerate() {
+            if !joined.contains(name) { return Err(format!("groups entry {} must be used by a join stage", index + 1)); }
+            if group.limit == Some(0) { return Err(format!("group {name:?} field limit must be positive")); }
+            if !valid_id(&group.exclusive) { return Err(format!("group {name:?} field exclusive must be a valid identifier")); }
+            let definition = self.group_definition(name).expect("group exists");
+            definition.check(true).map_err(|reason| format!("group {name:?}, {reason}"))?;
         }
         Ok(())
     }
     /// Schema 2: labels route, back edges are bounded, and every step is reachable and safe.
-    fn validate_routes(&self, in_group: bool) -> Result<(), Refusal> {
-        if self.max_reworks != 0 || self.rework_target.is_some() { return Err(Refusal::Definition); }
+    fn validate_routes(&self, in_group: bool) -> Result<(), String> {
+        if self.max_reworks != 0 { return Err("max_reworks must be zero in schema 2; use a stage limit".into()); }
+        if self.rework_target.is_some() { return Err("rework_target must be absent in schema 2; use a stage route".into()); }
         let n = self.stages.len();
         let index: BTreeMap<&str, usize> = self.stages.iter().enumerate().map(|(i, s)| (s.id.as_str(), i)).collect();
         // Every edge a step can take: (from, label, to), with `None` as the end of the run.
         let mut edges: Vec<(usize, &str, Option<usize>)> = Vec::new();
         let mut done_reachable_from: Vec<usize> = Vec::new();
         for (i, stage) in self.stages.iter().enumerate() {
-            if stage.limit > self.execution_limits().back_edges || stage.routes.len() > self.execution_limits().routes { return Err(Refusal::Definition); }
-            if in_group && matches!(stage.kind, StageKind::Join { .. }) { return Err(Refusal::Definition); }
+            let problem = |field, rule| stage_problem(stage, field, rule);
+            if stage.limit > self.execution_limits().back_edges {
+                return Err(problem("limit", "back edge limit exceeds the execution limit"));
+            }
+            if stage.routes.len() > self.execution_limits().routes {
+                return Err(problem("routes", "the number of routes exceeds the execution limit"));
+            }
+            if in_group && matches!(stage.kind, StageKind::Join { .. }) {
+                return Err(problem("kind", "a group cannot join another group"));
+            }
             let (mut back, mut splits) = (false, false);
             let mut labels: Vec<&str> = vec!["passed", "rejected"];
             if matches!(stage.kind, StageKind::Join { .. }) { labels.extend(["dropped", "landed"]); }
             for (label, target) in &stage.routes {
-                if !valid_id(label) || !can_emit(&stage.kind, label) { return Err(Refusal::Definition); }
+                if !valid_id(label) { return Err(problem("routes", "invalid route label")); }
+                let field = format!("routes.{label}");
+                let route_problem = |rule| stage_problem(stage, &field, rule);
+                if !can_emit(&stage.kind, label) { return Err(route_problem("the stage cannot emit this label")); }
                 // A rejected gate must stop, retry or split: falling forward or finishing would push or adopt what failed.
                 if label == "rejected" && matches!(stage.kind, StageKind::Run | StageKind::Check)
                     && self.stages.iter().any(|s| matches!(s.kind, StageKind::Push))
                     && finishes_or_goes_on(target, &index, i)
-                { return Err(Refusal::Definition); }
+                { return Err(route_problem("a rejected gate must fail, split, or retry before a push")); }
                 if !labels.contains(&label.as_str()) { labels.push(label); }
                 match target {
                     Target::Step(id) => {
-                        let &to = index.get(id.as_str()).ok_or(Refusal::Definition)?;
+                        let &to = index.get(id.as_str()).ok_or_else(|| route_problem("target stage does not exist"))?;
                         back |= to <= i;
                     }
                     Target::Split { step, otherwise } => {
                         // A split restarts the group at an earlier step, so it is a back edge, and
                         // its fallback is a plain place to go: splits do not nest.
-                        let &to = index.get(step.as_str()).ok_or(Refusal::Definition)?;
-                        if !in_group || to > i { return Err(Refusal::Definition); }
+                        let &to = index.get(step.as_str()).ok_or_else(|| route_problem("split target stage does not exist"))?;
+                        if !in_group || to > i { return Err(route_problem("a split must restart at an earlier group stage")); }
                         // Both halves start over, so the step must discard the candidate the group had.
-                        if !makes_candidate_anew(&self.stages[to].kind) { return Err(Refusal::Definition); }
+                        if !makes_candidate_anew(&self.stages[to].kind) { return Err(route_problem("a split must restart at a stage that makes a fresh candidate")); }
                         // The second half would run again what the first already landed.
-                        if self.stages[..=i].iter().any(|s| lands(&s.kind)) { return Err(Refusal::Definition); }
+                        if self.stages[..=i].iter().any(|s| lands(&s.kind)) { return Err(route_problem("a split cannot follow a landing stage")); }
                         match &**otherwise {
-                            Target::Step(id) => back |= *index.get(id.as_str()).ok_or(Refusal::Definition)? <= i,
-                            Target::Split { .. } => return Err(Refusal::Definition),
+                            Target::Step(id) => back |= *index.get(id.as_str()).ok_or_else(|| route_problem("split fallback stage does not exist"))? <= i,
+                            Target::Split { .. } => return Err(route_problem("splits cannot be nested")),
                             _ => {}
                         }
                         splits = true;
@@ -328,7 +377,8 @@ impl Definition {
             }
             // A back edge needs a limit. A split needs none, as halving bounds it, but may keep one it was published
             // with before ov-1071; a limit on a step with neither bounds nothing.
-            if (back && stage.limit == 0) || (!back && !splits && stage.limit > 0) { return Err(Refusal::Definition); }
+            if back && stage.limit == 0 { return Err(problem("limit", "a back edge requires a positive limit")); }
+            if !back && !splits && stage.limit > 0 { return Err(problem("limit", "a limit requires a back edge or split")); }
             for label in labels {
                 let target = match stage.routes.get(label) {
                     Some(target) => Some(target.clone()),
@@ -359,7 +409,7 @@ impl Definition {
             let unlanded = (label == "base_moved" && matches!(self.stages[from].kind, StageKind::Push))
                 || (label == "changes_requested" && matches!(self.stages[from].kind, StageKind::AwaitPr));
             if to <= from && (to..=from).any(|l| lands(&self.stages[l].kind) && !(unlanded && l == from)) {
-                return Err(Refusal::Definition);
+                return Err(stage_problem(&self.stages[from], &format!("routes.{label}"), "a retry cannot cross a landing stage"));
             }
         }
         // Every path into a push crosses a gate that passed after the last step that changed what the
@@ -378,7 +428,7 @@ impl Definition {
             if !changed { break; }
         }
         for (p, stage) in self.stages.iter().enumerate() {
-            if matches!(stage.kind, StageKind::Push) && !judged[p] { return Err(Refusal::Definition); }
+            if matches!(stage.kind, StageKind::Push) && !judged[p] { return Err(stage_problem(stage, "kind", "every path into a push must pass a gate for its candidate")); }
         }
         // A group that puts its candidate on a branch for CI (ov-1269) pushes only what that CI passed: every path into
         // a push crosses a CI wait that passed after the branch push, with no new candidate made since. A CI wait
@@ -402,9 +452,11 @@ impl Definition {
             let branches = self.stages.iter().any(|s| s.kind == StageKind::PushCandidate);
             for (p, stage) in self.stages.iter().enumerate() {
                 let pushed_before = self.stages[..p].iter().any(|s| s.kind == StageKind::Push);
-                if (branches && stage.kind == StageKind::Push && !green[p])
-                    || (stage.kind == StageKind::AwaitCi && !pushed_before && !branched[p]) {
-                    return Err(Refusal::Definition);
+                if branches && stage.kind == StageKind::Push && !green[p] {
+                    return Err(stage_problem(stage, "kind", "every path into a push must pass CI for its candidate branch"));
+                }
+                if stage.kind == StageKind::AwaitCi && !pushed_before && !branched[p] {
+                    return Err(stage_problem(stage, "kind", "waiting for CI requires a pushed branch"));
                 }
             }
         }
@@ -415,12 +467,12 @@ impl Definition {
                 StageKind::PrReady | StageKind::AwaitPr => StageKind::OpenPr,
                 _ => continue,
             };
-            if !self.stages[..p].iter().any(|s| s.kind == needs) { return Err(Refusal::Definition); }
+            if !self.stages[..p].iter().any(|s| s.kind == needs) { return Err(stage_problem(stage, "kind", "the pull request prerequisite stage must come first")); }
         }
         // A requested change is answered by making a new candidate, not by pushing the old one again.
         for stage in self.stages.iter().filter(|s| matches!(s.kind, StageKind::AwaitPr)) {
             if let Some(Target::Step(to)) = stage.routes.get("changes_requested") {
-                if !makes_candidate_anew(&self.stages[index[to.as_str()]].kind) { return Err(Refusal::Definition); }
+                if !makes_candidate_anew(&self.stages[index[to.as_str()]].kind) { return Err(stage_problem(stage, "routes.changes_requested", "rework must make a fresh candidate")); }
             }
         }
         // Reachability from the first step, and a way to Done.
@@ -430,7 +482,10 @@ impl Definition {
             if std::mem::replace(&mut seen[i], true) { continue; }
             todo.extend(edges.iter().filter(|e| e.0 == i).filter_map(|e| e.2));
         }
-        if seen.iter().any(|s| !s) || !done_reachable_from.iter().any(|&i| seen[i]) { return Err(Refusal::Definition); }
+        if let Some(i) = seen.iter().position(|s| !s) {
+            return Err(stage_problem(&self.stages[i], "routes", "the stage cannot be reached from the first stage"));
+        }
+        if !done_reachable_from.iter().any(|&i| seen[i]) { return Err("stages must have a route to Done".into()); }
         // A step that needs a candidate must have one on every path into it.
         let mut has = vec![true; n];
         has[0] = matches!(self.stages[0].kind, StageKind::Tracker);
@@ -445,7 +500,7 @@ impl Definition {
             if !changed { break; }
         }
         for (i, stage) in self.stages.iter().enumerate() {
-            if needs_candidate(&stage.kind) && !has[i] { return Err(Refusal::Definition); }
+            if needs_candidate(&stage.kind) && !has[i] { return Err(stage_problem(stage, "kind", "every path into this stage must supply a candidate")); }
         }
         Ok(())
     }
@@ -567,6 +622,10 @@ pub fn valid_model(model: &str) -> bool {
     let plain = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b));
     model.len() <= 64 && match model.split_once(':') { Some((harness, name)) => plain(harness) && plain(name), None => plain(model) }
 }
+fn stage_problem(stage: &Stage, field: &str, rule: &str) -> String {
+    format!("stage {:?} field {field}: {rule}", stage.id)
+}
+
 pub fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 128
         && id.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_:./".contains(&b))

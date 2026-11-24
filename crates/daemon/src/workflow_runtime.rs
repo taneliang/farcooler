@@ -65,6 +65,7 @@ mod recovery_backoff;
 #[cfg(test)]
 mod recovery_backoff_tests;
 pub use coding::{AGENT_REVIEWER, CodingConfigExt,CodingConfig, CodingCommand, CodingHarness, CodingReviewer, CodingCi, CodingLanding, CodingPullRequest, LaunchFile, MAX_COMMAND_MS};
+pub(crate) use coding::PinnedDefinition;
 pub use coding_execute::{CodingReviewReceipt, CodingCiReceipt, write_agent_verdict, write_agent_verdict_with_summary};
 mod wire_commands;
 mod named_tree;
@@ -96,6 +97,8 @@ pub enum Error {
     Encoding(#[from] serde_json::Error),
     #[error("runtime refused: {0}")]
     Refused(&'static str),
+    #[error("workflow validation: {0}")]
+    Validation(String),
     #[error("runtime refused: {0}")]
     QueueHeld(String),
     /// The run stopped on changes in its named tree it can't show it made (ov-979), listed for the person.
@@ -107,15 +110,36 @@ pub enum Error {
     Domain(farcooler_core::error::DomainError),
     /// A file the published workflow pins by digest no longer holds what was published (ov-1259). Kept apart from
     /// `Refused` so the item records which file, in words, instead of failing with no reason.
-    #[error("runtime refused: native settings changed: {}", .0.display())]
-    Changed(std::path::PathBuf),
+    #[error("runtime refused: native settings changed: {}", path.display())]
+    Changed { path: std::path::PathBuf, field: Option<String> },
 }
 impl Error {
+    /// Validation messages cross the draft RPC. Keep host paths and command values out of them.
+    pub(crate) fn validation_rule(&self) -> std::borrow::Cow<'_, str> {
+        match self {
+            Self::Refused(rule) => (*rule).into(),
+            Self::Validation(detail) => detail.as_str().into(),
+            Self::Changed { field, .. } => {
+                let field = field.as_deref().unwrap_or("pinned file");
+                format!("{field}: file is missing, unreadable, or its digest does not match").into()
+            }
+            Self::Io(_) => "runner could not read the configured file or directory".into(),
+            _ => "runner could not validate the configuration".into(),
+        }
+    }
+
+    pub(super) fn at_field(self, field: &str) -> Self {
+        match self {
+            Self::Changed { path, .. } => Self::Changed { path, field: Some(field.into()) },
+            other => Self::Validation(format!("{field}: {}", other.validation_rule())),
+        }
+    }
+
     /// What a person reads on an item this error stopped before anything ran, when it is one they can act on.
     pub(crate) fn reason(&self) -> Option<String> {
         match self {
             Error::Domain(refused) => Some(refused.to_string()),
-            Error::Changed(path) => Some(format!("{} changed after this workflow was published, so its pin no longer matches \
+            Error::Changed { path, .. } => Some(format!("{} changed after this workflow was published, so its pin no longer matches \
                 and nothing ran. Re-pin the workflow (`farcooler workspace re-pin`) and publish it, then retry.", path.display())),
             _ => None,
         }

@@ -818,6 +818,13 @@ impl Rpc {
                     return Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema:1, json:value.to_string() }));
                 }
                 let action_is_get = matches!(action, Action::Get);
+                if action_is_get && req.accepts.iter().any(|v| v == farcooler_protocol::workflow_commands::BUNDLE_VIEW) {
+                    let json = handle.read_bundle(admission).await.map_err(|error| match error {
+                        crate::workflow_runtime::Error::Domain(refusal) => refusal,
+                        _ => DomainError::OperationFailed,
+                    })?;
+                    return Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema: 1, json }));
+                }
                 let value = if action_is_get {
                     handle.read_get(admission, full || !summary).await
                 } else { handle.wire_command(admission, action).await }
