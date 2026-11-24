@@ -18,6 +18,9 @@ spec = importlib.util.spec_from_file_location("proto_lint", ROOT / "scripts/prot
 proto = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(proto)
 GROUP = "group: background-macos\ncancel-in-progress: false\nqueue: max"
+RECORDER = "canary-baseline.yml"
+RETRY_CONTROLLERS = ("ci-runner-retry.yml", "ci-runner-retry-recover.yml")
+RETRY_GROUP = "group: ci-runner-retry\ncancel-in-progress: false\nqueue: max"
 
 
 def peak(jobs, weights):
@@ -136,11 +139,15 @@ def check(texts):
             if name == "ci.yml":
                 if lock or workflow_lock or called_lock:
                     problems.append("landing CI must not wait on background-macos")
-            elif name in ("canary-baseline.yml", "ci-runner-retry.yml"):
-                # The recorder must never lose a shipped baseline to queue
-                # overflow/replacement. Its separate single job is reserved.
-                if workflow_lock or lock or called_lock or mac[job]:
-                    problems.append("CI retry and Canary baseline must remain outside the background queue on Linux")
+            elif name == RECORDER or name in RETRY_CONTROLLERS:
+                # Baseline recording and CI retry must run independently of
+                # the shared background queue.
+                if "group: background-macos" in top.get("concurrency", "").splitlines() + child_groups:
+                    problems.append(f"{name}/{job} must remain outside the background-macos queue")
+                if keys.get("runs-on") != "ubuntu-latest":
+                    problems.append(f"{name}/{job} must run on ubuntu-latest")
+                if name in RETRY_CONTROLLERS and keys.get("concurrency", "").strip() != RETRY_GROUP:
+                    problems.append(f"{name}/{job} must share the ci-runner-retry queue")
             elif not workflow_lock:
                 if name == "nightly.yml" and job.startswith("yield-"):
                     # Linux gate that waits for main CI; holds no Mac (ov-1226).
@@ -160,16 +167,18 @@ def check(texts):
     landing = counts["ci.yml"]
     background = max((entry[1] for entry in entries), default=0)
     background_mac = max((entry[2] for entry in entries), default=0)
-    recorder = counts["canary-baseline.yml"][0]
+    for name in (RECORDER, *RETRY_CONTROLLERS):
+        if counts.get(name) != (1, 0):
+            problems.append(f"{name} must reserve exactly one Linux job")
+    # The two retry controllers serialize across CI attempts and runs.
+    recorder = counts.get(RECORDER, (0, 0))[0]
+    retry = max(counts.get(name, (0, 0))[0] for name in RETRY_CONTROLLERS)
     # One Nightly yield gate can be waiting beside the background entry.
-    total = landing[0] + background + recorder + 1
+    total = landing[0] + background + recorder + retry + 1
     if landing[1] + background_mac > 5:
         problems.append("landing plus shared background exceeds five Macs")
     if total > 20:
-        problems.append("landing + all overlapping background workflows + recorder exceeds 20 total jobs")
-    # Keep the recorder's independent reservation explicitly bounded.
-    if recorder != 1:
-        problems.append("update the Canary baseline reservation")
+        problems.append("landing + background + independent Linux jobs + Nightly yield exceeds 20 total jobs")
     return problems, counts, total
 
 
@@ -198,6 +207,7 @@ def main():
             ("native shards overlap Swift build", "ci.yml", "needs: [changes, rust-macos-build, swift, swift-tests]", "needs: [changes, rust-macos-build, swift-tests]"),
             ("native shards overlap Swift tests", "ci.yml", "needs: [changes, rust-macos-build, swift, swift-tests]", "needs: [changes, rust-macos-build, swift]"),
             ("short Linux checks overlap Rust/Android", "ci.yml", "needs: [changes, rust-tests, android]", "needs: changes"),
+            ("Android build and UI use separate Linux slots", "ci.yml", "needs: [changes, android-build]\n", "needs: changes\n"),
             ("tunnel helper overlaps Rust/Android", "ci.yml", "needs: [changes, rust-tests, android]", "needs: [changes]"),
             ("Doc comments outside the budget", "doc-comments.yml", "group: background-macos", "group: doc-comments"),
             ("Site outside the budget", "site.yml", "group: background-macos", "group: site"),
@@ -230,6 +240,19 @@ def main():
         new_workflow = dict(texts, **{"new.yml": "on:\n  push:\njobs:\n  job:\n    runs-on: ubuntu-latest\n"})
         if not check(new_workflow)[0]:
             problems.append("a newly discovered workflow escaped the budget")
+        for name in RETRY_CONTROLLERS:
+            for old, new, expected in (
+                ("runs-on: ubuntu-latest", "runs-on: xcode-27", "must reserve exactly one Linux job"),
+                ("runs-on: ubuntu-latest", "runs-on: windows-latest", "must run on ubuntu-latest"),
+                ("runs-on: ubuntu-latest", "runs-on: ubuntu-latest\n    strategy:\n      matrix:\n        shard: [1, 2]", "must reserve exactly one Linux job"),
+                ("group: ci-runner-retry", "group: private-retry", "must share the ci-runner-retry queue"),
+                ("queue: max", "queue: single", "must share the ci-runner-retry queue"),
+                ("jobs:\n", "concurrency:\n  group: background-macos\njobs:\n", "must remain outside the background-macos queue"),
+            ):
+                changed = dict(texts)
+                changed[name] = texts[name].replace(old, new)
+                if not any(name in p and expected in p for p in check(changed)[0]):
+                    problems.append(f"self-test did not enforce {name}: {expected}")
         # Scheduled/full runs retain every shard; targeted exclusions may only
         # reduce that width, and changes to their shape require review.
         targeted = proto.workflow_jobs(texts["nightly.yml"])["ios-ui"]

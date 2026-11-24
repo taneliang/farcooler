@@ -11,10 +11,16 @@ permissions:
   contents: read
 jobs:
   retry:
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      (github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'cancelled')
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Share one Linux reservation with the recovery controller.
     concurrency:
-      group: runner-retry-Retry CI ${{ github.event.workflow_run.id }} attempt ${{ github.event.workflow_run.run_attempt }}
+      group: ci-runner-retry
+      cancel-in-progress: false
       queue: max
     steps:
       # workflow_run checks out the default branch, never the untrusted run's head.

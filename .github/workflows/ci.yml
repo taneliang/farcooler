@@ -1657,7 +1657,8 @@ jobs:
       max-parallel: 1
       matrix:
         shard: [first, rest]
-    needs: changes
+    # When mobile CI resumes, share one Linux slot with the Android build.
+    needs: [changes, android-build]
     if: ${{ false && (!cancelled() && needs.changes.outputs.android != 'false') }}
     runs-on: ubuntu-latest
     timeout-minutes: 40

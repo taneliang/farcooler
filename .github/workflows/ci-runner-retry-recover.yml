@@ -14,7 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
-      group: runner-retry-${{ github.event.workflow_run.display_title }}
+      group: ci-runner-retry
+      cancel-in-progress: false
       queue: max
     steps:
       - uses: actions/checkout@v4
