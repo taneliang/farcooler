@@ -42,6 +42,8 @@ pub struct CodingReviewReceipt {
     pub passed: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
 }
 
 /// The account the runner runs as, from the account database rather than the daemon's own environment, so a
@@ -91,7 +93,8 @@ pub fn write_agent_verdict_with_summary(env: impl Fn(&str) -> Option<String>, pa
     let parent = receipt.parent().filter(|p| receipt.is_absolute() && p.is_dir())
         .ok_or(Error::Refused("not run by an agent's review gate"))?;
     let body = serde_json::to_vec(&CodingReviewReceipt { binding: var("FARCOOLER_OPERATION_BINDING")?,
-        identity: AGENT_REVIEWER.into(), candidate: var("FARCOOLER_CANDIDATE")?, passed, summary })?;
+        identity: AGENT_REVIEWER.into(), candidate: var("FARCOOLER_CANDIDATE")?, passed, summary,
+        base: env("FARCOOLER_BASE").filter(|base| sha(base)) })?;
     // A fresh file renamed into place: the step reads one whole verdict, the last one given, and never follows a link.
     let draft = parent.join(format!(".verdict-{}", Uuid::now_v7()));
     let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600).custom_flags(libc::O_NOFOLLOW).open(&draft)?;
@@ -153,7 +156,7 @@ impl Exec {
     pub(super) fn process_log(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.output", digest(&binding.effect)))
     }
-    /// A Provision, Build or agent review that failed before it started, and why (ov-1058, ov-1308).
+    /// A Provision, Build or review that failed before it started, and why.
     fn unstarted_path(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.provision-unstarted.json", digest(&binding.effect)))
     }
@@ -356,6 +359,11 @@ impl Exec {
     /// Context wins over command environment and is pinned in the process fact.
     pub(super) fn pin_context(&self, command: &mut CodingCommand, binding: &Binding, candidate: &str, receipt: &Path) -> Result<()> {
         let effect = &binding.effect;
+        let base = if matches!(effect.kind, EffectKind::Execute(StageKind::Review(_))) {
+            self.review_base(binding)?.unwrap_or_else(|| binding.base.clone())
+        } else {
+            self.process_base(binding, candidate)?
+        };
         for (key, value) in [
             ("FARCOOLER_OPERATION_BINDING", digest(binding)),
             ("FARCOOLER_WORKFLOW_RUN", effect.run.clone()),
@@ -364,7 +372,7 @@ impl Exec {
             ("FARCOOLER_DEFINITION_PIN", effect.definition_pin.clone()),
             ("FARCOOLER_POLICY_PIN", effect.policy_pin.clone()),
             ("FARCOOLER_CANDIDATE", candidate.to_string()),
-            ("FARCOOLER_BASE", self.process_base(binding, candidate)?),
+            ("FARCOOLER_BASE", base),
             ("FARCOOLER_ITERATION", binding.iteration.to_string()),
             ("FARCOOLER_RECEIPT", receipt.to_string_lossy().into_owned()),
             // Which card the run is for (ov-962): the published prompt is the same for every ticket on the board.
@@ -624,6 +632,10 @@ impl Exec {
             StageKind::PushBranch | StageKind::OpenPr | StageKind::PrReady | StageKind::AwaitPr =>
                 return self.execute_pr_verb(binding, kind, cancel).await,
             StageKind::Build | StageKind::Check | StageKind::Run | StageKind::Review(_) | StageKind::Ci => {
+                if matches!(kind, StageKind::Review(_)) && let Err(error) = self.pin_review_base(binding).await {
+                    tracing::warn!(effect = %binding.effect.id, %error, "review base could not be pinned");
+                    return self.refuse_unstarted(binding, "Could not determine the review base from the landing target.".into());
+                }
                 // A repeated Run may still have a writer. Check before touching its tree:
                 // even a preparation failure cannot authorize a retry of that invocation.
                 if matches!(kind, StageKind::Run) && self.process_log(binding).try_exists()? {
@@ -889,7 +901,7 @@ impl Exec {
         if matches!(kind, StageKind::Run) { return self.reconcile_run(binding).await; }
         let mut facts = Vec::new();
         let mut check_rejection = None;
-        if matches!(kind, StageKind::Provision | StageKind::Build | StageKind::Review(Reviewer::Agent)) && self.unstarted_path(binding).try_exists()? {
+        if matches!(kind, StageKind::Provision | StageKind::Build | StageKind::Review(_)) && self.unstarted_path(binding).try_exists()? {
             let unstarted: Unstarted = serde_json::from_slice(&self.bytes(&self.unstarted_path(binding))?)?;
             if unstarted.binding != *binding { return Err(Error::Refused("foreign unstarted refusal")); }
             return Ok(Outcome::SafeFailureBecause(unstarted.why));

@@ -18,7 +18,7 @@ impl Exec {
             Err(error) => return Err(error),
         }
         let reviewing = matches!(binding.effect.kind, EffectKind::Execute(StageKind::Review(Reviewer::Agent)));
-        let instructions = if reviewing { Self::review_prompt(binding) }
+        let instructions = if reviewing { self.review_prompt(binding)? }
             else { Self::briefed(prompt, &binding.effect, binding.iteration) };
         let exe = std::env::current_exe()?;
         let found = crate::service::cli_binary(Some(&exe));
@@ -77,6 +77,9 @@ mod tests {
             if review {
                 binding.effect.id = "brief-review".into();
                 binding.effect.kind = EffectKind::Execute(StageKind::Review(Reviewer::Agent));
+                // This test renders the brief without launching tmux. Pin the base from the fixture's Git history.
+                binding.effect.candidate = Some(runtime.coding.as_ref().unwrap().base.clone());
+                runtime.pin_review_base(&binding).await.unwrap();
             }
             let brief = runtime.ticket_prompt(&binding, "Run tests and commit.").unwrap();
             for text in std::iter::once(update.title.as_str()).chain(std::iter::once(update.intent.as_str()))
@@ -88,6 +91,17 @@ mod tests {
             assert!(!brief.contains("`farcooler "), "all CLI commands have an installed path: {brief}");
             if review {
                 assert!(brief.contains("Don't change, commit or stage anything here."));
+                let base = runtime.coding.as_ref().unwrap().base.as_str();
+                let candidate = binding.effect.candidate.as_deref().unwrap();
+                assert!(brief.contains(&format!("`{base}..{candidate}`")));
+                let receipt = runtime.provider_path(&binding);
+                let mut command = runtime.coding.as_ref().unwrap().checks[0].clone();
+                runtime.pin_context(&mut command, &binding, candidate, &receipt).unwrap();
+                let path = super::super::write_agent_verdict_with_summary(
+                    |key| command.environment.get(key).cloned(), false, Some("A review finding".into())).unwrap();
+                let verdict: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+                assert_eq!(verdict["base"], base);
+                assert_eq!(verdict["candidate"], candidate);
                 let exe = std::env::current_exe().unwrap();
                 let cli = crate::service::cli_binary(Some(&exe));
                 let cli = if Path::new(&cli).is_absolute() { PathBuf::from(cli) }

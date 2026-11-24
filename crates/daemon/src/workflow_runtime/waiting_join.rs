@@ -87,7 +87,7 @@ impl Runtime {
         let mut exec = self.exec.clone();
         exec.coding = Some(config);
         if !heads.contains_key(&target) {
-            let head = exec.waiting_landing_head(&target).await
+            let head = exec.landing_head_in_repository(&target).await
                 .map_err(|error| describe_hold(workspace, key, "Could not read or fetch the landing target head", error));
             heads.insert(target.clone(), head);
         }
@@ -182,13 +182,14 @@ fn queue_publication_is_current(state: &State, item: &Item, pin: &str) -> bool {
 }
 
 impl Exec {
-    async fn waiting_landing_head(&self, target: &str) -> Result<String> {
+    /// Read the authoritative landing head and ensure its commit is available to compare locally.
+    pub(super) async fn landing_head_in_repository(&self, log_key: &str) -> Result<String> {
         let repository = self.repository();
         let Some(landing) = self.coding.as_ref().and_then(|c| c.landing.as_ref()) else {
             return queue_git(&repository, &["rev-parse", "--verify", self.landing_ref()], "local landing ref could not be resolved").await;
         };
         coding::validate_landing_identity(landing)?;
-        let log = |op| self.root.join("receipts").join(format!("{}.waiting-main-{op}.output", adapters::folder_name(target)));
+        let log = |op| self.root.join("receipts").join(format!("{}.landing-head-{op}.output", adapters::folder_name(log_key)));
         let head = if coding::landing_url(landing).is_some() {
             let log = log("read");
             let _ = std::fs::remove_file(&log);

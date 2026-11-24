@@ -1,11 +1,11 @@
 //! Landing behavior when the target branch moves, before queueing or during a gate.
-use super::{adapters, Request, Runtime};
+use super::{adapters, CodingConfigExt, CodingReviewer, Request, Runtime};
 use super::coding_verbs_tests::{
     at_join, batched_push, candidate_of, command, lander, outbox, phase_of, remote_head,
     resolve_fixture_conflicts, settled, until,
 };
 use farcooler_protocol::workflow_commands::{Action, Mutation};
-use farcooler_workflow::{step, Command, Definition, EffectKind, Phase, Refusal, StageKind, State, Target};
+use farcooler_workflow::{step, Command, Definition, EffectKind, Phase, Refusal, Reviewer, StageKind, State, Target};
 use farcooler_workflow::scheduling::{Budget, StartPolicy};
 
 /// Rewrite the runtime's pinned configuration, and open it again: the Nov 15 head no CI run was ever started on.
@@ -172,6 +172,54 @@ async fn waiting_ticket_queue_checks_main_before_admitting_a_conflict() {
     assert!(state.items.values().all(|item| item.group_of.is_none()));
     let brief = ticket.brief.as_deref().unwrap();
     assert!(brief.contains(&main) && brief.contains("shared.txt"), "{brief}");
+}
+
+#[tokio::test]
+async fn review_after_a_landing_send_back_only_sees_the_rebased_ticket() {
+    let (dir, mut runtime) = lander("conflict").await;
+    let script = dir.path().join("adapter.py");
+    let seen = dir.path().join("review-range");
+    let mut config = runtime.coding.clone().unwrap();
+    let mut review = config.checks[0].clone();
+    review.argv[2] = "review".into();
+    review.environment.insert("REVIEW_RANGE".into(), seen.to_string_lossy().into_owned());
+    config.reviewer = Some(CodingReviewer { identity: "reviewer".into(), command: review });
+    let root = runtime.root.clone();
+    std::fs::write(root.join("coding.json"), serde_json::to_vec(&config).unwrap()).unwrap();
+    drop(runtime);
+    runtime = Runtime::open(&root).unwrap();
+    let mut definition = waiting_definition(&runtime, false);
+    definition.stages.insert(3, config.stage("review", StageKind::Review(Reviewer::Dispatch), "coding-review/v1", "reviewer"));
+    let source = std::fs::read_to_string(&script).unwrap();
+    std::fs::write(&script, source.replace("elif stage == 'review':\n", r#"elif stage == 'review':
+    base = os.environ['FARCOOLER_BASE']
+    g = lambda *args: subprocess.check_output(['/usr/bin/git', *args], text=True).strip()
+    pathlib.Path(os.environ['REVIEW_RANGE']).write_text(json.dumps([
+        base, g('log', '--format=%s', base + '..' + candidate), g('diff', '--name-only', base, candidate)]))
+"#).replace("passed=iteration != '0' and mode != 'review-reject'", "passed=True")).unwrap();
+    at_join(&mut runtime, "ticket", &definition).await;
+    let original = remote_head(&runtime).await;
+    let before = runtime.state("w").unwrap().unwrap();
+    assert_eq!(serde_json::from_slice::<Vec<String>>(&std::fs::read(&seen).unwrap()).unwrap(),
+        [original, "build 0".into(), "shared.txt".into()]);
+
+    move_waiting_ticket_main(&dir, &runtime, "independent.txt", "landed elsewhere").await;
+    let rebased_onto = move_waiting_ticket_main(&dir, &runtime, "shared.txt", "conflicting landing").await;
+    let receipt = runtime.submit(&runtime.controller(), Request {
+        id: "queue-before-review-rebase".into(), workspace: "w".into(), expected_revision: before.revision,
+        sequence: 2, command: Command::Queue { item: "ticket".into() },
+    }, 10).await.unwrap();
+    assert_eq!(receipt.result, Err(Refusal::Stale));
+    // Advance main again after the rebase target was named. Build onto the named SHA,
+    // so the review needs the common ancestor rather than the latest target tip.
+    let source = std::fs::read_to_string(&script).unwrap();
+    std::fs::write(&script, source.replace("if stage == 'build':",
+        &format!("if stage == 'build':\n    subprocess.check_call(['/usr/bin/git', 'rebase', '--no-autostash', '-X', 'theirs', {rebased_onto:?}])"))).unwrap();
+    move_waiting_ticket_main(&dir, &runtime, "later.txt", "landed after the send-back").await;
+    until(&mut runtime, |s| phase_of(s, "ticket") == Some(Phase::WaitingJoin)).await;
+    assert_eq!(outbox(&runtime, StageKind::Review(Reviewer::Dispatch)), 2);
+    assert_eq!(serde_json::from_slice::<Vec<String>>(&std::fs::read(&seen).unwrap()).unwrap(),
+        [rebased_onto, "build 0\nbuild 0".into(), "shared.txt".into()]);
 }
 
 #[tokio::test]

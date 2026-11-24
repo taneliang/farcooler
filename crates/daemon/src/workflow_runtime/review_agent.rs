@@ -1,5 +1,4 @@
-//! An agent's review gate, as its step's options shape it (ov-1071): the workflow's words for the reviewer, and the
-//! model it runs with by the paths the ticket changed.
+//! The range a review sees, plus the agent's brief and changed-path model selection (ov-1071).
 use super::*;
 use super::coding::sha;
 use crate::review_agent::ReviewOptions;
@@ -9,7 +8,48 @@ use crate::review_agent::ReviewOptions;
 #[derive(Debug, Serialize, Deserialize)]
 struct ChosenModel { binding: String, model: Option<String>, paths: usize }
 
+#[derive(Serialize, Deserialize)]
+struct ReviewBase { binding: String, base: String }
+
 impl Exec {
+    fn review_base_path(&self, binding: &Binding) -> PathBuf {
+        self.root.join("receipts").join(format!("{}.review-base.json", digest(&binding.effect)))
+    }
+
+    pub(super) fn review_base(&self, binding: &Binding) -> Result<Option<String>> {
+        match self.bytes(&self.review_base_path(binding)) {
+            Ok(raw) => {
+                let pin: ReviewBase = serde_json::from_slice(&raw)?;
+                if pin.binding != digest(binding) || !sha(&pin.base) {
+                    return Err(Error::Refused("invalid review base receipt"));
+                }
+                Ok(Some(pin.base))
+            }
+            // Reviews launched before this pin existed still reconcile against their original binding.
+            Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Pin the common ancestor of the candidate and the landing target before launch. The target may
+    /// have advanced again after the rebase, so its tip is only an input to this calculation.
+    pub(super) async fn pin_review_base(&self, binding: &Binding) -> Result<()> {
+        if self.review_base(binding)?.is_some() { return Ok(()); }
+        let candidate = binding.effect.candidate.as_deref().filter(|c| sha(c))
+            .ok_or(Error::Refused("missing review candidate"))?;
+        let head = self.landing_head_in_repository(&binding.effect.id).await?;
+        let base = self.git_recorded(binding, &self.repository(),
+            &["--no-replace-objects", "merge-base", "--all", &head, candidate]).await?;
+        if !sha(&base) { return Err(Error::Refused("review needs a single common ancestor")); }
+        let receipts = self.root.join("receipts");
+        let mut draft = tempfile::NamedTempFile::new_in(&receipts)?;
+        serde_json::to_writer(draft.as_file_mut(), &ReviewBase { binding: digest(binding), base })?;
+        draft.as_file().sync_all()?;
+        draft.persist_noclobber(self.review_base_path(binding)).map_err(|error| error.error)?;
+        std::fs::File::open(receipts)?.sync_all()?;
+        Ok(())
+    }
+
     /// A deterministic child operation owns its own process, log and receipt. It is derived only from
     /// the admitted review's pinned options, and never admitted as a separate engine effect.
     pub(super) fn review_check(&self, binding: &Binding) -> Option<Binding> {
@@ -48,17 +88,22 @@ impl Exec {
         let path = self.chosen_model_path(binding);
         if path.try_exists()? { return Ok(()); }
         let candidate = binding.effect.candidate.clone().filter(|c| sha(c)).ok_or(Error::Refused("missing candidate"))?;
-        let changed = self.git_recorded(binding, tree, &["-c", "core.quotepath=off", "diff", "--name-only", "--no-renames", "-z", &binding.base, &candidate]).await?;
+        let base = self.review_base(binding)?.unwrap_or_else(|| binding.base.clone());
+        let changed = self.git_recorded(binding, tree, &["-c", "core.quotepath=off", "diff", "--name-only", "--no-renames", "-z", &base, &candidate]).await?;
         let paths: Vec<String> = changed.split('\0').filter(|p| !p.is_empty()).map(String::from).collect();
         let model = options.model_for(&paths).map(String::from).or_else(|| binding.effect.model.clone());
         durable(&path, &serde_json::to_vec(&ChosenModel { binding: digest(binding), model, paths: paths.len() })?)
     }
     /// An agent gate's brief, and the workflow's own words for its reviewer after it.
-    pub(super) fn review_prompt(binding: &Binding) -> String {
-        let brief = Self::reviewing(&binding.effect.item);
-        match Self::review_options(binding).and_then(|o| o.prompt) {
+    pub(super) fn review_prompt(&self, binding: &Binding) -> Result<String> {
+        let mut brief = Self::reviewing(&binding.effect.item);
+        if let Some(base) = self.review_base(binding)? {
+            let candidate = binding.effect.candidate.as_deref().ok_or(Error::Refused("missing review candidate"))?;
+            brief.push_str(&format!("\n\nThe engine gave you review range `{base}..{candidate}`. Include this range in a rejection summary."));
+        }
+        Ok(match Self::review_options(binding).and_then(|o| o.prompt) {
             Some(prompt) => format!("{brief}\n\n{prompt}"),
             None => brief,
-        }
+        })
     }
 }
