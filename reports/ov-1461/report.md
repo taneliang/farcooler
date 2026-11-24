@@ -21,3 +21,15 @@ After the fix, 25 daemon tests passed, including the new regression, landing and
 `cargo clippy --locked --offline -p farcooler-daemon --all-targets -- -D warnings` passed. The daemon layer and file-size checks also passed.
 
 The native PTY fixture could not initialize because the scratch path exceeded the macOS Unix socket path limit. Automatic approval review rejected rerunning that fixture with `TMPDIR=/tmp` under the scratch-only constraint.
+
+## Landing-gate follow-up
+
+The landing gate passed the rebase regression and the ticket-brief test, but eight existing tests failed again when rerun individually. All eight used the parallel-review fixture, which initialized an empty bare repository. Review now resolves the configured `refs/heads/main` before launching the reviewer or its parallel check. The empty target explains both the failed review phases and the cancellation test's wait for processes that never started.
+
+The fixture now publishes its initial commit to `refs/heads/main` in that private repository. The original landing-gate log (`rust-55372114.log`) records all eight repeat failures. The live `workflow get` command returned `known caller required`.
+
+`scripts/landing-gate --quick-only`, the daemon layer check, and the file-size check passed on the repaired worktree.
+
+All eight tests that failed at landing passed in the focused rerun, as did the rebase regression and the verdict-brief test. The rerun used two test slots at the runner's inherited nice value of 10 and a Git config with `init.defaultBranch = master`.
+
+The focused run passed 34 of 35 tests. `a_recorded_verdict_settles_a_turn_whose_end_never_arrives` exceeded its four-second assertion by 0.45 seconds and passed when rerun alone. `cargo clippy --locked --offline -p farcooler-daemon --all-targets -- -D warnings` passed before the follow-up commit.

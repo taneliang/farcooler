@@ -351,9 +351,13 @@ sys.exit(int(sys.argv[2]))
     let config = runtime.coding.as_mut().unwrap();
     config.checks[0].argv = vec!["/usr/bin/python3".into(), check.to_string_lossy().into_owned(),
         dir.path().to_string_lossy().into_owned(), if fail { "7" } else { "0" }.into()];
-    // The group never runs in these tests; its private bare target makes the whole definition publishable.
+    // Reviews resolve their base against the landing target even though these tests never run the group.
     let bare = dir.path().join("remote.git"); std::fs::create_dir(&bare).unwrap();
     adapters::git(&bare, &["init", "--bare", "--quiet"]).await.unwrap();
+    let status = tokio::process::Command::new("/usr/bin/git").current_dir(&config.repository)
+        .args(["-c", "core.hooksPath=/dev/null", "push", "--quiet", bare.to_str().unwrap(),
+            &format!("{}:refs/heads/main", config.base)]).status().await.unwrap();
+    assert!(status.success());
     config.landing = Some(CodingLanding { job: "parallel-test".into(), repository: bare.canonicalize().unwrap(),
         target: "refs/heads/main".into(), config_digest: digest(&std::fs::read(bare.join("config")).unwrap()) });
     config.security_reviews = vec![super::coding::SecurityReview {
