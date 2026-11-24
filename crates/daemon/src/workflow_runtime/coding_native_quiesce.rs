@@ -16,9 +16,7 @@ impl NativeOwner {
         if !processes.is_empty() && owns_session()? {
             match crate::effect_runner::Owner::matches_started(supervisor.pid, &supervisor.started) {
                 Ok(false) => return Ok(Vec::new()),
-                Err(error) => {
-                    if owns_session()? { return Err(Error::Io(error)); }
-                }
+                Err(error) if owns_session()? => return Err(Error::Io(error)),
                 _ => {}
             }
         }

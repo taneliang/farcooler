@@ -48,3 +48,13 @@ The workflow-read regression stalls the unrelated pane's argument read until the
 - The Mac app and test bundle built, and all 90 focused tests across 11 suites passed. The stalled-read regression observed “Runner not responding” while the original read was still open.
 - Nextest ran 5,104 tests across the three touched Rust crates and skipped 23. The full invocation exited nonzero with 5,100 passed, including two on retry, and four fixture failures caused by Intel Python on the inherited PATH. All four passed in two successful reruns with native Python on a scratch-only PATH. Every enabled case passed across the runs, and the tmux leak checks reported no leaks.
 - The full run passed the one-second workflow read with a blocked argument query, the six-run restart at two starts per minute, the bounded pane delivery and process-worker checks, all four native quiescence cases, and watchdog reporting. A temporary idle-sleep assertion kept the host awake after two long gaps and expired when nextest exited.
+
+## Verification on landing base `5bfcd67e88252f76ed4c0a264e34866f375fe99a`
+
+- The rebase kept native agent signaling in the hold. Legacy owner checks read topology and session membership through bounded workers. Heavy-queue admission uses bounded process-group and temporary-directory reads. A query timeout leaves admission unproved.
+- Clippy passed with `--all-targets -- -D warnings` for the daemon, CLI, and client. The daemon layer check, its base comparison, the file-size budget, and the Swift test-floor check passed.
+- The full nextest run passed all 5,129 enabled tests across the three crates, with 23 skipped. Seven cases passed on their first retry. The temp-file and tmux leak guards passed.
+- Eight of nine serial checks passed with retries disabled. The native hold timing test failed its resume assertion and nextest reported a leak. No hold from the scratch binary remained after the run. The same test passed by itself with retries disabled and both leak guards passed.
+- The workflow read met its one-second deadline while a process-argument query was blocked. The six-run restart honored the configured two starts per minute. The process-worker, pane-delivery, watchdog, native quiescence, and heavy-queue checks passed.
+- The Mac app and test bundle built. All 82 focused Swift tests across 12 suites passed, including the stalled read that publishes “Runner not responding” before the read ends.
+- The two web suites that consume the conversation-words fixture passed all 41 tests.
