@@ -230,8 +230,8 @@ mod tests {
         assert_eq!(revised.expected_version, u64::MAX);
         assert_eq!(revised.constraints, task.constraints);
         assert_eq!(revised.labels, task.labels);
-        assert_eq!(revised.acceptance, [item.clone()]);
-        let extra = acceptance("First line\n  more context\nNew criterion", &[item.clone()]);
+        assert_eq!(revised.acceptance, std::slice::from_ref(&item));
+        let extra = acceptance("First line\n  more context\nNew criterion", std::slice::from_ref(&item));
         assert_eq!(extra[0], item);
         assert_eq!(extra[1].text, "New criterion");
         assert!(!extra[1].met);

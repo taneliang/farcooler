@@ -92,7 +92,7 @@ pub fn destinations(task: &pb::Task, terminals: &[pb::Terminal], trees: &[pb::Wo
         .filter(|t| matches!(TerminalState::try_from(t.state), Ok(TerminalState::Running | TerminalState::Starting)))
         .max_by_key(|t| &t.id);
     let tree = task.worktree_id.as_ref().or_else(|| agent.map(|t| &t.worktree_id))
-        .and_then(|id| trees.iter().find(|tree| &tree.id == id))
+        .and_then(|id| trees.iter().find(|tree| tree.id == id))
         .filter(|tree| matches!(WorktreeState::try_from(tree.state), Ok(WorktreeState::Ready | WorktreeState::Active)));
     (agent.and_then(|t| Uuid::from_slice(&t.id).ok()), tree.and_then(|t| Uuid::from_slice(&t.id).ok()))
 }
