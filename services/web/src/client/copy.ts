@@ -148,6 +148,10 @@ export function runnerStopped(runner: string): string {
   return `${runner} stopped answering, so its list may be behind. Select Reconnect, then touch your passkey when your browser asks.`
 }
 
+export function runnerDeferred(runner: string): string {
+  return `${runner} is not connected yet. Select Connect, then touch your passkey when your browser asks.`
+}
+
 /// What an answer says when the runner didn't take it: by the runner's `what`
 /// where it named one, else by its code. `agent` is who the answer was for
 /// (`claude`). Mirrors AgentKit's PhoneAnswer.refusal, so a browser and a

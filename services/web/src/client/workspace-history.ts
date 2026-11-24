@@ -49,6 +49,7 @@ export class WorkspaceHistory {
 
   leave(): void {
     if (this.leaving) return
+    // Closing follows the browser's actual history when the entry has a parent.
     if (this.parent) {
       this.leaving = true
       history.back()

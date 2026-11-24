@@ -741,17 +741,23 @@ async function panes(page) {
 }
 
 /// Needs You across every runner this browser is enrolled on (ov-861): two
-/// real sshds, each in front of a fake daemon with one ask waiting. One
-/// Connect and one touch for each shows both asks, each row naming its runner;
+/// real sshds, each in front of a fake daemon with one ask waiting.
+/// On reload only the foreground runner needs a touch. The other offers
+/// Connect with an explanation. One more touch shows both asks;
 /// an answer reaches only the runner the row is on; and with the second runner
-/// gone, the first one's ask is still listed, with a line saying the second
-/// can't be reached.
+/// offline, the first one's ask is still listed after reload.
 async function everyRunner(page) {
   second = await startRunner('build-box')
   second.enroll(runner.keyA())
+  const studio = { id: 'r1', label: 'studio', user: me, host_key: runner.hostKey, token: 'test', why: '' }
+  await edit(page, { runners: [studio] })
+  await page.reload()
+  await statusSays(page, 'Connect to studio')
+  await page.click('#status-action')
+  await page.waitForFunction(() => Boolean(history.state?.workspaceScope), null, { timeout: 120_000 })
   await edit(page, {
     runners: [
-      { id: 'r1', label: 'studio', user: me, host_key: runner.hostKey, token: 'test', why: '' },
+      studio,
       { id: 'r2', label: 'build-box', user: me, host_key: second.hostKey, token: 'test2', why: '' },
     ],
   })
@@ -763,13 +769,17 @@ async function everyRunner(page) {
   await page.click('#status-action')
   await page.waitForSelector('#work:not([hidden])', { timeout: 120_000 })
   await page.click('#show-needs')
-  // Restored work connects the foreground runner first. A fresh grant can
-  // already be connecting the secondary runner.
   const rows = () => page.$$eval('#needs .need', rows => rows.map(r => ({ text: r.textContent, runner: r.querySelector('.need-runner')?.textContent ?? '' })))
-  const connectOther = page.locator('.need-runner-note').filter({ hasText: 'build-box' }).getByRole('button', { name: 'Connect', exact: true })
+  const deferred = page.locator('.need-runner-note').filter({ hasText: 'build-box' })
+  const connectOther = deferred.getByRole('button', { name: 'Connect', exact: true })
   const secondCard = page.locator('#needs .need').nth(1)
-  await connectOther.or(secondCard).first().waitFor({ timeout: 60_000 })
-  if (await connectOther.isVisible()) await connectOther.click()
+  await connectOther.waitFor({ timeout: 60_000 })
+  const deferredText = await deferred.evaluate(note => note.firstChild?.textContent)
+  if (deferredText !== 'build-box is not connected yet. Select Connect, then touch your passkey when your browser asks.') {
+    failures.push(`the deferred runner notice says ${JSON.stringify(deferredText)}`)
+  }
+  if (touches - before !== 1) failures.push(`returning with two runners cost ${touches - before} touches before Connect, expected 1`)
+  await connectOther.click()
   await secondCard.waitFor({ timeout: 60_000 })
   const both = await rows()
   const names = both.map(r => r.runner).sort()
@@ -790,7 +800,7 @@ async function everyRunner(page) {
   if (runner.answers().length) failures.push(`studio was answered ${JSON.stringify(runner.answers())} for build-box's ask`)
   else console.log('csp-check: an answer reached build-box and not studio')
 
-  // The second runner goes away: the first's ask stays, and the page says so.
+  // With the second runner offline, the first's ask stays visible on reload.
   spawnSync('/bin/kill', [String(second.pid)])
   await page.reload()
   await statusSays(page, 'Connect to studio')
@@ -805,7 +815,7 @@ async function everyRunner(page) {
   if (kept.length !== 1 || kept[0].runner !== 'studio') failures.push(`with build-box unreachable the list holds ${JSON.stringify(kept)}`)
   if (!(await page.locator('.need-runner-note button', { hasText: 'Connect' }).count())) failures.push(`the note for the unreachable runner has no Connect button: ${note}`)
   await shoot(page, 'runner-unreachable')
-  console.log(`csp-check: with build-box unreachable, studio's ask stayed listed and the page said "${note.trim()}"`)
+  console.log(`csp-check: with build-box offline, studio's ask stayed listed and the page said "${note.trim()}"`)
 }
 
 /// One runner, three workspaces (ov-871, ov-1445). The fake daemon's Main workspace has
@@ -1184,6 +1194,7 @@ try {
 
     if (workstationOnly) {
       runner.enroll(offer.key_a)
+      await everyRunner(page)
       await workspaceWalk(page)
       await workstationWalk(page)
       await detailWalk(page)

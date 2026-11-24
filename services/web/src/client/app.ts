@@ -25,7 +25,7 @@ import { openWorkflow, installWorkflowPort } from './workflow-view'
 import { WorkflowSessionPort } from './workflow-session'
 import init, { connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, needsYouView, openReply, passkeyKeyLine, planView, recoveryView, registrationData, registrationProof, rpId, workFailure, workView, workspaceLayout, workspaceOrchestrator, type WebRunner } from 'fc-web'
 
-import { compareWords, connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, needsYouFailure, registerFailure, restoreFailure, runnerStopped, saveFailure, sealedRefusal, unreachable } from './copy'
+import { compareWords, connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, needsYouFailure, registerFailure, restoreFailure, runnerDeferred, runnerStopped, saveFailure, sealedRefusal, unreachable } from './copy'
 import { askForCopy, assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
 import { Fleet, type RunnerDeps } from './fleet'
 import { type BoardView, buttonsFor, countLabel, countOf, isCounted, pageTitle } from './needs'
@@ -1022,6 +1022,9 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     } catch {}
   }
 
+  // The browser resolves restored history entries against its current workspace
+  // picker and live fleet. Moving this fallback policy to Rust needs a WASM
+  // route resolver fed by both; the current layout interface takes a resolved page.
   const resolve = (route: Route): Route => {
     const unavailable = route.page === 'workflow' && !spaces.some(space => space.id === route.space) ||
       route.page === 'ticket' && (!route.ticket || !fleet?.cardsOf(route.ticket.runner)?.deps?.task)
@@ -1168,7 +1171,7 @@ function joinRunner(session: Session, target: Granted, into: Fleet, automaticall
   }
   retries.set(target.id, () => void (everUp ? rec.reconnect() : attempt()))
   if (automatically) turn = turn.then(attempt)
-  else into.unreachable(target.id, runnerStopped(target.label), 'Connect')
+  else into.unreachable(target.id, runnerDeferred(target.label), 'Connect')
 }
 
 /// The tab is visible again or the browser is online: ask the runner now
