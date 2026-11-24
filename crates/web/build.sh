@@ -72,7 +72,7 @@ fi
 
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
-rm -f "$out"/farcooler_web* "$out"/tailcat.wasm "$out"/tailcat.raw.wasm "$out"/wasm_exec.js
+rm -f "$out"/farcooler_web* "$out"/tailcat.wasm "$out"/wasm_exec.js
 
 # --- Rust: the channel is stamped by farcooler-protocol's build.rs, which is
 # what makes a canary page refuse a stable phone's codes and run a canary
@@ -82,22 +82,21 @@ FARCOOLER_CHANNEL=$channel "$CARGO" build --locked --release --target wasm32-unk
   "${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/release/farcooler_web.wasm"
 # The features rustc's wasm32 target emits by default, named so wasm-opt
 # neither refuses the module nor introduces anything a browser lacks.
-wasm_features=(--enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext
-  --enable-mutable-globals --enable-reference-types --enable-multivalue)
-"$WASM_OPT" -Oz "${wasm_features[@]}" \
+"$WASM_OPT" -Oz \
+  --enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext \
+  --enable-mutable-globals --enable-reference-types --enable-multivalue \
   -o "$out/farcooler_web.wasm" "$out/farcooler_web_bg.wasm"
 rm "$out/farcooler_web_bg.wasm"
 
 # --- Go: the runner's own module, so the browser's Tailcat and the runner's
-# are the same version by construction. Optimize the browser module for size
-# so the bundle stays within the download budget.
+# are the same version by construction. Disabling Go inlining makes the
+# browser module smaller after Brotli compression.
 (
   cd ../tailcat/go
   tags=$("$GO" run ./webtags)
-  GOOS=js GOARCH=wasm CGO_ENABLED=0 "$GO" build -trimpath -ldflags="-s -w" -tags "$tags" -o "$out/tailcat.raw.wasm" .
+  GOOS=js GOARCH=wasm CGO_ENABLED=0 "$GO" build -trimpath -gcflags="all=-l" \
+    -ldflags="-s -w" -tags "$tags" -o "$out/tailcat.wasm" .
   cp "$("$GO" env GOROOT)/lib/wasm/wasm_exec.js" "$out/wasm_exec.js"
 )
-"$WASM_OPT" -Oz "${wasm_features[@]}" -o "$out/tailcat.wasm" "$out/tailcat.raw.wasm"
-rm "$out/tailcat.raw.wasm"
 
 ls -l "$out"
