@@ -87,8 +87,8 @@ fn retain_plan_items(state: &mut State) {
         && !(item.group_of.is_some() && matches!(item.phase, Phase::Done | Phase::Cancelled)));
 }
 
-/// Released Plan can load large archives through the unmarked read. Keep the
-/// rest of the reply intact so an oversized live state gets the frame refusal.
+/// Released Plan reads one unmarked workflow snapshot. Keep the complete reply
+/// when it fits, then shed history before limiting live runs to one frame.
 pub(crate) fn encode_legacy_get(mut value: serde_json::Value) -> String {
     let json = value.to_string();
     if json.len() <= PLAN_WORKFLOW_BYTES {
@@ -100,9 +100,82 @@ pub(crate) fn encode_legacy_get(mut value: serde_json::Value) -> String {
         let omitted = archive.len();
         archive.clear();
         value["archive_omitted"] = omitted.into();
-        return value.to_string();
+        let json = value.to_string();
+        if json.len() <= PLAN_WORKFLOW_BYTES {
+            return json;
+        }
     }
-    json
+
+    // Released action clients use this caller's sequence to prepare mutations.
+    let source = value.pointer("/context/capabilities/decision_principal")
+        .and_then(|v| v.as_str()).map(|principal| format!("wire:{principal}"));
+    if let Some(seen) = value.pointer_mut("/state/seen").and_then(|v| v.as_array_mut()) {
+        seen.clear();
+    }
+    if let Some(sequences) = value.pointer_mut("/state/source_sequences").and_then(|v| v.as_object_mut()) {
+        sequences.retain(|key, _| Some(key.as_str()) == source.as_deref());
+    }
+    let json = value.to_string();
+    if json.len() <= PLAN_WORKFLOW_BYTES {
+        return json;
+    }
+
+    fit_legacy_workflow(value)
+}
+
+fn fit_legacy_workflow(mut value: serde_json::Value) -> String {
+    let fields = value.as_object_mut().expect("workflow reply object");
+    let configuration = fields.remove("configuration");
+    let places = fields.remove("places");
+    fields.retain(|key, _| matches!(key.as_str(), "schema" | "context" | "state" | "stops" | "archive_omitted"));
+
+    // The base reply now contains just authenticated context, State's required
+    // identity and observation fields, and empty or single-entry collections.
+    let mut items = Vec::new();
+    if let Some(state) = value["state"].as_object_mut() {
+        state.retain(|key, _| matches!(key.as_str(),
+            "schema" | "workspace" | "revision" | "epoch" | "items" | "seen" | "source_sequences"));
+        let rows = state["items"].as_object_mut().expect("workflow state items");
+        items.extend(std::mem::take(rows));
+    }
+    let stops = std::mem::take(value["stops"].as_object_mut().expect("workflow stops"));
+    let count = items.len();
+    value["items_omitted"] = count.into();
+    let mut remaining = PLAN_WORKFLOW_BYTES - value.to_string().len();
+
+    // Plan already shows tracker-only tickets as board cards. Fit whole runs
+    // with their pinned definitions, preferring active and more recent runs.
+    items.retain(|(_, item)| item["definition"]["source"] != farcooler_workflow::TICKET_SOURCE);
+    items.sort_by_key(|(_, item)| {
+        let terminal = matches!(item["phase"].as_str(), Some("Done" | "Cancelled"));
+        (terminal, std::cmp::Reverse(item["since_ms"].as_i64().unwrap_or_default()))
+    });
+    let mut retained = 0;
+    for (id, item) in items {
+        if let Some(next) = remaining.checked_sub(workflow_field_bytes(&id, &item)) {
+            remaining = next;
+            value["state"]["items"][id] = item;
+            retained += 1;
+        }
+    }
+    value["items_omitted"] = (count - retained).into();
+    for (id, stop) in stops {
+        if value["state"]["items"].get(&id).is_some()
+            && let Some(next) = remaining.checked_sub(workflow_field_bytes(&id, &stop))
+        {
+            remaining = next;
+            value["stops"][id] = stop;
+        }
+    }
+    for (key, field) in [("configuration", configuration), ("places", places)] {
+        if let Some(field) = field
+            && let Some(next) = remaining.checked_sub(workflow_field_bytes(key, &field))
+        {
+            remaining = next;
+            value[key] = field;
+        }
+    }
+    value.to_string()
 }
 
 pub(crate) fn encode_plan_get(mut value: serde_json::Value, cursor: Option<&str>)
