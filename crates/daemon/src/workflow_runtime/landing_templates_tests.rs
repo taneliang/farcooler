@@ -57,7 +57,7 @@ async fn a_failing_command_gate_keeps_the_batch_from_ever_pushing() {
 #[tokio::test]
 async fn an_update_waits_for_a_started_landing_check_to_record_its_result() {
     use crate::landing_update::{announce_update, try_update};
-    use farcooler_store::workflow_effects::{legacy_landing_active, try_legacy_landing_fence};
+    use farcooler_store::workflow_effects::legacy_landing_active;
 
     let (dir, mut runtime) = lander("update-wait").await;
     let mut landing = plan(Template::BatchedPush, vec![Gate::Command(1)]);
@@ -81,7 +81,7 @@ async fn an_update_waits_for_a_started_landing_check_to_record_its_result() {
             assert!(try_update(&home).unwrap().is_none(), "the started check holds off the update");
             let database = home.join("workflow.sqlite");
             assert!(legacy_landing_active(&database).unwrap(), "old runners expose the check through admission");
-            assert!(try_legacy_landing_fence(&database).unwrap().is_none());
+            assert!(!farcooler_store::workflow_effects::try_legacy_landing_fence(&database).unwrap());
             std::fs::write(marker.with_extension("release"), b"").unwrap();
             waiting
         }).await.unwrap()
@@ -99,7 +99,6 @@ async fn an_update_waits_for_a_started_landing_check_to_record_its_result() {
     let gate = runtime.store.workflow_outbox("w").unwrap().into_iter()
         .find(|entry| entry.effect.kind == EffectKind::Execute(StageKind::Run)).unwrap();
     assert_eq!(gate.dispatch_state, "settled", "the result was recorded before the update got in");
-    assert!(try_legacy_landing_fence(&home.join("workflow.sqlite")).unwrap().is_some());
     runtime.pump(5).await.unwrap();
     assert_eq!(outbox(&runtime, StageKind::Run), 1, "the second landing has not started its check");
     assert_eq!(remote_head(&runtime).await, first, "no push can start during replacement");

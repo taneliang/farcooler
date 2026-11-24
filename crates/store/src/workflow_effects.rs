@@ -16,19 +16,47 @@ pub fn legacy_landing_active(database: &std::path::Path) -> rusqlite::Result<boo
     }
 }
 
-/// Reserve SQLite's writer slot before checking for admitted landings. Older
-/// runners commit admission before launching an effect, so holding this
-/// connection through their shutdown prevents a new admission in the gap.
-/// This transaction changes no rows and rolls back when the connection closes.
-pub fn try_legacy_landing_fence(database: &std::path::Path) -> rusqlite::Result<Option<Connection>> {
-    let conn = Connection::open_with_flags(database, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+/// Install a fence in the same write transaction that checks for admitted
+/// landings. Legacy admission requires its UPDATE to affect one row. Ignoring
+/// just that transition leaves the runner free to settle its other effects.
+pub fn try_legacy_landing_fence(database: &std::path::Path) -> rusqlite::Result<bool> {
+    let mut conn = Connection::open_with_flags(database, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
     conn.busy_timeout(std::time::Duration::ZERO)?;
-    match conn.execute_batch("BEGIN IMMEDIATE") {
-        Ok(()) => {}
-        Err(err) if writer_busy(&err) => return Ok(None),
+    let tx = match conn.transaction_with_behavior(TransactionBehavior::Immediate) {
+        Ok(tx) => tx,
+        Err(err) if writer_busy(&err) => return Ok(false),
         Err(err) => return Err(err),
+    };
+    if has_outbox(&tx)? {
+        if admitted_outbox_landing(&tx)? { return Ok(false); }
+        let landing = landing_effect("NEW");
+        tx.execute_batch(&format!(
+            "CREATE TRIGGER IF NOT EXISTS workflow_legacy_landing_fence
+             BEFORE UPDATE OF dispatch_state ON workflow_outbox
+             WHEN OLD.dispatch_state = 'claimed' AND NEW.dispatch_state = 'admitted'
+                  AND ({landing})
+             BEGIN SELECT RAISE(IGNORE); END;"
+        ))?;
     }
-    if admitted_landing(&conn)? { Ok(None) } else { Ok(Some(conn)) }
+    match tx.commit() {
+        Ok(()) => Ok(true),
+        Err(err) if writer_busy(&err) => Ok(false),
+        Err(err) => Err(err),
+    }
+}
+
+/// Call only after the legacy runner has released its owner lock, or from the
+/// next exclusive bootstrap if the updater exited before it could clean up.
+pub fn clear_legacy_landing_fence(database: &std::path::Path) -> rusqlite::Result<()> {
+    let conn = Connection::open_with_flags(database, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+    let installed: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'trigger' AND name = 'workflow_legacy_landing_fence')",
+        [], |row| row.get(0),
+    )?;
+    if installed {
+        conn.execute_batch("DROP TRIGGER IF EXISTS workflow_legacy_landing_fence")?;
+    }
+    Ok(())
 }
 
 fn writer_busy(err: &rusqlite::Error) -> bool {
@@ -36,17 +64,23 @@ fn writer_busy(err: &rusqlite::Error) -> bool {
 }
 
 fn admitted_landing(conn: &Connection) -> rusqlite::Result<bool> {
-    let has_outbox: bool = conn.query_row(
+    Ok(has_outbox(conn)? && admitted_outbox_landing(conn)?)
+}
+
+fn has_outbox(conn: &Connection) -> rusqlite::Result<bool> {
+    conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'workflow_outbox')",
         [], |row| row.get(0),
-    )?;
-    if !has_outbox { return Ok(false); }
+    )
+}
+
+fn admitted_outbox_landing(conn: &Connection) -> rusqlite::Result<bool> {
     // Cancellation changes the original admission to uncertain before its
     // process stops. Keep waiting while the corresponding Stop is pending.
+    let landing = landing_effect("o");
     conn.query_row(
-        "SELECT EXISTS (
+        &format!("SELECT EXISTS (
              SELECT 1 FROM workflow_outbox o
-             JOIN workflow_states s ON s.workspace = o.workspace
              WHERE (o.dispatch_state = 'admitted' OR (
                  o.dispatch_state = 'uncertain' AND EXISTS (
                      SELECT 1 FROM workflow_outbox stop
@@ -54,21 +88,24 @@ fn admitted_landing(conn: &Connection) -> rusqlite::Result<bool> {
                        AND stop.dispatch_state IN ('pending', 'claimed', 'admitted')
                        AND json_extract(stop.payload, '$.kind.Stop.operation') = o.id
                  )
-             )) AND (
-                 json_extract(o.payload, '$.kind.Execute') IN ('Land', 'Push', 'PushCandidate', 'PushBranch')
-                 OR (
-                     (json_extract(o.payload, '$.kind.Execute') IN ('Run', 'Check')
-                      OR json_extract(o.payload, '$.kind.Execute.Review') IN ('Agent', 'Dispatch'))
-                     AND EXISTS (
-                         SELECT 1 FROM json_each(s.state, '$.items') i
-                         WHERE i.key = json_extract(o.payload, '$.item')
-                           AND json_type(i.value, '$.group_of') = 'object'
-                     )
-                 )
-             )
-         )",
+             )) AND ({landing})
+         )"),
         [], |row| row.get(0),
     )
+}
+
+fn landing_effect(row: &str) -> String {
+    format!("json_extract({row}.payload, '$.kind.Execute') IN ('Land', 'Push', 'PushCandidate', 'PushBranch')
+             OR (
+                 (json_extract({row}.payload, '$.kind.Execute') IN ('Run', 'Check')
+                  OR json_extract({row}.payload, '$.kind.Execute.Review') IN ('Agent', 'Dispatch'))
+                 AND EXISTS (
+                     SELECT 1 FROM workflow_states s, json_each(s.state, '$.items') i
+                     WHERE s.workspace = {row}.workspace
+                       AND i.key = json_extract({row}.payload, '$.item')
+                       AND json_type(i.value, '$.group_of') = 'object'
+                 )
+             )")
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

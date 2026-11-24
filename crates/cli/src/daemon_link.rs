@@ -307,10 +307,10 @@ pub(crate) async fn ensure_in_with_start(
                 return Ok((kept, running.to_string()));
             }
             if has_landing_update_lock(&link) {
-                break (landing, link, None);
+                break (landing, link, false);
             }
-            if let Some(fence) = farcooler_store::workflow_effects::try_legacy_landing_fence(database)? {
-                break (landing, link, Some(fence));
+            if farcooler_store::workflow_effects::try_legacy_landing_fence(database)? {
+                break (landing, link, true);
             }
         }
         if let Some(report) = on_wait.take() { report(); }
@@ -320,8 +320,10 @@ pub(crate) async fn ensure_in_with_start(
     tracing::info!(running, ours = farcooler_protocol::BUILD, "replacing the local daemon");
     stop(&mut link).await?;
     drop(link);
-    wait_until_gone(socket, legacy.is_some()).await?;
-    drop(legacy);
+    wait_until_gone(socket, legacy).await?;
+    if legacy {
+        farcooler_store::workflow_effects::clear_legacy_landing_fence(database)?;
+    }
 
     start()?;
     let started = wait_for(socket).await?;

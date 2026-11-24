@@ -171,21 +171,27 @@ async fn an_update_drains_a_legacy_check_and_fences_admission_through_runner_rep
         "PRAGMA foreign_keys = OFF;
          INSERT INTO workflow_states VALUES ('w', 1, 1, '{\"items\":{\"group\":{\"group_of\":{}}}}');",
     ).unwrap();
-    let enqueue = |id, kind| {
+    let enqueue = |id, item, kind| {
         writer.execute(
             "INSERT INTO workflow_outbox (workspace, id, revision, payload, payload_hash, active)
              VALUES ('w', ?1, 1, ?2, '', 1)",
-            params![id, serde_json::json!({ "item": "group", "kind": { "Execute": kind } }).to_string()],
+            params![id, serde_json::json!({ "item": item, "kind": { "Execute": kind } }).to_string()],
         ).unwrap();
     };
-    let admit = |id: &str| writer.execute("UPDATE workflow_outbox SET dispatch_state = 'admitted' WHERE id = ?1", [id]);
+    let admit = |id: &str| writer.execute(
+        "UPDATE workflow_outbox SET dispatch_state = 'admitted' WHERE id = ?1 AND dispatch_state = 'claimed'", [id],
+    ).unwrap();
     let settle = |id: &str| {
         writer.execute("UPDATE workflow_outbox SET dispatch_state = 'settled', active = 0 WHERE id = ?1", [id]).unwrap();
     };
-    enqueue("gate", "Run");
-    enqueue("push", "Push");
-    enqueue("next", "Push");
-    admit("gate").unwrap();
+    enqueue("gate", "group", "Run");
+    enqueue("push", "group", "Push");
+    enqueue("next-push", "group", "Push");
+    enqueue("next-check", "group", "Run");
+    enqueue("ticket-check", "ticket", "Run");
+    writer.execute("UPDATE workflow_outbox SET dispatch_state = 'claimed'", []).unwrap();
+    assert_eq!(admit("gate"), 1);
+    assert_eq!(admit("ticket-check"), 1);
 
     let mut check = tokio::process::Command::new("/bin/sh").args(["-c", "read result && printf '%s' \"$result\""])
         .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).kill_on_drop(true)
@@ -232,14 +238,15 @@ async fn an_update_drains_a_legacy_check_and_fences_admission_through_runner_rep
 
     // A legacy runner can admit work while the app downloads. The relaunched
     // app's ensure must check again and fence the gap between idle and exit.
-    admit("push").unwrap();
+    assert_eq!(admit("push"), 1);
     let (wait, waiting) = oneshot::channel();
     let mut replacement = None;
     let ensuring = crate::daemon_link::ensure_in_with_start(&socket, &database, || wait.send(()).unwrap(), || {
         let settled: i64 = writer.query_row(
             "SELECT count(*) FROM workflow_outbox WHERE dispatch_state = 'settled'", [], |row| row.get(0),
         ).unwrap();
-        assert_eq!(settled, 2, "the replacement can read both recorded results");
+        assert_eq!(settled, 3, "the replacement can read all recorded results");
+        assert_eq!(admit("next-push"), 1, "the old runner's fence has been cleared");
         let server = UnixListenerServer::bind(&socket)?;
         replacement = Some(tokio::spawn(async move {
             server.serve(|_| Some((HandshakeConfig { daemon_version: farcooler_protocol::BUILD.into() }, LegacyRunner::default()))).await
@@ -251,7 +258,9 @@ async fn an_update_drains_a_legacy_check_and_fences_admission_through_runner_rep
         settle("push");
         listener_closed.await.unwrap();
         writer.busy_timeout(Duration::ZERO).unwrap();
-        assert_eq!(admit("next").unwrap_err().sqlite_error_code(), Some(rusqlite::ErrorCode::DatabaseBusy));
+        assert_eq!(admit("next-push"), 0, "the legacy push stays fenced after its listener closes");
+        assert_eq!(admit("next-check"), 0, "the legacy landing check stays fenced too");
+        settle("ticket-check");
         drop(owner);
     };
     let (ensured, (), updated) = tokio::time::timeout(Duration::from_secs(5), async {

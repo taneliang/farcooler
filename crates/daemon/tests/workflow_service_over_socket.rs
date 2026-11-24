@@ -265,14 +265,18 @@ async fn workflow_service_child() {
     let _=std::fs::remove_file(host.socket);
 }
 async fn process(root:&Path) -> (tokio::process::Child,Link,Uuid) {
-    let mut child=tokio::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--ignored","--exact","workflow_service_child","--nocapture"])
-        .env("FARCOOLER_WORKFLOW_SERVICE_TEST_ROOT",root).kill_on_drop(true).spawn().unwrap();
+    let mut command=tokio::process::Command::new(std::env::current_exe().unwrap());
+    command.args(["--ignored","--exact","workflow_service_child","--nocapture"])
+        .env("FARCOOLER_WORKFLOW_SERVICE_TEST_ROOT",root);
+    connect_process(command, root, &root.join("d.sock")).await
+}
+async fn connect_process(mut command:tokio::process::Command, root:&Path, socket:&Path) -> (tokio::process::Child,Link,Uuid) {
+    let mut child=command.kill_on_drop(true).spawn().unwrap();
     let mut link = None;
     assert!(common::wait_until(tokio::time::Instant::now() + std::time::Duration::from_secs(60),
         std::time::Duration::from_millis(20), async || {
             assert!(child.try_wait().unwrap().is_none(), "ordinary child exited before serving");
-            link = Client::connect(root.join("d.sock"),"process-proof","1").await.ok();
+            link = Client::connect(socket,"process-proof","1").await.ok();
             link.is_some()
         }).await, "ordinary child never served");
     let link = link.unwrap();
@@ -284,6 +288,70 @@ async fn end_process(child:&mut tokio::process::Child,link:&mut Link) {
     link.call(farcooler_transport::request("daemon.shutdown")).await.unwrap();
     let status=tokio::time::timeout(std::time::Duration::from_secs(15),child.wait()).await.unwrap().unwrap();
     assert!(status.success(),"ordinary child shutdown failed");
+}
+
+#[tokio::test]
+async fn a_legacy_runner_joins_a_non_landing_build_while_landing_admissions_are_fenced() {
+    use farcooler_store::workflow_effects::try_legacy_landing_fence;
+    use farcooler_workflow::{EffectKind, StageKind};
+
+    if person_terminal("a_legacy_runner_joins_a_non_landing_build_while_landing_admissions_are_fenced").await { return; }
+    let (dir, mut config) = configured(false, "cancel").await;
+    // Leave time for shutdown itself to cancel the command.
+    if let CodingHarness::Command(command) = &mut config.harness { command.timeout_ms = 30_000; }
+    let root = dir.path();
+    let home = root.join("state");
+    let _tmux = common::TmuxReaper::new(&home);
+    // By default the workflow service child uses the ordinary owner and
+    // advertises the pre-interlock handshake. A historical binary can run
+    // the same test, including its original daemon main and shutdown.
+    let (mut child, mut link, workspace) = if let Some(binary) = std::env::var_os("FARCOOLER_TEST_LEGACY_RUNNER") {
+        Host::open(root).await.close().await;
+        let mut command = tokio::process::Command::new(binary);
+        command.env("FARCOOLER_HOME", &home).env("FARCOOLER_CONFIG", home.join("config.toml"));
+        connect_process(command, root, &home.join("farcoolerd.sock")).await
+    } else {
+        process(root).await
+    };
+    assert!(!link.server_hello().capabilities.iter().any(|cap| cap == farcooler_protocol::capability::LANDING_UPDATE_LOCK));
+    let definition = config.definition().unwrap();
+    let adapter = Some(AdapterConfiguration::Coding(config));
+    let pin = farcooler_store::workflow_publication::configuration_pin(&definition, adapter.as_ref());
+    accepted(&call(&mut link, workspace, Action::Publish {
+        reason: None, notifications: None, mutation: mutation("p", 0, 1), expected_pin: None,
+        definition, adapter: adapter.map(Box::new),
+    }).await);
+    accepted(&call(&mut link, workspace, Action::Enqueue {
+        mutation: mutation("e", 0, 1), item: "active".into(), pin,
+    }).await);
+    let started = root.join("started");
+    assert!(common::wait_until(tokio::time::Instant::now() + std::time::Duration::from_secs(15),
+        std::time::Duration::from_millis(10), async || started.metadata().is_ok_and(|m| m.len() > 0)).await,
+        "build never started");
+    let database = home.join("farcooler.db");
+    let store = farcooler_store::Store::open(&database).unwrap();
+    let build_state = || store.workflow_outbox(&workspace.to_string()).unwrap().into_iter()
+        .find(|entry| entry.effect.kind == EffectKind::Execute(StageKind::Build)).unwrap().dispatch_state;
+    assert_eq!(build_state(), "admitted");
+    assert!(common::wait_until(tokio::time::Instant::now() + std::time::Duration::from_secs(5),
+        std::time::Duration::from_millis(10), async || try_legacy_landing_fence(&database).unwrap()).await,
+        "landing admission fence was never installed");
+    end_process(&mut child, &mut link).await;
+    assert_eq!(build_state(), "settled");
+    assert_eq!(store.workflow_state(&workspace.to_string()).unwrap().unwrap().items["active"].phase, Phase::Failed);
+
+    // If ensure exits after requesting shutdown, the next owner can clear
+    // the persisted fence at bootstrap.
+    let db = rusqlite::Connection::open(&database).unwrap();
+    let fence_exists = || db.query_row::<bool, _, _>(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name = 'workflow_legacy_landing_fence')",
+        [], |row| row.get(0),
+    ).unwrap();
+    assert!(fence_exists());
+    let mut replacement = common::listening_daemon(&home).await;
+    let mut link = Client::connect(home.join("farcoolerd.sock"), "process-proof", "1").await.unwrap();
+    assert!(!fence_exists());
+    end_process(&mut replacement.child, &mut link).await;
 }
 #[tokio::test]
 async fn workflow_service_process_bootstrap_restart_coding_offline_and_joined_shutdown() {

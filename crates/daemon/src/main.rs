@@ -239,6 +239,7 @@ async fn run(selected: &paths::RuntimeSelection) -> Result<(), i32> {
     // never sets: if it is set, the log says so from the first line.
     let _ = farcooler_daemon::service::test_stub_agents();
 
+    let database = selected.root().join(farcooler_daemon::cutover_gate::DATABASE);
     let service = match Service::open_selected(selected).await {
         Ok(service) => Arc::new(service),
         // Up, but refusing: see `refusal` for why this doesn't exit. The lock
@@ -258,6 +259,11 @@ async fn run(selected: &paths::RuntimeSelection) -> Result<(), i32> {
         }
     };
 
+    // The exclusive owner can clear a fence left by an interrupted updater.
+    farcooler_store::workflow_effects::clear_legacy_landing_fence(&database).map_err(|error| {
+        eprintln!("cannot clear the legacy landing update fence: {error}");
+        1
+    })?;
     farcooler_daemon::request_watchdog::start();
     service.start_workflows().map_err(|error| {
         eprintln!("cannot start workflow service: {error}"); 1
