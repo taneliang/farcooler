@@ -85,7 +85,7 @@ async fn profile_cli(
     // The socket address must fit the short Unix socket path limit, even
     // when the copied database lives under the engine's long scratch path.
     let socket_root = tempfile::Builder::new().prefix("fc-1429-").tempdir_in("/tmp").unwrap();
-    let server = UnixListenerServer::bind(&socket_root.path().join("farcoolerd.sock")).unwrap();
+    let server = UnixListenerServer::bind(socket_root.path().join("farcoolerd.sock")).unwrap();
     let svc = svc.clone();
     let watcher = crate::watch::Watcher::new(svc.clone());
     let stop = Arc::new(tokio::sync::Notify::new());
