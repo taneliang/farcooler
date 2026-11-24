@@ -108,17 +108,24 @@ async fn request_update(
     wait: bool,
 ) -> Result<UpdateReport, Box<dyn std::error::Error>> {
     let home = socket.parent().expect("app socket has a runtime directory");
-    if home.try_exists()? && farcooler_daemon::landing_update::try_update(home)?.is_none() {
-        if !wait {
+    let _reservation = if home.try_exists()? {
+        let reservation = farcooler_daemon::landing_update::announce_update(home)?;
+        if wait {
+            drop(crate::daemon_link::wait_for_landing(home, || {
+                eprintln!("Waiting for in-flight landing checks or pushes to finish before updating {}.", names.app);
+            }).await?);
+        } else if farcooler_daemon::landing_update::try_update(home)?.is_none() {
             return Err(format!(
                 "{} must wait for in-flight landing checks or pushes to finish. Run `{} app update --wait` to wait.",
                 names.app, names.cli
             ).into());
         }
-        drop(crate::daemon_link::wait_for_landing(home, || {
-            eprintln!("Waiting for in-flight landing checks or pushes to finish before updating {}.", names.app);
-        }).await?);
-    }
+        // Keep new landings queued while the app updates. The relaunched app
+        // can share this reservation and acquire the effect lock for its ensure.
+        Some(reservation)
+    } else {
+        None
+    };
     let conn = reach(socket, names, launch).await?;
     update(conn, socket, names, relaunch).await
 }

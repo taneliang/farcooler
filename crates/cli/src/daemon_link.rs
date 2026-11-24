@@ -287,6 +287,7 @@ async fn ensure_in(
     // at the point that actually stops the old runner.
     drop(link);
     let home = database.parent().expect("database has a runtime directory");
+    let _waiting = farcooler_daemon::landing_update::announce_update(home)?;
     let _landing = wait_for_landing(home, on_wait).await?;
     // The runner may have changed while we waited.
     let mut link = dial(socket).await?;
@@ -329,10 +330,10 @@ fn keep_running(build: &str, database: &Path) -> Option<Ensured> {
     }
 }
 
+/// Drain admitted landings while the caller holds an update reservation.
 pub(crate) async fn wait_for_landing(home: &Path, on_wait: impl FnOnce()) -> std::io::Result<std::fs::File> {
-    use farcooler_daemon::landing_update::{announce_update, try_update};
+    use farcooler_daemon::landing_update::try_update;
 
-    let _waiting = announce_update(home)?;
     if let Some(hold) = try_update(home)? {
         return Ok(hold);
     }

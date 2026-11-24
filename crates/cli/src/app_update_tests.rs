@@ -134,6 +134,40 @@ async fn a_busy_landing_refuses_an_update_unless_the_caller_asks_to_wait() {
 }
 
 #[tokio::test]
+async fn an_app_update_keeps_landings_queued_until_the_app_answers() {
+    use std::os::fd::AsRawFd;
+
+    let dir = tempfile::Builder::new().prefix("fc-app").tempdir_in("/tmp").unwrap();
+    let socket = dir.path().join("app.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    let names = canary();
+    // The runner needs this exclusive admission lock to start a landing.
+    let admit_landing = |lock: &std::fs::File| {
+        // SAFETY: the descriptor is valid for the lifetime of the borrowed file.
+        let status = unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        if status == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) }
+    };
+    let serve = async {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut conn = Conn { lines: BufReader::new(stream).lines() };
+        let request = conn.lines.next_line().await.unwrap().unwrap();
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&request).unwrap()["op"], "update");
+        let lock = std::fs::OpenOptions::new().read(true).write(true)
+            .open(dir.path().join("landing-update-waiters.lock")).unwrap();
+        assert_eq!(admit_landing(&lock).unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
+        // The app can still replace the runner as part of its relaunch.
+        assert!(farcooler_daemon::landing_update::try_update(dir.path()).unwrap().is_some());
+        conn.send(serde_json::json!({ "event": "upToDate", "app": about("2329", "8476e3b", 10) })).await.unwrap();
+        lock
+    };
+    let (report, lock) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(request_update(&socket, &names, false, true, false), serve)
+    }).await.unwrap();
+    assert!(matches!(report.unwrap(), UpdateReport::UpToDate(_)));
+    admit_landing(&lock).unwrap();
+}
+
+#[tokio::test]
 async fn an_update_reports_the_build_before_and_the_relaunched_one_after() {
     let app = FakeApp::start(vec![
         vec![
