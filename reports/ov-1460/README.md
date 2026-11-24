@@ -91,6 +91,26 @@ The return pass reran all five affected gate suites. All 78 tests passed,
 including the planted-lint and docs-only cases. Suites ran in sequence at
 niceness 10 with four Cargo jobs and build output under `$FARCOOLER_SCRATCH`.
 
+### Latest filing attempt, Nov 25
+
+Canary `0.1.0+5f08afc22` returned `scope-denied` with
+`known caller required` for both of the read-only commands
+`workspace workflow-draft-status` and `workflow get --full`. The compact
+`workflow get` timed out after 10 seconds, and `workflow bundle` is still
+unavailable in that CLI. Automatic approval review rejected a combined
+probe that included `workspace re-pin --out` because it flagged the
+possibility of changing Main’s selected workflow. The subsequent probes
+used only the read-only status and workflow queries.
+
+The filing verdict is **blocked on caller admission**. The selected bundle
+and the pending draft list require an admitted caller. Draft ID, decision card
+and expected published pin remain unavailable.
+
+The latest verification passed all 78 tests across the five gate suites.
+The landing-gate suite exercised the planted Clippy error and the docs-only
+skip. The rerun used native Python, niceness 10, four Cargo jobs and build
+output under `$FARCOOLER_SCRATCH`.
+
 From an admitted session with the ov-1456 CLI, export Main using
 `farcooler workflow bundle 01a0e3c7-3e2c-7ed0-b31c-0cc0d7401571 --json`
 and check its pending drafts with `workspace workflow-draft-status`. Verify
