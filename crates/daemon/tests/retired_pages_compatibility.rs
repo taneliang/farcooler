@@ -18,6 +18,7 @@ async fn an_older_app_can_open_a_board_without_the_pages_capability() {
     plan.payload = Some(Payload::PlanGet(PlanGetRequest {
         workspace_id: bytes::Bytes::copy_from_slice(repo.workspace.as_bytes()),
         include_closed: false,
+        ..Default::default()
     }));
     let response = app.call(plan).await.unwrap();
     assert!(matches!(response.value, Some(Value::Plan(_))));
