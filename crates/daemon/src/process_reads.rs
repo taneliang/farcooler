@@ -21,6 +21,8 @@ pub(crate) static TOPOLOGY: Lane = Lane::new("process-topology", 4, Duration::fr
 pub(crate) static DETAILS: Lane = Lane::new("process-details", 4, Duration::from_millis(100));
 pub(crate) static ARGUMENTS: Lane = Lane::new("process-arguments", 4, Duration::from_millis(100));
 pub(crate) static LABELS: Lane = Lane::new("process-labels", 1, Duration::from_millis(500));
+// Log discovery can wait on subprocesses without using the caller-attribution lane.
+pub(crate) static LOG_TOPOLOGY: Lane = Lane::new("log-topology", 2, Duration::from_millis(200));
 pub(crate) static OPEN_FILES: Lane = Lane::new("process-open-files", 2, Duration::from_secs(1));
 
 struct Place(&'static Lane);
@@ -115,9 +117,78 @@ impl Lane {
     }
 }
 
+/// One `struct kinfo_proc` on 64-bit macOS (`<sys/sysctl.h>`), and the offsets
+/// this reads from it. The `libc` crate has no definition. They were read off
+/// the kernel's own answer against `ps`'s for every process on a live host
+/// (all 979 agreed), and the layout has been fixed since the 64-bit ABI.
+#[cfg(target_os = "macos")]
+pub(crate) mod kinfo {
+    pub const SIZE: usize = 648;
+    pub const P_START: usize = 0;
+    pub const P_FLAG: usize = 32;
+    pub const P_PID: usize = 40;
+    pub const E_PPID: usize = 560;
+    pub const E_PGID: usize = 564;
+    pub const E_TDEV: usize = 572;
+    pub const E_TPGID: usize = 576;
+    /// `p_flag`: the process has a controlling terminal.
+    pub const P_CONTROLT: i32 = 0x2;
+}
+
+/// A retained child can already be a zombie when its owner receipt is written.
+/// KERN_PROC_PID includes that child, whereas proc_pidinfo only finds live processes.
+#[cfg(target_os = "macos")]
+pub(crate) fn owner_start_micros(pid: i32) -> Option<i64> {
+    DETAILS.read(move || {
+        let mut mib = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_PID, pid];
+        let mut record = [0u8; kinfo::SIZE];
+        let mut size = record.len();
+        // SAFETY: sysctl receives valid MIB, output buffer, and in/out length pointers.
+        let result = unsafe { libc::sysctl(mib.as_mut_ptr(), 4, record.as_mut_ptr().cast(), &mut size, std::ptr::null_mut(), 0) };
+        if result != 0 || size != record.len() || i32::from_ne_bytes(record[kinfo::P_PID..][..4].try_into().ok()?) != pid {
+            return None;
+        }
+        let start = &record[kinfo::P_START..];
+        let seconds = i64::from_ne_bytes(start[..8].try_into().ok()?);
+        let micros = i32::from_ne_bytes(start[8..12].try_into().ok()?);
+        if seconds <= 0 || !(0..1_000_000).contains(&micros) { return None; }
+        seconds.checked_mul(1_000_000)?.checked_add(i64::from(micros))
+    }).flatten()
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn owner_start_micros(pid: i32) -> Option<i64> {
+    let ticks: i64 = linux_stat(pid)?.get(19)?.parse().ok()?;
+    let boot: i64 = std::fs::read_to_string("/proc/stat").ok()?.lines()
+        .find_map(|line| line.strip_prefix("btime ")?.trim().parse().ok())?;
+    // SAFETY: sysconf has no preconditions.
+    let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    if hz <= 0 { return None }
+    boot.checked_mul(1_000_000)?.checked_add(ticks.checked_mul(1_000_000)?.checked_div(hz)?)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub(crate) fn owner_start_micros(_: i32) -> Option<i64> { None }
+
+#[cfg(target_os = "linux")]
+pub(crate) fn linux_stat(pid: i32) -> Option<Vec<String>> {
+    DETAILS.read(move || read_linux_stat(pid)).flatten()
+}
+
+#[cfg(target_os = "linux")]
+fn read_linux_stat(pid: i32) -> Option<Vec<String>> {
+    let text = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // The command name is parenthesized and may hold spaces; fields resume
+    // after its closing parenthesis, at field 3 (state).
+    let after = &text[text.rfind(')')? + 1..];
+    Some(after.split_whitespace().map(str::to_string).collect())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::Lane;
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
     use std::future::{Future, poll_fn};
     use std::task::Poll;
 

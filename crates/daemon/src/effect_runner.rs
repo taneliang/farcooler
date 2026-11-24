@@ -137,7 +137,7 @@ impl Owner {
             return Err(std::io::Error::other("injected unavailable process start identity"));
         }
         i32::try_from(pid).ok().filter(|&pid| pid > 0)
-            .and_then(crate::proc_table::owner_start_micros)
+            .and_then(crate::process_reads::owner_start_micros)
             .ok_or_else(|| std::io::Error::other("process start identity query unavailable"))
     }
 

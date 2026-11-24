@@ -151,19 +151,8 @@ pub(crate) fn process_incarnation(pid: i32) -> Option<i64> {
         .checked_add(i64::try_from(info.pbi_start_tvusec).ok()?)
 }
 
-#[cfg(target_os = "linux")]
-pub(crate) fn process_incarnation(pid: i32) -> Option<i64> {
-    let ticks: i64 = linux_stat(pid)?.get(19)?.parse().ok()?;
-    let boot: i64 = std::fs::read_to_string("/proc/stat").ok()?.lines()
-        .find_map(|line| line.strip_prefix("btime ")?.trim().parse().ok())?;
-    // SAFETY: sysconf has no preconditions.
-    let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
-    if hz <= 0 { return None }
-    boot.checked_mul(1_000_000)?.checked_add(ticks.checked_mul(1_000_000)?.checked_div(hz)?)
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-pub(crate) fn process_incarnation(_: i32) -> Option<i64> { None }
+#[cfg(not(target_os = "macos"))]
+pub(crate) use crate::process_reads::owner_start_micros as process_incarnation;
 
 #[cfg(target_os = "macos")]
 fn bsd_info(pid: i32) -> Option<libc::proc_bsdinfo> {
@@ -181,20 +170,6 @@ fn read_bsd_info(pid: i32) -> Option<libc::proc_bsdinfo> {
     (written == size).then(|| unsafe { info.assume_init() })
 }
 
-#[cfg(target_os = "linux")]
-fn linux_stat(pid: i32) -> Option<Vec<String>> {
-    crate::process_reads::DETAILS.read(move || read_linux_stat(pid)).flatten()
-}
-
-#[cfg(target_os = "linux")]
-fn read_linux_stat(pid: i32) -> Option<Vec<String>> {
-    let text = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    // The command name is parenthesized and may hold spaces; fields resume
-    // after its closing parenthesis, at field 3 (state).
-    let after = &text[text.rfind(')')? + 1..];
-    Some(after.split_whitespace().map(str::to_string).collect())
-}
-
 impl Processes for Kernel {
     #[cfg(target_os = "macos")]
     fn started(&self, pid: i32) -> Option<i64> {
@@ -209,7 +184,7 @@ impl Processes for Kernel {
     #[cfg(target_os = "linux")]
     fn started(&self, pid: i32) -> Option<i64> {
         // Field 22, start time in clock ticks since boot, plus boot time.
-        let ticks: i64 = linux_stat(pid)?.get(19)?.parse().ok()?;
+        let ticks: i64 = crate::process_reads::linux_stat(pid)?.get(19)?.parse().ok()?;
         let boot: i64 = std::fs::read_to_string("/proc/stat")
             .ok()?
             .lines()
@@ -221,7 +196,7 @@ impl Processes for Kernel {
 
     #[cfg(target_os = "linux")]
     fn tty(&self, pid: i32) -> Option<u64> {
-        linux_stat(pid)?.get(4)?.parse().ok().filter(|&d: &u64| d != 0)
+        crate::process_reads::linux_stat(pid)?.get(4)?.parse().ok().filter(|&d: &u64| d != 0)
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]

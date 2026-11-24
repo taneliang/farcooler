@@ -3,32 +3,38 @@
  "allowed": {
   "git": [],
   "access": [
-   "git"
+   "git",
+   "process"
   ],
   "agents": [
-   "git"
+   "git",
+   "process"
   ],
   "board": [
    "git"
   ],
   "engine": [
-   "git"
+   "git",
+   "process"
   ],
   "service": [
    "git",
    "access",
-   "agents"
+   "agents",
+   "process"
   ],
   "delivery": [
    "git",
-   "agents"
+   "agents",
+   "process"
   ],
   "watch": [
    "git",
    "agents",
    "board",
    "delivery"
-  ]
+  ],
+  "process": []
  },
  "composition": [
   "rpc",
@@ -46,7 +52,8 @@
   "wire",
   "main",
   "lib",
-  "bin"
+  "bin",
+  "request_watchdog"
  ],
  "modules": {
   "git": [
@@ -220,6 +227,9 @@
   "watch": [
    "watch",
    "watch_view"
+  ],
+  "process": [
+   "process_reads"
   ]
  }
 }

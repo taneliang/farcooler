@@ -18,6 +18,9 @@
 //! nothing at all (a sandbox hiding the table). A timed-out read also returns
 //! no data.
 
+#[cfg(target_os = "macos")]
+use crate::process_reads::kinfo;
+
 /// One row in `ps`'s column order. `foreground` is `ps`'s `+`: in the
 /// foreground process group of the controlling terminal.
 fn line(pid: i32, ppid: i32, pgid: i32, tty: &str, foreground: bool, args: &str) -> String {
@@ -96,48 +99,6 @@ fn read_state(pid: i32) -> ProcessState {
         Err(_) => ProcessState::Unknown,
     }
 }
-
-/// One `struct kinfo_proc` on 64-bit macOS (`<sys/sysctl.h>`), and the offsets
-/// this reads from it. The `libc` crate has no definition. They were read off
-/// the kernel's own answer against `ps`'s for every process on a live host
-/// (all 979 agreed), and the layout has been fixed since the 64-bit ABI.
-#[cfg(target_os = "macos")]
-mod kinfo {
-    pub const SIZE: usize = 648;
-    pub const P_START: usize = 0;
-    pub const P_FLAG: usize = 32;
-    pub const P_PID: usize = 40;
-    pub const E_PPID: usize = 560;
-    pub const E_PGID: usize = 564;
-    pub const E_TDEV: usize = 572;
-    pub const E_TPGID: usize = 576;
-    /// `p_flag`: the process has a controlling terminal.
-    pub const P_CONTROLT: i32 = 0x2;
-}
-
-/// A retained child can already be a zombie when its owner receipt is written.
-/// KERN_PROC_PID includes that child, whereas proc_pidinfo only finds live processes.
-#[cfg(target_os = "macos")]
-pub(crate) fn owner_start_micros(pid: i32) -> Option<i64> {
-    crate::process_reads::DETAILS.read(move || {
-        let mut mib = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_PID, pid];
-        let mut record = [0u8; kinfo::SIZE];
-        let mut size = record.len();
-        // SAFETY: sysctl receives valid MIB, output buffer, and in/out length pointers.
-        let result = unsafe { libc::sysctl(mib.as_mut_ptr(), 4, record.as_mut_ptr().cast(), &mut size, std::ptr::null_mut(), 0) };
-        if result != 0 || size != record.len() || i32::from_ne_bytes(record[kinfo::P_PID..][..4].try_into().ok()?) != pid {
-            return None;
-        }
-        let start = &record[kinfo::P_START..];
-        let seconds = i64::from_ne_bytes(start[..8].try_into().ok()?);
-        let micros = i32::from_ne_bytes(start[8..12].try_into().ok()?);
-        if seconds <= 0 || !(0..1_000_000).contains(&micros) { return None; }
-        seconds.checked_mul(1_000_000)?.checked_add(i64::from(micros))
-    }).flatten()
-}
-
-#[cfg(not(target_os = "macos"))]
-pub(crate) use crate::claude_registry::process_incarnation as owner_start_micros;
 
 /// The name `ps` prints for a terminal's device number (`ttys012`).
 ///

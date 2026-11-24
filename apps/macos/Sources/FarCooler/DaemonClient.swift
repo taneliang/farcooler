@@ -391,26 +391,12 @@ final class DaemonClient: ObservableObject {
     // MARK: - Live updates
 
     private(set) var eventStream: EventStream?
-    private var runnerHealthTask: Task<Void, Never>?
+    var runnerHealthTask: Task<Void, Never>?
     private var fleetReads = 0
-    private var runnerReadGeneration = 0
+    var runnerReadGeneration = 0
     var runnerResponseTimeout: TimeInterval = 10
 
-    private func startRunnerHealthChecks() {
-        guard runnerHealthTask == nil else { return }
-        runnerHealthTask = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(30))
-                guard !Task.isCancelled, let self else { return }
-                if self.state == .connected {
-                    // The event stream can stay open and silent through a runner stall.
-                    _ = await self.runnerRead(["root", "list", "--json"])
-                }
-            }
-        }
-    }
-
-    private func runnerDidNotRespond() {
+    func runnerDidNotRespond() {
         guard !isStopped, !awaitingRecheck else { return }
         let reason = HostState.runnerNotRespondingReason
         fleetError = reason
@@ -418,32 +404,6 @@ final class DaemonClient: ObservableObject {
         scheduleRetry()
     }
 
-    func prepareLocalRunner() async {
-        let timer = runnerDeadline()
-        defer { timer.cancel() }
-        await LocalDaemon.shared.ensure()
-    }
-
-    private func runnerDeadline() -> Task<Void, Never> {
-        let limit = runnerResponseTimeout
-        let generation = runnerReadGeneration
-        // The UI timer also covers a launch that has not returned from the kernel yet.
-        return Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(limit))
-            if !Task.isCancelled, self?.runnerReadGeneration == generation { self?.runnerDidNotRespond() }
-        }
-    }
-
-    func runnerRead(_ args: [String]) async -> (data: Data?, message: String?) {
-        let generation = runnerReadGeneration
-        let timer = runnerDeadline()
-        defer { timer.cancel() }
-        let result = await runRaw(args, background: true, deadline: runnerResponseTimeout)
-        if !Task.isCancelled, runnerReadGeneration == generation, result.message == HostState.runnerNotRespondingReason {
-            runnerDidNotRespond()
-        }
-        return result
-    }
     /// Which stream is current, so a terminated one's `onEnd` can tell
     /// whether it still is.
     ///

@@ -16,7 +16,9 @@ struct Call {
 pub(crate) struct Request(u64);
 
 impl Request {
-    pub(crate) fn begin(method: &'static str) -> Self {
+    pub(crate) fn begin(method: &str) -> Self {
+        use farcooler_protocol::method::Method;
+        let method = Method::parse(method).map_or("unknown", Method::name);
         let id = NEXT.fetch_add(1, Ordering::Relaxed);
         ACTIVE.lock().unwrap().insert(id, Call { method, started: Instant::now(), reported: false });
         Self(id)

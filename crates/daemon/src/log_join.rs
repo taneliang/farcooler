@@ -364,7 +364,13 @@ pub fn codex_rollout_of(pid: i32) -> Option<PathBuf> {
 ///
 /// Use one bounded topology read for the whole tree.
 fn process_subtree(root: i32) -> Vec<i32> {
-    crate::proc_table::topology().map_or_else(|| vec![root], |text| subtree_from_ps(root, &text))
+    let out = crate::process_reads::LOG_TOPOLOGY.read(|| Command::new("ps")
+        .args(["-axo", "pid=,ppid="])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output());
+    let Some(Ok(out)) = out else { return vec![root] };
+    subtree_from_ps(root, &String::from_utf8_lossy(&out.stdout))
 }
 
 pub(crate) fn subtree_from_ps(root: i32, text: &str) -> Vec<i32> {
