@@ -4,9 +4,8 @@
 //!
 //! A board names a subject when an engine landing group pushes (`sha:<pushed
 //! sha>`, ov-958). The watch reads each landing while CI is going and
-//! retains finished results. A read
-//! that changed what a board shows announces `plan_changed`. The old landings
-//! are history and aren't followed (ov-960).
+//! retains finished results. A read that changes what a board shows announces
+//! `plan_changed`. The old landings are history and aren't followed (ov-960).
 //!
 //! Every `gh` call is `gh api -X GET` with a `--jq` filter, run in the
 //! repository's main checkout through the daemon's own sandboxed launch
@@ -40,7 +39,7 @@ pub const NIGHTLY: &str = "Nightly";
 
 /// How often subjects are read while any run is still going.
 pub const BUSY: Duration = Duration::from_secs(60);
-/// How often they're read once everything watched has finished.
+/// Maximum interval between watch sweeps and between retries for a miss.
 pub const QUIET: Duration = Duration::from_secs(10 * 60);
 
 /// What a list of runs is cut down to: the fields read here, nothing more.
@@ -60,8 +59,8 @@ pub async fn run(svc: Arc<Service>, watcher: Arc<Watcher>) {
     }
 }
 
-/// What the watch remembers between turns: full SHAs for short ones, and a
-/// run's jobs while the run hasn't changed, so a finished run costs one call.
+/// What the watch remembers between turns: resolved SHAs, completed run jobs,
+/// and per-board polling times.
 #[derive(Default)]
 pub struct Memo {
     shas: HashMap<String, String>,
@@ -375,7 +374,7 @@ async fn gh_output(svc: &Service, tree: &Path, args: &[String]) -> Option<std::p
     out.ok()?.ok()
 }
 
-/// A run with its jobs, from `memo` while the run is unchanged.
+/// A run with its jobs, reused from `memo` once the run has completed.
 async fn with_jobs(
     svc: &Service,
     tree: &Path,

@@ -1,11 +1,10 @@
 //! A full idle minute with the daemon's background jobs and instrumented executables.
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use farcooler_core::page_doc::{self, Caps};
-use farcooler_store::{models::Actor, pages::{Anchor, PageWrite}};
 use std::os::unix::fs::PermissionsExt;
 
 const SHIMS: &str = "FARCOOLER_TEST_IDLE_SHIMS";
+const PUSHED_SHA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 fn write_shim(root: &Path, name: &str, body: &str) {
     let log = root.join(format!("{name}.log"));
@@ -39,7 +38,7 @@ exec {git:?} "$@""#));
         write_shim(&root, "gh", r#"
 case "$*" in
   *"/actions/runs/73/jobs"*) printf '%s\n' '[{"name":"Rust","status":"completed","conclusion":"success"}]' ;;
-  *"/actions/runs/73"*) printf '%s\n' '{"id":73,"name":"CI","head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","status":"completed","conclusion":"success","html_url":"https://example.invalid/73","created_at":"2026-01-01T00:00:00Z"}' ;;
+  *"head_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"*) printf '%s\n' '[{"id":73,"name":"CI","head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","status":"completed","conclusion":"success","html_url":"https://example.invalid/73","created_at":"2026-01-01T00:00:00Z"}]' ;;
   *) exit 1 ;;
 esac"#);
         let path = std::env::join_paths(std::iter::once(root.clone()).chain(
@@ -59,27 +58,24 @@ esac"#);
     assert!(head.ok);
     let base = head.stdout.trim().to_owned();
     let (_config_dir, mut runtime) = crate::workflow_runtime::read_perf_tests::idle_board_fixture(
-        &svc, &ws, &repository, base, dir.path(),
+        &svc, &ws, &repository, base, dir.path(), PUSHED_SHA,
     ).await;
     let main = svc.list_worktrees().unwrap().remove(0);
     svc.create_terminal(main.id, "Idle pane", "shell").await.unwrap();
 
-    let page = page_doc::parse(r#"{"v":1,"title":"CI","blocks":[{"type":"links","items":[{"label":"Finished","ci":"run:73"}]}]}"#, &Caps::default()).unwrap();
-    svc.store.set_page(board, &PageWrite { slot: "ci", page: &page, anchor: Anchor::Clear, ordinal: None,
-        if_revision: None }, Actor::Runner).unwrap();
+    let subject = farcooler_store::board_ci::sha_subject(PUSHED_SHA);
     let watcher = crate::watch::Watcher::new(svc.clone());
     let mut memo = crate::ci_watch::Memo::default();
     crate::ci_watch::read_all(&svc, &watcher, &mut memo).await;
-    assert!(svc.store.ci_read(board, "run:73").unwrap().unwrap().status.is_finished());
-    assert_eq!(launches(&shims, "gh").len(), 2, "warmup reads the run and its jobs once");
+    assert!(svc.store.ci_read(board, &subject).unwrap().unwrap().status.is_finished());
+    assert_eq!(launches(&shims, "gh").len(), 2, "warmup reads the SHA's runs and jobs once");
     // The run finished before the old watcher's ten-minute refresh cutoff.
     let db = rusqlite::Connection::open(svc.root_dir().join("farcooler.db")).unwrap();
-    db.execute("UPDATE board_ci SET fetched_at = 1 WHERE workspace_id = ?1 AND subject = 'run:73'",
-        [board.as_bytes()]).unwrap();
+    db.execute("UPDATE board_ci SET fetched_at = 1 WHERE workspace_id = ?1 AND subject = ?2",
+        (board.as_bytes(), &subject)).unwrap();
     drop(db);
 
     let before = ["lsof", "git", "gh", "tmux"].map(|p| launches(&shims, p).len());
-    let end = tokio::time::Instant::now() + Duration::from_secs(60);
     let (_stop, shutdown) = tokio::sync::watch::channel(false);
     let engine = tokio::spawn(async move { runtime.run(shutdown).await.unwrap() });
     let inventory = tokio::spawn(watcher.clone().run());
@@ -87,15 +83,7 @@ esac"#);
     let prs = tokio::spawn(crate::pr_watch::run(svc.clone(), watcher.clone()));
     let reviews = tokio::spawn(crate::pr_review::run(svc.clone(), watcher.clone()));
     let landing = tokio::spawn(crate::landing_read::run(svc.clone(), watcher.clone()));
-    let mut ticks = tokio::time::interval(Duration::from_secs(1));
-    loop {
-        tokio::select! {
-            biased;
-            _ = tokio::time::sleep_until(end) => break,
-            // Subject notifications may wake the watcher even on an idle board.
-            _ = ticks.tick() => crate::ci_watch::kick(),
-        }
-    }
+    tokio::time::sleep(Duration::from_secs(60)).await;
     let jobs = [engine, inventory, ci, prs, reviews, landing];
     for job in &jobs { job.abort(); }
     for job in jobs {
@@ -108,7 +96,7 @@ esac"#);
     let tmux = &tmux[before[3]..];
     let heads = git.iter().filter(|args| args.starts_with("ls-remote --refs")).count();
     let recursive = lsof.iter().filter(|args| args.starts_with("-nP -F p +D")).count();
-    let finished = gh.iter().filter(|args| args.contains("/actions/runs/73")).count();
+    let finished = gh.iter().filter(|args| args.contains(PUSHED_SHA) || args.contains("/actions/runs/73")).count();
     println!("idle 60s launches: lsof={} (recursive={recursive}) git={} (ls-remote={heads}) gh={} (finished run={finished}) tmux={}",
         lsof.len(), git.len(), gh.len(), tmux.len());
 
@@ -119,6 +107,7 @@ esac"#);
     // cleanup probe, alongside the independently bounded remote-head calls.
     assert!(git.len() <= 100, "all git launches: {}", git.len());
     assert_eq!(finished, 0, "a completed run was polled again");
+    assert!(svc.store.ci_read(board, &subject).unwrap().unwrap().status.is_finished());
     assert!(gh.len() <= 4, "all gh launches: {}", gh.len());
     assert!((1..=150).contains(&tmux.len()), "tmux launches: {}", tmux.len());
 }

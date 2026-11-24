@@ -253,7 +253,7 @@ if stage in ('build', 'check'):
 /// Seed an idle board with one held landing candidate and a blocked cleanup
 /// intent. The actual runtime owns every probe once the census starts.
 pub(crate) async fn idle_board_fixture(
-    svc: &crate::service::Service, ws: &str, repository: &Path, base: String, tree_root: &Path,
+    svc: &crate::service::Service, ws: &str, repository: &Path, base: String, tree_root: &Path, pushed_sha: &str,
 ) -> (tempfile::TempDir, Runtime) {
     use super::{adapters, CodingLanding, RunTree};
     use farcooler_protocol::workflow_config::AdapterConfiguration;
@@ -281,7 +281,7 @@ pub(crate) async fn idle_board_fixture(
     runtime.host = Some(svc.worktree_host().unwrap());
 
     // Seed a waiting candidate with its immutable adapter. The mock remote
-    // never answers, so the candidate stays at rest and there is no landing.
+    // never answers, so it stays at rest.
     fixture.exec.store = svc.store.clone();
     super::concurrency_tests::enqueue_item(&mut fixture, ws, "waiting", definition.clone());
     let mut state = fixture.state(ws).unwrap().unwrap();
@@ -292,6 +292,17 @@ pub(crate) async fn idle_board_fixture(
     waiting.phase = Phase::WaitingJoin;
     waiting.candidate = Some(base.clone());
     waiting.pending = None;
+    // A separate already-pushed group stays paused while its CI result is
+    // retained. It names a SHA to the same watcher used for real landings.
+    let mut pushed = waiting.clone();
+    pushed.definition = definition.group_definition("landing").unwrap();
+    pushed.pin = pushed.definition.pin();
+    pushed.resource = definition.groups["landing"].exclusive.clone();
+    pushed.run = "finished-ci".into();
+    pushed.stage = pushed.definition.stages.len() - 1;
+    pushed.phase = Phase::WaitingApproval;
+    pushed.candidate = Some(pushed_sha.into());
+    pushed.group_of = Some(farcooler_workflow::GroupOf { name: "landing".into(), pin: definition.pin() });
     let db = rusqlite::Connection::open(svc.root_dir().join("farcooler.db")).unwrap();
     db.execute("INSERT OR IGNORE INTO workflow_definitions(pin,definition) VALUES (?1,?2)",
         (&definition.pin(), serde_json::to_string(&definition).unwrap())).unwrap();
@@ -299,6 +310,7 @@ pub(crate) async fn idle_board_fixture(
         (&bundle, &definition.pin(), serde_json::to_string(&config).unwrap())).unwrap();
     drop(db);
     assert!(runtime.item_configuration(ws, "waiting", waiting).unwrap().is_some());
+    state.items.insert("group-finished-ci".into(), pushed);
     svc.store.workflow_state_for_tests(&state).unwrap();
 
     // A finished build left folders with open files. Seed its durable intent
