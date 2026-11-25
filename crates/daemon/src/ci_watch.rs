@@ -64,12 +64,18 @@ pub async fn run(svc: Arc<Service>, watcher: Arc<Watcher>) {
 #[derive(Default)]
 pub struct Memo {
     shas: HashMap<String, String>,
-    completed_jobs: HashMap<(Uuid, u64), Option<Vec<GhJob>>>,
+    completed_jobs: HashMap<(Uuid, u64), CachedJobs>,
     completed_order: VecDeque<(Uuid, u64)>,
     last_attempt: HashMap<(Uuid, String), i64>,
     /// Subjects GitHub didn't answer for, or had no run for: how many reads
     /// in a row, and when to ask again (review train-1005c M2).
     misses: HashMap<(Uuid, String), (u32, i64)>,
+}
+
+struct CachedJobs {
+    conclusion: Option<String>,
+    updated_at: String,
+    jobs: Option<Vec<GhJob>>,
 }
 
 /// How long after `misses` reads in a row that GitHub couldn't or didn't
@@ -374,7 +380,7 @@ async fn gh_output(svc: &Service, tree: &Path, args: &[String]) -> Option<std::p
     out.ok()?.ok()
 }
 
-/// A run with its jobs, reused from `memo` once the run has completed.
+/// A run with its jobs, reused from `memo` for an unchanged completed attempt.
 async fn with_jobs(
     svc: &Service,
     tree: &Path,
@@ -386,14 +392,13 @@ async fn with_jobs(
         // The placeholder for a Canary run that has not started (`ci_canary`).
         return (run, None);
     }
-    let key = (repository, run.id);
-    if let Some(jobs) = memo.completed_jobs.get(&key) {
-        return (run, jobs.clone());
+    if let Some(cached) = memo.completed_jobs(repository, &run) {
+        return (run, cached.jobs.clone());
     }
     let path = format!("repos/{{owner}}/{{repo}}/actions/runs/{}/jobs", run.id);
     let jobs = gh_get(svc, tree, &api_args(&path, &["per_page=100".into()], JOBS_JQ)).await.and_then(|b| parse_jobs(&b));
     if memo_holds(&run.status) {
-        memo.remember_completed_jobs(key, jobs.clone());
+        memo.remember_completed_jobs(repository, &run, jobs.clone());
     }
     (run, jobs)
 }
@@ -402,16 +407,29 @@ async fn with_jobs(
 const MEMO_MAX: usize = 512;
 
 impl Memo {
-    fn remember_completed_jobs(&mut self, key: (Uuid, u64), jobs: Option<Vec<GhJob>>) {
-        // Only called on a cache miss. Evict a single oldest entry so a new
-        // completed run does not make the watch forget all the recent ones.
-        if self.completed_jobs.len() == MEMO_MAX
-            && let Some(oldest) = self.completed_order.pop_front()
-        {
-            self.completed_jobs.remove(&oldest);
+    fn completed_jobs(&self, repository: Uuid, run: &GhRun) -> Option<&CachedJobs> {
+        // GitHub reuses the run ID when a retry starts a new attempt.
+        self.completed_jobs.get(&(repository, run.id)).filter(|cached| {
+            memo_holds(&run.status) && cached.conclusion == run.conclusion
+                && cached.updated_at == run.updated_at
+        })
+    }
+
+    fn remember_completed_jobs(&mut self, repository: Uuid, run: &GhRun, jobs: Option<Vec<GhJob>>) {
+        let key = (repository, run.id);
+        let cached = CachedJobs {
+            conclusion: run.conclusion.clone(),
+            updated_at: run.updated_at.clone(),
+            jobs,
+        };
+        if self.completed_jobs.insert(key, cached).is_none() {
+            self.completed_order.push_back(key);
+            if self.completed_jobs.len() > MEMO_MAX
+                && let Some(oldest) = self.completed_order.pop_front()
+            {
+                self.completed_jobs.remove(&oldest);
+            }
         }
-        self.completed_jobs.insert(key, jobs);
-        self.completed_order.push_back(key);
     }
 }
 

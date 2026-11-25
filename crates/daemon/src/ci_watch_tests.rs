@@ -8,8 +8,10 @@ use super::*;
 fn completed_job_memo_evicts_only_the_oldest_run() {
     let mut memo = Memo::default();
     let repository = Uuid::nil();
-    for run in 0..=MEMO_MAX as u64 {
-        memo.remember_completed_jobs((repository, run), None);
+    let mut run = parse_run(&fixture("run-one.json")).unwrap();
+    for id in 0..=MEMO_MAX as u64 {
+        run.id = id;
+        memo.remember_completed_jobs(repository, &run, None);
     }
     assert_eq!(memo.completed_jobs.len(), MEMO_MAX);
     assert!(!memo.completed_jobs.contains_key(&(repository, 0)));
@@ -230,6 +232,26 @@ fn jobs_are_reread_until_their_run_finishes() {
     assert!(!memo_holds("in_progress"));
     assert!(!memo_holds("queued"));
     assert!(memo_holds("completed"));
+}
+
+#[test]
+fn a_retry_with_the_same_run_id_refreshes_the_jobs() {
+    let repository = Uuid::from_u128(1);
+    let mut run = parse_runs(&fixture("runs-sha-failed.json")).unwrap()
+        .into_iter().find(|run| run.name == "CI").unwrap();
+    let mut memo = Memo::default();
+    memo.remember_completed_jobs(repository, &run, None);
+    assert!(memo.completed_jobs(repository, &run).is_some());
+    assert!(memo.completed_jobs(Uuid::nil(), &run).is_none());
+
+    run.status = "in_progress".into();
+    assert!(memo.completed_jobs(repository, &run).is_none());
+    run.status = "completed".into();
+    run.updated_at = "2026-11-25T01:00:00Z".into();
+    assert!(memo.completed_jobs(repository, &run).is_none());
+    memo.remember_completed_jobs(repository, &run, Some(Vec::new()));
+    assert!(memo.completed_jobs(repository, &run).unwrap().jobs.is_some());
+    assert_eq!(memo.completed_order.len(), 1);
 }
 
 /// The nightly iOS UI run (ov-534) names main's head, so a train pushed at that

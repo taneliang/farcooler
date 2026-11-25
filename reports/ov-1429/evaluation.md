@@ -191,3 +191,21 @@ The loaded fixture passed all four bounds and made zero tmux calls during the re
 The pane test's first run overlapped compilation and measured a 291 ms echo before it observed either cleanup phase. After compilation finished, the standalone rerun echoed 10 keys with a maximum of 73.1 ms. Eight echoes overlapped `lsof`, and the test also observed an echo during the filesystem walk and verified the cleanup receipt.
 
 Nextest ran 4,837 tests across the daemon, CLI, store, and workflow suites and selected socket integrations. The first run passed 4,772. The fallback app directory exceeded the macOS Unix socket path limit. All 65 initial failures passed on a serial rerun with a shorter private app directory and the same binaries. Migration lint and its self-test, daemon-layer, file-size, doc-comment, and Nightly dispatch checks passed.
+
+## Verification on landing base `e69f25328`
+
+The CI watch keeps the landing base's retry and recovery checks. A CI retry can reuse a GitHub run ID. The watch reuses jobs for a completed attempt as long as its conclusion and update time match, and refreshes jobs when the run becomes active again. The regression test covers those transitions and checks that replacing a completed attempt takes one cache slot.
+
+| Loaded RPC | Rebased latency | Budget |
+| --- | ---: | ---: |
+| Plan | 744 ms | < 2 s |
+| Plan theme list | 1,024 ms | < 2 s |
+| Workflow Get | 199 ms | < 1 s |
+| Task List, first page | 42 ms | — |
+| Worktree List | 0.25 ms | < 2 s |
+
+The loaded reads launched zero tmux clients. The idle minute recorded 23 `lsof` launches (12 recursive), 72 Git launches (one remote-head probe), one `gh` launch (zero polls of the finished run), and 64 tmux launches.
+
+The pane latency test exceeded its 100 ms deadline on three runs, with maxima of 317 ms, 120 ms, and 125 ms as the probe completed. A standalone run with fixture data under `FARCOOLER_SCRATCH` passed. All ten echoes arrived within 49.6 ms. Eight overlapped the open-file probe, and the test also observed the accounting walk and verified the cleanup receipt. The cause of the earlier timing misses remains unresolved.
+
+All 15 CI watcher tests passed. Nextest ran 4,728 tests across the daemon, CLI, store, and workflow suites and selected socket integrations. The parallel run passed 4,725. All three initial failures passed in a serial rerun with the same binaries. They covered native notice cleanup, a recorded verdict without a turn-end event, and recovery of an admitted CI effect after reconfiguration. Migration lint and its self-test, daemon-layer, file-size, doc-comment, and workflow lint checks passed.
