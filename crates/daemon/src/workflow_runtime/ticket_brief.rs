@@ -91,6 +91,7 @@ mod tests {
             assert!(!brief.contains("`farcooler "), "all CLI commands have an installed path: {brief}");
             if review {
                 assert!(brief.contains("Don't change, commit or stage anything here."));
+                assert!(brief.contains("Run builds and tests in the foreground, or keep your turn open until they finish."));
                 let base = runtime.coding.as_ref().unwrap().base.as_str();
                 let candidate = binding.effect.candidate.as_deref().unwrap();
                 assert!(brief.contains(&format!("`{base}..{candidate}`")));

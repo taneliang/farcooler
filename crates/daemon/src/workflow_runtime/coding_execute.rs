@@ -345,11 +345,11 @@ impl Exec {
         let scratch = super::owned_directories::SCRATCH_PROMPT;
         format!("You are reviewing ticket {item}. The ticket is included below. The work under review is \
             the commits from $FARCOOLER_BASE to $FARCOOLER_CANDIDATE in this worktree. Review it against the ticket. Don't \
-            change, commit or stage anything here.\n\n{scratch}\n\nWhen you've decided, record your verdict with \
+            change, commit or stage anything here.\n\n{scratch}\n\nRun builds and tests in the foreground, or keep your turn open until they finish.\n\n\
+            When you've decided, record your verdict with \
             `farcooler workflow verdict --passed true` or `farcooler workflow verdict --passed false --summary \"What needs to change\"`, then end your turn. \
             The rejection summary becomes a finding on the ticket so the next agent knows what to fix. \
-            Only that command's verdict counts. If you end your turn without one, the review hasn't happened, and it \
-            runs again.")
+            Only that command's verdict counts. If the step finishes without a verdict, the review runs again.")
     }
     /// The published prompt, led by the card this run is for. `ticket_prompt` adds the pinned card text,
     /// so learning the job never depends on a CLI lookup.

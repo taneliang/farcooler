@@ -4,7 +4,10 @@ use super::coding::FileValidation;
 use super::native_messages::{Followup, send_native_reply};
 use farcooler_agent_core::event::{AgentEvent, EndReason};
 use farcooler_agent_hooks::{Agent, assemble::MessageAssembler, facts::facts, wire::HookLine};
+use farcooler_core::activity::Registry;
+use farcooler_protocol::v1::AgentActivity;
 use farcooler_tmux::TmuxServer;
+use std::sync::LazyLock;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
 #[path = "coding_native_quiesce.rs"]
@@ -62,6 +65,14 @@ const VERDICT_QUIET: Duration = Duration::from_secs(1);
 const UNFINISHED_QUIET: Duration = Duration::from_secs(30 * 60);
 #[cfg(test)]
 const UNFINISHED_QUIET: Duration = Duration::from_secs(2);
+/// Let Claude redraw after Stop and start a new turn when a background shell exits.
+const CLAUDE_IDLE_FOR: Duration = Duration::from_millis(500);
+static CLAUDE_ACTIVITY: LazyLock<Registry> = LazyLock::new(Registry::built_in);
+
+enum ClaudeStop {
+    AwaitingIdle,
+    IdleSince(Duration),
+}
 
 /// A startup refusal ends the turn even if the harness leaves its interactive prompt alive. This is
 /// negative evidence only; screen text can never supply a successful result.
@@ -357,6 +368,7 @@ impl Exec {
         let mut verdict = None;
         let building = matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build));
         let mut unfinished: Option<Duration> = None;
+        let mut claude_stop = None;
         let mut unread = PaneUnread::default();
         loop {
             let stream = tokio::select! {
@@ -364,7 +376,8 @@ impl Exec {
                 _ = look.tick() => {
                     if let Some(reason) = self.quarantine_reason(binding) { return Ok((false, hooks, Some(reason))); }
                     let owner: NativeOwner = serde_json::from_slice(&self.bytes(&self.native_path(binding, "owner"))?)?;
-                    let life = server(&self.root, binding).pane_life_with_exit_evidence(&owner.pane, owner.terminal).await;
+                    let tmux = server(&self.root, binding);
+                    let life = tmux.pane_life_with_exit_evidence(&owner.pane, owner.terminal).await;
                     #[cfg(test)]
                     let life = if UNREADABLE_PANE.with(|n| n.get()) > 0 {
                         UNREADABLE_PANE.with(|n| n.set(n.get() - 1));
@@ -372,7 +385,12 @@ impl Exec {
                     } else { life };
                     match pane_look(life, &mut unread, clock.now()) {
                         PaneLook::Live => {}
-                        PaneLook::Unread => continue,
+                        PaneLook::Unread => {
+                            if claude_stop.is_some() { claude_stop = Some(ClaudeStop::AwaitingIdle); }
+                            continue;
+                        }
+                        // The pane closed after a valid Stop, so Claude cannot start another turn.
+                        PaneLook::Lost(_) if claude_stop.is_some() && unread.closed >= 2 => return Ok((true, hooks, None)),
                         PaneLook::Lost(why) => {
                             let _ = super::execution::ACTIVITY.try_with(|a| {
                                 a.session.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -383,11 +401,31 @@ impl Exec {
                     }
                     if agent == Agent::Codex && startup_check.elapsed() >= Duration::from_secs(1) {
                         startup_check = tokio::time::Instant::now();
-                        let output = server(&self.root, binding).capture_pane(&owner.pane, 40).await
+                        let output = tmux.capture_pane(&owner.pane, 40).await
                             .map_err(|_| Error::Refused("native startup output unavailable"))?;
                         if let Some(reason) = startup_refusal(agent, &output) { return Ok((false, hooks, Some(reason))); }
                     }
                     if verdict.is_none() && self.recorded_verdict(binding) { verdict = Some(clock.now()); }
+                    if let Some(stop) = &claude_stop {
+                        if verdict.is_some() { return Ok((true, hooks, None)); }
+                        let idle = tmux.capture_screen(&owner.pane).await
+                            .is_ok_and(|screen| CLAUDE_ACTIVITY.classify(agent.as_str(), &screen) == AgentActivity::Idle);
+                        let now = clock.now();
+                        claude_stop = match (stop, idle) {
+                            (_, false) => Some(ClaudeStop::AwaitingIdle),
+                            (ClaudeStop::AwaitingIdle, true) => Some(ClaudeStop::IdleSince(now)),
+                            (ClaudeStop::IdleSince(since), true) if now.saturating_sub((*since).max(heard)) < CLAUDE_IDLE_FOR => continue,
+                            (ClaudeStop::IdleSince(_), true) => {
+                                if !building || self.unfinished_build(binding, &tree).await.ok().flatten().is_none() {
+                                    return Ok((true, hooks, None));
+                                }
+                                tracing::info!(effect = %binding.effect.id, "the build ended its turn without committing; waiting for its next turn");
+                                unfinished = Some(now);
+                                None
+                            }
+                        };
+                        continue;
+                    }
                     if verdict.is_some_and(|at: Duration| clock.now().saturating_sub(at.max(heard)) >= VERDICT_QUIET) {
                         tracing::warn!(effect = %binding.effect.id, "the reviewer recorded its verdict and went quiet without its turn's end being heard; the verdict ends it");
                         return Ok((true, hooks, None));
@@ -446,9 +484,11 @@ impl Exec {
             let events = assembler.accept(line.agent, &line.event, &line.payload);
             let ended = prompted && events.iter().any(|event| matches!(event,
                 AgentEvent::TurnEnded { reason: EndReason::EndTurn }));
-            // Decide whether the build is waiting before the queue's last check, under the same
-            // admission lock as message.send. An unfinished build keeps accepting direction.
-            let waiting = ended && building && self.unfinished_build(binding, &tree).await.ok().flatten().is_some();
+            // Claude can issue Stop before drawing its idle prompt beside running shells.
+            // Reply to the hook first so it can redraw and wake for their completion.
+            let check_claude = ended && agent == Agent::Claude && !self.recorded_verdict(binding);
+            // Keep accepting direction while a deferred Stop or an unfinished build can resume.
+            let waiting = check_claude || (ended && building && self.unfinished_build(binding, &tree).await.ok().flatten().is_some());
             let followup = if prompted && (ended || line.event == "PreToolUse") {
                 self.native_followup(binding, &line, stream.get_mut(), ended && !waiting).await?
             } else { Followup::NoMessage };
@@ -460,7 +500,11 @@ impl Exec {
             if keyed_stop && let Followup::Sent(reply) = followup { continued_stop = Some((line.payload.clone(), reply)); }
             hooks.push(line);
             if hooks.len() > 4096 { return Err(Error::Refused("too many native hooks")); }
-            if continued { unfinished = None; continue; }
+            if continued || check_claude {
+                claude_stop = (!continued).then_some(ClaudeStop::AwaitingIdle);
+                unfinished = None;
+                continue;
+            }
             if prompted {
                 for event in events {
                     if let AgentEvent::TurnEnded { reason } = event {
@@ -564,6 +608,8 @@ impl Exec {
             never = stuck => match never {},
             result = controlled => result,
         };
+        // When Stop was deferred, admission stayed open for the resumed turn's hooks.
+        crate::engine_steering::inbox(id, |open| { *open = false; Ok(()) }).map_err(Error::Domain)?;
         let _ = super::execution::ACTIVITY.try_with(|a| {
             a.settle();
             a.session.store(false, std::sync::atomic::Ordering::SeqCst);

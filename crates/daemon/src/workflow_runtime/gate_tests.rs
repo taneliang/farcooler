@@ -15,17 +15,34 @@ def hook(event, **extra):
         s.connect(os.environ['FARCOOLER_NATIVE_HOOK_SOCKET'])
         s.sendall((json.dumps(dict(agent='claude', event=event, payload=dict(session_id=session, cwd=os.getcwd(), **extra)))+'\n').encode())
         assert s.recv(64).strip() == b'{}'
+def review_verdict(passed):
+    pathlib.Path(os.environ['FARCOOLER_RECEIPT']).write_text(json.dumps(dict(binding=os.environ['FARCOOLER_OPERATION_BINDING'],
+        identity='agent', candidate=os.environ['FARCOOLER_CANDIDATE'], passed=passed)))
+def wait_for_shell(seconds):
+    build = subprocess.Popen(['/bin/sh', '-c', 'sleep "$1"', 'shell', str(seconds)])
+    hook('Stop')
+    # Claude redraws its prompt after the Stop hook returns.
+    print('✻ Worked for 3s · 1 shell still running', flush=True)
+    print('─' * 40 + '\n❯ \n' + '─' * 40 + '\n  ⏵⏵ auto mode on · 1 shell', flush=True)
+    build.wait()
 hook('SessionStart')
 hook('UserPromptSubmit', prompt=prompt)
 if prompt.startswith('You are reviewing'):
     log = pathlib.Path(os.environ['STARTED']).parent / 'reviews'
     with log.open('a') as f: f.write(os.environ.get('FARCOOLER_WORKFLOW_MODEL', '-') + '\n')
+    if mode in ('background-shell', 'background-no-verdict', 'background-timeout'):
+        wait_for_shell(30 if mode == 'background-timeout' else 1.5)
+        print('\x1b[2J\x1b[HClaude Code', flush=True)
+        if mode == 'background-shell':
+            print('  esc to interrupt', flush=True)
+            time.sleep(1)
+            review_verdict(True)
+        time.sleep(30)
     # 'subdir' and 'nostop' review well the first time: one ends its turn from a directory it moved into, as ov-1064's
     # reviewer did after a `cd apps/android`, and one records its verdict and never ends its turn (ov-1082).
     first = mode in ('subdir', 'nostop')
     if (first or len(log.read_text().splitlines()) > 1) and mode != 'never':
-        pathlib.Path(os.environ['FARCOOLER_RECEIPT']).write_text(json.dumps(dict(binding=os.environ['FARCOOLER_OPERATION_BINDING'],
-            identity='agent', candidate=os.environ['FARCOOLER_CANDIDATE'], passed=mode != 'reject')))
+        review_verdict(mode != 'reject')
     if mode == 'subdir':
         os.makedirs('apps/android', exist_ok=True)
         os.chdir('apps/android')
@@ -35,7 +52,16 @@ else:
     pathlib.Path('result.txt').write_text('candidate native PTY')
     subprocess.check_call(['/usr/bin/git','add','--','result.txt'])
     subprocess.check_call(['/usr/bin/git','-c','commit.gpgsign=false','commit','--quiet','-m','native build'])
+    if mode == 'background-build':
+        wait_for_shell(1.5)
+        print('\x1b[2J\x1b[HClaude Code\n  esc to interrupt', flush=True)
+        result = pathlib.Path('result.txt')
+        result.write_text('candidate after testing')
+        subprocess.check_call(['/usr/bin/git','-c','commit.gpgsign=false','commit','--quiet','-am','tested build'])
+        print('\x1b[2J\x1b[HClaude Code', flush=True)
 hook('Stop')
+if mode == 'exits-after-stop' and prompt.startswith('You are reviewing'):
+    sys.exit(0)
 time.sleep(30)
 "#;
 
@@ -104,6 +130,45 @@ async fn an_agent_gate_then_the_orchestrator_then_the_owner_each_hold_the_run_un
     // It landed what the agent reviewed.
     assert_eq!(adapters::git(&runtime.repository(), &["rev-parse", runtime.landing_ref()]).await.unwrap(),
         state.items["one"].candidate.clone().unwrap());
+}
+
+#[tokio::test]
+async fn a_claude_reviewer_waits_for_its_background_shell_and_records_a_verdict() {
+    let (dir, mut runtime, _fake) = three_gates("background-shell").await;
+    let definition = definition(&runtime);
+    enqueue(&mut runtime, "w", "one", definition);
+    let state = settle(&mut runtime, 2).await;
+    assert_eq!(at(&state), ("orchestrator-review".into(), Phase::WaitingReview), "{:?}", state.items["one"].failed_reason());
+    assert_eq!(std::fs::read_to_string(dir.path().join("reviews")).unwrap(), "claude:sonnet\n");
+}
+
+#[tokio::test]
+async fn a_claude_reviewer_without_a_verdict_settles_when_idle_or_exited_or_at_the_step_deadline() {
+    for (mode, reason) in [
+        ("background-no-verdict", "The reviewing agent ended without recording a verdict."),
+        ("exits-after-stop", "The reviewing agent ended without recording a verdict."),
+        ("background-timeout", "ran past the step's 1-minute time limit"),
+    ] {
+        let (_dir, mut runtime, _fake) = three_gates(mode).await;
+        let mut definition = definition(&runtime);
+        definition.stages.iter_mut().find(|stage| stage.id == "agent-review").unwrap().max_attempts = 1;
+        enqueue(&mut runtime, "w", "one", definition);
+        let state = settle(&mut runtime, 2).await;
+        assert_eq!(at(&state), ("agent-review".into(), Phase::Failed), "{mode}");
+        assert!(state.items["one"].failed_reason().unwrap().contains(reason), "{mode}: {state:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_claude_build_can_update_its_candidate_after_a_background_shell() {
+    let (_dir, mut runtime, _fake) = three_gates("background-build").await;
+    let definition = runtime.configured_definition().unwrap();
+    enqueue(&mut runtime, "w", "one", definition);
+    let state = finish(&mut runtime, "w").await;
+    assert_eq!(at(&state), ("end".into(), Phase::Done), "{state:?}");
+    let candidate = state.items["one"].candidate.as_deref().unwrap();
+    assert_eq!(adapters::git(&runtime.repository(), &["show", &format!("{candidate}:result.txt")]).await.unwrap(),
+        "candidate after testing");
 }
 
 #[tokio::test]
@@ -447,7 +512,7 @@ async fn full_review_route_and_reviewer_rejection_remain_effective() {
         d.stages[2].operation.arguments[1] = serde_json::json!({"under_lines":1,"report_paths":[],"full_paths":["auth/**"]}).to_string();
         if reject {
             let agent = dir.path().join("gates.py");
-            let text = std::fs::read_to_string(&agent).unwrap().replace("passed=mode != 'reject'", "passed=False");
+            let text = std::fs::read_to_string(&agent).unwrap().replace("review_verdict(mode != 'reject')", "review_verdict(False)");
             std::fs::write(agent, text).unwrap();
         }
         enqueue(&mut runtime, "w", "one", d);
