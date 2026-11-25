@@ -69,6 +69,18 @@ async fn fixture() -> (Harness, ReviewFixture) {
         )
         .unwrap();
         fs::write(checkout.join("reports/context.md"), inventory).unwrap();
+        fs::create_dir(checkout.join("samples")).unwrap();
+        // Cross the byte and line limits independently in Git-generated patches.
+        fs::write(
+            checkout.join("samples/byte-limit.txt"),
+            format!("{}\n", "x".repeat(1024)).repeat(2300),
+        )
+        .unwrap();
+        fs::write(
+            checkout.join("samples/line-limit.txt"),
+            "added line\n".repeat(5000),
+        )
+        .unwrap();
         git(&checkout, &["add", "."]);
         git(
             &checkout,
@@ -143,6 +155,57 @@ async fn fixture() -> (Harness, ReviewFixture) {
     })
     .await;
     (harness, fixture.unwrap())
+}
+
+#[tokio::test]
+async fn web_review_socket_refuses_marks_for_byte_and_line_limited_diffs() {
+    let (h, fixture) = fixture().await;
+    let session = Session::connect_local(&h.socket).await.unwrap();
+    let read = async |req| {
+        session
+            .web_review(
+                h.workspace,
+                fixture.ticket,
+                serde_json::from_value(req).unwrap(),
+            )
+            .await
+    };
+    let initial = read(json!({"view":"changes"})).await.unwrap();
+    for (path, reason) in [
+        ("samples/byte-limit.txt", "exceeds the byte limit"),
+        ("samples/line-limit.txt", "exceeds the line limit"),
+    ] {
+        let file = initial["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|file| file["path"] == path)
+            .unwrap();
+        let view = read(json!({"view":"changes","position":file["position"]}))
+            .await
+            .unwrap();
+        assert!(
+            view["diff"]["notice"].as_str().unwrap().contains(reason),
+            "{view}"
+        );
+        assert_eq!(view["diff"]["hunks"], json!([]));
+        assert!(view["diff"]["next"].is_null());
+        assert!(view["mark"].is_null());
+        let mut position = view["position"].clone();
+        // A saved or hand-edited offset beyond the oversized hunk returns an
+        // empty uncapped page. It must still be refused.
+        for from in [0, 1] {
+            position["from"] = json!(from);
+            assert!(
+                matches!(
+                    read(json!({"view":"changes","position":position,"edit":{"action":"review","reviewed":true}})).await,
+                    Err(SessionError::Refused { code, what, .. })
+                        if code == ErrorCode::InvalidArgument as i32 && what == "review_incomplete"
+                ),
+                "{path} at offset {from}"
+            );
+        }
+    }
 }
 
 #[tokio::test]

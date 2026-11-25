@@ -102,6 +102,15 @@ try {
 
   const tab = await page()
   await button(tab, 'Changes').click()
+  for (const [path, notice] of [
+    ['samples/byte-limit.txt', 'This file’s diff exceeds the byte limit and cannot be marked reviewed.'],
+    ['samples/line-limit.txt', 'A hunk exceeds the line limit. This file cannot be marked reviewed.'],
+  ]) {
+    await button(tab, path).click()
+    await tab.getByText(notice, { exact: true }).waitFor()
+    assert.equal(await button(tab, 'Mark reviewed').count(), 0)
+    assert.equal(await button(tab, 'Next diff page').count(), 0)
+  }
   await button(tab, 'Approve').waitFor()
   assert.equal((await rpc({ method: 'move' })).error, undefined)
   await button(tab, 'Approve').click()
@@ -115,7 +124,7 @@ try {
   await tab.getByText('Approval accepted', { exact: true }).waitFor()
   assert.equal(await button(tab, 'Approve').count(), 0)
   assert.deepEqual(errors, [])
-  console.log('PASS files, candidate diff, shared inline comment, reviewed state, reload and exact-candidate approval')
+  console.log('PASS files, candidate diff, diff limits, shared inline comment, reviewed state, reload and exact-candidate approval')
 } finally {
   await browser.close()
   await rpc({ method: 'stop' })

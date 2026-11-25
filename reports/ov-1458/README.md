@@ -4,18 +4,20 @@ Open a Board ticket with a linked worktree and choose **Files** or **Changes**. 
 
 Rust binds committed reviews to the worktree and the compared Git objects. The uncommitted comparison also uses the worktree digest. Rust resolves file and line anchors, projects reviewed markers, and checks the candidate again before a comment or approval. A replacement candidate keeps the file selection when that path still exists and clears the old line selection and reviewed markers. The browser stores reviewed marks for the tab and restores the file, diff page, selected line and scroll offset on reload.
 
+Rust requires the full diff in one view to mark a file reviewed. Changes explains when a patch exceeds the byte limit or a hunk exceeds the line limit. Partial pages remain readable where the runner returns a forward cursor. File marks are separate from the existing workflow approval.
+
 Source reads require the runner’s existing control grant. The review offers the workflow’s **Approve** or **Accept review** action when the authenticated principal can act on the displayed commit. Approval uses the existing workflow preparation, retained-command journal and runner validation.
 
 ## Browser evidence
 
-The browser check runs the production ticket and review renderers against an isolated authenticated runner session with a real Git checkout. The fixture uses the [parity inventory](../ov-1439/parity.md) and [Web board report](../ov-1446/README.md). It checks folder navigation, a lengthy text preview, diff selection, shared inline comments, reviewed marks and scroll restoration on reload. It then moves HEAD, checks that the old approval is refused, and restores and approves the exact workflow candidate.
+The browser check runs the production ticket and review renderers against an isolated authenticated runner session with a real Git checkout. The fixture uses the [parity inventory](../ov-1439/parity.md) and [Web board report](../ov-1446/README.md). It checks folder navigation, a lengthy text preview, diff selection, shared inline comments, reviewed marks and scroll restoration on reload. It checks that byte-capped patches and line-capped hunks display the limit and offer neither a reviewed mark nor a next page. It then moves HEAD, checks that the old approval is refused, and restores and approves the exact workflow candidate.
 
 | View | Phone | Desktop |
 | --- | --- | --- |
 | File preview | [320 × 900](files-320.png) | [1280 × 900](files-1280.png) |
 | Restored inline review | [320 × 900](changes-320.png) | [1280 × 900](changes-1280.png) |
 
-The Rust client suite covers stable anchors, current and stale candidates, read-scope refusal and rooted file reads. The daemon diff suite checks that a pinned patch stays on its candidate after HEAD moves. The Web Rust, Web unit and workflow suites, Board and Work browser checks, both TypeScript checks, WASM build, and Canary wire and shared-core linters passed.
+The Rust client suite covers stable anchors, current and stale candidates, read-scope refusal and rooted file reads. Against Git-generated patches, it also checks that both caps reject direct mark requests, including requests with a later hunk offset. The daemon diff suite checks that a pinned patch stays on its candidate after HEAD moves. The Web Rust, Web unit and workflow suites, Board and Work browser checks, both TypeScript checks, WASM build, and Canary wire and shared-core linters passed.
 
 To rerun the browser check with the Web dependencies and Playwright Chromium installed, start the fixture from the repository root.
 

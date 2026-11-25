@@ -93,8 +93,9 @@ impl Session {
                 let mut notes = detail.notes;
                 match edit {
                     Some(Edit::Review { reviewed }) => {
-                        if patch.is_none() {
-                            return Err(stale());
+                        let patch = patch.as_ref().ok_or_else(stale)?;
+                        if reviewed && !view.can_mark_reviewed(patch) {
+                            return Err(refused(ErrorCode::InvalidArgument, "review_incomplete"));
                         }
                         view.update_marks(&mut marks, reviewed);
                     }

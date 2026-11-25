@@ -194,6 +194,13 @@ impl<'a> Candidate<'a> {
         }
     }
 
+    pub fn can_mark_reviewed(&self, patch: &pb::FileDiff) -> bool {
+        self.position.from == 0
+            && patch.truncated.is_none()
+            && patch.next_hunk.is_none()
+            && patch.unsupported.is_none()
+    }
+
     pub fn view(
         &self,
         patch: Option<&pb::FileDiff>,
@@ -228,7 +235,16 @@ impl<'a> Candidate<'a> {
             position.line.clear();
         }
         let diff = patch.map(|p| {
+            use pb::Truncation::{ByteCap, HunkCap, LineCap};
+
             let mut diff = changes_json::file_diff_json(p);
+            let truncation = p.truncated.and_then(|t| pb::Truncation::try_from(t).ok());
+            let next = match truncation {
+                Some(LineCap | HunkCap) if p.unsupported.is_none() => {
+                    p.next_hunk.filter(|&from| from > position.from)
+                }
+                _ => None,
+            };
             for (hunk, view) in p
                 .hunks
                 .iter()
@@ -257,18 +273,24 @@ impl<'a> Candidate<'a> {
                     view["comments"] = json!(comments.remove(&id).unwrap_or_default());
                 }
             }
-            diff["notice"] = json!(match p
-                .unsupported
-                .and_then(|u| pb::DiffUnsupported::try_from(u).ok())
-            {
-                Some(pb::DiffUnsupported::Binary) => Some("Binary file"),
-                Some(pb::DiffUnsupported::Submodule) => Some("Submodule"),
+            diff["notice"] = json!(match p.unsupported {
+                Some(u) if u == pb::DiffUnsupported::Binary as i32 => Some("Binary file"),
+                Some(u) if u == pb::DiffUnsupported::Submodule as i32 => Some("Submodule"),
                 Some(_) => Some("Text diff is unavailable"),
-                None if p.truncated.is_some() => Some("This page shows part of the diff."),
-                None if p.hunks.is_empty() => Some("No text changes in this file."),
-                None => None,
+                None => match truncation {
+                    Some(ByteCap) =>
+                        Some("This file’s diff exceeds the byte limit and cannot be marked reviewed."),
+                    Some(LineCap) if next.is_none() =>
+                        Some("A hunk exceeds the line limit. This file cannot be marked reviewed."),
+                    _ if p.truncated.is_some() && next.is_none() =>
+                        Some("The full diff is unavailable. This file cannot be marked reviewed."),
+                    _ if !self.can_mark_reviewed(p) =>
+                        Some("This page shows part of the diff. The full diff is required to mark this file reviewed."),
+                    _ if p.hunks.is_empty() => Some("No text changes in this file."),
+                    _ => None,
+                },
             });
-            diff["next"] = json!(p.next_hunk.map(|from| (
+            diff["next"] = json!(next.map(|from| (
                 "Next diff page",
                 Position {
                     from,
@@ -304,7 +326,7 @@ impl<'a> Candidate<'a> {
             ],
             "notice": self.stale.then_some("The candidate changed. Review the current diff before continuing."),
             "empty": "No changed files", "refresh": "Refresh",
-            "mark": patch.map(|_| {
+            "mark": patch.filter(|p| reviewed(&file_id) || self.can_mark_reviewed(p)).map(|_| {
                     let reviewed = reviewed(&file_id);
                     json!({"label":if reviewed {"Mark unreviewed"} else {"Mark reviewed"},
                         "edit":{"action":"review", "reviewed":!reviewed}})
@@ -372,6 +394,7 @@ pub fn links(scope: &str, worktree: bool, files: bool, changes: bool) -> Value {
 pub fn failure(word: &str, code: &str, what: &str) -> &'static str {
     match (word, code, what) {
         (_, _, "review_stale") => "The candidate or diff changed. Refresh before continuing.",
+        (_, _, "review_incomplete") => "The full diff is required to mark this file reviewed.",
         (_, _, "review_worktree") => "The ticket’s worktree is no longer available.",
         (_, _, "review_comment") => "Enter an inline comment.",
         (_, "not-found", _) => "The ticket or path is no longer available.",
@@ -478,6 +501,39 @@ mod tests {
         let saved = Candidate::new(tree, &changes, position).position;
         changes.worktree_digest = "edit".into();
         assert!(Candidate::new(tree, &changes, saved).stale);
+    }
+
+    #[test]
+    fn only_a_complete_diff_can_be_marked_reviewed() {
+        let tree = Uuid::now_v7();
+        let path = "large.txt";
+        let changes = pb::ChangeSet {
+            files: vec![pb::FileChange {
+                path: path.into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let candidate = Candidate::new(tree, &changes, Position::default());
+        let mut patch = pb::FileDiff {
+            path: path.into(),
+            hunks: vec![pb::Hunk::default()],
+            truncated: Some(pb::Truncation::HunkCap as i32),
+            next_hunk: Some(1),
+            ..Default::default()
+        };
+        let first = candidate.view(Some(&patch), &[], "control", &Marks::default(), None);
+        assert!(first["mark"].is_null());
+        assert_eq!(first["diff"]["next"][0], "Next diff page");
+        let position = serde_json::from_value(first["diff"]["next"][1].clone()).unwrap();
+        let last = Candidate::new(tree, &changes, position);
+        patch.truncated = None;
+        patch.next_hunk = None;
+        let view = last.view(Some(&patch), &[], "control", &Marks::default(), None);
+        assert!(view["mark"].is_null());
+        assert!(view["diff"]["next"].is_null());
+        assert!(view["diff"]["notice"].is_string());
+        assert!(candidate.can_mark_reviewed(&patch));
     }
 
     #[test]
