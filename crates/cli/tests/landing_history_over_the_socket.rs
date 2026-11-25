@@ -4,9 +4,9 @@ mod in_process;
 
 use farcooler_protocol::v1::Scope;
 use farcooler_store::{models::Actor, testing::{exec_for_tests, old_landing, old_landing_lander}};
-use farcooler_workflow::{Archived, ArchivedGroup, Phase, State};
+use farcooler_workflow::{Archived, ArchivedGroup, Definition, Phase, Progression, StageKind, State};
 use in_process::*;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 async fn run_landing(h: &Harness, repo: &Repo, args: &[&str]) -> std::process::Output {
     tokio::process::Command::new(env!("CARGO_BIN_EXE_farcooler"))
@@ -30,29 +30,50 @@ async fn list_and_show_distinguish_engine_groups() {
     let repo = a_repository(&h);
     let store = &h.service.store;
     let mut state = State::empty(repo.workspace.to_string(), 1);
-    state.revision = 2;
-    let mut keys = Vec::new();
-    for (n, sha) in [(1, "abcdef1"), (2, "abcdef2")] {
-        let task = store.create_task(repo.workspace, &format!("Engine landing {n}"), Actor::Manager).unwrap();
-        state.archive.insert(format!("group-{n:020}-landing"), Archived {
-            phase: Phase::Done,
-            candidate: Some(sha.into()),
-            group: Some(ArchivedGroup {
-                name: "landing".into(),
-                tickets: vec![task.key.clone()],
-                pushed: Some(sha.into()),
-                since_ms: now_millis(),
-            }),
-            start_load: None,
-            last_run: None,
-            history: Vec::new(),
-            closed: None,
-        });
+    state.revision = 3;
+    let archived = store.create_task(repo.workspace, "Archived landing", Actor::Manager).unwrap();
+    let live = store.create_task(repo.workspace, "Live landing", Actor::Manager).unwrap();
+    state.archive.insert("group-00000000000000000001-landing".into(), Archived {
+        phase: Phase::Done,
+        candidate: Some("abcdef1".into()),
+        group: Some(ArchivedGroup {
+            name: "landing".into(),
+            tickets: vec![archived.key.clone()],
+            pushed: Some("abcdef1".into()),
+            since_ms: now_millis(),
+        }),
+        start_load: None,
+        last_run: None,
+        history: Vec::new(),
+        closed: None,
+    });
+    let mut definition = Definition::tracker("orchestrator");
+    definition.schema = 2;
+    definition.source = "group/landing".into();
+    definition.stages[0].kind = StageKind::AwaitBase;
+    definition.stages[0].progression = Progression::Automatic;
+    definition.validate_group().unwrap();
+    state.items.insert("group-00000000000000000002-landing".into(), serde_json::from_value(json!({
+        "pin": definition.pin(),
+        "definition": definition,
+        "policy_pin": "fixture",
+        "dependencies": [],
+        "resource": "ref:origin:main",
+        "stage": 0,
+        "iteration": 0,
+        "attempt": 0,
+        "fence": 1,
+        "phase": Phase::Blocked,
+        "run": "fixture",
+        "group_of": { "name": "landing", "pin": "fixture" },
+        "members": [{ "item": live.key, "candidate": "abcdef2" }],
+        "since_ms": now_millis(),
+    })).unwrap());
+    for task in [&archived, &live] {
         exec_for_tests(store, &format!(
             "INSERT INTO workflow_owned_items(workspace, item, task_id) VALUES ('{}', '{}', X'{}')",
             repo.workspace, task.key, task.id.simple(),
         ));
-        keys.push(task.key);
     }
     let json = serde_json::to_string(&state).unwrap().replace('\'', "''");
     exec_for_tests(store, &format!(
@@ -64,20 +85,23 @@ async fn list_and_show_distinguish_engine_groups() {
     let list = landing(&h, &repo, &["list"]).await;
     let [first, second] = list["landings"].as_array().unwrap().as_slice() else { panic!("{list}") };
     assert_ne!(first["id"], second["id"]);
-    assert_ne!(first["tickets"], second["tickets"]);
     let text = run_landing(&h, &repo, &["list"]).await;
     assert!(text.status.success(), "{}", String::from_utf8_lossy(&text.stderr));
     let text = String::from_utf8(text.stdout).unwrap();
     assert!(!text.contains("Landing 0"), "{text}");
-    for listed in [first, second] {
+    for (key, pushed_sha) in [(&archived.key, json!("abcdef1")), (&live.key, Value::Null)] {
+        let listed = [first, second].into_iter().find(|l| l["tickets"][0]["key"] == *key).unwrap();
         assert_eq!(listed["number"], 0);
-        let key = listed["tickets"][0]["key"].as_str().unwrap();
-        assert!(keys.iter().any(|expected| expected == key));
+        assert_eq!(listed["pushed_sha"], pushed_sha);
         let id = listed["id"].as_str().unwrap();
         let mut shown = landing(&h, &repo, &["show", id]).await;
-        assert_eq!(shown.as_object_mut().unwrap().remove("events"), Some(serde_json::json!([])));
+        assert_eq!(shown.as_object_mut().unwrap().remove("events"), Some(json!([])));
         assert_eq!(&shown, listed);
-        assert!(text.lines().any(|line| line.contains(id) && line.contains(key)), "{text}");
+        let listed_line = text.lines().find(|line| line.contains(id) && line.contains(key)).unwrap();
+        let output = run_landing(&h, &repo, &["show", id]).await;
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let details = String::from_utf8(output.stdout).unwrap();
+        assert_eq!(details.lines().next(), Some(listed_line));
     }
     let missing = run_landing(&h, &repo, &["show", "00000000-0000-0000-0000-000000000000"]).await;
     assert!(!missing.status.success());
