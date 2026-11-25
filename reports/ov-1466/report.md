@@ -27,24 +27,23 @@ still return a successful response within one second while the stall is held.
   versions (1 passed, 0 failed in each run). The same five daemon test
   modules listed below passed with tmux 3.4 (64 tests).
 - macOS arm64, tmux 3.8. The named regression passed in the daemon library
-  test target on the original run and on recheck (1 passed, 0 failed each time).
-  The daemon test modules for workflow admission, caller seats, foreground
-  sampling, the process table, and process-read lanes passed (66 tests).
+  test target. The November 26 recheck passed both individually (1 test) and
+  with the daemon test modules for workflow admission, caller seats, foreground
+  sampling, the process table, and process-read lanes (66 tests).
 - `cargo clippy --locked -p farcooler-daemon --all-targets -- -D warnings`
   passed on macOS. The daemon-layer, file-size-budget, and shared-core lints
   passed.
 
 ## Main CI
 
-The ov-1466 fix is on the ticket branch at
-`6eb3b744b1fdd441edf8520608baf64115547886`. The checked main head,
-`8c85d3179e00de94c02cd89974764c41973c1f67`, still arms the stall using tmux’s
-`pane_pid`. Its CI run was in progress when checked.
-[GitHub Actions run 45669588871](https://github.com/taneliang/farcooler/actions/runs/45669588871)
+GitHub reported `8c85d3179e00de94c02cd89974764c41973c1f67` as the head of
+`main` on November 26, 2026 (SGT). Its admission test still arms the stall
+using tmux’s `pane_pid`. The `CI` workflow for that push completed with
+`failure` on attempt 2. Rust tests (3/4) logged the same panic at
+`admission_tests.rs:573`, `sampler reached the unrelated process's arguments: Elapsed(())`.
+[CI run 45669588871, attempt 2](https://github.com/taneliang/farcooler/actions/runs/45669588871/attempts/2)
+[Rust tests (3/4) job log](https://github.com/taneliang/farcooler/actions/runs/45669588871/job/139421754114)
 
-The preceding main CI run failed on this regression in Rust tests (3/4).
-[GitHub Actions run 45568814028](https://github.com/taneliang/farcooler/actions/runs/45568814028)
-
-The acceptance check requires a successful `push` run of the `CI` workflow on
-`main` whose head SHA is the engine’s landing commit containing the fix. That
-commit and run were unavailable while preparing this ticket branch.
+The fix is on the ticket branch at `6eb3b744b1fdd441edf8520608baf64115547886`.
+The main CI acceptance item remains open until GitHub reports a successful
+`CI` push run with the SHA that lands the fix on `main`.
