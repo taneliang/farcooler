@@ -45,6 +45,7 @@ pub fn timeout() -> Duration {
 #[derive(Debug)]
 pub struct GitOutput {
     pub ok: bool,
+    pub code: Option<i32>,
     pub stdout: String,
     pub stderr: String,
 }
@@ -60,6 +61,7 @@ pub struct GitOutput {
 #[derive(Debug)]
 pub struct GitBytes {
     pub ok: bool,
+    code: Option<i32>,
     pub stdout: Vec<u8>,
     pub stderr: String,
 }
@@ -68,7 +70,7 @@ pub struct GitBytes {
 pub async fn git(cwd: &Path, args: &[&str]) -> Result<GitOutput> {
     let raw = git_bytes(cwd, args).await?;
     Ok(GitOutput {
-        ok: raw.ok,
+        ok: raw.ok, code: raw.code,
         stdout: String::from_utf8_lossy(&raw.stdout).into_owned(),
         stderr: raw.stderr,
     })
@@ -118,7 +120,7 @@ pub async fn git_with(
     timeout: Duration,
 ) -> Result<GitOutput> {
     let raw = run_bounded(&*launch()?, timeout, cwd, args, extra, None).await?;
-    Ok(GitOutput { ok: raw.ok, stdout: String::from_utf8_lossy(&raw.stdout).into_owned(), stderr: raw.stderr })
+    Ok(GitOutput { ok: raw.ok, code: raw.code, stdout: String::from_utf8_lossy(&raw.stdout).into_owned(), stderr: raw.stderr })
 }
 
 /// `git_with`, against the index file `index` instead of the worktree's own
@@ -133,7 +135,7 @@ pub async fn git_with_index(
     index: &Path,
 ) -> Result<GitOutput> {
     let raw = run_bounded(&*launch()?, timeout, cwd, args, extra, Some(index)).await?;
-    Ok(GitOutput { ok: raw.ok, stdout: String::from_utf8_lossy(&raw.stdout).into_owned(), stderr: raw.stderr })
+    Ok(GitOutput { ok: raw.ok, code: raw.code, stdout: String::from_utf8_lossy(&raw.stdout).into_owned(), stderr: raw.stderr })
 }
 
 pub use crate::git_launch::{Launch, gh_launch, git_launch};
@@ -237,7 +239,7 @@ async fn run_bounded(
         pins.extend_from_slice(extra);
         spawn_bounded(launch, deadline, cwd, &crate::git_guard::args(args), Some(&pins), index).await?
     };
-    Ok(GitBytes { ok: out.code == Some(0), stdout: out.stdout, stderr: out.stderr })
+    Ok(GitBytes { ok: out.code == Some(0), code: out.code, stdout: out.stdout, stderr: out.stderr })
 }
 
 /// What one guarded git gave back.

@@ -448,7 +448,10 @@ pub enum Outcome {
     SafeFailureWithReceipt { reason: Option<String>, receipt: String },
     /// A temporary resource refusal; retry without spending an attempt or a back-edge.
     ResourceHold(String),
-    Interrupted, Uncertain, Stopped { operation: String, receipt: String } }
+    Interrupted, Uncertain,
+    /// A fenced recovery check could not establish what happened.
+    UncertainBecause(String),
+    Stopped { operation: String, receipt: String } }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EffectKind { Decide { policy: crate::ScriptPolicy, input: Box<crate::HookInput> }, Execute(StageKind), Stop { operation: String } }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

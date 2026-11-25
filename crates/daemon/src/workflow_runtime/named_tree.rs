@@ -288,6 +288,40 @@ pub(super) async fn stop_on_changes(tree: &Path, ledger: &Path, run: &str, candi
 }
 
 impl Exec {
+    /// Accept only a registered linked checkout of the expected branch. A named
+    /// checkout must also have made it through the store's board claim.
+    pub(super) async fn provision_intact(&self, binding: &Binding, path: &Path) -> Result<bool> {
+        let branch = binding.effect.tree.as_ref().map_or_else(
+            || adapters::private_branch(&binding.workspace, &binding.effect), |tree| tree.branch.clone());
+        let inventory = crate::git::list_worktrees(&self.repository()).await.map_err(Error::Domain)?;
+        if !inventory.iter().any(|tree| !tree.is_main && !tree.prunable
+            && tree.branch.as_deref() == Some(&branch) && same_path(Path::new(&tree.path), path))
+        {
+            return Ok(false);
+        }
+        if binding.effect.tree.is_some() {
+            let board = Uuid::parse_str(&binding.workspace).map_err(|_| Error::Refused("invalid workspace"))?;
+            let repository = self.store.get_workspace(board).map_err(Error::Domain)?.repository_id;
+            let rows = self.store.list_worktrees_for_repository(repository).map_err(Error::Domain)?;
+            let claimed = rows.iter().find(|row| row.workspace_id == Some(board) && row.branch == branch
+                && same_path(Path::new(&row.worktree_path), path));
+            let Some(row) = claimed else {
+                return Err(Error::Refused("Git lists the worktree, but its board claim could not be verified"));
+            };
+            if self.store.list_terminals_for_worktree(row.id).map_err(Error::Domain)?
+                .iter().any(|terminal| terminal.exit_code.is_none() && terminal.exit_signal.is_none())
+            {
+                return Err(Error::Refused("the worktree still has an open terminal"));
+            }
+        }
+        let head = if binding.effect.reuse_checkout { self.verify_tree_identity(binding).await? }
+            else { self.verify_tree(binding).await? };
+        if head != binding.base && !binding.effect.reuse_checkout && !binding.effect.tree.as_ref().is_some_and(|tree| tree.adopted) {
+            return Err(Error::Refused("the checkout is on the expected branch, but its commit differs from the pinned base"));
+        }
+        Ok(true)
+    }
+
     /// Make the run's named worktree, record it, and claim it for the board, under the repository's lock.
     pub(super) async fn provision_named(&self, workspace: &str, binding: &Binding, tree: &RunTree) -> Result<()> {
         check_base(binding, tree)?;
@@ -347,9 +381,10 @@ pub(super) async fn unmade(repository: &Path, path: &Path, made: Option<&str>, e
 /// fails is never taken for nothing.
 pub(super) async fn what_is_there(repository: &Path, path: &Path, made: Option<&str>) -> Option<String> {
     let shown = path.display();
-    match path.try_exists() {
-        Ok(false) => {}
-        Ok(true) => return Some(format!("there is a directory at {shown}")),
+    match path.symlink_metadata() {
+        Ok(meta) if meta.is_dir() => return Some(format!("there is a directory at {shown}")),
+        Ok(_) => return Some(format!("something is still at {shown}")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(_) => return Some(format!("{shown} can't be read")),
     }
     match crate::git::list_worktrees(repository).await {
@@ -359,10 +394,11 @@ pub(super) async fn what_is_there(repository: &Path, path: &Path, made: Option<&
         Err(_) => return Some("git couldn't list the repository's worktrees".into()),
     }
     let branch = made?;
-    match crate::git::branch_exists(repository, branch).await {
-        Ok(false) => None,
-        Ok(true) => Some(format!("the branch {branch} exists")),
-        Err(_) => Some(format!("git couldn't say whether the branch {branch} exists")),
+    let reference = format!("refs/heads/{branch}");
+    match crate::git::git(repository, &["rev-parse", "--verify", "--quiet", &reference]).await {
+        Ok(read) if read.ok => Some(format!("the branch {branch} exists")),
+        Ok(read) if read.code == Some(1) && read.stderr.is_empty() => None,
+        _ => Some(format!("git couldn't say whether the branch {branch} exists")),
     }
 }
 

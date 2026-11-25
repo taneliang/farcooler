@@ -130,3 +130,23 @@ async fn ov1427_restart_reaps_a_native_owner_that_survived_the_runner() {
     assert_ne!(unsafe { libc::kill(pid, 0) }, 0);
     drop(abandoned);
 }
+
+#[tokio::test]
+async fn an_uncertain_native_build_resumes_from_its_intact_turn_and_commit() {
+    let (_dir, mut runtime, _fake) = super::super::coding_native::tests::native("pass").await;
+    let definition = runtime.configured_definition().unwrap();
+    enqueue(&mut runtime, "w", "one", definition);
+    runtime.pump(2).await.unwrap();
+    let binding = admitted(&runtime).await;
+    let (_cancel, cancelled) = tokio::sync::watch::channel(false);
+    let Outcome::Passed(evidence) = runtime.execute_coding("w", &binding, cancelled).await.unwrap()
+        else { panic!("the recorded native turn should pass") };
+    let fact = runtime.root.join("receipts").join(format!("{}.process.json", digest(&binding.effect)));
+    std::fs::remove_file(fact).unwrap();
+    runtime.observe("w", &binding.effect, Outcome::Uncertain, false, 30).unwrap();
+
+    runtime.pump(1_000).await.unwrap();
+    let state = runtime.state("w").unwrap().unwrap();
+    assert_eq!(state.items["one"].stage, 2);
+    assert_eq!(state.items["one"].candidate.as_deref(), Some(evidence.candidate.as_str()));
+}

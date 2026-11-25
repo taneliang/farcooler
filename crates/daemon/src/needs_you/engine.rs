@@ -5,12 +5,15 @@ use farcooler_protocol::v1::NeedsYouKind;
 use super::{Signal, Subject};
 use crate::engine_stuck::Stuck;
 
-pub(super) fn signal(index: usize, stuck: &Stuck) -> Signal {
+pub(super) fn signal(index: usize, stuck: &Stuck, tasks: &[farcooler_store::models::Task]) -> Signal {
+    let workspace = uuid::Uuid::parse_str(&stuck.workspace).ok();
+    let subject = tasks.iter().find(|task| Some(task.workspace_id) == workspace && task.key == stuck.item)
+        .map_or(Subject::Engine(index), |task| Subject::Task(task.id));
     Signal {
         kind: NeedsYouKind::Blocked,
         id: format!("engine-stuck-{}-{}", stuck.workspace, stuck.item),
         since_ms: stuck.since_ms,
-        subject: Subject::Engine(index),
+        subject,
         terminal: None,
         question: stuck.question.clone(),
         detail: Some(stuck.item.clone()),

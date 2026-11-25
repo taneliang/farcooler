@@ -110,15 +110,20 @@ impl Exec {
         durable(&self.verb_path(binding), &serde_json::to_vec(&VerbFact {
             binding: binding.clone(), label: label.into(), candidate: candidate.into(), detail })?)
     }
-    /// A person's settlement replaces the fact a crash left, atomically; nothing else ever does.
-    pub(super) fn settle_fact(&self, binding: &Binding, label: &str, candidate: &str, detail: serde_json::Value) -> Result<()> {
+    /// A settlement based on a fresh target read replaces the fact a crash left, atomically.
+    pub(super) fn settle_push_fact(&self, binding: &Binding, landed: bool, settled_by: &str) -> Result<Outcome> {
+        let candidate = binding.effect.candidate.clone().ok_or(Error::Refused("missing push candidate"))?;
+        let label = if landed { "passed" } else { "base_moved" };
+        let fact = VerbFact { binding: binding.clone(), label: label.into(), candidate,
+            detail: serde_json::json!({ "settled_by": settled_by, "landed": landed }) };
+        let raw = serde_json::to_vec(&fact)?;
         let path = self.verb_path(binding);
         let temporary = path.with_extension("settling");
         let _ = std::fs::remove_file(&temporary);
-        durable(&temporary, &serde_json::to_vec(&VerbFact { binding: binding.clone(), label: label.into(), candidate: candidate.into(), detail })?)?;
+        durable(&temporary, &raw)?;
         std::fs::rename(&temporary, &path)?;
         std::fs::File::open(path.parent().ok_or(Error::Refused("missing parent"))?)?.sync_all()?;
-        Ok(())
+        Self::verb_outcome(binding, &StageKind::Push, fact, &raw)
     }
     /// The local repository's configuration must not redirect or extend the transport.
     async fn refuse_redirected_transport(&self, binding: &Binding) -> Result<()> {
@@ -222,7 +227,11 @@ impl Exec {
                 || !self.on_target(identity, &fact.candidate, &log).await?
             { return Err(Error::Refused("remote landing SHA changed")); }
         }
-        let manifest = digest(&(binding, &fact.candidate, &raw, &fact.label));
+        Self::verb_outcome(binding, kind, fact, &raw)
+    }
+
+    fn verb_outcome(binding: &Binding, kind: &StageKind, fact: VerbFact, raw: &[u8]) -> Result<Outcome> {
+        let manifest = digest(&(binding, &fact.candidate, raw, &fact.label));
         let receipt = if fact.label == "passed" { digest(&("coding-receipt/v1", &manifest)) }
             else { format!("{}.verb.json", digest(&binding.effect)) };
         let evidence = Evidence { candidate: fact.candidate, manifest, receipt, policy_pin: binding.effect.policy_pin.clone() };
@@ -1027,14 +1036,22 @@ fn sign_in_refusal(log: &str) -> Option<&'static str> {
 /// Whether `candidate` is on the target of the repository at `repository`. A remote that cannot be read is
 /// an error, never an answer of "no": only an object the remote lacks, or one off the target, is absent.
 pub(super) async fn on_remote(repository: &Path, target: &str, candidate: &str) -> Result<bool> {
-    let read = crate::git::git(repository, &["rev-parse", "--verify", "--quiet", target]).await
-        .map_err(|_| Error::Refused("the landing remote cannot be read"))?;
-    if !read.ok { return Err(Error::Refused("the landing target cannot be read")); }
-    let known = crate::git::git(repository, &["cat-file", "-e", &format!("{candidate}^{{commit}}")]).await
-        .map_err(|_| Error::Refused("the landing remote cannot be read"))?;
-    if !known.ok { return Ok(false); }
-    Ok(crate::git::git(repository, &["merge-base", "--is-ancestor", candidate, target]).await
-        .map_err(|_| Error::Refused("the landing remote cannot be read"))?.ok)
+    let git = async |args: &[&str]| {
+        crate::git::git(repository, args).await.map_err(|_| Error::Refused("the landing remote cannot be read"))
+    };
+    let target_commit = format!("{target}^{{commit}}");
+    let read = git(&["--no-replace-objects", "rev-parse", "--verify", "--quiet", &target_commit]).await?;
+    let head = read.stdout.trim();
+    if !read.ok || !sha(head) { return Err(Error::Refused("the landing target cannot be read")); }
+    let candidate_commit = format!("{candidate}^{{commit}}");
+    let known = git(&["--no-replace-objects", "rev-parse", "--verify", "--quiet", &candidate_commit]).await?;
+    if known.code == Some(1) && known.stderr.is_empty() { return Ok(false); }
+    if !known.ok { return Err(Error::Refused("the candidate cannot be read on the landing remote")); }
+    match git(&["--no-replace-objects", "merge-base", "--is-ancestor", candidate, head]).await?.code {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(Error::Refused("the landing target's history cannot be read")),
+    }
 }
 
 /// Sleep `every` milliseconds. True when a cancel came first.

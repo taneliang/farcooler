@@ -218,13 +218,17 @@ impl Exec {
     /// Git in the private landing repository alone, with no credentials and no replace objects: what it answers is
     /// not the shared repository's to change. `None` when git refused.
     async fn landing_git(&self, args: &[&str]) -> Result<Option<String>> {
+        let output = self.landing_git_output(args).await?;
+        Ok(output.status.success().then(|| String::from_utf8_lossy(&output.stdout).trim().to_string()))
+    }
+
+    async fn landing_git_output(&self, args: &[&str]) -> Result<std::process::Output> {
         let private = self.landing_repository().await?;
         let (program, mut environment) = self.transfer_environment().await?;
         environment.insert("GIT_DIR".into(), private.to_string_lossy().into_owned());
         environment.insert("GIT_NO_REPLACE_OBJECTS".into(), "1".into());
-        let output = tokio::process::Command::new(program).current_dir(&private).env_clear().envs(&environment)
-            .args(args).stdin(std::process::Stdio::null()).output().await?;
-        Ok(output.status.success().then(|| String::from_utf8_lossy(&output.stdout).trim().to_string()))
+        Ok(tokio::process::Command::new(program).current_dir(&private).env_clear().envs(&environment)
+            .args(args).stdin(std::process::Stdio::null()).kill_on_drop(true).output().await?)
     }
     /// Put `candidate` and its history in the private landing repository, so a push from there can send it. What
     /// arrived is read there: a transfer the shared config redirected stages nothing.
@@ -305,7 +309,11 @@ impl Exec {
         if self.landing_git(&["cat-file", "-e", &format!("{candidate}^{{commit}}")]).await?.is_none() {
             self.stage(candidate, &format!("refs/farcooler/check/{}", candidate.get(..16).unwrap_or(candidate))).await?;
         }
-        Ok(self.landing_git(&["merge-base", "--is-ancestor", candidate, &head]).await?.is_some())
+        match self.landing_git_output(&["merge-base", "--is-ancestor", candidate, &head]).await?.status.code() {
+            Some(0) => Ok(true),
+            Some(1) => Ok(false),
+            _ => Err(Error::Refused("the landing target's history cannot be read")),
+        }
     }
     /// Where a ticket starts on a network landing (ov-1059): the hash of the target's head as the remote has it now,
     /// by a plain ask that takes a moment. The objects behind it are brought over by Provision (`ensure_start_objects`),

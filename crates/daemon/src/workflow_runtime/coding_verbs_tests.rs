@@ -7,6 +7,7 @@ use super::coding_verbs::{classify_push, PushVerdict};
 use std::collections::BTreeMap;
 
 mod heavy_lock;
+mod automatic_settle;
 
 const GATE: &str = r#"elif stage == 'gate':
     if mode == 'resource-hold' and not pathlib.Path(os.environ['MARKER']).exists():

@@ -539,7 +539,7 @@ fn apply_in_snapshot(tx: &Transaction<'_>, input: &Input, payload: &str, by: Opt
                 if let farcooler_workflow::Command::Observe { effect, outcome, .. }
                     | farcooler_workflow::Command::Resolve { effect, outcome, .. } = &input.command
                 {
-                    let status = if matches!(outcome, farcooler_workflow::Outcome::Uncertain) {
+                    let status = if matches!(outcome, farcooler_workflow::Outcome::Uncertain | farcooler_workflow::Outcome::UncertainBecause(_)) {
                         "uncertain"
                     } else { "settled" };
                     tx.execute("UPDATE workflow_outbox SET dispatch_state = ?3 WHERE workspace = ?1 AND id = ?2",

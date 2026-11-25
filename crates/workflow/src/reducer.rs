@@ -394,6 +394,12 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                         }
                         Outcome::Hook(_) => return Err(Refusal::Invalid),
                         Outcome::Uncertain => { item.phase = Phase::Uncertain; }
+                        Outcome::UncertainBecause(reason) => {
+                            if !resolving || !valid_rework_reason(reason) { return Err(Refusal::Invalid); }
+                            item.phase = Phase::Uncertain;
+                            item.failure = Some(reason.clone());
+                            if item.since_ms == 0 { item.since_ms = input.now_ms; }
+                        }
                         Outcome::Stopped { operation, receipt } => {
                             // A stop receipt is only valid for the cancellation operation, never execution.
                             if !item.run.starts_with("cancel:") { return Err(Refusal::Phase); }

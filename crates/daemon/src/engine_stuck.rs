@@ -63,6 +63,21 @@ pub fn list() -> Vec<Stuck> {
     all
 }
 
+/// The engine stores the result of an inconclusive probe on the fenced item.
+pub(crate) fn uncertain(store: &farcooler_store::Store) -> Vec<Stuck> {
+    use farcooler_workflow::Phase;
+    let mut items = Vec::new();
+    for workspace in store.workflow_workspaces().unwrap_or_default() {
+        let Ok(Some(state)) = store.workflow_state(&workspace) else { continue };
+        for (item, run) in state.items {
+            if run.phase != Phase::Uncertain { continue; }
+            let Some(question) = run.failure else { continue };
+            items.push(Stuck { workspace: workspace.clone(), item, since_ms: run.since_ms, question });
+        }
+    }
+    items
+}
+
 /// Unlists the build when its run ends, however it ends.
 struct Listed(Key);
 impl Drop for Listed {
@@ -102,7 +117,7 @@ pub(crate) fn listen(watcher: &std::sync::Arc<crate::watch::Watcher>) {
     if let Ok(mut all) = listeners().lock() { all.push(std::sync::Arc::downgrade(watcher)); }
 }
 
-fn announce() {
+pub(crate) fn announce() {
     let live: Vec<_> = listeners().lock().map(|mut all| {
         all.retain(|w| w.strong_count() > 0);
         all.iter().filter_map(|w| w.upgrade()).collect()

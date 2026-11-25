@@ -238,6 +238,7 @@ pub async fn gather(
     inputs.tasks = tasks.into_values().collect();
     inputs.pr_requests = svc.pr_requests.current(millis(SystemTime::now()));
     inputs.engine_stuck = crate::engine_stuck::list();
+    inputs.engine_stuck.extend(crate::engine_stuck::uncertain(&svc.store));
     inputs.logins = svc.login_needs();
     inputs.runner = crate::push::runner_name().to_string();
     let since = millis(SystemTime::now()) - kept::WINDOW_MS;
@@ -516,7 +517,7 @@ pub fn assemble(inputs: &Inputs, now: SystemTime) -> Vec<pb::NeedsYouItem> {
         signals.extend(task_signal(task, inputs));
     }
     signals.extend(inputs.pr_requests.iter().enumerate().map(|(i, r)| pr::request_signal(i, r)));
-    signals.extend(inputs.engine_stuck.iter().enumerate().map(|(i, s)| engine::signal(i, s)));
+    signals.extend(inputs.engine_stuck.iter().enumerate().map(|(i, s)| engine::signal(i, s, &inputs.tasks)));
     let mut quiet = login::items(inputs, now_ms);
     quiet.extend(kept::items(inputs, now_ms));
 
@@ -865,6 +866,22 @@ mod tests {
 
     fn kinds(items: &[pb::NeedsYouItem]) -> Vec<NeedsYouKind> {
         items.iter().map(|i| i.kind()).collect()
+    }
+
+    #[test]
+    fn an_uncertain_step_and_its_board_card_make_one_needs_you_item() {
+        let mut fleet = Fleet::new();
+        fleet.task(TaskStatus::NeedsDecision, 5_000);
+        let ticket = fleet.inputs.tasks[0].key.clone();
+        let finding = format!("The runner checked {ticket}. Its build may still be running.");
+        fleet.inputs.engine_stuck.push(crate::engine_stuck::Stuck {
+            workspace: fleet.workspace.to_string(), item: ticket.clone(), since_ms: ago(1_000), question: finding.clone(),
+        });
+        let items = assemble(&fleet.inputs, now());
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].kind(), NeedsYouKind::Blocked);
+        assert_eq!(items[0].detail.as_deref(), Some(ticket.as_str()));
+        assert_eq!(items[0].question, finding);
     }
 
     #[test]

@@ -169,6 +169,9 @@ impl Exec {
         durable(&self.unstarted_path(binding), &serde_json::to_vec(&Unstarted { binding: binding.clone(), why: why.clone() })?)?;
         Ok(Outcome::SafeFailureBecause(why))
     }
+    pub(super) fn has_verified_process_receipt(&self, binding: &Binding) -> bool {
+        self.settled_process(binding).is_ok()
+    }
     /// A process fact is written only after its owned writers have ended. Its answer can still be unknown.
     fn settled_process(&self, binding: &Binding) -> Result<(ProcessFact, Vec<u8>)> {
         let raw = self.bytes(&self.fact_path(binding))?;
@@ -183,11 +186,14 @@ impl Exec {
     }
     /// The fact of a process that has ended, read for nothing but that: its binding is checked, not the command it
     /// ran, which a re-pin since may have changed.
-    fn ended_process(&self, binding: &Binding) -> Result<Vec<u8>> {
+    pub(super) fn ended_process(&self, binding: &Binding) -> Result<Vec<u8>> {
         let raw = self.bytes(&self.fact_path(binding))?;
         let fact: ProcessFact = serde_json::from_slice(&raw)?;
         if fact.binding != *binding { return Err(Error::Refused("foreign process fact")); }
         Ok(raw)
+    }
+    pub(super) fn record_git_settlement(&self, binding: &Binding) -> Result<()> {
+        durable(&self.git_settlement(binding), &serde_json::to_vec(&GitSettlement { binding: binding.clone() })?)
     }
     pub(super) fn git_settlement(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.git-settled.json", digest(&binding.effect)))
@@ -737,7 +743,7 @@ impl Exec {
         if matches!(kind, StageKind::Provision | StageKind::Land) {
             // Written only after the retained bounded Git operation has returned.
             // A visible ref/worktree alone cannot prove its old process is done.
-            durable(&self.git_settlement(binding), &serde_json::to_vec(&GitSettlement { binding: binding.clone() })?)?;
+            self.record_git_settlement(binding)?;
         }
         self.reconcile_coding(binding).await
     }
@@ -838,7 +844,7 @@ impl Exec {
         }
         Ok(candidate)
     }
-    async fn verify_tree_identity(&self, binding: &Binding) -> Result<String> {
+    pub(super) async fn verify_tree_identity(&self, binding: &Binding) -> Result<String> {
         let tree = self.tree(binding);
         let common = self.git_recorded(binding, &tree, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).await?;
         if Path::new(&common).canonicalize()? != self.repository().join(".git").canonicalize()? {

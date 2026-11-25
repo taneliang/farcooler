@@ -591,7 +591,7 @@ impl Runtime {
                 self.activities.lock().unwrap().remove(&(job.workspace.clone(), job.effect.id.clone()));
                 futures.remove(index);
                 #[cfg(test)] { self.drained += 1; }
-                if let Ok(outcome) = outcome {
+                if !job.reconciling && let Ok(outcome) = outcome {
                     if let Err(error) = self.write_journal(&Journal { binding: job.binding, outcome }) {
                         tracing::warn!(effect = %job.effect.id, %error, "workflow settlement could not be retained");
                     }
@@ -800,6 +800,32 @@ impl Runtime {
                     self.activities.lock().unwrap().remove(&(job.workspace.clone(), job.effect.id.clone()));
                     futures.remove(index);
                     self.note_holding(running);
+                    if job.reconciling {
+                        let now = clock();
+                        let state = self.state(&job.workspace)?.ok_or(Error::Refused("missing state"))?;
+                        if let Some(item) = state.items.get(&job.effect.item)
+                            .filter(|item| item.phase == Phase::Uncertain && item.pending.as_ref() == Some(&job.effect.id))
+                        {
+                            let result = match result {
+                                Ok(outcome) if outcome != Outcome::Uncertain => {
+                                    if self.observe(&job.workspace, &job.effect, outcome, true, now)? {
+                                        if item.failure.is_some() { crate::engine_stuck::announce(); }
+                                        self.recovery.settled(&job.workspace, &job.effect.id);
+                                        count += 1;
+                                        None
+                                    } else { Some("the engine could not accept the recovered result".into()) }
+                                }
+                                Ok(_) => Some("the available evidence could not establish an outcome".into()),
+                                Err(error) => Some(error.to_string()),
+                            };
+                            if let Some(finding) = result {
+                                if self.say_uncertain(&job.workspace, &job.effect, item, &finding, now)? { count += 1; }
+                                self.recovery.unsettled(&job.workspace, &job.effect.id, Some(finding), now);
+                            }
+                        }
+                        scan |= self.continuous && !stopping;
+                        continue;
+                    }
                     let (workspace, effect, binding) = (job.workspace, job.effect, job.binding);
                     let outcome = match result {
                         Ok(outcome) => {
@@ -873,10 +899,10 @@ impl Runtime {
             for stored in self.store.workflow_dispatch_effects(workspace, &[])? {
                 if self.shutdown.as_ref().is_some_and(|s| *s.borrow()) { return Ok(()); }
                 let effect = stored.effect;
+                if stored.dispatch_state == "uncertain" { uncertain.insert(effect.id.clone()); }
                 if running.iter().any(|j| j.effect.id == effect.id && &j.workspace == workspace) { continue; }
                 // An Uncertain effect that recovery couldn't settle waits before it is looked at again (ov-1301).
                 if stored.dispatch_state == "uncertain" {
-                    uncertain.insert(effect.id.clone());
                     if self.recovery.waiting(workspace, &effect.id, now_ms) { continue; }
                 }
                 let state = self.state(workspace)?.ok_or(Error::Refused("missing state"))?;
@@ -890,20 +916,58 @@ impl Runtime {
                 let selected = self.select_item_configuration(workspace, &effect.item, item);
                 if matches!(stored.dispatch_state.as_str(), "admitted" | "uncertain") {
                     let tree = self.effect_tree(workspace, &effect);
-                    let Ok(_tree) = self.tree_lock(&tree).try_read_owned() else { continue };
+                    let Ok(tree) = self.tree_lock(&tree).try_read_owned() else { continue };
+                    let resolving = stored.dispatch_state == "uncertain";
+                    let auto = resolving && item.phase == Phase::Uncertain
+                        && matches!(effect.kind, EffectKind::Execute(StageKind::Provision | StageKind::Build | StageKind::Push))
+                        && self.recovery.automatic_due(workspace, &effect.id, now_ms);
                     if let Err(error) = selected {
                         if stored.dispatch_state != "uncertain" {
                             tracing::warn!(effect = %effect.id, %error, "retained configuration unavailable; ownership remains uncertain");
-                            if self.observe(workspace, &effect, Outcome::Uncertain, false, clock())? { *count += 1; }
+                            if self.observe(workspace, &effect, Outcome::Uncertain, false, clock())? {
+                                *count += 1;
+                                uncertain.insert(effect.id.clone());
+                                self.recovery.unsettled(workspace, &effect.id, None, now_ms);
+                            }
                         } else {
-                            self.recovery.unsettled(workspace, &effect.id, Some(format!("retained configuration unavailable: {error}")), now_ms);
+                            let finding = format!("retained configuration unavailable: {error}");
+                            if auto && self.say_uncertain(workspace, &effect, item, &finding, clock())? { *count += 1; }
+                            self.recovery.unsettled(workspace, &effect.id, Some(finding), now_ms);
                         }
                         continue;
                     }
                     self.recovery.looking();
+                    let binding: Result<Binding> = (|| Ok(Binding::new(workspace, &effect, stored.resource_generation
+                        .ok_or(Error::Refused("admitted effect lacks generation"))?, item.iteration, &self.item_base(workspace, &effect)?)))();
+                    let binding = match binding {
+                        Ok(binding) => binding,
+                        Err(error) => {
+                            let finding = format!("could not bind the effect: {error}");
+                            if auto && self.say_uncertain(workspace, &effect, item, &finding, clock())? { *count += 1; }
+                            self.recovery.unsettled(workspace, &effect.id, Some(finding), now_ms);
+                            if !resolving && self.observe(workspace, &effect, Outcome::Uncertain, false, clock())? {
+                                *count += 1;
+                                uncertain.insert(effect.id.clone());
+                            }
+                            continue;
+                        }
+                    };
+                    if auto && self.coding.is_some() {
+                        let exec = self.exec.clone();
+                        let (cancel, _) = tokio::sync::watch::channel(false);
+                        let probe = binding.clone();
+                        self.activities.lock().unwrap().insert((workspace.clone(), effect.id.clone()), Default::default());
+                        futures.push(effect_slot(async move {
+                            match exec.reconcile_coding(&probe).await {
+                                Ok(outcome) if outcome != Outcome::Uncertain => Ok(outcome),
+                                _ => exec.auto_settle(&probe).await,
+                            }
+                        }));
+                        running.push(Running { workspace: workspace.clone(), effect, binding, cancel,
+                            pool: None, _tree: tree, _landing: None, reconciling: true });
+                        continue;
+                    }
                     let recovered = async {
-                        let binding = Binding::new(workspace, &effect, stored.resource_generation
-                            .ok_or(Error::Refused("admitted effect lacks generation"))?, item.iteration, &self.item_base(workspace, &effect)?);
                         if matches!(effect.kind, EffectKind::Decide { .. }) {
                             self.recover_hook(&binding, now_ms).map(Some)
                         } else if self.coding.is_some() {
@@ -916,12 +980,17 @@ impl Runtime {
                         Ok(outcome) => (outcome.unwrap_or(Outcome::Uncertain), None),
                         Err(error) => (Outcome::Uncertain, Some(error.to_string())),
                     };
-                    // Decided once: an effect recovery can't settle stays Uncertain, for the orchestrator, and is
-                    // looked at again less and less often, its reason said once (ov-1301).
-                    if outcome == Outcome::Uncertain { self.recovery.unsettled(workspace, &effect.id, why, now_ms); }
-                    else { self.recovery.settled(workspace, &effect.id); }
-                    if stored.dispatch_state == "uncertain" && outcome == Outcome::Uncertain { continue; }
-                    if self.observe(workspace, &effect, outcome, stored.dispatch_state == "uncertain", clock())? { *count += 1; }
+                    if outcome == Outcome::Uncertain {
+                        uncertain.insert(effect.id.clone());
+                        self.recovery.unsettled(workspace, &effect.id, why, now_ms);
+                        if resolving { continue; }
+                    } else {
+                        self.recovery.settled(workspace, &effect.id);
+                    }
+                    if self.observe(workspace, &effect, outcome, resolving, clock())? {
+                        *count += 1;
+                        if resolving && item.failure.is_some() { crate::engine_stuck::announce(); }
+                    }
                     continue;
                 }
                 if item.deciding.is_none() && !matches!(item.phase, Phase::Running | Phase::WaitingSlot | Phase::Cancelling) { continue; }
@@ -1022,12 +1091,25 @@ impl Runtime {
                     else if exec.coding.is_some() { exec.execute_coding(&run_workspace, &run_binding, cancelled).await }
                     else { exec.execute(&run_workspace, &run_binding).await }
                 })));
-                running.push(Running { workspace: workspace.clone(), effect, binding, cancel, pool, _tree: tree, _landing: landing });
+                running.push(Running { workspace: workspace.clone(), effect, binding, cancel, pool, _tree: tree, _landing: landing, reconciling: false });
             }
             self.recovery.keep_only(workspace, &uncertain);
         }
         Ok(())
     }
+    fn say_uncertain(&self, workspace: &str, effect: &Effect, item: &farcooler_workflow::Item, finding: &str, now_ms: i64) -> Result<bool> {
+        let finding: String = finding.chars().filter(|c| !c.is_control()).take(650).collect();
+        let tickets = if effect.members.is_empty() { effect.item.clone() } else {
+            effect.members.iter().map(|member| member.item.as_str()).collect::<Vec<_>>().join(", ")
+        };
+        let tickets: String = tickets.chars().take(250).collect();
+        let reason = format!("The runner checked the uncertain step for {tickets}. {finding}");
+        if item.failure.as_deref() == Some(&reason) { return Ok(false); }
+        let written = self.observe(workspace, effect, Outcome::UncertainBecause(reason), true, now_ms)?;
+        if written { crate::engine_stuck::announce(); }
+        Ok(written)
+    }
+
     /// Write what an effect found. The engine may refuse the result (evidence for another policy, a
     /// label the step does not declare, a quarantined resource). That must fail the one item, never
     /// end the service for every workspace: a refused result settles the item as `Uncertain`, which
@@ -1238,6 +1320,7 @@ struct Running {
     pool: Option<Pool>,
     _tree: tokio::sync::OwnedRwLockReadGuard<()>,
     _landing: Option<std::fs::File>,
+    reconciling: bool,
 }
 enum Event {
     Tick,

@@ -1,4 +1,4 @@
-//! A person's word on a push whose outcome the runtime lost (ov-956).
+//! Fenced recovery of worktree, build, and push effects with uncertain outcomes.
 use super::*;
 use super::coding::sha;
 use super::coding::sha as sha_ok;
@@ -53,25 +53,13 @@ impl Runtime {
             .find(|s| &s.effect.id == pending && s.dispatch_state == "uncertain")
             .ok_or(Error::Refused("the effect is not uncertain"))?;
         if stored.effect.kind != EffectKind::Execute(StageKind::Push) { return Err(Error::Refused("only a push can be settled")); }
-        let candidate = stored.effect.candidate.clone().filter(|c| sha(c)).ok_or(Error::Refused("missing push candidate"))?;
-        // The item's own configuration: the runtime serves many repositories and holds the last one it launched.
-        let mut exec = self.exec.clone();
-        if self.service_mode {
-            let bundle = self.store.workflow_bundle(&item.policy_pin)?.ok_or(Error::Refused("missing item bundle"))?;
-            exec.coding = bundle.adapter.map(|farcooler_protocol::workflow_config::AdapterConfiguration::Coding(config)| config);
-            exec.base = exec.coding.as_ref().map_or_else(|| "0".repeat(40), |c| c.base.clone());
-        }
-        let identity = exec.landing()?;
-        // Read the remote first; a claim it contradicts is refused, and a remote that cannot be read settles nothing.
-        let log = exec.root.join("receipts").join(format!("{}.settle.fetch.output", digest(&stored.effect)));
-        if exec.on_target(identity, &candidate, &log).await? != landed {
-            return Err(Error::Refused("the remote disagrees"));
-        }
+        self.refuse_active_probe(workspace, &stored.effect)?;
+        let exec = self.settlement_exec(item)?;
         let base = exec.item_base(workspace, &stored.effect)?;
         let binding = Binding::new(workspace, &stored.effect,
             stored.resource_generation.ok_or(Error::Refused("the push was never admitted"))?, item.iteration, &base);
-        exec.settle_fact(&binding, if landed { "passed" } else { "base_moved" }, &candidate,
-            serde_json::json!({ "settled_by": "person", "landed": landed }))?;
+        exec.check_push(&binding, Some(landed)).await?;
+        self.recovery.wake();
         if let Some(wake) = &self.notice_wake { wake.notify_one(); }
         Ok(())
     }
@@ -121,70 +109,130 @@ impl Runtime {
             EffectKind::Stop { operation } => outbox.iter().find(|s| &s.effect.id == operation).ok_or(Error::Refused("missing stopped effect"))?,
             _ => stored,
         };
+        self.refuse_active_probe(workspace, &provision.effect)?;
         let build = provision.effect.kind == EffectKind::Execute(StageKind::Build);
         if provision.effect.kind != EffectKind::Execute(StageKind::Provision) && !build {
             return Err(refused(format!("Only a build, or a step that makes a run's worktree, can be resolved this way; \
                 {item_id}'s uncertain step is neither.")));
         }
+        let exec = self.settlement_exec(item)?;
+        let base = exec.item_base(workspace, &provision.effect)?;
+        let binding = Binding::new(workspace, &provision.effect,
+            provision.resource_generation.ok_or(Error::Refused("the provision was never admitted"))?, item.iteration, &base);
+        if build {
+            exec.resolve_build(item_id, &binding).await?;
+        } else {
+            exec.check_provision(&binding, false).await?;
+        }
+        self.recovery.wake();
+        if let Some(wake) = &self.notice_wake { wake.notify_one(); }
+        Ok(())
+    }
+
+    fn refuse_active_probe(&self, workspace: &str, effect: &Effect) -> Result<()> {
+        if self.activities.lock().unwrap().contains_key(&(workspace.to_string(), effect.id.clone())) {
+            return Err(Error::Refused("the runner is checking this effect"));
+        }
+        Ok(())
+    }
+
+    /// The item's own configuration, even if the runtime last selected another repository.
+    fn settlement_exec(&self, item: &farcooler_workflow::Item) -> Result<Exec> {
         let mut exec = self.exec.clone();
         if self.service_mode {
             let bundle = self.store.workflow_bundle(&item.policy_pin)?.ok_or(Error::Refused("missing item bundle"))?;
             exec.coding = bundle.adapter.map(|farcooler_protocol::workflow_config::AdapterConfiguration::Coding(config)| config);
             exec.base = exec.coding.as_ref().map_or_else(|| "0".repeat(40), |c| c.base.clone());
         }
-        let base = exec.item_base(workspace, &provision.effect)?;
-        let binding = Binding::new(workspace, &provision.effect,
-            provision.resource_generation.ok_or(Error::Refused("the provision was never admitted"))?, item.iteration, &base);
-        if build {
-            exec.resolve_build(item_id, &binding).await?;
-            // The settlement just written is read by the next sweep, not after the effect's backoff (ov-1301).
-            self.recovery.wake();
-            if let Some(wake) = &self.notice_wake { wake.notify_one(); }
-            return Ok(());
+        Ok(exec)
+    }
+
+}
+
+impl Exec {
+    /// The delayed probe runs only after receipt recovery has failed.
+    pub(super) async fn auto_settle(&self, binding: &Binding) -> Result<Outcome> {
+        match binding.effect.kind {
+            EffectKind::Execute(StageKind::Push) => self.check_push(binding, None).await,
+            EffectKind::Execute(StageKind::Provision) => self.check_provision(binding, true).await,
+            EffectKind::Execute(StageKind::Build) => {
+                // A usable process receipt still governs the result. A failed Git read is
+                // no reason to discard that receipt and retry the build.
+                if self.has_verified_process_receipt(binding) {
+                    return Err(Error::Refused("the build ended, but its checkout or result could not be verified"));
+                }
+                self.check_build(&binding.effect.item, binding, "the runner checked it").await
+            }
+            _ => unreachable!("only supported uncertain steps are probed"),
         }
-        if exec.git_settlement(&binding).try_exists()? {
-            return Err(refused(format!("{item_id}'s worktree step finished and left its receipt, which settles it; nothing to resolve.")));
+    }
+
+    /// Read the pinned landing target before retaining any conclusion about a lost push.
+    async fn check_push(&self, binding: &Binding, expected: Option<bool>) -> Result<Outcome> {
+        let candidate = binding.effect.candidate.as_deref().filter(|c| sha(c)).ok_or(Error::Refused("missing push candidate"))?;
+        let identity = self.landing()?;
+        let log = self.root.join("receipts").join(format!("{}.settle.fetch.output", digest(&binding.effect)));
+        let landed = self.on_target(identity, candidate, &log).await?;
+        if expected.is_some_and(|claimed| claimed != landed) {
+            return Err(Error::Refused("the remote disagrees"));
         }
-        let (path, made) = match &provision.effect.tree {
-            Some(tree) => (PathBuf::from(&tree.path), (!tree.adopted).then(|| tree.branch.clone())),
-            None => (exec.tree(&binding), Some(adapters::private_branch(workspace, &provision.effect))),
+        // After a restart, receipt recovery reads the target again before accepting a pass.
+        self.settle_push_fact(binding, landed, if expected.is_some() { "person" } else { "runner" })
+    }
+
+    async fn check_provision(&self, binding: &Binding, automatic: bool) -> Result<Outcome> {
+        let item_id = &binding.effect.item;
+        let refused = |sentence: String| Error::Domain(farcooler_core::DomainError::refused(sentence));
+        if self.git_settlement(binding).try_exists()? {
+            return Err(refused(format!("{item_id}'s worktree receipt exists, but its result could not be verified.")));
+        }
+        let path = self.tree(binding);
+        let made = match &binding.effect.tree {
+            Some(tree) => (!tree.adopted).then(|| tree.branch.clone()),
+            None => Some(adapters::private_branch(&binding.workspace, &binding.effect)),
         };
         // Under the repository's lock, as Provision makes a named tree, so nothing is made while it looks. Taken only
         // if free: this runs inside the runtime's loop, which is what polls a Provision holding the lock, so waiting
         // for it here would wait for good and stop every command and effect with it.
-        let lock = match (&exec.host, Uuid::parse_str(workspace).ok().and_then(|w| self.store.get_workspace(w).ok())) {
-            (Some(host), Some(board)) => Some(host.lock(board.repository_id)),
-            _ => None,
-        };
+        let lock = if let Some(host) = &self.host {
+            let board = Uuid::parse_str(&binding.workspace).map_err(|_| Error::Refused("invalid workspace"))?;
+            let board = self.store.get_workspace(board).map_err(Error::Domain)?;
+            Some(host.lock(board.repository_id))
+        } else { None };
         let _held = match &lock {
             Some(lock) => Some(lock.try_lock().map_err(|_| refused(format!("{item_id} can't be resolved while the runner is making \
                 another run's worktree in this repository. Resolve it again in a moment.")))?),
             None => None,
         };
-        if let Some(there) = named_tree::what_is_there(&exec.repository(), &path, made.as_deref()).await {
+        if automatic && path.symlink_metadata().is_ok_and(|meta| meta.is_dir()) && self.provision_intact(binding, &path).await? {
+            self.record_git_settlement(binding)?;
+            return self.reconcile_coding(binding).await;
+        }
+        if let Some(there) = named_tree::what_is_there(&self.repository(), &path, made.as_deref()).await {
             return Err(refused(format!("{item_id} can't be resolved yet: {there}. Take that away by hand if the run made it, then resolve again.")));
         }
-        exec.refuse_unstarted(&binding, "Git never finished making the run's worktree, and nothing was made; the orchestrator \
-            resolved it. Retry the run.".into())?;
-        self.recovery.wake();
-        if let Some(wake) = &self.notice_wake { wake.notify_one(); }
-        Ok(())
+        let checked = if automatic { "the runner checked" } else { "the orchestrator resolved it" };
+        self.refuse_unstarted(binding, format!("Git never finished making the run's worktree, and nothing was made; {checked}. Retry the run."))
     }
-}
 
-/// The orchestrator settling a build left Uncertain whose process has ended (ov-1301), as it settles a lost
-/// Provision: a daemon that restarted or lost the build's receipt held it there, and only an owner's word cleared it.
-impl Exec {
     /// Believed only once the runner looks: a process fact (written only after the process ended), or a native
     /// agent whose pane is gone with nothing on its terminal, or one that was never let out. Then the build is
     /// recorded as having ended with no result, and the next sweep fails the step with that (it runs again in the
     /// same worktree if it has attempts left), or ends the cancelled run waiting on it. Nothing is killed.
     pub(super) async fn resolve_build(&self, item_id: &str, binding: &Binding) -> Result<()> {
+        self.check_build(item_id, binding, "the orchestrator resolved it").await?;
+        Ok(())
+    }
+
+    async fn check_build(&self, item_id: &str, binding: &Binding, checked: &str) -> Result<Outcome> {
         let refused = |sentence: String| Error::Domain(farcooler_core::DomainError::refused(sentence));
         if self.unstarted_recorded(binding)? {
             return Err(refused(format!("{item_id}'s build is already resolved; the next look settles it.")));
         }
-        let ended = if self.process_fact_recorded(binding)? { None }
+        let ended = if self.process_fact_recorded(binding)? {
+                self.ended_process(binding)?;
+                None
+            }
             else if self.is_native_agent(binding) { self.native_ended(binding).await? }
             // A command build keeps no owner record: only one that never wrote its log provably never ran.
             else if self.process_log(binding).try_exists()? { Some("its command may still be running, and the runner can't prove it ended") }
@@ -192,10 +240,8 @@ impl Exec {
         if let Some(running) = ended {
             return Err(refused(format!("{item_id} can't be resolved yet: {running}. Cancel it, or wait for it to end, then resolve again.")));
         }
-        self.refuse_unstarted(binding, "The build ended with no result the runner could read, and nothing of it is still \
-            running; the orchestrator resolved it. Its work stays in the worktree for the step's next attempt, a retry or \
-            a send-back.".into())?;
-        Ok(())
+        self.refuse_unstarted(binding, format!("The build ended with no result the runner could read, and nothing of it is still \
+            running; {checked}. Any work in the worktree carries over to the next build attempt."))
     }
 }
 

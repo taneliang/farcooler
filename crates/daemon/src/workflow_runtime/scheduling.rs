@@ -235,7 +235,7 @@ mod tests {
         let (cancel, _) = tokio::sync::watch::channel(false);
         // Keep the actual continuous sweep open, as a long landing gate does. No external process runs.
         let tree = runtime.tree_lock(&runtime.tree(&binding)).try_read_owned().unwrap();
-        let job = Running { workspace: "w".into(), effect, binding, cancel, pool: None, _tree: tree, _landing: None };
+        let job = Running { workspace: "w".into(), effect, binding, cancel, pool: None, _tree: tree, _landing: None, reconciling: false };
         let mut d = coding_definition(false);
         d.stages.retain(|s| s.kind == StageKind::Build);
         d.stages[0].progression = Progression::AwaitApproval { principal: "owner".into() };
