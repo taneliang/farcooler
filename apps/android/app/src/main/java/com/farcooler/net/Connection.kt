@@ -613,6 +613,21 @@ class Connection(
      */
     suspend fun readBoard(workspace: WorkspaceSummary) = boardReads.readOne(workspace)
 
+    suspend fun reorderTask(workspace: WorkspaceSummary, task: String, anchor: String, after: Boolean): Boolean {
+        val build = daemon.value ?: return false
+        if (!build.can(Capability.BOARD_ORDER) || build.grantedScope == "read") return false
+        val result = attempt {
+            core.call("task.reorder", buildJsonObject {
+                put("task", task)
+                put("anchor", anchor)
+                put("after", after)
+            })
+        }
+        if (result.isFailure) return false
+        readBoard(workspace)
+        return true
+    }
+
     /**
      * The board a route names, by workspace id: the one in [boardList], or —
      * one the fleet has not listed, a route restored before the fleet was

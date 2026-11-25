@@ -6,6 +6,19 @@ import Foundation
 // keeper's, in AgentKit, where `swift test` reads them back.
 
 extension Connection {
+    var mayReorderTasks: Bool {
+        guard isAnswering, let build = knownBuild else { return false }
+        return build.can(.boardOrder) && build.grantedScope != "read"
+    }
+
+    func reorderTask(_ task: TaskRow, relativeTo anchor: TaskRow, after: Bool, on board: WorkspaceSummary) async -> Bool {
+        guard mayReorderTasks,
+            (try? await rpc("task.reorder", ["task": task.id, "anchor": anchor.id, "after": after])) != nil
+        else { return false }
+        _ = await readBoard(board)
+        return true
+    }
+
     /// The keeper for `workspace`'s board, built on first use from what this
     /// phone kept for it in its defaults, under this runner's id.
     func readsKeeper(for workspace: String) -> BoardReadsKeeper {

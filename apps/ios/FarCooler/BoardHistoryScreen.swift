@@ -19,6 +19,7 @@ struct BoardHistoryScreen: View {
 
     @State private var query = ""
     @State private var area: String?
+    @State private var reorderFailed = false
     @Environment(\.phoneNavigator) private var navigator
 
     /// The plan, as the plan column reads it; its lists are this screen's.
@@ -81,9 +82,21 @@ struct BoardHistoryScreen: View {
         }
     }
 
+    private var reorder: ((TaskRow, TaskRow, Bool) async -> Bool)? {
+        guard footer == .notStarted || footer == .waiting,
+            BoardFilter.isEmpty(query), area == nil, connection.mayReorderTasks,
+            !connection.unreadBoards.contains(place.workspace),
+            let summary = connection.boardList.first(where: { $0.id == place.workspace })
+        else { return nil }
+        return { task, anchor, after in
+            await connection.reorderTask(task, relativeTo: anchor, after: after, on: summary)
+        }
+    }
+
     var body: some View {
         let all = rows
         let found = BoardHistory.filter(all, query: query, area: area)
+        let submit = reorder
         BoardTick { now in
             List {
                 let areas = BoardHistory.areas(all)
@@ -98,6 +111,7 @@ struct BoardHistoryScreen: View {
                     }
                 }
                 ForEach(blocks(found, now: now)) { group in
+                    let rowsByStatus = Dictionary(grouping: group.rows, by: \.status)
                     Section {
                         ForEach(group.rows) { row in
                             Button { navigator?.open(.task(place, task: row.id)) } label: {
@@ -121,6 +135,9 @@ struct BoardHistoryScreen: View {
                             .taskKeyCard(row.key, speaksTitle: false)
                             .accessibilityElement(children: .combine)
                             .accessibilityIdentifier("history-row-\(row.key)")
+                            .boardReorder(
+                                row, among: rowsByStatus[row.status] ?? [], submit: submit,
+                                failed: { reorderFailed = true })
                         }
                     } header: {
                         HStack {
@@ -145,6 +162,9 @@ struct BoardHistoryScreen: View {
             }
         }
         .searchable(text: $query, prompt: "Keys and titles")
+        .alert(TaskBoardModel.reorderFailed, isPresented: $reorderFailed) {
+            Button("OK", role: .cancel) {}
+        }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         // Its rows' keys preview their tasks (ov-299).

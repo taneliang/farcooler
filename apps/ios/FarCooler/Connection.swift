@@ -1641,7 +1641,7 @@ final class Connection: ObservableObject {
     }
 
     /// Answer a task's decision: an `answer` note, written as you
-    /// (`task.note`, `PhoneTaskAnswer`), the one task write a phone makes.
+    /// (`task.note`, `PhoneTaskAnswer`).
     /// The runner leaves the task in Needs Decision for its
     /// orchestrator to move; the item leaves Needs You because it's answered.
     func answerDecision(task: String, with text: String) async -> String? {

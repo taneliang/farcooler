@@ -1,5 +1,38 @@
 import SwiftUI
 
+extension View {
+    @ViewBuilder
+    func boardReorder(
+        _ row: TaskRow, among rows: [TaskRow],
+        submit: ((TaskRow, TaskRow, Bool) async -> Bool)?, failed: @escaping () -> Void
+    ) -> some View {
+        if let submit, rows.count > 1 {
+            HStack {
+                self
+                Spacer(minLength: 0)
+                Image(systemName: "line.3.horizontal")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+                    .accessibilityLabel("Drag to reorder")
+                    .draggable(row.id)
+            }
+            .dropDestination(for: String.self) { ids, _ in
+                guard let id = ids.first, id != row.id,
+                    let from = rows.firstIndex(where: { $0.id == id }),
+                    let to = rows.firstIndex(where: { $0.id == row.id })
+                else { return false }
+                Task {
+                    if !(await submit(rows[from], row, from < to)) { failed() }
+                }
+                return true
+            }
+        } else {
+            self
+        }
+    }
+}
+
 // A workspace's board, on a phone: the list form, in-line on the workspace
 // screen's Board segment (ov-55, spec §5), and the card rows it and the task
 // screen share.
@@ -58,6 +91,7 @@ struct WorkspaceBoardList: View {
     let onOpen: (TaskRow) -> Void
     let onJump: (BoardAgent) -> Void
     let onRefresh: () async -> Void
+    let onReorder: ((TaskRow, TaskRow, Bool) async -> Bool)?
     /// Whether this workspace has an orchestrator to plan its work (not
     /// Main), which is what an empty board points at (ov-184).
     let ledByOrchestrator: Bool
@@ -91,6 +125,7 @@ struct WorkspaceBoardList: View {
     @State private var collapsed: Set<TaskStatus>
     /// The long sections showing every task, not just ten.
     @State private var showingMore: Set<TaskStatus> = []
+    @State private var reorderFailed = false
 
     init(
         board: TaskBoardModel?, unread: Bool, place: PhoneWorkspace, speaksOfAgents: Bool,
@@ -102,7 +137,7 @@ struct WorkspaceBoardList: View {
         onShowOrchestrator: (() -> Void)? = nil, onHistory: @escaping (TaskStatus) -> Void = { _ in },
         reads: BoardReads = .firstLook(now: Date()), readNotes: @escaping (TaskRow) async -> [TaskNoteRow]? = { _ in nil },
         readsAreShared: @escaping () -> Bool = { false }, onMarkAllRead: @escaping (Date?) -> Void = { _ in },
-        plan: PlanBoardHook? = nil
+        plan: PlanBoardHook? = nil, onReorder: ((TaskRow, TaskRow, Bool) async -> Bool)? = nil
     ) {
         self.board = board
         self.unread = unread
@@ -114,6 +149,7 @@ struct WorkspaceBoardList: View {
         self.onOpen = onOpen
         self.onJump = onJump
         self.onRefresh = onRefresh
+        self.onReorder = onReorder
         self.ledByOrchestrator = ledByOrchestrator
         self.orchestratorRunning = orchestratorRunning
         self.asksRep = asksRep
@@ -184,6 +220,9 @@ struct WorkspaceBoardList: View {
         .refreshable {
             await onRefresh()
             if showsPlan { await plan?.read() }
+        }
+        .alert(TaskBoardModel.reorderFailed, isPresented: $reorderFailed) {
+            Button("OK", role: .cancel) {}
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("board")
@@ -295,6 +334,10 @@ struct WorkspaceBoardList: View {
                                 livePanes: live.count, runnerRecordsTasks: speaksOfAgents),
                             onOpen: { onOpen(row) },
                             onJump: onJump)
+                            .boardReorder(
+                                row, among: section.rows,
+                                submit: unread || section.status.isFinished ? nil : onReorder,
+                                failed: { reorderFailed = true })
                     }
                     if cut.hidden > 0 {
                         Button(BoardSectionCut.showMoreTitle(cut.hidden)) {

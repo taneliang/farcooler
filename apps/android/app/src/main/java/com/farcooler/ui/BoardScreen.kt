@@ -90,6 +90,7 @@ import com.farcooler.model.orchestratorTerminalId
 import com.farcooler.model.startLine
 import com.farcooler.model.TaskAgentPresence
 import com.farcooler.model.TaskBoard
+import com.farcooler.model.TaskBoardPresenter
 import com.farcooler.model.TaskKeyCard
 import com.farcooler.model.TaskRow
 import com.farcooler.model.Terminal
@@ -225,6 +226,8 @@ fun BoardTab(
     LaunchedEffect(workspace.id) { connection.readBoard(workspace) }
 
     val board = boards[workspace.id]
+    val mayReorder = daemon?.let { it.can(Capability.BOARD_ORDER) && it.grantedScope != "read" } == true &&
+        workspace.id !in unread
     val speaks = TaskAgentLink.speaksOfAgents(link, daemon)
     val jump = boardJump(connection.host.id, fleet.worktrees, onJump) { why ->
         scope.launch { snackbar.showSnackbar(why) }
@@ -342,6 +345,16 @@ fun BoardTab(
                             is BoardListEntry.Card -> item(key = entry.key) {
                                 val row = entry.row
                                 val agents = if (speaks) boardAgents(row, fleet.worktrees) else emptyList()
+                                val section = board.columns.firstOrNull { it.status == row.status }?.rows.orEmpty()
+                                val reorder = if (mayReorder && !row.status.isFinished && section.size > 1) {
+                                    BoardReorder(workspace.id, section, row) { task, after ->
+                                        scope.launch {
+                                            if (!connection.reorderTask(workspace, task, row.id, after)) {
+                                                snackbar.showSnackbar(TaskBoardPresenter.ask<String>("reorder_failed"))
+                                            }
+                                        }
+                                    }
+                                } else null
                                 TaskCardRow(
                                     row = row,
                                     agents = agents,
@@ -354,6 +367,7 @@ fun BoardTab(
                                     },
                                     onJump = jump,
                                     card = taskKeys.card(row.key),
+                                    reorder = reorder,
                                 )
                                 Separator()
                             }
@@ -536,6 +550,7 @@ internal fun TaskCardRow(
     onJump: (Terminal) -> Unit,
     /** Its card, which a long press shows (ov-299). */
     card: TaskKeyCard? = null,
+    reorder: BoardReorder? = null,
 ) {
     val now = rememberMinuteClock()
     var held by remember { mutableStateOf(false) }
@@ -554,8 +569,13 @@ internal fun TaskCardRow(
         },
         headlineContent = { Text(row.title, maxLines = 3, overflow = TextOverflow.Ellipsis) },
         supportingContent = { CardDetails(row, now, speaks) },
-        trailingContent = { AgentControl(row.key, agents, orchestrator, presence, onJump) },
-        modifier = Modifier
+        trailingContent = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AgentControl(row.key, agents, orchestrator, presence, onJump)
+                if (reorder != null) BoardDragHandle(reorder.drag)
+            }
+        },
+        modifier = boardDropTarget(reorder)
             .combinedClickable(onClick = onOpen, onLongClick = card?.let { { held = true } }, onLongClickLabel = card?.let { "Show ${it.key}" })
             .testTag("board-card-${row.key}"),
     )

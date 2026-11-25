@@ -364,7 +364,10 @@ struct WorkspaceScreen: View {
                 guard let rows = connection.boards[summary.id]?.rows else { return }
                 connection.markAllRead(rows: rows, latest: latest, workspace: summary.id)
             },
-            plan: planHook(summary))
+            plan: planHook(summary),
+            onReorder: connection.mayReorderTasks ? { task, anchor, after in
+                await connection.reorderTask(task, relativeTo: anchor, after: after, on: summary)
+            } : nil)
         .task { await connection.readBoard(summary) }
     }
 

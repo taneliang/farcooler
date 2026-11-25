@@ -60,8 +60,10 @@ for runs competing for the next build slot on that board. New cards follow
 filing order and keep their position across status changes. Move a card with
 `farcooler task reorder ov-42 --before ov-33` (or `--after`), relative to any
 other card on that board. On Mac, open View > Tasks by Status and drag within
-a status section. In the web client, open Backlog and To Do from the Plan
-and drag within either section.
+a status section. On the iPad and Android boards, use the drag handle on the
+card. On iPhone, use it in the Plan's Not Started or Waiting for a Builder
+list. In the web client, open Backlog and To Do from the Plan and drag
+within either section.
 
 `task line KEY…`, `task line --build KEY…`, and `plan set KEY…` put those
 cards first in the same order, keeping the relative order of other cards.
