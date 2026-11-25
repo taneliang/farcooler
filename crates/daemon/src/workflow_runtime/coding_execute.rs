@@ -27,9 +27,6 @@ struct ProcessFact {
 #[serde(deny_unknown_fields)]
 struct GitSettlement { binding: Binding }
 
-/// HEAD before this attempt started: an adopted branch can already be ahead of the run's base.
-#[derive(Serialize, Deserialize)]
-struct BuildStart { binding: Binding, head: String }
 /// A Provision or Build that failed before it started: its binding, and the sentence for the ticket.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -442,14 +439,6 @@ impl Exec {
     }
     async fn run_coding(&self, binding: &Binding, owner: &str, mut command: CodingCommand,
         cancel: tokio::sync::watch::Receiver<bool>) -> Result<()> {
-        if matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build)) {
-            // A resumed effect keeps the run, including the work already committed by that run.
-            let head = match self.previous_build_start(binding)? {
-                Some(head) => head,
-                None => self.git_recorded(binding, &self.tree(binding), &["rev-parse", "HEAD"]).await?,
-            };
-            durable(&self.build_start_path(binding), &serde_json::to_vec(&BuildStart { binding: binding.clone(), head })?)?;
-        }
         // Settle the pause before writing launch evidence or starting a landing gate.
         let landing_gate = matches!(binding.effect.kind, EffectKind::Execute(StageKind::Run)) && self.state(&binding.workspace)?
             .is_some_and(|s| s.items.get(&binding.effect.item).is_some_and(|i| i.group_of.is_some()));
@@ -885,46 +874,13 @@ impl Exec {
         }
         Ok(candidate)
     }
-    fn build_start_path(&self, binding: &Binding) -> PathBuf {
-        self.root.join("receipts").join(format!("{}.build-start.json", digest(&binding.effect)))
-    }
-    fn previous_build_start(&self, binding: &Binding) -> Result<Option<String>> {
-        for stored in self.store.workflow_outbox(&binding.workspace)? {
-            if stored.effect.id == binding.effect.id { break; }
-            if stored.effect.run != binding.effect.run || stored.effect.item != binding.effect.item
-                || stored.effect.kind != EffectKind::Execute(StageKind::Build) { continue; }
-            let Some(generation) = stored.resource_generation else { continue };
-            let previous = Binding::new(&binding.workspace, &stored.effect, generation, binding.iteration, &binding.base);
-            match self.bytes(&self.build_start_path(&previous)) {
-                Ok(raw) => {
-                    let start: BuildStart = serde_json::from_slice(&raw)?;
-                    if start.binding != previous { return Err(Error::Refused("foreign build start")); }
-                    return Ok(Some(start.head));
-                }
-                Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error),
-            }
-        }
-        Ok(None)
-    }
-    /// Why a build's tree holds no new commit for it to hand on, said as a sentence for the run, or `None` when it
-    /// does (ov-1090): changes left uncommitted, or a HEAD still at the base or at the candidate it was given.
+    /// A build must leave a clean tree with a commit beyond the run's base. Work committed by an interrupted
+    /// attempt remains valid when a retry has nothing further to commit.
     pub(super) async fn unfinished_build(&self, binding: &Binding, tree: &Path) -> Result<Option<String>> {
         let changed = self.tree_changes(binding, tree).await?;
         let head = self.git_recorded(binding, tree, &["rev-parse", "HEAD"]).await?;
-        let started = match self.bytes(&self.build_start_path(binding)) {
-            Ok(raw) => {
-                let start: BuildStart = serde_json::from_slice(&raw)?;
-                if start.binding != *binding { return Err(Error::Refused("foreign build start")); }
-                Some(start.head)
-            }
-            // Old effects did not retain their starting HEAD.
-            Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(error) => return Err(error),
-        };
         let mut reasons = Vec::new();
-        if head == binding.base || ((started.as_ref() == Some(&head) || binding.effect.candidate.as_ref() == Some(&head))
-            && !binding.effect.reuse_checkout) {
+        if head == binding.base {
             reasons.push("The build ended without changes: it made no new commit.".to_string());
         }
         if !changed.is_empty() {

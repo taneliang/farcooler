@@ -18,7 +18,11 @@ class FixtureTests(unittest.TestCase):
                 "import shutil\n"
                 "shutil.disk_usage = lambda path: shutil._ntuple_diskusage(1024**3, 0, 1024**3)\n"
             )
-            env = {**os.environ, "PYTHONPATH": str(root)}
+            # Reproduce the engine scratch path, which is too long for Unix sockets.
+            scratch = root / ("engine-scratch-" + "x" * 100)
+            scratch.mkdir()
+            env = {**os.environ, "PYTHONPATH": str(root), "TMPDIR": str(scratch),
+                   "FARCOOLER_SCRATCH": str(scratch)}
             env.pop("LANE_GATE_TEST_FIXTURE", None)
             result = subprocess.run([sys.executable, str(ROOT / "scripts/lane-gate.py"), "--self-test"],
                                     cwd=ROOT, env=env, capture_output=True, text=True)

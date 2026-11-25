@@ -497,7 +497,7 @@ async fn ov_1217_dirty_build_without_a_commit_reports_reason_files_and_last_mess
     assert_eq!(std::fs::read_to_string(runtime.item_tree("w", "one").join("result.txt")).unwrap(), "work kept without a commit");
 }
 #[tokio::test]
-async fn ov_1217_no_commit_does_not_reuse_work_already_ahead_of_base() {
+async fn ov_1435_retry_keeps_committed_work_from_interrupted_attempt() {
     let (_dir, mut runtime, _fake) = native_agent("no-changes", "codex").await;
     let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
     runtime.pump(2).await.unwrap();
@@ -507,8 +507,7 @@ async fn ov_1217_no_commit_does_not_reuse_work_already_ahead_of_base() {
         "commit", "--allow-empty", "-m", "earlier work"]).await.unwrap();
     let (_cancel, cancelled) = tokio::sync::watch::channel(false);
     let outcome = runtime.execute_coding("w", &binding, cancelled).await.unwrap();
-    assert!(matches!(outcome, Outcome::SafeFailureBecause(ref why) if why.contains("ended without changes")
-        && why.contains("the runner request hung")), "{outcome:?}");
+    assert!(matches!(outcome, Outcome::Passed(_)), "{outcome:?}");
 }
 #[tokio::test]
 async fn workflow_native_builds_overlap_each_on_its_own_hook_socket() {

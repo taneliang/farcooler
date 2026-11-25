@@ -86,7 +86,7 @@ class FoldBaselineTests(unittest.TestCase):
 
 class CompilerCacheTests(unittest.TestCase):
     def test_socket_cleanup_preserves_live_servers_and_unexpected_files(self):
-        # This socket-only fixture needs a short absolute path for sockaddr_un.
+        # Ignore TMPDIR: engine scratch paths can exceed the sockaddr_un limit.
         with tempfile.TemporaryDirectory(dir="/tmp") as temporary:
             path = Path(temporary).resolve() / "server.sock"
             with socket.socket(socket.AF_UNIX) as server:
