@@ -1,7 +1,9 @@
 # ov-1464 · Broken pipe in the ov-1463 build
 
-The November 24, 2026 runner records tie the failure to the native hook reply
-for an orchestrator message. Times below are UTC.
+The November 24, 2026 runner log and wake receipts survived the restart. They
+identify the failed write as the daemon's steering reply for an orchestrator
+message. The hook exit record that would explain why the socket closed is
+unavailable. Times below are UTC.
 
 | Time | Runner evidence |
 | --- | --- |
@@ -20,25 +22,23 @@ turn. This places the disconnect before the runner quiesced the agent.
 
 ## Hook disconnect
 
-The runner reached `native_followup` after decoding a complete hook frame
-for the bound Codex session. The wake completion note narrows the write to
-that function's steering reply. Its only eligible events were `PreToolUse`
-and `Stop`. The `wf1:bff8faa3….launch-hooks` receipt and the worktree hooks
-both register `PreToolUse` with `--gating` and a 70-second Codex command
-timeout. The CLI makes `Stop` wait when the launch environment supplies
-the private socket. A routine fire-and-forget lifecycle hook cannot
-explain this write.
+The wake completion note narrows the writer to the steering response body
+or its terminating newline in `native_messages.rs:76` at base `2ed5cee1b`.
+The eligible events were `PreToolUse` and `Stop`. The launch-hooks receipt
+and worktree configuration register Codex `PreToolUse` with `--gating` and
+a 70-second Codex command timeout. The CLI makes `Stop` wait on the private
+socket. A routine lifecycle hook cannot reach the steering write.
+[Steering reply](../../crates/daemon/src/workflow_runtime/native_messages.rs#L59) ·
+[Hook registration](../../crates/daemon/src/hook_install/native_host.rs#L35) ·
+[Stop gating](../../crates/cli/src/hook.rs#L117)
 
-On either waiting hook, the 400 ms first-contact deadline covers reading
-stdin, connecting, writing the frame, and receiving the first reply. The
-runner reaches the steering write before it writes anything else on that
-connection. If the hook exits normally after sending the frame while that
-first reply is still pending, the deadline accounts for the close. The CLI
-exits 0 with empty stdout. The runner can still process the complete frame
-after the socket closes. A hook process terminated while waiting can leave
-the same frame and the same `EPIPE`.
-[Hook client](../../crates/cli/src/hook.rs) ·
-[Native turn loop](../../crates/daemon/src/workflow_runtime/coding_native.rs)
+| Mechanism | Code and incident evidence |
+| --- | --- |
+| A waiting hook times out after sending the frame | [hook.rs:61](../../crates/cli/src/hook.rs#L61) sets the 400 ms deadline. [hook.rs:275](../../crates/cli/src/hook.rs#L275) drops the first contact if its deadline expires while the first reply is pending. The runner can read the complete frame after the CLI closes. A hold timeout requires an initial reply, which this path never sends. |
+| The hook process is terminated after sending the frame | A signal or a harness timeout can close the process's socket while it waits in [hook.rs:329](../../crates/cli/src/hook.rs#L329). The retained records have no matching hook exit. |
+| A non-gating `PreToolUse` exits immediately | [hook.rs:224](../../crates/cli/src/hook.rs#L224) advertises updated input even without gating, and [hook.rs:325](../../crates/cli/src/hook.rs#L325) closes without waiting. The installed wf1 hook used gating. The failed frame does not survive to establish which hook registration sent it. |
+| Codex sends a duplicate `Stop` and that peer disconnects | Base `coding_native.rs:420–421` replayed the previous continuation with fatal writes. The [replay branch](../../crates/daemon/src/workflow_runtime/coding_native.rs#L420) bypasses wake completion, so it cannot explain the failed-delivery note in wf1. |
+| An empty or informational reply goes to a closed peer | The [empty reply](../../crates/daemon/src/workflow_runtime/coding_native.rs#L437) ignores the write error. The [informational context reply](../../crates/daemon/src/watch/answer_wake/engine.rs#L69) handles it locally. Neither ends a turn through this error. |
 
 The retained wf1 records establish the disconnect before the reply. The
 actual close reason remains unverified.
@@ -69,11 +69,6 @@ actual close reason remains unverified.
   Machine lists no local snapshots to recover the earlier Codex log
   database from.
 
-The timeout regression reproduces the normal exit path and its engine
-failure. The historical close-reason acceptance item remains open pending
-a hook exit or deadline record tied to the failed connection, or the ticket
-owner's acceptance of the evidence gap.
-
 ## Message delivery
 
 Yes, delivering a message could end a working engine agent's turn. The send
@@ -87,25 +82,31 @@ Codex Stop reply also leaves the original continuation in place.
 
 ## Regression
 
-The test runs the real `farcooler hook` CLI for Codex `PreToolUse` against the
-native runner's private socket with a steering message pending. It pauses
-polling the turn until the hook exits successfully after its 400 ms deadline
-with empty stdout, then lets the runner process the queued frame. The native
-build fixture waits for the durable unconfirmed-delivery note before
-committing.
+The regressions queue a manager message against an admitted Codex build.
+They close the client socket after the frame is on the wire and before
+the runner polls the reply.
 
-On `origin/main` at `2ed5cee1b` with just the test and its fixture added, the
-build settled as `SafeFailureBecause` with the same
-`Broken pipe (os error 32)`. With the fix, the same admitted build recorded
-the unconfirmed delivery, committed, and settled as passed.
+- The real gating `PreToolUse` CLI exits successfully with empty stdout
+  after its 400 ms deadline.
+- A subprocess that has sent a waiting `Stop` frame is killed before the
+  reply. The build still has no commit at this boundary and can continue.
+- The real non-gating `PreToolUse` CLI sends a frame and exits without
+  reading the reply.
+- A connected `Stop` gets a continuation, a disconnected duplicate hits
+  the replay, and a third copy can still read the original continuation.
 
-The follow-up verification built the workspace binaries in the ticket
-scratch directory and ran the niced daemon library and binary unit suites
-with four Nextest workers and ARM64 Python. Nextest recorded 3,416 passes,
-four failures, and 18 skipped. All four failures passed in a niced serial
-rerun, along with the hook timeout regression. The serial run used a lower
-nice value so the builder priority test could lower its own priority
-without hitting the macOS ceiling.
+The first three cases require the durable unconfirmed-delivery note. Each
+case requires the same admitted build to commit and pass.
+[Regression tests](../../crates/daemon/src/workflow_runtime/coding_native_delivery_tests.rs#L118)
+
+All four cases settled with `SafeFailureBecause` and
+`Broken pipe (os error 32)` on base `2ed5cee1b` with only the regressions
+and their fixture added. All four passed with the production fix.
+
+The daemon library and binary unit run used four niced workers and reported
+3,422 passes, one failure, and 18 skips. The sole failure,
+`workflow_execution_phases_follow_claims_and_slots`, reported uncertain
+worktree provisioning and passed in a serial rerun.
 `cargo clippy --locked --offline --workspace --all-targets -- -D warnings`
 passed with six build jobs.
 
@@ -120,4 +121,8 @@ changed the worktree or external state. Resuming in the same slot would
 require a recovery protocol that proves the old owner is gone, reconciles
 its effects, and gives the new invocation a separate identity. Genuine
 interruptions retain the existing settlement and retry rules, which preserve
-the worktree.
+the worktree. The runner quiesces the terminal before writing its settlement.
+Reconciliation reads that settlement for the original binding and can account
+for an interrupted owner under the existing receipt rules.
+[Quiescence and settlement](../../crates/daemon/src/workflow_runtime/coding_native.rs#L554) ·
+[Interrupted owner reconciliation](../../crates/daemon/src/workflow_runtime/coding_native.rs#L584)

@@ -846,7 +846,7 @@ hook('sessionStart' if agent == 'cursor' else 'SessionStart')
 prompt = pathlib.Path(os.environ['TEST_LAUNCHED_PROMPT_FILE']).read_text() if 'TEST_LAUNCHED_PROMPT_FILE' in os.environ else os.environ['TEST_LAUNCHED_PROMPT']
 hook('beforeSubmitPrompt' if agent == 'cursor' else 'UserPromptSubmit', prompt=prompt)
 pathlib.Path(os.environ['STARTED']).write_text(str(os.getpid()))
-if mode == 'hook-reply-timeout':
+if mode == 'hook-disconnect':
     ready = pathlib.Path(os.environ['STARTED']).with_name('direction-ready')
     while not ready.exists():
         time.sleep(0.01)
@@ -924,7 +924,7 @@ else:
         process.argv.clear();
         process.timeout_ms = match mode {
             "foreign-only" => 300,
-            "hook-reply-timeout" => 15_000,
+            "hook-disconnect" => 15_000,
             _ => 5000,
         };
         if mode == "active-steering" && matches!(agent, "claude" | "codex") {
