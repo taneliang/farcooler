@@ -1080,6 +1080,14 @@ def gate(args):
             plans, chosen, args.base, Step, typeshare_ready=ready or args.quick_only or args.dry_run,
             review=args.quick_only)
 
+        if not args.quick_only and "swift-tests" in chosen and any(
+                path in {"apps/macos/test-floor.txt", "apps/shared/AgentKit/test-floor.txt"} for path in files):
+            quick["swift-tests"].insert(0, Step("swift-tests", "Swift test floors",
+                f"./scripts/test-floor-check.py --no-drop --base {shlex.quote(args.base)}\n"))
+        if not args.quick_only and "wire" in chosen and "scripts/daemon-layers-counts.txt" in files:
+            quick["wire"].append(Step("wire", "Daemon counts against fold base",
+                f"./scripts/daemon-layers.py --counts-not-grown {shlex.quote(args.base)}\n"))
+
     # --only (or --skip) leaves out jobs the diff reaches. Say so here, and again in the summary, which is
     # what gets pasted into a report: a summary that reads "all steps passed" must not stand for a gate it skipped.
     left_out = [j for j in JOBS if j in reach and j not in chosen]

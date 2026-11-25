@@ -27,6 +27,7 @@ run, or look at the number the last full run printed.
 
     ./scripts/test-floor-check.py                    # against origin/main
     ./scripts/test-floor-check.py --base <rev> [--tolerance N]
+    ./scripts/test-floor-check.py --no-drop --base <landing-base>
     ./scripts/test-floor-check.py --self-test
 """
 import argparse
@@ -82,20 +83,35 @@ def judge(name, floor, decls, base_floor, base_decls, tolerance):
     return True, note
 
 
+def no_drop(name, floor, base_floor):
+    """Require a readable floor at least as high as the pinned landing base."""
+    path = f"{name}/test-floor.txt"
+    if not isinstance(floor, int) or not isinstance(base_floor, int):
+        return False, f"{path}: cannot compare the candidate and landing base floors"
+    if floor < base_floor:
+        return False, f"{path}: floor {floor} fell below the landing base ({base_floor})"
+    return True, f"{path}: floor {floor}, at least the landing base ({base_floor})"
+
+
 def main(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="origin/main")
     ap.add_argument("--tolerance", type=int, default=2)
+    ap.add_argument("--no-drop", action="store_true", help="reject floors below the landing base")
     ap.add_argument("--self-test", action="store_true")
     a = ap.parse_args(argv)
     if a.self_test:
         return self_test()
-    base = git("merge-base", "HEAD", a.base).stdout.strip() or None
+    base = a.base if a.no_drop else git("merge-base", "HEAD", a.base).stdout.strip() or None
     bad = False
     for s in SUITES:
-        ok, msg = judge(s, floor_at(None, s), declarations(None, s),
-                        floor_at(base, s) if base else None,
-                        declarations(base, s) if base else None, a.tolerance)
+        floor = floor_at(None, s)
+        base_floor = floor_at(base, s) if base else None
+        if a.no_drop:
+            ok, msg = no_drop(s, floor, base_floor)
+        else:
+            ok, msg = judge(s, floor, declarations(None, s), base_floor,
+                            declarations(base, s) if base else None, a.tolerance)
         print(("ok   " if ok else "FAIL ") + msg)
         bad |= not ok
     return 1 if bad else 0
@@ -116,7 +132,11 @@ def self_test():
         if got != want:
             fails += 1
             print(f"self-test FAIL: {what}: got {got}, wanted {want}: {msg}")
-    print("test-floor-check self-test: " + ("FAILED" if fails else f"{len(cases)} cases pass"))
+    ok, _ = no_drop("s", 2000, 2001)
+    if ok:
+        fails += 1
+        print("self-test FAIL: a matched decrease must fail the landing floor check")
+    print("test-floor-check self-test: " + ("FAILED" if fails else f"{len(cases) + 1} cases pass"))
     return 1 if fails else 0
 
 

@@ -12,6 +12,7 @@ use super::coding::{sha, wait_times};
 use farcooler_workflow::FailedStep;
 use farcooler_store::board_ci::CiStatus;
 use farcooler_protocol::workflow_config::CiUnrun;
+use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -696,7 +697,7 @@ impl Exec {
         // sha. A ticket stacked on another's commits, or on copies already on the base, skips those.
         let listed = self.pick_read(binding, tree, &["cherry", "HEAD", &member.candidate]).await?;
         for commit in listed.lines().filter_map(|l| l.strip_prefix("+ ")).filter(|c| !c.is_empty()) {
-            let pick = |extra: &'static [&'static str]| -> Vec<&str> {
+            let pick = |extra: &[&'static str]| -> Vec<&'static str> {
                 COMMIT_IDENTITY.iter().copied().chain(extra.iter().copied()).collect()
             };
             let mut args = pick(&["cherry-pick", "-x"]); args.push(commit);
@@ -709,6 +710,16 @@ impl Exec {
             }
             // Only confirmed unmerged paths diagnose a member; infrastructure failures retry the fold.
             if unmerged.is_empty() { return Err(Error::Refused("fold cherry-pick failed without conflicts")); }
+            let files: Vec<_> = unmerged.lines().collect();
+            if self.resolve_baseline_conflicts(binding, tree, &files).await? {
+                let finish = if self.pick_git(binding, tree, &["diff", "--cached", "--quiet"]).await?.0 {
+                    "--skip"
+                } else {
+                    "--continue"
+                };
+                self.pick_read(binding, tree, &pick(&["cherry-pick", finish])).await?;
+                continue;
+            }
             self.pick_read(binding, tree, &pick(&["cherry-pick", "--abort"])).await?;
             // A copy of this change on the tree under other context (a later commit of the same ticket
             // touched the same file) is not a conflict: the change is already there.
@@ -717,6 +728,48 @@ impl Exec {
                 files: unmerged.lines().map(str::to_owned).collect() }));
         }
         Ok(None)
+    }
+
+    /// Resolve only the repository's known, regular baseline files. Use bundled source so the
+    /// fold never runs a script from a candidate before the configured landing gate starts.
+    async fn resolve_baseline_conflicts(&self, binding: Option<&Binding>, tree: &Path, paths: &[&str]) -> Result<bool> {
+        if !paths.iter().all(|path| matches!(*path, "apps/macos/test-floor.txt" | "apps/shared/AgentKit/test-floor.txt"
+            | "scripts/daemon-layers.json" | "scripts/daemon-layers-counts.txt")) {
+            return Ok(false);
+        }
+        let root = tree.canonicalize()?;
+        for path in paths {
+            let parent = root.join(path).parent().ok_or(Error::Refused("baseline file has no parent"))?.to_path_buf();
+            if parent.canonicalize()? != parent { return Ok(false); }
+        }
+        let mut command = std::process::Command::new("/usr/bin/python3");
+        command.env_clear();
+        crate::git_guard::apply(&mut command, &crate::git_guard::fixed());
+        command.args(["-I", "-c", include_str!("../../../../scripts/fold-baselines.py"),
+            include_str!("../../../../scripts/daemon-layers.py"), include_str!("../../../../scripts/test-floor-check.py")])
+            .args(paths).current_dir(&root).env("PATH", "/usr/bin:/bin").env("GIT_OPTIONAL_LOCKS", "0");
+        let mut command = tokio::process::Command::from(command);
+        command.kill_on_drop(true);
+        let output = tokio::time::timeout(std::time::Duration::from_secs(30), command.output()).await
+            .map_err(|_| Error::Refused("fold baseline resolver timed out"))??;
+        if !output.status.success() {
+            tracing::warn!(error = %String::from_utf8_lossy(&output.stderr), "fold baseline resolver failed");
+            return Err(Error::Refused("fold baseline resolver failed"));
+        }
+        let replacements: BTreeMap<String, String> = serde_json::from_slice(&output.stdout)?;
+        if replacements.is_empty() { return Ok(false); }
+        for path in paths {
+            let text = replacements.get(*path).ok_or(Error::Refused("missing baseline resolution"))?;
+            let destination = root.join(path);
+            let parent = destination.parent().ok_or(Error::Refused("baseline file has no parent"))?;
+            let mut file = tempfile::NamedTempFile::new_in(parent)?;
+            std::io::Write::write_all(&mut file, text.as_bytes())?;
+            file.persist(destination).map_err(|error| error.error)?;
+        }
+        let mut add = vec!["add", "--"];
+        add.extend_from_slice(paths);
+        self.pick_read(binding, tree, &add).await?;
+        Ok(true)
     }
 
     async fn pick_git(&self, binding: Option<&Binding>, tree: &Path, args: &[&str]) -> Result<(bool, String)> {

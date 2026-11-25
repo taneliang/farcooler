@@ -1,0 +1,158 @@
+"""Resolve supported baseline conflicts from the pending cherry-pick.
+
+The daemon runs this bundled source with isolated Python and a private fold
+worktree. Output is a JSON object of replacement texts. An empty object leaves
+the conflict to Git's normal send-back route.
+"""
+import json
+import pathlib
+import re
+import subprocess
+import sys
+
+FLOORS = {"apps/macos/test-floor.txt", "apps/shared/AgentKit/test-floor.txt"}
+LAYERS = "scripts/daemon-layers.json"
+COUNTS = "scripts/daemon-layers-counts.txt"
+
+
+class UnsupportedConflict(ValueError):
+    """The conflict needs a person to settle it."""
+
+
+def git(*args, accepted=(0,)):
+    result = subprocess.run(["git", "--no-pager", *args], capture_output=True, text=True, timeout=5)
+    if result.returncode not in accepted:
+        raise RuntimeError(f"git {args[0]} failed: {result.stderr.strip()}")
+    return result.stdout
+
+
+def stages(path):
+    entries = git("ls-files", "--unmerged", "--", path).splitlines()
+    modes_and_stages = [(entry.split()[0], entry.split()[2]) for entry in entries]
+    if modes_and_stages != [("100644", str(i)) for i in (1, 2, 3)]:
+        raise UnsupportedConflict(f"{path} is not a regular content conflict")
+    return [git("cat-file", "blob", f":{i}:{path}") for i in (1, 2, 3)]
+
+
+def merge_value(base, ours, theirs):
+    if ours == theirs or theirs == base:
+        return ours
+    if ours == base:
+        return theirs
+    raise UnsupportedConflict("both sides changed the same entry")
+
+
+def merge_entries(base, ours, theirs):
+    merged = {}
+    for key in dict.fromkeys([*ours, *theirs, *base]):
+        value = merge_value(base.get(key), ours.get(key), theirs.get(key))
+        if value is not None:
+            merged[key] = value
+    return merged
+
+
+def owners(table):
+    entries = [*table["modules"].items(), ("composition", table["composition"])]
+    result = {}
+    for layer, modules in entries:
+        if not isinstance(modules, list):
+            raise UnsupportedConflict("module lists must be arrays")
+        for module in modules:
+            if not isinstance(module, str) or module in result:
+                raise UnsupportedConflict("module ownership must be unique")
+            result[module] = layer
+    return result
+
+
+def merge_layers(versions):
+    configs = [json.loads(text) for text in versions]
+    if any(set(cfg) != {"about", "allowed", "modules", "composition"} for cfg in configs):
+        raise UnsupportedConflict("unknown layer table format")
+    if any(not isinstance(cfg["allowed"], dict) or not isinstance(cfg["modules"], dict)
+           or not isinstance(cfg["about"], str) for cfg in configs):
+        raise UnsupportedConflict("invalid layer table")
+    if any(not isinstance(uses, list) or any(not isinstance(use, str) for use in uses)
+           for cfg in configs for uses in cfg["allowed"].values()):
+        raise UnsupportedConflict("invalid layer allowlist")
+    allowed = merge_entries(*(cfg["allowed"] for cfg in configs))
+    assignments = merge_entries(*(owners(cfg) for cfg in configs))
+    # Preserve each existing list's order. A new module follows the current list.
+    layer_names = dict.fromkeys(layer for cfg in [configs[1], configs[2], configs[0]]
+                                for layer in cfg["modules"] if layer in allowed)
+    modules = {layer: [] for layer in layer_names}
+    composition = []
+    for name, layer in assignments.items():
+        if layer == "composition":
+            composition.append(name)
+        elif layer in modules:
+            modules[layer].append(name)
+        else:
+            raise UnsupportedConflict(f"{name} has no layer")
+    return {"about": merge_value(*(cfg["about"] for cfg in configs)),
+            "allowed": allowed, "composition": composition, "modules": modules}
+
+
+def floor(path, versions, declaration_pattern):
+    if not all(re.fullmatch("[0-9]+", value.strip()) for value in versions):
+        raise UnsupportedConflict("test floor is not a number")
+    suite = str(pathlib.PurePosixPath(path).parent)
+    # Use the commit that set the current floor as the calibration point.
+    # Earlier commits in this pick sequence may already have added tests.
+    anchor = git("log", "-1", "--format=%H", "HEAD", "--", path).strip()
+    if not anchor:
+        raise UnsupportedConflict("no committed floor to calibrate")
+    grep = ["-h", "-E", declaration_pattern]
+    before = git("grep", *grep, anchor, "--", suite, accepted=(0, 1))
+    after = git("grep", "--cached", *grep, "--", suite, accepted=(0, 1))
+    return f"{max(0, int(versions[1]) + len(after.splitlines()) - len(before.splitlines()))}\n"
+
+
+def resolve(paths, scanner, declaration_pattern):
+    versions = {path: stages(path) for path in paths}
+    result = {}
+    config = None
+    if LAYERS in versions:
+        config = merge_layers(versions[LAYERS])
+        if scanner["Layers"](config).problems():
+            raise UnsupportedConflict("merged layer table is invalid")
+        result[LAYERS] = json.dumps(config, indent=1) + "\n"
+    if COUNTS in versions:
+        counts = [scanner["read_counts"](text) for text in versions[COUNTS]]
+        if any(faults for _, faults in counts):
+            raise UnsupportedConflict("invalid daemon layer counts")
+        _, (ours, _), (theirs, _) = counts
+        if config is None:
+            config = json.loads(git("cat-file", "blob", f":{LAYERS}"))
+        layers = scanner["Layers"](config)
+        root = pathlib.Path.cwd()
+        source = root / scanner["SRC"]
+        if source.resolve() != source or any(path.is_symlink() for path in source.rglob("*.rs")):
+            raise UnsupportedConflict("daemon source contains symbolic links")
+        violations, _, refused = scanner["scan"](root, layers)
+        actual = scanner["tally"](violations, refused)
+        # Both reviewed ceilings still apply. The gate will reject edges above
+        # a ceiling, including growth against the pinned main.
+        result[COUNTS] = scanner["write_counts"]({
+            pair: min(limit, theirs.get(pair, 0), actual.get(pair, 0))
+            for pair, limit in ours.items()
+        })
+    for path in FLOORS.intersection(paths):
+        result[path] = floor(path, versions[path], declaration_pattern)
+    return result
+
+
+def main(scanner_source, floor_source, paths):
+    if not set(paths) <= FLOORS | {LAYERS, COUNTS}:
+        return {}
+    scanner = {"__file__": "scripts/daemon-layers.py", "__name__": "daemon_layers"}
+    floor_check = {"__file__": "scripts/test-floor-check.py", "__name__": "test_floor_check"}
+    exec(scanner_source, scanner)
+    exec(floor_source, floor_check)
+    try:
+        return resolve(paths, scanner, floor_check["DECL"])
+    except (ValueError, KeyError, TypeError):
+        return {}
+
+
+if __name__ == "__main__":
+    print(json.dumps(main(sys.argv[1], sys.argv[2], sys.argv[3:])))

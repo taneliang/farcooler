@@ -33,6 +33,41 @@ changes = load("ci-changes")
 cache = load("gate_sccache")
 
 
+class FoldBaselineTests(unittest.TestCase):
+    def layer_config(self, modules):
+        return json.dumps({"about": "fixture", "allowed": {"engine": [], "service": []},
+                           "composition": [], "modules": modules})
+
+    def test_independent_layer_additions_combine(self):
+        resolver = load("fold-baselines")
+        configs = [self.layer_config({"engine": names, "service": []})
+                   for names in (["entry"], ["entry", "first"], ["entry", "second"])]
+        self.assertEqual(resolver.merge_layers(configs)["modules"]["engine"],
+                         ["entry", "first", "second"])
+
+    def test_divergent_layer_assignments_request_resolution(self):
+        resolver = load("fold-baselines")
+        configs = [self.layer_config(modules) for modules in (
+            {"engine": [], "service": []}, {"engine": ["new"], "service": []},
+            {"engine": [], "service": ["new"]})]
+        with self.assertRaises(resolver.UnsupportedConflict):
+            resolver.merge_layers(configs)
+
+    def test_count_recompute_cannot_record_new_edges(self):
+        resolver = load("fold-baselines")
+        scanner = load("daemon-layers")
+        versions = ["engine -> service: 3", "engine -> service: 2", "engine -> service: 1"]
+        config = self.layer_config({"engine": ["current"], "service": ["dependency"]})
+        with patch.object(resolver, "stages", return_value=versions), \
+             patch.object(resolver, "git", return_value=config), \
+             patch.object(scanner, "scan", return_value=({"one": ("engine", "service", "one", "dependency"),
+                                                          "two": ("engine", "service", "two", "dependency")}, [], {})):
+            result = resolver.resolve([resolver.COUNTS], vars(scanner), "")
+        counts, faults = scanner.read_counts(result[resolver.COUNTS])
+        self.assertFalse(faults)
+        self.assertEqual(counts, {("engine", "service"): 1})
+
+
 class CompilerCacheTests(unittest.TestCase):
     def test_socket_cleanup_preserves_live_servers_and_unexpected_files(self):
         # This socket-only fixture needs a short absolute path for sockaddr_un.

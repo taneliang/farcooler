@@ -1,7 +1,8 @@
 //! The fold skips commits whose change is already in its tree (ov-1283), so a ticket stacked on another
-//! lands without a manual rebase.
+//! lands without a manual rebase. Known derived baselines can also be settled during a pick.
 use std::path::Path;
-use super::{Binding, Runtime};
+use super::{Binding, Command, Runtime, StageKind};
+use super::coding_verbs_tests::{at_join, batched_push, command, lander, outbox, until};
 use super::coding_tests::{admitted, configured};
 use super::tests::enqueue;
 
@@ -97,4 +98,42 @@ async fn a_commit_that_truly_conflicts_still_fails_the_fold_naming_the_file() {
     let conflict = runtime.pick_member(Some(&binding), repo.path(), &member("t", &t)).await.unwrap().unwrap();
     assert_eq!(conflict.files, ["shared.txt"]);
     assert_eq!(g(&["status", "--porcelain"]), "", "the aborted pick leaves the tree settled");
+}
+
+/// Two reviewed floor bumps collide at the same line. The shared gate must see both tests and
+/// their combined floor, without routing either member back through build.
+#[tokio::test]
+async fn a_shared_floor_conflict_reaches_the_group_gate_without_rebuilds() {
+    let (dir, mut runtime) = lander("floor-conflict").await;
+    let definition = batched_push(&runtime, "any", 5000);
+    at_join(&mut runtime, "ahead", &definition).await;
+    let script = dir.path().join("adapter.py");
+    let text = std::fs::read_to_string(&script).unwrap();
+    let edits = r#"if stage == 'build':
+    item = os.environ['FARCOOLER_WORKFLOW_ITEM']
+    if item in ('first', 'second'):
+        count = 1 if item == 'first' else 2
+        suite = pathlib.Path('apps/macos')
+        tests = suite / (item + 'Tests.swift')
+        tests.write_text('@Test func added() {}\n' * count)
+        if item == 'second':
+            subprocess.check_call(['/usr/bin/git', 'add', '--', str(tests)])
+            subprocess.check_call(['/usr/bin/git', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'add tests before bumping floor'])
+        (suite / 'test-floor.txt').write_text(str(100 + count) + '\n')
+        subprocess.check_call(['/usr/bin/git', 'add', '--', str(suite)])"#;
+    let gate = r#"elif stage == 'gate':
+    suite = pathlib.Path('apps/macos')
+    if (suite / 'firstTests.swift').exists():
+        assert (suite / 'secondTests.swift').exists()
+        assert (suite / 'test-floor.txt').read_text() == '103\n'
+        pathlib.Path(os.environ['MARKER']).touch()"#;
+    std::fs::write(&script, text.replace("if stage == 'build':", edits).replace("elif stage == 'gate':", gate)).unwrap();
+    for item in ["first", "second"] { at_join(&mut runtime, item, &definition).await; }
+    for item in ["ahead", "first", "second"] {
+        assert!(command(&runtime, Command::Queue { item: item.into() }).result.is_ok());
+    }
+    until(&mut runtime, |s| dir.path().join("marker").exists()
+        || ["first", "second"].iter().any(|item| s.items.get(*item).is_some_and(|item| item.brief.is_some()))).await;
+    assert_eq!(outbox(&runtime, StageKind::Build), 3, "each member built just once");
+    assert!(dir.path().join("marker").exists(), "the combined floor reached the group gate");
 }

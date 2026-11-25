@@ -125,6 +125,7 @@ SCRIPT_USERS = {
     'scripts/fixtures/landing-timing/wf1:c3f9304db0c32a4244f48d51772c486cbcaa68258272d5c6f2fc2fe502e7899a.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
     'scripts/fixtures/landing-timing/wf1:da5ef33f0ea6f20f2983bfae97122951721e1ef23c029cad2e6d415543fc18e0.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
     'scripts/fixtures/landing-timing/wf1:e285fca49b073c72050695692118c53bd67d5d5238ed67bbea17e61bcb7085ba.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
+    'scripts/fold-baselines.py': None,  # Full: bundled into the daemon's landing fold and exercised by its Rust tests.
     'scripts/fold-check.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
     'scripts/fresh-script-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.
     'scripts/gate-evidence-mutation-test.py': None,  # Full: transitive gate users not established; retain conservative fallback.

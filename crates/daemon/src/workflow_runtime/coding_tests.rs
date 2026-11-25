@@ -37,6 +37,13 @@ pub(super) async fn configured(review: bool, mode: &str) -> (tempfile::TempDir, 
         adapters::git(&repo, &["add", "--", "scripts", "crates"]).await.unwrap();
         Some(checks)
     } else { None };
+    if mode == "floor-conflict" {
+        let suite = repo.join("apps/macos");
+        std::fs::create_dir_all(&suite).unwrap();
+        std::fs::write(suite.join("test-floor.txt"), "100\n").unwrap();
+        std::fs::write(suite.join("BaseTests.swift"), "@Test func a() {}\n".repeat(100)).unwrap();
+        adapters::git(&repo, &["add", "--", "apps"]).await.unwrap();
+    }
     adapters::git(&repo, &["-c", "user.name=Test", "-c", "user.email=test@localhost",
         "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "base"]).await.unwrap();
     let base = adapters::git(&repo, &["rev-parse", "HEAD"]).await.unwrap();
