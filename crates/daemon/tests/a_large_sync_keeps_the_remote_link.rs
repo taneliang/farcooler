@@ -4,7 +4,7 @@ use farcooler_daemon::service::Service;
 use farcooler_protocol::{v1::{self as pb, request, result, Scope}, workflow_commands::Action};
 use farcooler_store::models::Actor;
 use farcooler_transport::{ClientError, request as rpc};
-use farcooler_workflow::{Archived, Command, Definition, Grant, Grouping, Input, Phase, Progression, State, step};
+use farcooler_workflow::{Archived, Command, Definition, Grant, Grouping, Input, Phase, Progression, RunRecord, State, step};
 use uuid::Uuid;
 
 mod common;
@@ -66,6 +66,65 @@ fn seed_state(service: &Service, state: &State) {
     farcooler_store::testing::exec_for_tests(&service.store, &format!(
         "INSERT INTO workflow_states(workspace, revision, epoch, state) VALUES('{}', {}, 1, '{}')",
         state.workspace, state.revision, json.replace('\'', "''")));
+}
+
+#[tokio::test]
+async fn plan_keeps_a_live_run_with_more_than_a_frame_of_restart_history() {
+    let dir = tempfile::Builder::new().prefix("fc1417").tempdir_in("/tmp").unwrap();
+    let service = Service::open_in(dir.path().to_path_buf()).await.unwrap();
+    let root = service.store.create_repository_root(service.host_id, "/fixture", 0).unwrap();
+    let repo = service.store.create_repository(service.host_id, root.id, "fixture", "/fixture/.git", "").unwrap();
+    let workspace = service.store.ensure_main_workspace(repo.id).unwrap().id;
+    let mut state = large_state(workspace, 0);
+    state.archive.clear();
+    let item = state.items.get_mut("seed").unwrap();
+    item.history = (0..1500).map(|n| RunRecord {
+        phase: Phase::Failed,
+        run: format!("prior-{n}"),
+        stop_run: None,
+        pin: item.pin.clone(),
+        fence: n,
+        candidate: None,
+        tree: None,
+        models: Default::default(),
+        reason: Some("The build did not pass. ".repeat(32)),
+        rework_history: Vec::new(),
+        sent_back: Vec::new(),
+        back_edges: Default::default(),
+    }).collect();
+    assert!(serde_json::to_vec(&item.history).unwrap().len() > farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES);
+    let current_run = item.run.clone();
+    seed_state(&service, &state);
+    drop(service);
+    let _daemon = common::listening_daemon(dir.path()).await;
+    let socket = dir.path().join("farcoolerd.sock");
+    let session = farcooler_client::session::Session::connect_local(&socket).await.unwrap();
+
+    let paged = session.plan_with_workflow(workspace).await;
+    let mut legacy = farcooler_transport::Client::connect(&socket, "released-plan", "1").await.unwrap();
+    let mut get = farcooler_client::plan_json::workflow_request(workspace);
+    get.accepts.clear();
+    let board = session.plan(workspace).await.unwrap();
+    let unmarked = farcooler_client::plan_json::with_workflow(&board, workspace, Some(async {
+        Ok(legacy.call(get).await?.value.unwrap())
+    })).await;
+    let visible_runs = |plan: serde_json::Value| {
+        plan["workflow"]["runs"].as_array().unwrap().iter()
+            .map(|run| (run["item"].clone(), run["run"].clone(), run["phase"].clone()))
+            .collect::<Vec<_>>()
+    };
+    let expected = vec![(
+        serde_json::json!("seed"),
+        serde_json::Value::String(current_run),
+        serde_json::json!("WaitingApproval"),
+    )];
+    assert_eq!(
+        (
+            paged.map(visible_runs).map_err(|e| e.to_string()),
+            unmarked.map(visible_runs).map_err(|e| e.to_string()),
+        ),
+        (Ok(expected.clone()), Ok(expected)),
+    );
 }
 
 async fn exercise(item_bytes: usize, metadata_bytes: usize) {
