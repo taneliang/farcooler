@@ -560,7 +560,21 @@ async fn workflow_get_answers_while_another_panes_arguments_are_unreadable() {
     let worktree = svc.store.list_worktrees_for_repository(repo).unwrap().remove(0);
     let unrelated = svc.create_terminal(worktree.id, "unreadable pane", "shell").await.unwrap();
     svc.inventory.refresh().await;
-    let pid = svc.inventory_snapshot().panes.iter().find(|p| p.terminal_id == unrelated.id).unwrap().stamp.pid as i32;
+    let inventory = svc.inventory_snapshot();
+    let pane = inventory.panes.iter().find(|p| p.terminal_id == unrelated.id).unwrap();
+    let tty = pane.tty.trim_start_matches("/dev/");
+    // tmux's pane PID can be the launch wrapper. Only the foreground group
+    // contributes arguments, so wait for the interactive shell's prompt
+    // and arm the stall for a process the sampler actually reads.
+    crate::test_support::shell_ready(&svc, unrelated.id).await;
+    let pid = tokio::time::timeout(crate::test_support::PANE_PATIENCE, async {
+        loop {
+            if let Some(running) = crate::foreground::read().await.pane(tty) {
+                break running.pid;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }).await.expect("unrelated pane has a foreground process");
     let runtime = Runtime::open_service(&svc.root_dir().join("workflow-test"), svc.store.clone()).unwrap();
     let rpc = factory(&svc, &runtime, Peer { client_id: None, scope: Scope::Control }, Some(caller));
     let mut get = request(ws, &Action::Get);
