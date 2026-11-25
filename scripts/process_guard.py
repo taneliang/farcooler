@@ -41,6 +41,36 @@ def run(argv, *, cwd=None, env=None, stdout=None, stderr=None):
             supervisor.wait()
 
 
+def run_self_test(argv):
+    """Wait for fixture cleanup on catchable signals, and leave a lease for SIGKILL."""
+    def interrupted(signum, _frame):
+        for sig in previous:
+            signal.signal(sig, signal.SIG_IGN)
+        raise SystemExit(128 + signum)
+
+    previous = {sig: signal.signal(sig, interrupted)
+                for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT)}
+    try:
+        return run(argv).returncode
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+
+
+def self_test_ready(*pids):
+    """Publish exact fixture identities for the lifetime regressions."""
+    if ready_file := os.environ.get('FC_SELF_TEST_READY'):
+        ready = Path(ready_file)
+        pending = ready.with_suffix('.tmp')
+        pending.write_text(' '.join(map(str, (os.getpid(), *pids))))
+        first_report = not ready.exists()
+        pending.replace(ready)
+        if first_report and os.environ.get('FC_SELF_TEST_PAUSE'):
+            os.kill(os.getpid(), signal.SIGSTOP)
+        if os.environ.get('FC_SELF_TEST_FAIL'):
+            raise AssertionError('injected self-test failure after fixture startup')
+
+
 def members(session):
     """Exact PIDs still in our session, even after nextest has been reparented."""
     listing = subprocess.run(['ps', '-axo', 'pid='], capture_output=True, text=True, check=True)

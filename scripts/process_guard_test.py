@@ -12,6 +12,8 @@ import tempfile
 import time
 import unittest
 
+import process_guard
+
 SCRIPTS = Path(__file__).resolve().parent
 
 
@@ -143,7 +145,7 @@ class ProcessGuardTests(unittest.TestCase):
     def exercise_real_cargo_runner(self, runner):
         cargo = shutil.which('cargo')
         self.assertIsNotNone(cargo, 'cargo is required for the real-runner regression')
-        with tempfile.TemporaryDirectory(prefix='fc-cargo-', dir='/tmp') as scratch:
+        with tempfile.TemporaryDirectory(prefix='fc-cargo-', dir=os.environ.get('FARCOOLER_SCRATCH')) as scratch:
             root = Path(scratch)
             (root / 'src').mkdir()
             (root / 'Cargo.toml').write_text('[package]\nname = "guard-fixture"\nversion = "0.1.0"\nedition = "2021"\n')
@@ -183,14 +185,7 @@ class ProcessGuardTests(unittest.TestCase):
                                             and pidfile.exists() and pidfile.read_text(),
                                             f'{runner} test did not start: ' + (root / 'owner.log').read_text())
                             test_pid = int(pidfile.read_text())
-                            if os.environ.get('FC_SELF_TEST_READY'):
-                                # Publish both PIDs atomically so the outer regression can
-                                # wait until this runner is actually stopped.
-                                ready = Path(os.environ['FC_SELF_TEST_READY'])
-                                ready.with_suffix('.tmp').write_text(f'{os.getpid()} {test_pid}')
-                                ready.with_suffix('.tmp').replace(ready)
-                                if os.environ.get('FC_SELF_TEST_PAUSE'):
-                                    os.kill(os.getpid(), signal.SIGSTOP)
+                            process_guard.self_test_ready(test_pid)
                             os.kill(owner.pid, sig)
                             owner.wait(timeout=8)
                             self.assertTrue(until(lambda: not running(test_pid)),
@@ -216,7 +211,6 @@ class ProcessGuardTests(unittest.TestCase):
         self.exercise_real_cargo_runner('nextest')
 
     def test_normal_result_and_environment_survive(self):
-        import process_guard
         with tempfile.TemporaryDirectory(prefix='fc-result-', dir='/tmp') as scratch:
             out = Path(scratch) / 'out'
             with out.open('w') as stream:
@@ -230,4 +224,6 @@ class ProcessGuardTests(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    if sys.argv[1:2] == ['--self-test-worker']:
+        unittest.main(argv=[sys.argv[0], *sys.argv[2:]])
+    sys.exit(process_guard.run_self_test([sys.executable, __file__, '--self-test-worker', *sys.argv[1:]]))

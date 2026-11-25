@@ -28,10 +28,13 @@ after the grace period is named, and ended in CI.
   ./scripts/tmux-leak-check.py --self-test
 """
 
+from contextlib import ExitStack
 import os
+from pathlib import Path
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -39,9 +42,6 @@ import time
 import process_guard
 
 GRACE_SECONDS = 5
-# Every private dir `run` made, for the self-test to remove once it has ended
-# the servers it deliberately leaked.
-BASES = []
 
 
 def server_pids(base):
@@ -103,12 +103,12 @@ def end(pids):
         time.sleep(1)
 
 
-def run(argv, kill, grace=GRACE_SECONDS):
+def run(argv, kill, grace=GRACE_SECONDS, *, base=None):
     """Run `argv` with a private TMUX_TMPDIR; return (exit code, leaked PIDs)."""
     # Short and directly under /tmp: a unix socket path is limited to about
     # 100 bytes, and $TMPDIR on a Mac is already long.
-    base = tempfile.mkdtemp(prefix="fc-leak-", dir="/tmp")
-    BASES.append(base)
+    if base is None:
+        base = tempfile.mkdtemp(prefix="fc-leak-", dir="/tmp")
     try:
         status = process_guard.run(argv, env={**os.environ, "TMUX_TMPDIR": base}).returncode
         servers, daemons = leaked(base, grace)
@@ -126,12 +126,10 @@ def run(argv, kill, grace=GRACE_SECONDS):
             shutil.rmtree(base, ignore_errors=True)
 
 
-def alive(pid):
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
+def stop_fixture(child):
+    if child.poll() is None:
+        child.kill()
+    child.wait()
 
 
 def self_test():
@@ -139,106 +137,101 @@ def self_test():
     if not tmux or not shutil.which("lsof"):
         print("tmux-leak-check: SKIP self-test, no tmux or lsof")
         return 0
-    start = "{tmux} -L {name} -f /dev/null new-session -d -s x 'sleep 600'"
     failures = []
-    pids = set()
+    noop = [sys.executable, "-c", "pass"]
 
-    # A bystander on its own TMUX_TMPDIR: never looked at or touched.
-    other = tempfile.mkdtemp(prefix="fc-other-", dir="/tmp")
-    env = {**os.environ, "TMUX_TMPDIR": other}
-    subprocess.run(["sh", "-c", start.format(tmux=tmux, name="bystander")], env=env, check=True)
-    bystanders = server_pids(other)
-    try:
-        # Outside CI: a leak is reported, the server is left running.
-        rc, pids = run(["sh", "-c", start.format(tmux=tmux, name=f"leak{os.getpid()}")], kill=False, grace=1)
-        if rc != 1 or len(pids) != 1:
-            failures.append(f"a leaked server was not caught (rc={rc}, pids={pids})")
-        if not all(alive(p) for p in pids):
-            failures.append("a leak was killed outside CI")
-        # In CI: a leak is reported and ended.
-        rc2, pids2 = run(["sh", "-c", start.format(tmux=tmux, name=f"leakci{os.getpid()}")], kill=True, grace=1)
-        if rc2 != 1 or len(pids2) != 1 or any(alive(p) for p in pids2):
-            failures.append(f"a leaked server was not ended in CI (rc={rc2}, pids={pids2})")
-        # A command that cleans up is not a leak.
-        clean = start.format(tmux=tmux, name=f"clean{os.getpid()}") + f"; {tmux} -L clean{os.getpid()} kill-server"
-        rc3, pids3 = run(["sh", "-c", clean], kill=False, grace=1)
-        if rc3 != 0 or pids3:
-            failures.append(f"a clean command was flagged (rc={rc3}, pids={pids3})")
-        # Dead sockets left behind are not leaks, and do not hide a live one
-        # among them (all sockets are checked in a single lsof).
-        n = os.getpid()
-        stale = "".join(
-            f"{start.format(tmux=tmux, name=f'st{n}{i}')}; kill -9 $({tmux} -L st{n}{i} display -p '#{{pid}}'); "
-            for i in range(3)
-        )
-        rc4, pids4 = run(["sh", "-c", stale + start.format(tmux=tmux, name=f"live{n}")], kill=True, grace=1)
-        if rc4 != 1 or len(pids4) != 1 or any(alive(p) for p in pids4):
-            failures.append(f"a live leak among stale sockets was missed (rc={rc4}, pids={pids4})")
-        rc5, pids5 = run(["sh", "-c", stale], kill=False, grace=1)
-        if rc5 != 0 or pids5:
-            failures.append(f"stale sockets were flagged (rc={rc5}, pids={pids5})")
-        if not all(alive(p) for p in bystanders):
+    with ExitStack() as fixtures:
+        def private_dir(prefix="fc-leak-"):
+            return fixtures.enter_context(tempfile.TemporaryDirectory(prefix=prefix, dir="/tmp"))
+
+        def spawn(argv, base):
+            child = subprocess.Popen(argv, env={**os.environ, "TMUX_TMPDIR": base},
+                                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+            fixtures.callback(stop_fixture, child)
+            return child
+
+        def server(base):
+            # A foreground server keeps its real socket but stays in the
+            # self-test's guarded session. No pane or shell is needed.
+            child = spawn([tmux, "-D", "-L", "fixture", "-f", "/dev/null"], base)
+            address = Path(base) / f"tmux-{os.getuid()}" / "fixture"
+            deadline = time.monotonic() + 15
+            while not address.exists():
+                if child.poll() is not None or time.monotonic() >= deadline:
+                    raise RuntimeError("tmux fixture did not open its socket")
+                time.sleep(0.05)
+            return child
+
+        def stale_sockets(base):
+            directory = Path(base) / f"tmux-{os.getuid()}"
+            directory.mkdir(mode=0o700, exist_ok=True)
+            for i in range(3):
+                # A closed Unix socket leaves the same inode as a dead server.
+                with socket.socket(socket.AF_UNIX) as stale:
+                    stale.bind(str(directory / f"stale-{i}"))
+
+        def check(label, base, *, child=None, kill=False, command=noop):
+            rc, pids = run(command, kill, grace=0, base=base)
+            expected = {child.pid} if child else set()
+            if rc != int(bool(expected)) or pids != expected:
+                failures.append(f"{label}: exit {rc}, PIDs {pids}, expected PIDs {expected}")
+            if child and (child.poll() is not None) != kill:
+                failures.append(f"{label}: wrong state for fixture {child.pid}")
+            if child:
+                stop_fixture(child)
+
+        # The bystander shares the fixture lifetime, but uses a different
+        # socket directory and must survive every individual leak check.
+        other = private_dir("fc-other-")
+        bystander = server(other)
+        fakes = private_dir("fc-fake-")
+        fake = Path(fakes) / "farcoolerd"
+        fake.write_text("import time\ntime.sleep(600)\n")
+        daemon_base = private_dir()
+        daemon = spawn([sys.executable, str(fake)], daemon_base)
+        process_guard.self_test_ready(bystander.pid, daemon.pid)
+
+        base = private_dir()
+        check("leaked server outside CI", base, child=server(base))
+        base = private_dir()
+        check("leaked server in CI", base, child=server(base), kill=True)
+        base = private_dir()
+        clean = server(base)
+        check("clean server", base, command=[tmux, "-L", "fixture", "kill-server"])
+        if clean.wait(timeout=8) != 0:
+            failures.append("the clean server failed to exit")
+        base = private_dir()
+        live = server(base)
+        stale_sockets(base)
+        check("live server among stale sockets", base, child=live, kill=True)
+        base = private_dir()
+        stale_sockets(base)
+        check("stale sockets alone", base)
+        if bystander.poll() is not None:
             failures.append("a server outside the private TMUX_TMPDIR was killed")
-        # A daemon the command leaves running (ov-566): a python script named
-        # farcoolerd, so its command line ends in `/farcoolerd`. (An argv[0] set
-        # with `exec -a` does not survive Homebrew's python re-launching itself.)
-        fakes = tempfile.mkdtemp(prefix="fc-fake-", dir="/tmp")
-        fake = os.path.join(fakes, "farcoolerd")
-        with open(fake, "w") as f:
-            f.write("import time\ntime.sleep(600)\n")
-        python = sys.executable
-        # Cover a daemon that leaves the session. An ordinary background
-        # child now belongs to process_guard's session and is reaped there
-        # before this detached-daemon check runs (ov-1138).
-        leave = [python, "-c", "import subprocess, sys; subprocess.Popen("
-                 "[sys.executable, sys.argv[1]], start_new_session=True, "
-                 "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)", fake]
-        rc6, pids6 = run(leave, kill=False, grace=1)
-        if rc6 != 1 or len(pids6) != 1:
-            failures.append(f"a leaked farcoolerd was not caught (rc={rc6}, pids={pids6})")
-        if not all(alive(p) for p in pids6):
-            failures.append("a leaked farcoolerd was killed outside CI")
-        end([p for p in pids6 if alive(p)])
-        rc7, pids7 = run(leave, kill=True, grace=1)
-        if rc7 != 1 or len(pids7) != 1 or any(alive(p) for p in pids7):
-            failures.append(f"a leaked farcoolerd was not ended in CI (rc={rc7}, pids={pids7})")
-        # One the command stops is no leak.
-        stops = ["sh", "-c", f"{python} {fake} </dev/null >/dev/null 2>&1 & kill $!; wait $! 2>/dev/null; true"]
-        rc8, pids8 = run(stops, kill=False, grace=1)
-        if rc8 != 0 or pids8:
-            failures.append(f"a stopped farcoolerd was flagged (rc={rc8}, pids={pids8})")
-        # A farcoolerd outside the private TMUX_TMPDIR (the owner's, another
-        # lane's) is never looked at, though it is running.
-        lone = subprocess.Popen([python, fake], env={**os.environ, "TMUX_TMPDIR": other})
-        try:
-            rc9, pids9 = run([python, "-c", "pass"], kill=True, grace=1)
-            if rc9 != 0 or pids9 or lone.poll() is not None:
-                failures.append(f"a farcoolerd of another run was flagged or ended (rc={rc9}, pids={pids9})")
-            # The environment is what finds it: this one is found by its own base.
-            if lone.pid not in daemon_pids(other):
-                failures.append("a running farcoolerd was not found by its TMUX_TMPDIR")
-        finally:
-            lone.kill()
-            lone.wait()
-        # And a process that only mentions the name is not one.
-        talker = subprocess.Popen([python, "-c", "import time; time.sleep(60)", "tail", "/x/farcoolerd.log"],
-                                  env={**os.environ, "TMUX_TMPDIR": other})
-        try:
-            if daemon_pids(other):
-                failures.append("a process that only names farcoolerd was taken for one")
-        finally:
-            talker.kill()
-            talker.wait()
-            shutil.rmtree(fakes, ignore_errors=True)
-    finally:
-        end([p for p in pids if alive(p)])
-        end(list(bystanders))
-        for base in BASES:
-            shutil.rmtree(base, ignore_errors=True)
-        shutil.rmtree(other, ignore_errors=True)
+
+        # The fakes stand outside the command's session, like a detached
+        # daemon, but the outer self-test guard still owns their lifetime.
+        check("leaked farcoolerd outside CI", daemon_base, child=daemon)
+        base = private_dir()
+        check("leaked farcoolerd in CI", base, child=spawn([sys.executable, str(fake)], base), kill=True)
+        stops = [sys.executable, "-c", "import subprocess, sys; "
+                 "p = subprocess.Popen([sys.executable, sys.argv[1]]); p.terminate(); p.wait()", str(fake)]
+        check("stopped farcoolerd", private_dir(), command=stops)
+
+        lone = spawn([sys.executable, str(fake)], other)
+        check("farcoolerd of another run", private_dir(), kill=True)
+        if lone.poll() is not None or lone.pid not in daemon_pids(other):
+            failures.append("a farcoolerd outside the private TMUX_TMPDIR was killed or not identified")
+        stop_fixture(lone)
+        talker = spawn([sys.executable, "-c", "import time; time.sleep(60)", "tail", "/x/farcoolerd.log"], other)
+        if daemon_pids(other):
+            failures.append("a process that only names farcoolerd was taken for one")
+        stop_fixture(talker)
+
+    for failure in failures:
+        print(f"tmux-leak-check: self-test FAILED, {failure}", file=sys.stderr)
     if failures:
-        for f in failures:
-            print(f"tmux-leak-check: self-test FAILED, {f}", file=sys.stderr)
         return 1
     print("tmux-leak-check: self-test ok")
     return 0
@@ -247,6 +240,8 @@ def self_test():
 if __name__ == "__main__":
     args = sys.argv[1:]
     if args == ["--self-test"]:
+        sys.exit(process_guard.run_self_test([sys.executable, __file__, "--self-test-worker"]))
+    if args == ["--self-test-worker"]:
         sys.exit(self_test())
     if args[:1] == ["--"] and len(args) > 1:
         sys.exit(run(args[1:], kill=bool(os.environ.get("CI")))[0])
