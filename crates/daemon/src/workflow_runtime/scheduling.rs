@@ -14,6 +14,8 @@ pub(super) struct Scheduler {
     recovered_start: bool,
     #[cfg(test)]
     state_reads: usize,
+    #[cfg(test)]
+    load_override_milli: Option<u64>,
 }
 struct Board {
     revision: Option<u64>,
@@ -44,7 +46,14 @@ impl Runtime {
         self.scheduling.lock().unwrap().refused.insert((workspace.into(), item.into(), true), now_ms.saturating_add(REFUSED_RETRY_MS));
     }
     pub(super) fn schedule_ready(&self, workspaces: &[String], now_ms: i64, ready_queues: &BTreeSet<(String, String)>) -> Result<()> {
-        self.schedule(workspaces, now_ms, load_milli(), Some(ready_queues))
+        #[cfg(test)]
+        let load = {
+            let fake = self.scheduling.lock().unwrap().load_override_milli;
+            fake.or_else(load_milli)
+        };
+        #[cfg(not(test))]
+        let load = load_milli();
+        self.schedule(workspaces, now_ms, load, Some(ready_queues))
     }
     #[cfg(test)]
     fn schedule_with_load(&self, workspaces: &[String], now_ms: i64, load: Option<u64>) -> Result<()> {
@@ -326,13 +335,17 @@ mod tests {
     }
     #[tokio::test]
     async fn published_policy_is_pumped_without_start_commands_and_can_pause_and_resume() {
+        const FAKE_LOAD_MILLI: u64 = 100;
+        let tickets = ["a", "b", "c", "d", "e"];
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("runtime");
         let mut runtime = Runtime::create(&root).await.unwrap();
+        runtime.scheduling.get_mut().unwrap().load_override_milli = Some(FAKE_LOAD_MILLI);
         let mut d = coding_definition(false);
+        d.stages[1].progression = Progression::AwaitApproval { principal: "owner".into() };
         d.start_policy = Some(policy(Budget::Fixed(0)));
         publish(&runtime, d.clone());
-        track(&runtime, &["a", "b", "c", "d", "e"]);
+        track(&runtime, &tickets);
         runtime.pump(100).await.unwrap();
         assert!(runtime.state("w").unwrap().unwrap().items.values().all(|i| i.definition.is_ticket()));
         d.start_policy.as_mut().unwrap().budget = Budget::Unlimited;
@@ -340,11 +353,20 @@ mod tests {
         // Restart reads the policy from the durable publication; no in-memory enable switch.
         drop(runtime);
         let mut runtime = Runtime::open(&root).unwrap();
-        // Main bounds provisions with the work pool; a one-shot pump drains one admitted wave.
-        for _ in 0..3 { runtime.pump(200).await.unwrap(); }
+        runtime.scheduling.get_mut().unwrap().load_override_milli = Some(FAKE_LOAD_MILLI);
+        // Provision one worktree per sweep to avoid concurrent Git writes in the fixture repository.
+        runtime.places().work = 1;
+        for _ in &tickets { runtime.pump(200).await.unwrap(); }
         let state = runtime.state("w").unwrap().unwrap();
-        assert_eq!(state.items.values().filter(|i| active(i)).count(), 5);
-        assert!(state.items.values().all(|i| i.stage >= 1), "all five provisions executed: {state:?}");
+        let expected_load = Some(farcooler_workflow::StartLoad {
+            sample_milli: Some(FAKE_LOAD_MILLI), below_milli: None,
+        });
+        for key in tickets {
+            let item = &state.items[key];
+            assert_eq!(item.stage, 1, "{key} reached Build after provisioning (phase: {:?})", item.phase);
+            assert_eq!(item.phase, Phase::WaitingApproval, "{key} is waiting to build");
+            assert_eq!(item.start_load, expected_load, "{key}'s automatic start recorded the test's load sample");
+        }
     }
 
     #[tokio::test]
