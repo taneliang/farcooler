@@ -336,7 +336,7 @@ impl CommandHandle {
         admission.recheck().and_then(|()| admission.permits(&Action::Get)).map_err(Error::Domain)?;
         let reader = self.reader.clone();
         let workspace = admission.workspace();
-        if let Some(sample) = reader.refresh_disk_usage() {
+        if !matches!(view, GetView::Plan) && let Some(sample) = reader.refresh_disk_usage() {
             // Let a small inventory complete for the first reply. Large inventories
             // finish in the background, with the previous sample still available.
             let _ = tokio::time::timeout(Duration::from_millis(200), sample).await;
@@ -749,6 +749,8 @@ mod tests {
         req.accepts.push(farcooler_protocol::accepts::WORKFLOW_PLAN.into());
         let response = rpc.handle(req).await;
         let value = super::super::admission_tests::receipt(&response);
+        assert!(value.get("disk_usage").is_none());
+        assert!(runtime.disk_usage_reply(&workspace.to_string())["sampled_at_ms"].is_null());
         let reduced: State = serde_json::from_value(value["state"].clone()).unwrap();
         let auth = serde_json::from_value(value["context"]["capabilities"].clone()).unwrap();
         let view = farcooler_client::workflow_presentation::project(
@@ -843,6 +845,7 @@ mod tests {
             mutation: farcooler_protocol::workflow_commands::Mutation { id:"track".into(), revision:0, epoch:1, sequence:1 },
             item:"ov-1".into(), column:None,
         }).unwrap();
+        runtime.refresh_disk_usage().unwrap().await.unwrap();
         let rpc = factory(&svc, &runtime, Peer { client_id:None, scope:Scope::Control }, None);
         // Leave the actor inbox deliberately unconsumed: a read cannot depend on any effect's progress.
         let mut req = request(workspace, &Action::Get);
@@ -851,6 +854,9 @@ mod tests {
             .expect("workflow get waited on the effect inbox");
         let summary = receipt(&reply);
         let full = runtime.wire_command(&ws, "owner", Action::Get).unwrap();
+        assert!(summary["disk_usage"]["engine_tree_bytes"].is_u64());
+        assert_eq!(summary["disk_usage"]["waiting_build_bytes"], 0);
+        assert_eq!(summary["disk_usage"], full["disk_usage"]);
         for field in ["revision", "epoch", "source_sequences"] {
             assert_eq!(summary["state"][field], full["state"][field]);
         }
@@ -863,7 +869,9 @@ mod tests {
         let mut req = request(workspace, &Action::Get);
         req.accepts.push("workflow_full_v1".into());
         let reply = tokio::time::timeout(Duration::from_secs(2), rpc.handle(req)).await.unwrap();
-        assert_eq!(receipt(&reply)["state"], full["state"]);
+        let explicit_full = receipt(&reply);
+        assert_eq!(explicit_full["state"], full["state"]);
+        assert_eq!(explicit_full["disk_usage"], summary["disk_usage"]);
         // Shipped apps send no accepts marker and still need the original full schema.
         let reply = tokio::time::timeout(Duration::from_secs(2), rpc.handle(request(workspace, &Action::Get)))
             .await.expect("unmarked workflow get waited on the effect inbox");
