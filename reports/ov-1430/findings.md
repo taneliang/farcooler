@@ -67,3 +67,9 @@ The workflow-read regression stalls the unrelated pane's argument read until the
 - The shared words fixture passed through the linked Rust bridge in AgentKit. All 51 focused Mac tests passed, including the app publishing “Runner not responding” while the read was still open.
 - The first nextest invocation inherited the workflow’s hook socket, which overrides the fixtures’ socket paths. I stopped that invocation and verified its private tmux namespace had no running servers or scratch daemons. The rerun cleared workflow environment variables before starting the test harness.
 - The isolated nextest run passed all 5,129 enabled tests, with 23 skipped and two passing on retry. One retry followed host sleep. The workflow-read, six-run restart, process-worker, pane-delivery, and watchdog regressions passed. The temporary-file and tmux leak checks passed.
+
+## Landing file-size repair
+
+- The landing candidate exceeded the 2,444-line ceiling for `rpc.rs` by two lines. Moving the existing scope-name and scope-ordering helpers into `rpc/scope.rs` removed 20 lines from the dispatch file. The file now has 2,415 lines on the pinned run base, and the budget update found no change to its ceiling.
+- The quick landing gate passed, including the file-size self-test and budget check. Clippy passed with `--all-targets -- -D warnings` for the daemon, CLI, and client.
+- Nextest passed all 5,129 enabled tests across the same crates, with 23 skipped and four passing on retry. The run continued after a host sleep. The temporary-file and tmux leak guards passed.

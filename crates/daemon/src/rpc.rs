@@ -19,10 +19,12 @@ mod watch;
 mod error_response;
 mod screen_revision;
 mod runner_settings;
+mod scope;
 mod status_work;
 mod task_create;
 mod terminal_view;
 use error_response::error_response;
+use scope::{satisfies, scope_name};
 use screen_revision::screen_revision;
 
 use std::sync::Arc;
@@ -664,28 +666,6 @@ fn scope_of(method: Method) -> Scope {
         | Method::ThemeUpsert
         | Method::ThemeDelete => Scope::HostAdmin,
     }
-}
-
-fn scope_name(scope: Scope) -> &'static str {
-    match scope {
-        Scope::Unspecified => "none",
-        Scope::Read => "read",
-        Scope::Control => "control",
-        Scope::HostAdmin => "host_admin",
-    }
-}
-
-/// Scopes are ordered: `host_admin` can do anything `control` can.
-fn satisfies(granted: Scope, required: Scope) -> bool {
-    fn rank(s: Scope) -> u8 {
-        match s {
-            Scope::Unspecified => 0,
-            Scope::Read => 1,
-            Scope::Control => 2,
-            Scope::HostAdmin => 3,
-        }
-    }
-    rank(granted) >= rank(required)
 }
 
 impl Handler for Rpc {
