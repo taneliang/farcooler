@@ -68,6 +68,7 @@ async fn list_and_show_distinguish_engine_groups() {
     let text = run_landing(&h, &repo, &["list"]).await;
     assert!(text.status.success(), "{}", String::from_utf8_lossy(&text.stderr));
     let text = String::from_utf8(text.stdout).unwrap();
+    assert!(!text.contains("Landing 0"), "{text}");
     for listed in [first, second] {
         assert_eq!(listed["number"], 0);
         let key = listed["tickets"][0]["key"].as_str().unwrap();
@@ -78,6 +79,9 @@ async fn list_and_show_distinguish_engine_groups() {
         assert_eq!(&shown, listed);
         assert!(text.lines().any(|line| line.contains(id) && line.contains(key)), "{text}");
     }
+    let missing = run_landing(&h, &repo, &["show", "00000000-0000-0000-0000-000000000000"]).await;
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("No engine landing here has ID"));
     let ambiguous = run_landing(&h, &repo, &["show", "0"]).await;
     assert!(!ambiguous.status.success());
     assert!(String::from_utf8_lossy(&ambiguous.stderr).contains("More than one engine landing"));
