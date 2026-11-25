@@ -1,127 +1,79 @@
 # ov-1460 · Clippy before review
 
-Main’s workflow bundle places the Clippy check after quick checks and before
-agent review. A failed check returns the candidate and its diagnostic to Build
-through the existing rejected route. The builder’s next candidate runs both
-checks again.
+Main's workflow bundle runs changed-crate Clippy between quick checks and
+agent review. A nonzero exit uses the engine's existing rejected route to
+return the candidate and diagnostic to Build. The builder's next candidate
+runs both checks again. [Workflow bundle](workflow-main.json)
 
-The check diffs against the engine’s pinned base. When the diff has no Rust
-paths, it exits before Cargo or the machine lock. It maps Rust paths to Cargo
-workspace members, including shared test modules included from outside a
-crate. It takes the default Clippy command and per-package feature variants
-from the local landing plan. The default command replaces `--workspace` with
-the changed packages. Applicable feature variants keep their full arguments,
-including `--all-targets -- -D warnings`. The fixture suite that invokes Cargo
-runs in the regular gate, keeping the quick-check stage build-free.
+The gate diffs against the engine's pinned base. It exits before Cargo or the
+machine lock when the diff has no Rust paths. It maps changed Rust paths to
+workspace members, including shared test modules outside a crate that a
+workspace member includes. It takes Clippy flags from the landing plan. The
+workspace command replaces `--workspace` with the changed packages and each
+applicable feature variant keeps its full arguments, including
+`--all-targets -- -D warnings`. The compiling regression suite runs in the
+regular wire gate so quick checks remain build-free. Wire CI provisions
+Clippy for the fixture.
 
 ## Regression
 
-The test using Main’s exact check command failed on the old definition because
-the stage before review was `quick-checks`. It then passed with the new stage.
-The test commits a real Clippy error in the changed crate, first in default
-code and then behind a landing feature. Both candidates return nonzero with a
-Clippy diagnostic. The repaired candidate passes even though an unchanged
-workspace member still contains the same error. The docs-only candidate skips
-the check without creating a Cargo target directory.
+The workflow regression first failed against the old definition because review
+was preceded by `quick-checks`. On the rebased branch it also failed in a
+scratch copy with Clippy execution disabled. The disabled check returned zero
+for the candidate with the planted lint.
 
-The quick-check classification test also failed first in both planning modes,
-then passed after the compiling fixture suite moved out of the quick phase.
+The workflow command rejects the planted `clippy::manual_filter` lint in both
+default code and code enabled by a landing feature. It accepts the repaired
+candidate while an unchanged workspace member still contains the lint. A
+docs-only candidate skips Clippy without creating a Cargo target directory.
+The quick-check classification test also went red in both planning modes
+before the compiling fixture suite moved to the regular gate.
 
-The landing gate, landing policy, gate evidence, engine gate and lane gate
-lifetime suites passed 78 tests with a scratch Git home configured for the
-`master` default branch. The lane gate self-test and file-size budget passed.
-Four targeted Rust tests passed across the daemon, client and store. Main’s
-bundle validator found the same stale Canary Codex hook pin in the original
-bundle and in this proposal. The validator passed after refreshing that pin
-and its derived operation pins in a scratch copy.
+On the rebased branch, 90 tests passed across the landing gate, landing policy,
+gate evidence, engine gate, lane gate lifetime, and Rust selection suites.
+The CI change-selection and lane gate self-tests passed, as did the file size
+budget. The tests used a scratch Git config with `init.defaultBranch = master`,
+four Cargo jobs, and niceness 10.
+
+The earlier daemon bundle validator passed after the hook and operation pins
+were refreshed. On the rebased branch, all 13 operation pins and both
+content-addressed hook files matched, and the bundle's configured base was an
+ancestor of its landing ref. The fresh daemon validator run was stopped while
+the shared runner was above its load limit, before Cargo started.
 
 ## Runner timing
 
 Measured on this Apple Silicon Mac with Clippy 0.1.98, four Cargo jobs and
 niceness 10. The daemon-only diff used `8dc6d9795^` as its base and includes
-`crates/daemon/src/yielding/tests.rs`. All build artifacts were under
-`$FARCOOLER_SCRATCH/target`. The timing excludes the wait for the shared
-machine lock and includes process startup and change detection.
+`crates/daemon/src/yielding/tests.rs`. Build artifacts went under
+`$FARCOOLER_SCRATCH/target`. Wall time includes process startup and change
+detection and excludes time in the shared machine lock queue.
 
 | Candidate and cache state | Wall time |
 | --- | ---: |
-| Daemon, all three Clippy variants warm, three runs | 3.64 s, 3.36 s, 5.44 s |
+| Daemon, all three Clippy variants warm | 3.64 s, 3.36 s, 5.44 s |
 | No changed Rust files | 0.78 s |
+| Rebased ticket, exact workflow command, no changed Rust files | 0.24 s |
 
-The first pass through all three daemon variants took 386.98 s with default
-dependencies already primed and feature variants still cold. All checks passed.
-The workflow command uses the shared machine lock and four Cargo jobs.
+The first pass through all three daemon variants took 386.98 seconds with
+default dependencies already primed and feature variants still cold. All
+checks passed. The workflow uses the shared machine lock and four Cargo jobs.
 
-## Draft filing
+## Orchestrator handoff
 
-The [checked-in bundle](../../.claude/agent/reports/ov-1071/workflow-main.json)
-now points to the content-addressed Claude and Codex hook files present on
-Canary. Their byte digests match the file pins. All 13 stage and group
-operations pin the resulting adapter,
-`wf1:e5aa796034a2ccdec6cc62e601bc10855be67db7434130487815900825622205`.
-The five Python suites passed all 78 tests again with the refreshed bundle,
-including the planted Clippy error and the skip for a docs-only diff.
+The complete bundle pins the content-addressed Canary Claude and Codex hook
+files and uses the adapter pin
+`wf1:e5aa796034a2ccdec6cc62e601bc10855be67db7434130487815900825622205`
+in all 13 stage and group operations.
 
-Canary CLI `0.1.0+5f08afc22` reached Overnight Main on Nov 24
-(`01a0e3c7-3e2c-7ed0-b31c-0cc0d7401571`). It returned
-`scope denied: known caller required` for `workflow get`, the
-configuration-only read used by `workspace re-pin`, and
-`workspace workflow-draft-status`. The installed CLI predates ov-1456’s
-`workflow bundle` command. The filing verdict is **blocked**. This builder
-could not verify the selected configuration against the checked-in bundle,
-and obtained no draft ID or Needs Decision card.
-
-An authenticated Main orchestrator or owner session is required to read the
-selected bundle and file the change. The filing evidence is the draft ID,
-the Needs Decision card ID, the expected published pin, and the draft’s
-`pending` state.
-
-### Return pass, Nov 25
-
-Canary again returned `scope-denied` (`known caller required`) for both
-`workspace workflow-draft-status` and the selected-configuration read in
-`workspace re-pin --out`, after the sandbox allowed the socket connection.
-The installed CLI still rejects `workflow bundle` as an unknown subcommand.
-The status and proposal RPCs use the same caller admission check. The proposal
-also replaces any pending draft on Main, so the status and live bundle are
-needed before submitting this full definition. **Filing remains blocked.**
-The pending draft ID, decision card and expected published pin are unavailable.
-
-The return pass reran all five affected gate suites. All 78 tests passed,
-including the planted-lint and docs-only cases. Suites ran in sequence at
-niceness 10 with four Cargo jobs and build output under `$FARCOOLER_SCRATCH`.
-
-### Latest filing attempt, Nov 25
-
-Canary `0.1.0+5f08afc22` returned `scope-denied` with
-`known caller required` for both of the read-only commands
-`workspace workflow-draft-status` and `workflow get --full`. The compact
-`workflow get` timed out after 10 seconds, and `workflow bundle` is still
-unavailable in that CLI. Automatic approval review rejected a combined
-probe that included `workspace re-pin --out` because it flagged the
-possibility of changing Main’s selected workflow. The subsequent probes
-used only the read-only status and workflow queries.
-
-The filing verdict is **blocked on caller admission**. The selected bundle
-and the pending draft list require an admitted caller. Draft ID, decision card
-and expected published pin remain unavailable.
-
-The latest verification passed all 78 tests across the five gate suites.
-The landing-gate suite exercised the planted Clippy error and the docs-only
-skip. The rerun used native Python, niceness 10, four Cargo jobs and build
-output under `$FARCOOLER_SCRATCH`.
-
-From an admitted session with the ov-1456 CLI, export Main using
+After landing, the admitted Main orchestrator can export Main with
 `farcooler workflow bundle 01a0e3c7-3e2c-7ed0-b31c-0cc0d7401571 --json`
-and check its pending drafts with `workspace workflow-draft-status`. Verify
-the checked-in proposal against the export before filing. If the export has
-additional changes, carry those forward into the proposal.
+using an app that includes ov-1456. Compare the selected bundle to this
+proposal, carry forward any live changes, and use
+`workspace workflow-draft-status` to check for pending owner decisions before
+filing `reports/ov-1460/workflow-main.json` for owner approval. The builder
+handoff is the checked-in bundle.
 
-```sh
-farcooler --json workspace workflow-draft 01a0e3c7-3e2c-7ed0-b31c-0cc0d7401571 \
-  --file .claude/agent/reports/ov-1071/workflow-main.json \
-  --reason 'ov-1460: Run landing Clippy on changed crates before review.'
-```
-
-Record `draft.id`, `draft.card`, `draft.drafted_against` (the expected
-published pin) and `draft.state` from the JSON reply.
+Earlier builder reads of Main returned `scope denied: known caller required`
+on Canary `0.1.0+5f08afc22`, which also predates `workflow bundle`. The live
+selection still needs the orchestrator's comparison.

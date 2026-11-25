@@ -571,7 +571,7 @@ class LandingTests(unittest.TestCase):
             self.assertIn("full workspace", lane.rust_impact(ROOT, [("M", "crates/cli/src/main.rs")]))
 
     def test_main_clippy_check_rejects_a_changed_crate_before_review(self):
-        bundle = json.loads((ROOT / ".claude/agent/reports/ov-1071/workflow-main.json").read_text())
+        bundle = json.loads((ROOT / "reports/ov-1460/workflow-main.json").read_text())
         stages = bundle["definition"]["stages"]
         review = next(i for i, stage in enumerate(stages) if "Review" in stage["kind"])
         stage = stages[review - 1]
