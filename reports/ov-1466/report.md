@@ -26,13 +26,25 @@ still return a successful response within one second while the stall is held.
   with both tmux 3.4 and tmux 3.6. The corrected test passed with both
   versions (1 passed, 0 failed in each run). The same five daemon test
   modules listed below passed with tmux 3.4 (64 tests).
-- macOS arm64, tmux 3.8. The named regression passed (1 passed, 0 failed).
+- macOS arm64, tmux 3.8. The named regression passed in the daemon library
+  test target on the original run and on recheck (1 passed, 0 failed each time).
   The daemon test modules for workflow admission, caller seats, foreground
   sampling, the process table, and process-read lanes passed (66 tests).
 - `cargo clippy --locked -p farcooler-daemon --all-targets -- -D warnings`
   passed on macOS. The daemon-layer, file-size-budget, and shared-core lints
   passed.
 
-Main CI verification remains pending on the landing commit. The last checked
-main run failed on this regression in Rust tests (3/4).
+## Main CI
+
+The ov-1466 fix is on the ticket branch at
+`6eb3b744b1fdd441edf8520608baf64115547886`. The checked main head,
+`8c85d3179e00de94c02cd89974764c41973c1f67`, still arms the stall using tmux’s
+`pane_pid`. Its CI run was in progress when checked.
+[GitHub Actions run 45669588871](https://github.com/taneliang/farcooler/actions/runs/45669588871)
+
+The preceding main CI run failed on this regression in Rust tests (3/4).
 [GitHub Actions run 45568814028](https://github.com/taneliang/farcooler/actions/runs/45568814028)
+
+The acceptance check requires a successful `push` run of the `CI` workflow on
+`main` whose head SHA is the engine’s landing commit containing the fix. That
+commit and run were unavailable while preparing this ticket branch.
