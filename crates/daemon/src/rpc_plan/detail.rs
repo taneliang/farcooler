@@ -18,8 +18,11 @@ pub(super) fn page(mut plan: pb::Plan, query: pb::PlanDetailRead) -> Result<pb::
     match query.subject {
         Some(Subject::ThemeName(name)) => {
             let name = name.trim().to_lowercase();
-            plan.themes.retain(|view| view.theme.as_ref().is_some_and(|theme|
-                theme.name.to_lowercase().starts_with(&name) || short_id(&theme.id) == name));
+            plan.themes.retain(|view| view.theme.as_ref().is_some_and(|theme| {
+                theme.name.to_lowercase().starts_with(&name)
+                    || short_id(&theme.id) == name
+                    || crate::wire::parse_id(&theme.id).is_some_and(|id| id.to_string() == name)
+            }));
             let tasks = plan.themes.iter().flat_map(|view| view.task_ids.iter().cloned()).collect();
             retain_tickets(&mut plan, &tasks);
             plan.landings.clear();

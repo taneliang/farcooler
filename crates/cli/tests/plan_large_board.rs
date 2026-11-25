@@ -16,6 +16,48 @@ fn id(uuid: Uuid) -> bytes::Bytes {
 }
 
 #[tokio::test]
+async fn scoped_theme_commands_accept_a_full_uuid() {
+    use farcooler_store::plan::NewTheme;
+
+    let h = start(Scope::Control).await;
+    let repo = a_repository(&h);
+    let store = &h.service.store;
+    let card = store.create_task(repo.workspace, "A card to add", Actor::Manager).unwrap();
+    let theme = store.create_theme(repo.workspace, &NewTheme {
+        name: "A theme".into(), outcome: "Keep the board readable".into(),
+    }, &[], Actor::Manager).unwrap();
+    let uuid = theme.id.to_string();
+    let commands = [
+        vec!["show", &uuid],
+        vec!["set", &uuid, "--story", "Updated by UUID"],
+        vec!["cards", &uuid, "--add", &card.key],
+    ];
+    let mut failures = Vec::new();
+    for args in commands {
+        let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_farcooler"))
+            .env("FARCOOLER_HOME", h.socket.parent().unwrap())
+            .env_remove("FARCOOLER_WORKSPACE")
+            .env_remove("FARCOOLER_ACTOR")
+            .args(["plan", "--json", "--repo", &repo.id.to_string()])
+            .args(["--workspace", &repo.workspace.to_string(), "theme"])
+            .args(&args)
+            .output().await.unwrap();
+        if !output.status.success() {
+            failures.push(format!("{args:?}: {}", String::from_utf8_lossy(&output.stderr)));
+            continue;
+        }
+        let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(response["id"], uuid);
+        match args[0] {
+            "set" => assert_eq!(response["story"], "Updated by UUID"),
+            "cards" => assert_eq!(response["cards"][0]["key"], card.key),
+            _ => {}
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[tokio::test]
 async fn a_large_board_loads_in_plan_overview_and_detail_commands() {
     use farcooler_store::models::TaskStatus;
     use farcooler_store::plan::{NewTheme, ThemeUpdate};
