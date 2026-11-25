@@ -419,7 +419,7 @@ impl Exec {
         }
     }
     async fn run_coding(&self, binding: &Binding, owner: &str, mut command: CodingCommand,
-        cancel: tokio::sync::watch::Receiver<bool>) -> Result<()> {
+        cancel: tokio::sync::watch::Receiver<bool>, shutdown: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>) -> Result<()> {
         if matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build)) {
             let head = self.git_recorded(binding, &self.tree(binding), &["rev-parse", "HEAD"]).await?;
             durable(&self.build_start_path(binding), &serde_json::to_vec(&BuildStart { binding: binding.clone(), head })?)?;
@@ -466,13 +466,14 @@ impl Exec {
             }
             None => None,
         };
+        let cancelled = cancel.clone();
         let exit = async {
             Ok::<_, Error>(if self.is_native_agent(binding) {
                 self.run_native(binding, &command, cancel).await?
             } else {
                 // A gate can run for hours and leave the daemon behind it: its owner is recorded so a
                 // recovery can end it before it runs again (a group's gate holds the whole landing target).
-                let owner = matches!(binding.effect.kind, EffectKind::Execute(StageKind::Run)).then(|| self.owner_path(binding));
+                let owner = matches!(binding.effect.kind, EffectKind::Execute(StageKind::Run | StageKind::Build)).then(|| self.owner_path(binding));
                 let builder = matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build)).then_some(&self.yielding);
                 crate::effect_runner::owned_yielding(&self.tree(binding), &command.argv, &command.environment,
                     &log, Duration::from_millis(command.timeout_ms), cancel, owner.as_deref(), builder).await.map_err(|failure| {
@@ -494,10 +495,26 @@ impl Exec {
         };
         if let Some(ledger) = &ledger { named_tree::end_gate(ledger)?; }
         let exit = exit?;
+        if exit.is_none() && *cancelled.borrow() && shutdown.as_ref().is_some_and(|s| s.load(std::sync::atomic::Ordering::SeqCst)) {
+            durable(&self.interruption_path(binding), &serde_json::to_vec(binding)?)?;
+        }
         if self.is_native_agent(binding) { return self.write_native_fact(binding, exit.map(|code| code == 0)); }
         let fact = ProcessFact { binding: binding.clone(), argv: command.argv,
             environment: pinned_environment, managed_build: true, exit, log_path: Some(log.clone()), log_digest: digest(&self.bytes(&log)?) };
         durable(&self.fact_path(binding), &serde_json::to_vec(&fact)?)
+    }
+    fn interruption_path(&self, binding: &Binding) -> PathBuf {
+        self.root.join("receipts").join(format!("{}.shutdown.json", digest(&binding.effect)))
+    }
+    fn shutdown_interrupted(&self, binding: &Binding) -> Result<bool> {
+        match self.bytes(&self.interruption_path(binding)) {
+            Ok(raw) => {
+                if serde_json::from_slice::<Binding>(&raw)? != *binding { return Err(Error::Refused("foreign shutdown receipt")); }
+                Ok(true)
+            },
+            Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error),
+        }
     }
     fn check_binding(&self, workspace: &str, binding: &Binding) -> Result<()> {
         if binding.workspace != workspace || !self.resource_matches(workspace, &binding.effect)
@@ -691,10 +708,10 @@ impl Exec {
                     // No cleanup while the reviewer reads: both see the same candidate. Both futures are
                     // drained even on failure, so neither writer survives the stage's result.
                     let (review, gate) = tokio::join!(
-                        self.run_coding(binding, &binding.effect.id, command, cancel.clone()),
-                        self.run_coding(&check, &binding.effect.id, check_command, cancel));
+                        self.run_coding(binding, &binding.effect.id, command, cancel.clone(), shutdown.clone()),
+                        self.run_coding(&check, &binding.effect.id, check_command, cancel, shutdown.clone()));
                     review?; gate?;
-                } else if let Err(error) = self.run_coding(binding, &binding.effect.id, command, cancel).await {
+                } else if let Err(error) = self.run_coding(binding, &binding.effect.id, command, cancel, shutdown.clone()).await {
                     // run_coding exposes I/O as retryable only before launch or after quiescence.
                     if matches!(kind, StageKind::Run) && matches!(&error, Error::Io(_)) {
                         return Ok(Outcome::SafeFailure);
@@ -885,6 +902,7 @@ impl Exec {
     pub(super) async fn reconcile_coding(&self, binding: &Binding) -> Result<Outcome> {
         self.check_binding(&binding.workspace, binding)?;
         if let Some(check) = self.review_check(binding) {
+            let check_interrupted = !self.fact_path(&check).try_exists()? || self.shutdown_interrupted(&check)?;
             let (review, gate) = tokio::join!(self.reconcile_coding_single(binding), self.reconcile_run(&check));
             let (review, gate) = (review?, gate?);
             return Ok(match (review, gate) {
@@ -942,7 +960,24 @@ impl Exec {
                     self.write_native_fact(binding, Some(false))?;
                 }
             }
+            if !self.is_native_agent(binding) && matches!(kind, StageKind::Build)
+                && !self.fact_path(binding).try_exists()? && self.owner_path(binding).try_exists()? {
+                if !crate::effect_runner::Owner::reap(&self.owner_path(binding)).await? {
+                    return Err(Error::Refused("the build's process could not be ended"));
+                }
+                let command = self.bound_command(binding, false, true)?;
+                let log = self.process_log(binding);
+                let fact = ProcessFact { binding: binding.clone(), argv: command.argv, environment: command.environment,
+                    managed_build: true, exit: None, log_path: Some(log.clone()), log_digest: digest(&self.bytes(&log)?) };
+                durable(&self.interruption_path(binding), &serde_json::to_vec(binding)?)?;
+                durable(&self.fact_path(binding), &serde_json::to_vec(&fact)?)?;
+            }
             let (fact, raw) = self.settled_process(binding)?;
+            if matches!(kind, StageKind::Build) && fact.exit.is_none() && self.shutdown_interrupted(binding)? {
+                let pending = self.state(&binding.workspace)?.is_some_and(|state| state.items.get(&binding.effect.item)
+                    .is_some_and(|item| item.pending.as_ref() == Some(&binding.effect.id)));
+                if pending { return Ok(Outcome::Interrupted); }
+            }
             if self.is_native_agent(binding) {
                 if let Some(reason) = self.verify_native_settlement(binding, fact.exit)? {
                     return Ok(Outcome::SafeFailureBecause(reason));

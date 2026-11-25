@@ -1160,3 +1160,25 @@ async fn workflow_native_claude_requires_an_active_steering_hook() {
     std::fs::write(root.join("coding.json"), serde_json::to_vec(&original).unwrap()).unwrap();
     Runtime::open(&root).expect("the installed gating hook is accepted");
 }
+
+#[tokio::test]
+async fn ov1427_command_build_shutdown_preserves_last_attempt() {
+    let (dir, mut runtime) = configured(false, "cancel").await;
+    let mut definition = runtime.configured_definition().unwrap();
+    for stage in &mut definition.stages { stage.max_attempts = 1; }
+    enqueue(&mut runtime, "w", "one", definition);
+    runtime.pump(2).await.unwrap();
+    let before = runtime.state("w").unwrap().unwrap().items["one"].clone();
+    let (stop, signal) = tokio::sync::watch::channel(false);
+    let shutdown = async {
+        assert!(super::wait_until(tokio::time::Instant::now() + Duration::from_secs(30),
+            Duration::from_millis(10), || dir.path().join("started").exists()).await);
+        stop.send_replace(true);
+    };
+    let (result, ()) = tokio::join!(runtime.run(signal), shutdown);
+    result.unwrap();
+    let item = &runtime.state("w").unwrap().unwrap().items["one"];
+    assert_ne!(item.phase, Phase::Failed);
+    assert_eq!((item.stage, item.attempt, &item.run), (before.stage, before.attempt, &before.run));
+    assert!(item.failure.as_deref().is_some_and(|s| s.contains("interrupted") && s.contains("resumed")));
+}

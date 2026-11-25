@@ -682,3 +682,68 @@ async fn security_policy_requires_the_whole_ordered_sequence_and_resets_on_rewor
             && e.dispatch_state == "settled"));
     }
 }
+
+#[tokio::test]
+async fn parallel_review_resumes_after_its_check_is_interrupted_on_the_last_attempt() {
+    let (dir, mut runtime, _fake, d) = parallel_fixture(false, true).await;
+    let script = dir.path().join("parallel.py");
+    let original = std::fs::read_to_string(&script).unwrap();
+    std::fs::write(&script, original.replace("sys.exit(int(sys.argv[2]))", "time.sleep(60)")).unwrap();
+    std::fs::write(runtime.root.join("coding.json"), serde_json::to_vec(runtime.coding.as_ref().unwrap()).unwrap()).unwrap();
+    enqueue(&mut runtime, "w", "one", d);
+    for time in 2..20 {
+        if at(&runtime.state("w").unwrap().unwrap()).0 == "light" { break; }
+        runtime.pump(time).await.unwrap();
+    }
+    let binding = super::coding_tests::admitted(&runtime).await;
+    let check = runtime.review_check(&binding).unwrap();
+    let (_cancel, cancelled) = tokio::sync::watch::channel(false);
+    let mut run = Box::pin(runtime.execute_coding("w", &binding, cancelled));
+    tokio::select! {
+        result = run.as_mut() => panic!("review ended before restart: {result:?}"),
+        _ = async { while !runtime.root.join("receipts").join(format!("{}.process.json", digest(&binding.effect))).exists() || !runtime.owner_path(&check).exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }} => {}
+    }
+    drop(run);
+    let root = runtime.root.clone();
+    drop(runtime);
+    std::fs::write(&script, original).unwrap();
+    let mut runtime = Runtime::open(&root).unwrap();
+    assert_eq!(runtime.reconcile_coding(&binding).await.unwrap(), Outcome::Interrupted);
+    let state = settle(&mut runtime, 200).await;
+    assert_eq!(state.items["one"].phase, Phase::WaitingJoin, "{:?}", state.items["one"]);
+    let effects = runtime.store.workflow_outbox("w").unwrap();
+    assert_eq!(effects.iter().filter(|s| s.effect.kind == binding.effect.kind && s.effect.run == binding.effect.run).count(), 2);
+}
+
+#[tokio::test]
+async fn ov1427_shutdown_after_review_pass_preserves_last_attempt() {
+    let (dir, mut runtime, _fake, d) = parallel_fixture(false, true).await;
+    let script = dir.path().join("parallel.py");
+    let text = std::fs::read_to_string(&script).unwrap().replace("sys.exit(int(sys.argv[2]))", "time.sleep(60)");
+    std::fs::write(script, text).unwrap();
+    enqueue(&mut runtime, "w", "one", d);
+    for time in 2..20 {
+        if at(&runtime.state("w").unwrap().unwrap()).0 == "light" { break; }
+        runtime.pump(time).await.unwrap();
+    }
+    let stored = runtime.store.workflow_outbox("w").unwrap().into_iter().find(|s| s.active).unwrap();
+    let binding = Binding::new("w", &stored.effect, 0, 0, &runtime.coding.as_ref().unwrap().base);
+    let check = runtime.review_check(&binding).unwrap();
+    let receipt = runtime.provider_path(&binding);
+    let owner = runtime.owner_path(&check);
+    let before = runtime.state("w").unwrap().unwrap().items["one"].clone();
+    let (stop, signal) = tokio::sync::watch::channel(false);
+    let shutdown = async {
+        assert!(super::wait_until(tokio::time::Instant::now() + Duration::from_secs(60),
+            Duration::from_millis(10), || receipt.exists() && owner.exists()).await);
+        stop.send_replace(true);
+    };
+    let (result, ()) = tokio::join!(runtime.run(signal), shutdown);
+    result.unwrap();
+    let item = &runtime.state("w").unwrap().unwrap().items["one"];
+    assert_ne!(item.phase, Phase::Failed);
+    assert_eq!((item.stage, item.attempt, &item.run), (before.stage, before.attempt, &before.run));
+    assert!(item.failure.as_deref().is_some_and(|s| s.contains("interrupted") && s.contains("resumed")));
+}

@@ -23,17 +23,20 @@ async fn workflow_coding_native_reopen_stop_owns_original_pty_without_relaunch()
     let pane = panes.iter().find(|p| p.pane_id == window.pane_id).unwrap();
     let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: pane.pane_id.clone(), tty: pane.tty.clone(), hold: true, supervisor: None };
     durable(&runtime.native_path(&binding, "owner"), &serde_json::to_vec(&owner).unwrap()).unwrap();
-    // Surviving private PTY plus bound owner, but no launch/process settlement.
-    // Drop/reopen only the workflow owner, as after daemon death.
-    drop(runtime); let mut runtime = Runtime::open(&root).unwrap(); runtime.pump(200).await.unwrap();
-    assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::Uncertain);
+    // A surviving private PTY with a bound owner is ended during recovery before the turn resumes.
     let mut foreign = owner.clone(); foreign.tty = "/dev/foreign".into();
     assert!(runtime.quiesce_native(&foreign).await.is_err());
     assert_eq!(host.0.pane_life(&owner.pane, id).await.unwrap(), farcooler_tmux::PaneLife::Live);
+    drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    runtime.pump(200).await.unwrap();
     let state = runtime.state("w").unwrap().unwrap();
-    runtime.submit_now(&runtime.controller(), Request { id: "cancel".into(), workspace: "w".into(),
-        expected_revision: state.revision, sequence: 2, command: Command::Cancel { item: "one".into() , reason: None } }, 201).unwrap();
-    assert_eq!(finish(&mut runtime, "w").await.items["one"].phase, Phase::Cancelled);
+    let item = &state.items["one"];
+    assert_ne!(item.phase, Phase::Uncertain);
+    assert_ne!(item.phase, Phase::Failed);
+    assert_eq!(item.attempt, 1);
+    assert!(item.failure.as_deref().is_some_and(|s| s.contains("interrupted") && s.contains("resumed")));
+    assert_ne!(host.0.pane_life(&owner.pane, id).await.unwrap(), farcooler_tmux::PaneLife::Live);
     assert_eq!(runtime.reconcile_coding(&binding).await.unwrap(), Outcome::SafeFailure);
 }
 #[tokio::test]
@@ -92,9 +95,8 @@ async fn workflow_service_native_stop_ignores_launch_drift_with_original_owner()
         }
         assert!(config.validate().is_err(),"fresh launch must still refuse drift");
         let mut runtime = Runtime::open_service(&root,svc.store.clone()).unwrap();
-        runtime.pump(200).await.unwrap();
+        // Cancel before the recovery sweep, so Stop still owns the surviving process.
         let state = runtime.state(&workspace).unwrap().unwrap();
-        assert_eq!(state.items["one"].phase,Phase::Uncertain,"{drift}");
         assert_eq!(host.0.pane_life(&owner.pane,id).await.unwrap(),farcooler_tmux::PaneLife::Live);
         runtime.submit_now(&runtime.controller(),Request { id:"cancel".into(),workspace:workspace.clone(),
             expected_revision:state.revision,sequence:2,command:Command::Cancel { item:"one".into() , reason: None } },201).unwrap();

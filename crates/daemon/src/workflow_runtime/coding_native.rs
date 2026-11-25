@@ -580,8 +580,8 @@ impl Exec {
         if let Some(reply) = stop_reply { let _ = reply.send(Ok(())); }
         Ok(completed.map(|passed| if passed { 0 } else { 1 }))
     }
-    /// Only an admitted Stop, or a reviewer's own recorded verdict (ov-1082), may terminate an interrupted native
-    /// owner. Ordinary reconciliation never launches, sends input, or kills a discovered process. `completed` is what
+    /// End an interrupted native owner after a Stop, recorded verdict, or recovery of a pending turn.
+    /// Recovery never launches or sends input to the agent. `completed` is what
     /// the settlement says of the turn; a settlement already written (the daemon died after it) is kept, and what it
     /// says is returned.
     pub(super) async fn cancel_interrupted_native(&self, binding: &Binding, completed: Option<bool>) -> Result<Option<bool>> {

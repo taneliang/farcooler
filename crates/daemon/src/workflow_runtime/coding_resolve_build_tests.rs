@@ -106,3 +106,26 @@ async fn a_native_build_whose_pane_went_with_the_daemon_settles_once_with_why() 
     assert_ne!(item.phase, Phase::Uncertain, "nothing of it runs, so it is settled, not held");
     assert!(item.failure.as_deref().is_some_and(|f| f.contains("daemon stopped or restarted")), "{item:?}");
 }
+
+#[tokio::test]
+async fn ov1427_restart_reaps_a_native_owner_that_survived_the_runner() {
+    let (dir, mut runtime, _fake) = super::super::coding_native::tests::native("cancel").await;
+    let mut definition = runtime.configured_definition().unwrap();
+    for stage in &mut definition.stages { stage.max_attempts = 1; }
+    enqueue(&mut runtime, "w", "one", definition);
+    runtime.pump(2).await.unwrap();
+    let binding = admitted(&runtime).await;
+    let (_stop, signal) = tokio::sync::watch::channel(false);
+    let mut abandoned = Box::pin(runtime.execute_coding("w", &binding, signal));
+    let started = dir.path().join("started");
+    tokio::select! {
+        result = abandoned.as_mut() => panic!("native build ended early: {result:?}"),
+        _ = async { while !started.exists() { tokio::time::sleep(Duration::from_millis(10)).await; } } => {}
+    }
+    let pid: i32 = std::fs::read_to_string(&started).unwrap().parse().unwrap();
+    assert_eq!(unsafe { libc::kill(pid, 0) }, 0);
+    // Keep the old future alive and unpolled: unlike dropping it, this does not reap its private server.
+    assert_eq!(runtime.reconcile_coding(&binding).await.unwrap(), Outcome::Interrupted);
+    assert_ne!(unsafe { libc::kill(pid, 0) }, 0);
+    drop(abandoned);
+}
