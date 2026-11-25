@@ -1,13 +1,10 @@
 //! Retained managed tmux PTY + normalized hook ownership, without Service activation.
 use super::*;
 use super::coding::FileValidation;
-use super::native_messages::{Followup, send_native_reply};
+use super::native_messages::{ClaudeStop, Followup, IdleDirection, send_native_reply};
 use farcooler_agent_core::event::{AgentEvent, EndReason};
 use farcooler_agent_hooks::{Agent, assemble::MessageAssembler, facts::facts, wire::HookLine};
-use farcooler_core::activity::Registry;
-use farcooler_protocol::v1::AgentActivity;
 use farcooler_tmux::TmuxServer;
-use std::sync::LazyLock;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
 #[path = "coding_native_quiesce.rs"]
@@ -65,14 +62,6 @@ const VERDICT_QUIET: Duration = Duration::from_secs(1);
 const UNFINISHED_QUIET: Duration = Duration::from_secs(30 * 60);
 #[cfg(test)]
 const UNFINISHED_QUIET: Duration = Duration::from_secs(2);
-/// Let Claude redraw after Stop and start a new turn when a background shell exits.
-const CLAUDE_IDLE_FOR: Duration = Duration::from_millis(500);
-static CLAUDE_ACTIVITY: LazyLock<Registry> = LazyLock::new(Registry::built_in);
-
-enum ClaudeStop {
-    AwaitingIdle,
-    IdleSince(Duration),
-}
 
 /// A startup refusal ends the turn even if the harness leaves its interactive prompt alive. This is
 /// negative evidence only; screen text can never supply a successful result.
@@ -386,7 +375,7 @@ impl Exec {
                     match pane_look(life, &mut unread, clock.now()) {
                         PaneLook::Live => {}
                         PaneLook::Unread => {
-                            if claude_stop.is_some() { claude_stop = Some(ClaudeStop::AwaitingIdle); }
+                            if let Some(stop) = &mut claude_stop { *stop = ClaudeStop::default(); }
                             continue;
                         }
                         // The pane closed after a valid Stop, so Claude cannot start another turn.
@@ -406,24 +395,23 @@ impl Exec {
                         if let Some(reason) = startup_refusal(agent, &output) { return Ok((false, hooks, Some(reason))); }
                     }
                     if verdict.is_none() && self.recorded_verdict(binding) { verdict = Some(clock.now()); }
-                    if let Some(stop) = &claude_stop {
+                    if let Some(stop) = &mut claude_stop {
                         if verdict.is_some() { return Ok((true, hooks, None)); }
-                        let idle = tmux.capture_screen(&owner.pane).await
-                            .is_ok_and(|screen| CLAUDE_ACTIVITY.classify(agent.as_str(), &screen) == AgentActivity::Idle);
                         let now = clock.now();
-                        claude_stop = match (stop, idle) {
-                            (_, false) => Some(ClaudeStop::AwaitingIdle),
-                            (ClaudeStop::AwaitingIdle, true) => Some(ClaudeStop::IdleSince(now)),
-                            (ClaudeStop::IdleSince(since), true) if now.saturating_sub((*since).max(heard)) < CLAUDE_IDLE_FOR => continue,
-                            (ClaudeStop::IdleSince(_), true) => {
-                                if !building || self.unfinished_build(binding, &tree).await.ok().flatten().is_none() {
-                                    return Ok((true, hooks, None));
-                                }
-                                tracing::info!(effect = %binding.effect.id, "the build ended its turn without committing; waiting for its next turn");
-                                unfinished = Some(now);
-                                None
+                        if !stop.idle(&tmux, &owner.pane, now, heard).await { continue; }
+                        if unfinished.is_none() && building && self.unfinished_build(binding, &tree).await.ok().flatten().is_some() {
+                            tracing::info!(effect = %binding.effect.id, "the build ended its turn without committing; waiting for its next turn");
+                            unfinished = Some(now);
+                        }
+                        let closing = unfinished.is_none_or(|at| now.saturating_sub(at.max(heard)) >= UNFINISHED_QUIET);
+                        match self.idle_claude_direction(binding, &tmux, &owner.pane, &owner.tty, closing).await? {
+                            IdleDirection::Empty if closing => return Ok((true, hooks, None)),
+                            IdleDirection::Submitted => {
+                                claude_stop = None;
+                                unfinished = None;
                             }
-                        };
+                            IdleDirection::Empty | IdleDirection::Waiting => {}
+                        }
                         continue;
                     }
                     if verdict.is_some_and(|at: Duration| clock.now().saturating_sub(at.max(heard)) >= VERDICT_QUIET) {
@@ -501,7 +489,7 @@ impl Exec {
             hooks.push(line);
             if hooks.len() > 4096 { return Err(Error::Refused("too many native hooks")); }
             if continued || check_claude {
-                claude_stop = (!continued).then_some(ClaudeStop::AwaitingIdle);
+                claude_stop = (!continued).then(ClaudeStop::default);
                 unfinished = None;
                 continue;
             }

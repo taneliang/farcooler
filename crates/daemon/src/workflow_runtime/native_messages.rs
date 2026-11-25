@@ -1,8 +1,37 @@
-//! Codex and Claude tool hooks deliver direction before the tool runs. Stop remains the
-//! continuation boundary between tools; its final queue check also closes admission.
+//! Codex and Claude tool hooks deliver direction before the tool runs. The final queue
+//! check at Stop or after Claude redraws its idle prompt also closes admission.
 use super::*;
 use farcooler_agent_hooks::wire::{HookLine, TAKES_FOLLOWUP};
+use farcooler_core::activity::Registry;
+use farcooler_protocol::v1::AgentActivity;
+use farcooler_store::{PendingWake, models::Actor};
 use tokio::io::AsyncWriteExt;
+
+#[derive(Default)]
+pub(super) struct ClaudeStop(Option<Duration>);
+
+impl ClaudeStop {
+    pub(super) async fn idle(&mut self, tmux: &farcooler_tmux::TmuxServer, pane: &str, now: Duration, heard: Duration) -> bool {
+        static ACTIVITY: std::sync::LazyLock<Registry> = std::sync::LazyLock::new(Registry::built_in);
+        if !tmux.capture_screen(pane).await.is_ok_and(|screen| ACTIVITY.classify("claude", &screen) == AgentActivity::Idle) {
+            self.0 = None;
+            return false;
+        }
+        // Let Claude redraw after Stop and start a new turn when a background shell exits.
+        now.saturating_sub((*self.0.get_or_insert(now)).max(heard)) >= Duration::from_millis(500)
+    }
+}
+
+pub(super) enum IdleDirection {
+    Empty,
+    Waiting,
+    Submitted,
+}
+
+enum QueueRead {
+    Peek,
+    Claim,
+}
 
 pub(super) enum Followup {
     NoMessage,
@@ -58,31 +87,13 @@ impl Exec {
     }
     pub(super) async fn native_followup(&self, binding: &Binding, line: &HookLine,
         stream: &mut tokio::net::UnixStream, closing: bool) -> Result<Followup> {
-        use farcooler_store::models::Actor;
         let tool = matches!(line.agent, farcooler_agent_hooks::Agent::Claude | farcooler_agent_hooks::Agent::Codex) && line.event == "PreToolUse"
             && line.takes_updated_input();
         let stop = line.event == "Stop" && line.takes.iter().any(|t| t == TAKES_FOLLOWUP);
         if !(tool || stop) || line.payload.get("agent_id").is_some() { return Ok(Followup::NoMessage); }
-        let id = super::coding_native::terminal(binding);
-        let workspace = Uuid::parse_str(&binding.workspace).ok();
-        // Explicit messages were admitted for this exact live agent. The answer-wake
-        // preference governs pane typing, not direction returned through a native hook.
-        let claimed = crate::engine_steering::inbox(id, |open| {
-            let mut claimed = Vec::new();
-            for wake in self.store.pending_message_wakes()? {
-                if wake.to != Some(id) || wake.claimed_at.is_some() { continue; }
-                let task = self.store.get_task(wake.task)?;
-                if Some(task.workspace_id) != workspace { continue; }
-                if self.store.claim_wake(&wake)? { claimed.push((wake, task.key)); }
-            }
-            if closing && stop && claimed.is_empty() { *open = false; }
-            Ok(claimed)
-        }).map_err(Error::Domain)?;
+        let claimed = self.native_direction(binding, QueueRead::Claim, closing && stop)?;
         if claimed.is_empty() { return Ok(Followup::NoMessage); }
-        let text = claimed.iter().map(|(w, key)| {
-            let from = match w.actor { Actor::Manager => "the orchestrator", Actor::User => "the owner", _ => "a collaborator" };
-            format!("[from {from} on {key}] {}", w.body)
-        }).collect::<Vec<_>>().join("\n");
+        let text = direction_text(&claimed);
         // Deny this tool, handing the direction to the agent before it can make the old change.
         // A plain allow would bypass a permission check, and a Stop continuation would arrive late.
         // Informational runner notices (ov-1171) provide context; explicit direction still fences the tool.
@@ -101,10 +112,54 @@ impl Exec {
         let sent = sent?;
         if !sent && closing && stop {
             // This Stop had no continuation. Close admission before normal settlement.
+            let id = super::coding_native::terminal(binding);
             crate::engine_steering::inbox(id, |open| { *open = false; Ok(()) }).map_err(Error::Domain)?;
         }
         Ok(if sent { Followup::Sent(reply) } else { Followup::Disconnected })
     }
+
+    /// Once Claude has redrawn after Stop, that hook has returned. Continue through
+    /// the same private pane, leaving the message queued if a safe prompt is unavailable.
+    pub(super) async fn idle_claude_direction(&self, binding: &Binding, tmux: &farcooler_tmux::TmuxServer,
+        pane: &str, tty: &str, closing: bool) -> Result<IdleDirection> {
+        if self.native_direction(binding, QueueRead::Peek, closing)?.is_empty() { return Ok(IdleDirection::Empty); }
+        let id = super::coding_native::terminal(binding);
+        let Ok(Some(prompt)) = crate::watch::answer_wake::engine::IdlePrompt::claude(tmux, pane, id, tty).await
+            else { return Ok(IdleDirection::Waiting) };
+        let claimed = self.native_direction(binding, QueueRead::Claim, false)?;
+        if claimed.is_empty() { return Ok(IdleDirection::Waiting); }
+        let sent = matches!(prompt.submit(&direction_text(&claimed)).await, Ok(true));
+        for (wake, _) in claimed {
+            self.store.finish_wake(&wake, (!sent).then_some("Couldn't confirm the engine agent got the message")).map_err(Error::Domain)?;
+        }
+        if sent { Ok(IdleDirection::Submitted) }
+        else { Err(Error::Refused("couldn't confirm Claude received direction after its background work")) }
+    }
+
+    fn native_direction(&self, binding: &Binding, read: QueueRead, closing: bool) -> Result<Vec<(PendingWake, String)>> {
+        let id = super::coding_native::terminal(binding);
+        let workspace = Uuid::parse_str(&binding.workspace).ok();
+        // Serialize the empty queue check and admission closure with message.send.
+        crate::engine_steering::inbox(id, |open| {
+            let mut queued = Vec::new();
+            for wake in self.store.pending_message_wakes()? {
+                if wake.to != Some(id) || wake.claimed_at.is_some() { continue; }
+                let task = self.store.get_task(wake.task)?;
+                if Some(task.workspace_id) == workspace && (matches!(read, QueueRead::Peek) || self.store.claim_wake(&wake)?) {
+                    queued.push((wake, task.key));
+                }
+            }
+            if closing && queued.is_empty() { *open = false; }
+            Ok(queued)
+        }).map_err(Error::Domain)
+    }
+}
+
+fn direction_text(queued: &[(PendingWake, String)]) -> String {
+    queued.iter().map(|(wake, key)| {
+        let from = match wake.actor { Actor::Manager => "the orchestrator", Actor::User => "the owner", _ => "a collaborator" };
+        format!("[from {from} on {key}] {}", wake.body)
+    }).collect::<Vec<_>>().join("\n")
 }
 
 #[cfg(test)]

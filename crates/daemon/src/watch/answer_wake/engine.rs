@@ -144,75 +144,95 @@ impl Watcher {
             let why = (!handed_off).then(|| "Couldn't confirm the message reached its engine agent".to_string());
             return Some(self.settle(wake, Some(task), why));
         }
-        let rules = Registry::built_in();
-        let Ok(screen) = runtime.tmux.capture_screen(&pane.pane_id).await else { return waiting() };
-        // Other agents wait for an empty box between turns. Never paste into a shell, dialog or draft.
-        match between(preset, pid).await {
-            Ok(true) => {}
-            Ok(false) => return waiting(),
+        let prompt = match IdlePrompt::read(&runtime.tmux, &pane.pane_id, pane.terminal_id, &pane.tty, (preset, pid)).await {
+            Ok(Some(prompt)) => prompt,
+            Ok(None) => return waiting(),
             Err(_) => return Some(self.refuse_unreadable(wake, task, false)),
-        }
-        if rules.classify(preset, &screen) != AgentActivity::Idle
-            || composer::read(preset, &screen) != composer::Composer::Empty
-            || bracketed(&runtime, &pane).await != Some(true) {
-            return waiting();
-        }
+        };
         match self.service.store.claim_wake(wake) {
             Ok(true) => {},
             Ok(false) => return Some(Pass::Settled),
             Err(_) => return waiting(),
         }
-        let pasted = runtime.tmux.send_literal(&pane.pane_id, &format!("\x1b[200~{text}\x1b[201~")).await;
+        match prompt.submit(&text).await {
+            Ok(true) => Some(self.settle(wake, Some(task), None)),
+            Ok(false) => Some(self.settle(wake, Some(task), Some("Paste left in the engine agent's composer; not sent".into()))),
+            Err(_) => Some(self.refuse_unreadable(wake, task, true)),
+        }
+    }
+}
+
+/// A verified empty composer of the live agent in this private pane.
+pub(crate) struct IdlePrompt<'a> {
+    tmux: &'a farcooler_tmux::TmuxServer,
+    pane: &'a str,
+    tty: &'a str,
+    agent: (&'static str, i32),
+    rules: Registry,
+}
+
+impl<'a> IdlePrompt<'a> {
+    pub(crate) async fn claude(tmux: &'a farcooler_tmux::TmuxServer, pane: &'a str, terminal: uuid::Uuid,
+        tty: &'a str) -> Result<Option<Self>, Held> {
+        let Some(agent @ ("claude", _)) = foreground(tty).await? else { return Ok(None) };
+        Self::read(tmux, pane, terminal, tty, agent).await
+    }
+
+    async fn read(tmux: &'a farcooler_tmux::TmuxServer, pane: &'a str, terminal: uuid::Uuid,
+        tty: &'a str, agent: (&'static str, i32)) -> Result<Option<Self>, Held> {
+        let rules = Registry::built_in();
+        let Ok(screen) = tmux.capture_screen(pane).await else { return Ok(None) };
+        if !between(agent.0, agent.1).await?
+            || rules.classify(agent.0, &screen) != AgentActivity::Idle
+            || composer::read(agent.0, &screen) != composer::Composer::Empty
+            || bracketed(tmux, pane, terminal).await != Some(true) {
+            return Ok(None);
+        }
+        Ok(Some(Self { tmux, pane, tty, agent, rules }))
+    }
+
+    pub(crate) async fn submit(self, text: &str) -> Result<bool, Held> {
+        let (preset, pid) = self.agent;
+        let pasted = self.tmux.send_literal(self.pane, &format!("\x1b[200~{text}\x1b[201~")).await;
         let expected = if preset == "cursor" {
-            composer::drawn::Expected::default().then_cursor_paste(&text)
+            composer::drawn::Expected::default().then_cursor_paste(text)
         } else {
-            composer::drawn::Expected::default().then_paste(&text)
+            composer::drawn::Expected::default().then_paste(text)
         };
         if pasted.is_ok() {
             for _ in 0..50 {
                 tokio::time::sleep(Duration::from_millis(20)).await;
-                let Ok(screen) = runtime.tmux.capture_screen(&pane.pane_id).await else { break };
+                let Ok(screen) = self.tmux.capture_screen(self.pane).await else { break };
                 if expected.shown_by(&composer::read(preset, &screen)) {
-                    let idle = match between(preset, pid).await {
-                        Ok(idle) => idle,
-                        Err(_) => return Some(self.refuse_unreadable(wake, task, true)),
-                    };
-                    if idle && rules.classify(preset, &screen) == AgentActivity::Idle {
-                        match foreground(&pane.tty).await {
-                            Ok(Some(agent)) if agent == (preset, pid) => {
-                                if runtime.tmux.send_bytes_hex(&pane.pane_id, "0d").await.is_ok() {
-                                    return Some(self.settle(wake, Some(task), None));
-                                }
-                            }
-                            Ok(_) => {}
-                            Err(_) => return Some(self.refuse_unreadable(wake, task, true)),
-                        }
+                    if between(preset, pid).await? && self.rules.classify(preset, &screen) == AgentActivity::Idle
+                        && foreground(self.tty).await? == Some(self.agent) {
+                        return Ok(self.tmux.send_bytes_hex(self.pane, "0d").await.is_ok());
                     }
                     break;
                 }
             }
         }
-        Some(self.settle(wake, Some(task), Some("Paste left in the engine agent's composer; not sent".into())))
+        Ok(false)
     }
 }
 
 /// Whether the engine pane's program asked for bracketed paste: tmux's own flag, or, on a tmux older than 3.7 which
 /// renders that flag as nothing (Ubuntu 24.04's 3.4), what following the pane's output has seen (ov-1263).
-async fn bracketed(runtime: &crate::runtime::Runtime, pane: &farcooler_core::inventory::TaggedPane) -> Option<bool> {
+async fn bracketed(tmux: &farcooler_tmux::TmuxServer, pane: &str, terminal: uuid::Uuid) -> Option<bool> {
     #[cfg(test)]
     let tmux_may_say = !crate::paste_mode::forced_old_tmux();
     #[cfg(not(test))]
     let tmux_may_say = true;
     if tmux_may_say {
-        match runtime.tmux.pane_bracketed_paste(&pane.pane_id).await {
+        match tmux.pane_bracketed_paste(pane).await {
             Ok(Some(on)) => return Some(on),
             Ok(None) => {}
             Err(_) => return None,
         }
     }
-    let modes = BRACKETING.lock().unwrap().iter().find(|(id, _)| *id == pane.terminal_id).map(|(_, m)| m.clone())?;
-    let record = modes.record(&pane.pane_id)?;
-    let pid = runtime.tmux.pane_pid(&pane.pane_id).await.ok()?;
+    let modes = BRACKETING.lock().unwrap().iter().find(|(id, _)| *id == terminal).map(|(_, m)| m.clone())?;
+    let record = modes.record(pane)?;
+    let pid = tmux.pane_pid(pane).await.ok()?;
     record.bracketed(pid)
 }
 

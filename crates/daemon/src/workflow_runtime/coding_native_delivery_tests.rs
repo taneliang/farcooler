@@ -4,6 +4,92 @@ use farcooler_protocol::v1::{self as pb, request, result};
 use farcooler_store::models::Actor;
 
 #[tokio::test]
+async fn deferred_claude_stop_delivers_direction_accepted_while_a_shell_runs() {
+    let (dir, mut runtime, _fake) = tests::native("pass").await;
+    let (_service_dir, svc, repo) = crate::test_support::fixture().await;
+    runtime.store = svc.store.clone();
+    let ws = svc.store.ensure_main_workspace(repo).unwrap();
+    let task = svc.store.create_task(ws.id, "Build with late direction", Actor::User).unwrap();
+    let workspace = ws.id.to_string();
+    let definition = runtime.configured_definition().unwrap();
+    super::super::tests::enqueue(&mut runtime, &workspace, &task.key, definition);
+    runtime.pump(2).await.unwrap();
+    let state = runtime.state(&workspace).unwrap().unwrap();
+    let effect = runtime.store.workflow_outbox(&workspace).unwrap().into_iter().find(|s| s.active).unwrap().effect;
+    let claim = runtime.store.workflow_claim_effect(&workspace, &effect.id, "deferred-stop", state.revision,
+        state.epoch, 10, 100).unwrap().unwrap();
+    let base = runtime.pin_base(&workspace, &effect).await.unwrap();
+    assert!(runtime.store.workflow_admit_effect(&claim, 10).unwrap());
+    let binding = Binding::new(&workspace, &effect, claim.resource_generation, state.items[&task.key].iteration, &base);
+
+    let agent = dir.path().join("claude");
+    std::fs::copy(farcooler_core::programs::find("perl").unwrap(), &agent).unwrap();
+    let composer = dir.path().join("composer.pl");
+    let stand_in = include_str!("../watch/answer_wake/stand_in.pl").replace(
+        r#"logit("SUBMIT " . logged($sent));"#,
+        r#"exec('/usr/bin/python3', $ENV{DEFERRED_AGENT}, $sent) or die $!;"#);
+    std::fs::write(&composer, stand_in).unwrap();
+    let script = dir.path().join("deferred.py");
+    std::fs::write(&script, r#"import json, os, pathlib, socket, subprocess, sys, time
+def hook(event, **extra):
+    with socket.socket(socket.AF_UNIX) as s:
+        s.connect(os.environ['FARCOOLER_NATIVE_HOOK_SOCKET'])
+        takes = ['followup'] if event == 'Stop' else []
+        payload = dict(session_id=os.environ['FARCOOLER_NATIVE_SESSION'], cwd=os.getcwd(), **extra)
+        s.sendall((json.dumps(dict(agent='claude', event=event, takes=takes, payload=payload))+'\n').encode())
+        assert json.loads(s.makefile().readline()) == {}
+def commit(text):
+    pathlib.Path('result.txt').write_text(text)
+    subprocess.check_call(['/usr/bin/git', 'add', '--', 'result.txt'])
+    subprocess.check_call(['/usr/bin/git', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', text])
+if len(sys.argv) > 1:
+    assert 'Use the new API' in sys.argv[1]
+    hook('UserPromptSubmit', prompt=sys.argv[1])
+    commit('steered candidate')
+    hook('Stop')
+    time.sleep(30)
+prompt_file = os.environ.get('TEST_LAUNCHED_PROMPT_FILE')
+hook('UserPromptSubmit', prompt=pathlib.Path(prompt_file).read_text() if prompt_file else os.environ['TEST_LAUNCHED_PROMPT'])
+commit('original candidate')
+root = pathlib.Path(os.environ['STARTED']).parent
+shell = subprocess.Popen(['/bin/sh', '-c', 'while [ ! -f "$1" ]; do sleep 0.05; done', 'shell', str(root / 'release')])
+hook('Stop')
+print('✻ Worked for 3s · 1 shell still running', flush=True)
+print('─' * 40 + '\n❯ \n' + '─' * 40 + '\n  ⏵⏵ auto mode on · 1 shell', flush=True)
+pathlib.Path(os.environ['STARTED']).touch()
+shell.wait()
+os.execv(root / 'claude', [str(root / 'claude'), str(root / 'composer.pl'), 'claude', str(root / 'control'), str(root / 'composer.log')])
+"#).unwrap();
+    std::fs::write(dir.path().join("control"), "idle").unwrap();
+    let config = dir.path().join("config");
+    std::fs::create_dir(&config).unwrap();
+    TEST_ARGV.with(|p| *p.borrow_mut() = Some(vec!["/usr/bin/python3".into(), script.to_string_lossy().into_owned()]));
+    let mut command = runtime.exec.coding_command(&binding).unwrap();
+    command.timeout_ms = 20_000;
+    command.environment.insert("CLAUDE_CONFIG_DIR".into(), config.to_string_lossy().into_owned());
+    command.environment.insert("DEFERRED_AGENT".into(), script.to_string_lossy().into_owned());
+    let watcher = crate::watch::Watcher::new(svc.clone());
+    let steer = async {
+        assert!(super::wait_until(tokio::time::Instant::now() + Duration::from_secs(10),
+            Duration::from_millis(20), || dir.path().join("started").exists()).await, "Stop was never acknowledged");
+        let sent = watcher.message_send(pb::Request { method: "message.send".into(),
+            payload: Some(request::Payload::MessageSend(pb::MessageSend {
+                to: task.key.clone(), text: "Use the new API".into(), actor: "manager".into(),
+                workspace_id: ws.id.as_bytes().to_vec().into(), ..Default::default()
+            })), ..Default::default()
+        }, crate::people::Person::Owner).await.unwrap();
+        assert!(matches!(sent, result::Value::MessageSent(_)));
+        assert_eq!(svc.store.pending_message_wakes().unwrap().len(), 1);
+        std::fs::write(dir.path().join("release"), "").unwrap();
+    };
+    let (_cancel, cancelled) = tokio::sync::watch::channel(false);
+    let (completion, ()) = tokio::join!(runtime.exec.run_native(&binding, &command, cancelled), steer);
+    assert_eq!(completion.unwrap(), Some(0), "{}", std::fs::read_to_string(runtime.process_log(&binding)).unwrap_or_default());
+    assert_eq!(std::fs::read_to_string(runtime.tree(&binding).join("result.txt")).unwrap(), "steered candidate");
+    assert!(svc.store.pending_message_wakes().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn accepted_native_claude_delivers_message_and_acceptance_before_turn_ends() {
     let exe = std::env::current_exe().unwrap();
     let cli = farcooler_core::scratch::cargo_profile(&exe).unwrap().join("farcooler");
