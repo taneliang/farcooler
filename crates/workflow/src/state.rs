@@ -81,7 +81,7 @@ pub struct Item {
     /// Back edges taken so far, by the id of the step that took them (schema 2).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub back_edges: BTreeMap<String, u8>,
-    /// How many times a controller has retried this item after it failed.
+    /// Step retries spent in the current run.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub retries: u8,
     /// A group item only: the tickets it runs, each pinned to the candidate it joined with.
@@ -438,7 +438,7 @@ pub enum Command {
     Close { item: String, resolution: CloseResolution },
     /// A controller runs a failed item's step again, within `MAX_RETRIES`.
     Retry { item: String },
-    /// Rebuild after an exhausted review, on the same checkout with that gate's allowance renewed.
+    /// Rebuild after an exhausted review, on the same checkout with fresh gate and step retry allowances.
     RestartReview { item: String },
     /// The orchestrator queues a ticket waiting at its `Join` step into the open group.
     Queue { item: String },

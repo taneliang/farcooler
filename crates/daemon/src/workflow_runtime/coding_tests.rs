@@ -99,7 +99,7 @@ elif stage == 'review':
         os.mkfifo(receipt)
         sys.exit(0)
     receipt.write_text(json.dumps(dict(binding='foreign' if mode == 'review-foreign' else binding, identity='reviewer', candidate=candidate,
-        passed=iteration != '0' and mode not in ('review-reject', 'review-limit'),
+        passed=iteration != '0' and mode != 'review-reject' and mode != 'review-limit',
         summary='Finding at review round ' + iteration if mode == 'review-limit' else None)))
 elif stage == 'ci':
     if mode == 'ci-fifo':
@@ -186,6 +186,7 @@ async fn review_limit_keeps_the_finding_and_retry_rebuilds_in_the_same_checkout(
         let get = runtime.wire_command(&workspace, "owner", Action::Get).unwrap();
         let reason = get["state"]["items"][key]["reason"].as_str().unwrap();
         assert!(reason.starts_with(&format!("{gate}:")) && reason.contains("send-back limit of 3"), "{reason}");
+        assert_eq!(crate::plan_run::run_of(&failed, key).unwrap().reason.as_deref(), Some(reason));
         assert!(item.failure.is_some(), "{item:?}");
         let notes = runtime.store.notes_for(card.id, Some(NoteKind::Finding)).unwrap();
         assert_eq!(notes.len(), 4, "{notes:?}");

@@ -764,7 +764,6 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     controller(input)?;
                     // A failed run does not own its resource, so a retry queues like new work.
                     if item.phase != Phase::Failed || item.group_of.is_some() { return Err(Refusal::Phase); }
-                    if item.retries >= item.definition.execution_limits().retries { return Err(Refusal::Limit); }
                     if matches!(command, Command::RestartReview { .. }) {
                         let build = item.review_restart_stage().ok_or(Refusal::Phase)?;
                         let prior = item.last_run();
@@ -778,8 +777,11 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                         item.candidate = None;
                         item.last_evidence = None;
                         item.run.clear();
+                        item.retries = 0;
+                    } else {
+                        if item.retries >= item.definition.execution_limits().retries { return Err(Refusal::Limit); }
+                        item.retries += 1;
                     }
-                    item.retries += 1;
                     item.attempt = 1;
                     item.failure = None;
                     item.reason = None;

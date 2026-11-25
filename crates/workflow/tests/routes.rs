@@ -286,6 +286,43 @@ fn retries_are_bounded() {
     assert_eq!(step(&state, &retry(&state)), Err(Refusal::Limit));
 }
 #[test]
+fn a_review_limit_restart_renews_an_exhausted_step_retry_allowance() {
+    let definition = routed();
+    let build_attempts = definition.stages[1].max_attempts;
+    let review_limit = definition.stages[3].limit;
+    let retry_limit = definition.execution_limits().retries;
+    let mut state = start(definition);
+    state = go(state.clone(), pass(&state));
+
+    for _ in 0..2 {
+        assert_eq!(stage(&state), "stage-1");
+        for _ in 0..retry_limit {
+            for _ in 0..build_attempts {
+                state = go(state.clone(), observe(&state, Outcome::SafeFailure));
+            }
+            state = go(state.clone(), retry(&state));
+        }
+        for _ in 0..=review_limit {
+            state = to_check(state);
+            state = go(state.clone(), pass(&state));
+            assert_eq!(stage(&state), "stage-3");
+            state = go(state.clone(), reject(&state));
+        }
+        let failed = &state.items["item"];
+        assert_eq!(failed.phase, Phase::Failed);
+        assert_eq!(failed.retries, retry_limit);
+        assert!(failed.review_limit_failure().is_some());
+        assert_eq!(step(&state, &retry(&state)), Err(Refusal::Limit));
+
+        let restart = input(&state, Command::RestartReview { item: "item".into() }, Grant::Controller);
+        state = go(state.clone(), restart);
+        let restarted = &state.items["item"];
+        assert_eq!(restarted.phase, Phase::Running);
+        assert_eq!(restarted.retries, 0);
+        assert!(!restarted.back_edges.contains_key("stage-3"));
+    }
+}
+#[test]
 fn a_retry_waits_when_another_run_holds_the_resource() {
     let mut state = failed();
     state = go(state.clone(), enqueue(&state, Definition::coding(), "other", "repo/branch"));
