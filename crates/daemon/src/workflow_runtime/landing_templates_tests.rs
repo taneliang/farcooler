@@ -98,7 +98,11 @@ async fn an_update_waits_for_a_started_landing_check_to_record_its_result() {
     drop(waiting);
     let gate = runtime.store.workflow_outbox("w").unwrap().into_iter()
         .find(|entry| entry.effect.kind == EffectKind::Execute(StageKind::Run)).unwrap();
-    assert_eq!(gate.dispatch_state, "settled", "the result was recorded before the update got in");
+    assert_eq!(gate.dispatch_state, "settled");
+    assert!(runtime.store.workflow_events("w").unwrap().iter().any(|event| {
+        matches!(&event.command, Command::Observe { effect, outcome: Outcome::Passed(_), .. }
+            if effect == &gate.effect.id)
+    }), "the started check's passing result was recorded before the update got in");
     runtime.pump(5).await.unwrap();
     assert_eq!(outbox(&runtime, StageKind::Run), 1, "the second landing has not started its check");
     assert_eq!(remote_head(&runtime).await, first, "no push can start during replacement");
