@@ -36,8 +36,8 @@ impl Store {
             params![effect.workspace, owner], |r| r.get(0))?)
     }
 
-    /// Recovery can retain a new, deterministic tree-release intent for a known finished group.
-    /// Never overwrite a prior attempt; recovery explicitly reconciles finished group trees.
+    /// Recovery can retain a new, deterministic build-output intent for a known finished group.
+    /// Never overwrite a prior attempt.
     pub fn workflow_cleanup_enqueue(&self, effect: &CleanupEffect) -> Result<()> {
         self.conn().execute("INSERT OR IGNORE INTO engine_build_cleanup(workspace,id,payload) VALUES (?1,?2,?3)",
             params![effect.workspace, effect.id, serde_json::to_string(effect)?])?;
@@ -45,7 +45,7 @@ impl Store {
     }
 
     /// Only the exclusive runtime's recovery pass may revive an interrupted cleanup
-    /// whose path has retained ownership evidence. Ordinary build output is never replayed.
+    /// whose path has retained ownership evidence. Ordinary run cleanup is never replayed.
     pub fn workflow_cleanup_recover(&self, effect: &CleanupEffect, reason: &str) -> Result<()> {
         let resumed = CleanupResult { retry: true, skipped: vec![reason.into()], ..CleanupResult::default() };
         self.conn().execute("UPDATE engine_build_cleanup SET result=?3 WHERE workspace=?1 AND id=?2 AND result=?4",

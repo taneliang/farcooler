@@ -437,115 +437,67 @@ async fn build_cleanup_group_inherits_published_folder_list() {
 }
 
 #[tokio::test]
-async fn build_cleanup_cancelled_group_retains_open_output_and_unlisted_files() {
+async fn build_cleanup_cancelled_group_defers_output_while_a_source_file_is_open() {
     use super::coding_verbs_tests::command;
     let (_dir, mut runtime, group, tree) = building_group(None).await;
-    let handle = File::open(tree.join("target/output")).unwrap();
-    std::fs::create_dir_all(tree.join("apps/android/app/build")).unwrap();
-    std::fs::write(tree.join("apps/android/app/build/binary"), b"gradle").unwrap();
+    let archive = seed_nextest_archive(&tree);
+    let bytes = archive.metadata().unwrap().len();
     std::fs::write(tree.join("personal-notes"), b"keep").unwrap();
+    let handle = File::open(tree.join("personal-notes")).unwrap();
     command(&runtime, Command::Cancel { item: group.clone(), reason: None });
     runtime.pump(100).await.unwrap();
-    assert_eq!(std::fs::read(tree.join("target/output")).unwrap(), b"group output");
-    assert_eq!(std::fs::read(tree.join("personal-notes")).unwrap(), b"keep");
+    assert!(archive.exists());
     let record = runtime.store.workflow_cleanups("w").unwrap().into_iter().find(|r| r.effect.item == group).unwrap();
     let result = record.result.unwrap();
     assert!(result.retry);
-    assert_eq!(result.bytes_freed, 6, "other folders are freed during contention");
-    assert!(result.skipped.iter().any(|s| s.contains("open files")));
+    assert_eq!(result.bytes_freed, 0);
+    assert!(result.skipped.iter().any(|s| s.contains("open files")), "{result:?}");
     drop(handle);
     let root = runtime.root.clone();
     drop(runtime);
     let mut runtime = Runtime::open(&root).unwrap();
-    runtime.pump(100).await.unwrap();
-    assert!(!tree.join("target").exists(), "ended groups retry after recovery and file closure");
-    assert!(!tree.exists(), "the disposable group checkout is released after file closure");
+    runtime.release_builds_at(&["w".into()], i64::MAX, || Ok(())).await.unwrap();
+    assert!(!archive.exists(), "ended groups retry after file closure");
+    assert_eq!(std::fs::read(tree.join("personal-notes")).unwrap(), b"keep");
+    assert_eq!(std::fs::read(tree.join("target/output")).unwrap(), b"group output");
     let record = runtime.store.workflow_cleanups("w").unwrap().into_iter().find(|r| r.effect.item == group).unwrap();
-    assert!(record.result.as_ref().unwrap().bytes_freed > 18);
+    assert_eq!(record.result.as_ref().unwrap().bytes_freed, bytes);
     assert!(!record.result.as_ref().unwrap().retry);
     runtime.pump(100).await.unwrap();
     let again = runtime.store.workflow_cleanups("w").unwrap().into_iter().find(|r| r.effect.item == group).unwrap();
     assert_eq!(again.result, record.result, "settled bytes are counted once");
 }
 
-
 #[tokio::test]
-async fn build_cleanup_cancelled_group_releases_the_whole_disposable_tree() {
-    use super::coding_verbs_tests::command;
-    let (_dir, mut runtime, group, tree) = building_group(None).await;
-    let foreign = tempfile::tempdir().unwrap();
-    std::fs::write(foreign.path().join("live-output"), b"keep").unwrap();
-    std::os::unix::fs::symlink(foreign.path(), tree.join("foreign-tree")).unwrap();
-    let head = adapters::git(&tree, &["rev-parse", "HEAD"]).await.unwrap();
-    std::fs::write(tree.join("personal-notes"), b"keep").unwrap();
-    command(&runtime, Command::Cancel { item: group.clone(), reason: None });
-    runtime.pump(100).await.unwrap();
-    assert!(!tree.join("target").exists());
-    assert!(!tree.exists());
-    assert_eq!(std::fs::read(foreign.path().join("live-output")).unwrap(), b"keep");
-    assert!(adapters::git(&runtime.repository(), &["cat-file", "-e", &head]).await.is_ok());
-    let record = runtime.store.workflow_cleanups("w").unwrap().into_iter().find(|r| r.effect.item == group).unwrap();
-    assert!(record.result.unwrap().bytes_freed > 12);
-}
-
-#[tokio::test]
-async fn build_cleanup_ended_group_with_empty_output_policy_still_releases_its_tree() {
+async fn build_cleanup_ended_group_with_empty_output_policy_keeps_its_output() {
     use super::coding_verbs_tests::command;
     let (_dir, mut runtime, group, tree) = building_group(Some(vec![])).await;
+    let archive = seed_nextest_archive(&tree);
     command(&runtime, Command::Cancel { item: group.clone(), reason: None });
     runtime.pump(100).await.unwrap();
     let record = runtime.store.workflow_cleanups("w").unwrap().into_iter()
         .find(|r| r.effect.item == group).unwrap();
-    assert!(record.effect.folders.is_empty(), "the published policy disables output deletion");
-    assert!(record.result.as_ref().unwrap().bytes_freed > 12);
-    assert!(record.result.as_ref().unwrap().skipped.is_empty());
-    assert!(!tree.exists(), "folder policy does not retain finished group checkouts");
-    let root = runtime.root.clone();
-    drop(runtime);
-    let mut runtime = Runtime::open(&root).unwrap();
-    runtime.pump(100).await.unwrap();
-    assert!(!tree.exists());
-    let again = runtime.store.workflow_cleanups("w").unwrap().into_iter()
-        .find(|r| r.effect.item == group).unwrap();
-    assert_eq!(again.result, record.result, "recovery preserves the settled cleanup result");
+    assert!(record.effect.folders.is_empty());
+    assert_eq!(record.result.unwrap(), Default::default());
+    assert!(archive.exists(), "the published policy disables output deletion");
 }
 
 #[tokio::test]
-async fn build_cleanup_cancelled_group_preserves_committed_work_after_pruning() {
-    use super::coding_verbs_tests::command;
-    let (_dir, mut runtime, group, tree) = building_group(None).await;
-    std::fs::write(tree.join("group-work.txt"), b"keep committed work").unwrap();
-    adapters::git(&tree, &["add", "group-work.txt"]).await.unwrap();
-    adapters::git(&tree, &["-c", "commit.gpgsign=false", "-c", "user.name=Test",
-        "-c", "user.email=test@example.com", "commit", "-m", "group work"]).await.unwrap();
-    let head = adapters::git(&tree, &["rev-parse", "HEAD"]).await.unwrap();
-    let branch = adapters::git(&tree, &["symbolic-ref", "HEAD"]).await.unwrap();
-    command(&runtime, Command::Cancel { item: group.clone(), reason: None });
-    runtime.pump(100).await.unwrap();
-    assert!(!tree.join("target").exists(), "commits must not prevent output release");
-    assert!(!tree.exists(), "cleanup releases the source checkout while retaining its branch");
-    let retained = adapters::git(&runtime.repository(), &["rev-parse", "--verify", &branch]).await.unwrap();
-    assert_eq!(retained, head, "pruning must retain the ref protecting a group's commits from GC");
-    let record = runtime.store.workflow_cleanups("w").unwrap().into_iter().find(|r| r.effect.item == group).unwrap();
-    assert!(record.result.unwrap().bytes_freed > 12);
-}
-
-#[tokio::test]
-async fn build_cleanup_cancelled_group_anchors_detached_commits_before_removing_the_tree() {
+async fn build_cleanup_cancelled_group_keeps_detached_commits_and_registration() {
     use super::coding_verbs_tests::command;
     let (_dir, mut runtime, group, tree) = building_group(None).await;
     adapters::git(&tree, &["checkout", "--detach"]).await.unwrap();
     adapters::git(&tree, &["-c", "commit.gpgsign=false", "-c", "user.name=Test",
         "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "detached group work"]).await.unwrap();
     let head = adapters::git(&tree, &["rev-parse", "HEAD"]).await.unwrap();
+    let archive = seed_nextest_archive(&tree);
     command(&runtime, Command::Cancel { item: group.clone(), reason: None });
     runtime.pump(100).await.unwrap();
-    assert!(!tree.join("target").exists(), "unanchored commits must not prevent output release");
-    assert!(!tree.exists());
-    let reference = format!("refs/workflow/finished/{}", adapters::folder_name(&digest(&("w", &group))));
-    assert_eq!(adapters::git(&runtime.repository(), &["rev-parse", &reference]).await.unwrap(), head);
+    assert!(!archive.exists());
+    assert_eq!(adapters::git(&tree, &["rev-parse", "HEAD"]).await.unwrap(), head);
+    let listed = adapters::git(&runtime.repository(), &["worktree", "list", "--porcelain"]).await.unwrap();
+    assert!(listed.contains(tree.to_str().unwrap()));
 }
-
 
 #[tokio::test]
 async fn build_cleanup_group_uncertain_records_skip_and_retains_output() {
@@ -789,29 +741,42 @@ async fn build_cleanup_holds_effects_on_the_same_tree_until_it_finishes() {
 }
 
 #[tokio::test]
-async fn build_cleanup_recovery_releases_a_group_tree_retained_by_an_older_engine() {
+async fn build_cleanup_startup_reclaims_finished_group_output_and_preserves_local_work() {
     use super::coding_verbs_tests::{command, until};
     let (_dir, mut runtime, group, tree) = building_group(None).await;
     until(&mut runtime, |s| s.items[&group].phase == Phase::WaitingReview).await;
-    std::fs::create_dir_all(tree.join("target")).unwrap();
-    std::fs::write(tree.join("target/binary"), b"old output retained").unwrap();
+    let tracked = tree.join("source.txt");
+    std::fs::write(&tracked, b"original").unwrap();
+    adapters::git(&tree, &["add", "--", "source.txt"]).await.unwrap();
+    adapters::git(&tree, &["-c", "commit.gpgsign=false", "-c", "user.name=Test", "-c", "user.email=test@example.com",
+        "commit", "-m", "seed tracked source"]).await.unwrap();
+    std::fs::write(&tracked, b"staged edit").unwrap();
+    adapters::git(&tree, &["add", "--", "source.txt"]).await.unwrap();
+    std::fs::write(&tracked, b"unstaged edit").unwrap();
+    let archive = seed_nextest_archive(&tree);
+    let bytes = archive.metadata().unwrap().len();
+    let untracked = tree.join("personal-notes");
+    std::fs::write(&untracked, b"keep notes").unwrap();
+    let local_output = tree.join("target/local-notes");
+    std::fs::write(&local_output, b"keep these too").unwrap();
     command(&runtime, Command::Cancel { item: group.clone(), reason: None });
-    // An older engine settled folder cleanup but deliberately left this checkout behind.
-    let record = runtime.store.workflow_cleanups("w").unwrap().into_iter().rev().find(|r| r.effect.item == group).unwrap();
+    // An older engine settled folder cleanup but left the checkout behind.
+    let record = runtime.store.workflow_cleanups("w").unwrap().into_iter().rev()
+        .find(|r| r.effect.item == group).unwrap();
     assert!(runtime.store.workflow_cleanup_begin(&record.effect, None).unwrap());
     runtime.store.workflow_cleanup_result(&record.effect, &Default::default()).unwrap();
-    let reader = File::open(tree.join("target/binary")).unwrap();
     let root = runtime.root.clone();
     drop(runtime);
     let mut runtime = Runtime::open(&root).unwrap();
     runtime.pump(100).await.unwrap();
-    assert!(tree.exists(), "the recovery sweep leaves a checkout with a live reader");
-    drop(reader);
-    runtime.release_builds(&["w".into()]).await.unwrap();
-    assert!(!tree.exists(), "recovery releases a known finished group's old tree");
+    assert_eq!(std::fs::read(tracked).unwrap(), b"unstaged edit");
+    assert_eq!(adapters::git(&tree, &["show", ":source.txt"]).await.unwrap(), "staged edit");
+    assert_eq!(std::fs::read(untracked).unwrap(), b"keep notes");
+    assert_eq!(std::fs::read(local_output).unwrap(), b"keep these too");
+    assert!(!archive.exists(), "startup reclaims verified output beside local work");
     let records = runtime.store.workflow_cleanups("w").unwrap();
     let released = records.iter().rev().find(|r| r.effect.item == group && r.effect.id != record.effect.id).unwrap();
-    assert!(released.result.as_ref().unwrap().bytes_freed > 12);
+    assert_eq!(released.result.as_ref().unwrap().bytes_freed, bytes);
     runtime.pump(100).await.unwrap();
     assert_eq!(runtime.store.workflow_cleanups("w").unwrap().len(), records.len());
 }
@@ -832,10 +797,11 @@ async fn recovery_accounts_for_idle_output_left_by_an_older_engine() {
     assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::WaitingReview);
 }
 
-fn seed_nextest_archive(tree: &Path) {
+pub(super) fn seed_nextest_archive(tree: &Path) -> PathBuf {
     let target = tree.join("target");
     std::fs::create_dir_all(&target).unwrap();
-    let file = File::create(target.join("rust-tests.tar.zst")).unwrap();
+    let path = target.join("rust-tests.tar.zst");
+    let file = File::create(&path).unwrap();
     let encoder = zstd::stream::write::Encoder::new(file, 1).unwrap();
     let mut archive = tar::Builder::new(encoder);
     for (path, metadata) in [
@@ -856,6 +822,7 @@ fn seed_nextest_archive(tree: &Path) {
         archive.append_data(&mut header, path, bytes.as_slice()).unwrap();
     }
     archive.into_inner().unwrap().finish().unwrap();
+    path
 }
 
 pub(super) fn cargo_build_output(package: &Path, target: &Path) -> Vec<PathBuf> {

@@ -11,11 +11,11 @@ mod generated;
 const LEGACY_BUILD_FOLDERS: &[&str] = &["crates/web/target", "apps/macos/.build", "apps/shared/AgentKit/.build"];
 const LEGACY_PUBLISHED_DEFAULTS: &[&str] = &["target", "apps/android/app/build", "apps/*/build", ".build"];
 
-const OUTPUT_INTERRUPTED: &str = "build output cleanup interrupted; bytes freed unknown";
+pub(super) const OUTPUT_INTERRUPTED: &str = "build output cleanup interrupted; bytes freed unknown";
 pub(super) const CLEANUP_RETRY: Duration = Duration::from_secs(1);
 const CHECKOUT_RETRY: Duration = Duration::from_secs(5 * 60);
 
-pub(super) const GROUP_INTERRUPTED: &str = "group tree cleanup interrupted; bytes freed unknown";
+const LEGACY_GROUP_INTERRUPTED: &str = "group tree cleanup interrupted; bytes freed unknown";
 
 #[derive(Clone, Default)]
 pub(super) struct TreeLocks(Arc<Mutex<BTreeMap<PathBuf, Weak<RwLock<()>>>>>);
@@ -164,26 +164,15 @@ impl Exec {
                     continue;
                 };
                 if !self.store.workflow_cleanup_begin(&effect, record.result.as_ref())? { continue; }
-                let reconcile = record.result.as_ref().is_some_and(|r|
-                    r.skipped.iter().any(|s| s == GROUP_INTERRUPTED));
-                let mut result = match self.release_build_attempt(&effect, &tree, held, || {}, reconcile).await {
+                let mut result = match self.release_build_attempt(&effect, &tree, held, || {}).await {
                     Ok(result) => result,
                     Err(error) => CleanupResult { skipped: vec![format!("cleanup unavailable: {error}")], ..CleanupResult::default() },
                 };
-                // A preflight refusal must not discard the reconciliation mode: .git may be
-                // gone already, and only a later safe reconciliation can finish this intent.
-                if reconcile && !result.skipped.is_empty() { result.retry = true; }
                 let output_unknown = result.skipped.iter().any(|s| s.contains(OUTPUT_INTERRUPTED))
-                    || record.result.as_ref().is_some_and(|r| r.skipped.iter().any(|s| s.contains(OUTPUT_INTERRUPTED)));
+                    || record.result.as_ref().is_some_and(|r| r.skipped.iter()
+                        .any(|s| s.contains(OUTPUT_INTERRUPTED) || s.starts_with(LEGACY_GROUP_INTERRUPTED)));
                 // Completed folders are absent on retry; preserve their byte count exactly once.
-                if reconcile || result.skipped.iter().any(|s| s.starts_with(GROUP_INTERRUPTED)) {
-                    // Neither the remaining size nor zero is a known total for the lost attempt.
-                    // Keep the existing wire convention: zero plus an explicit unknown-byte reason.
-                    result.bytes_freed = 0;
-                    result.skipped.push(GROUP_INTERRUPTED.into());
-                } else {
-                    result.bytes_freed = result.bytes_freed.saturating_add(record.result.map_or(0, |r| r.bytes_freed));
-                }
+                result.bytes_freed = result.bytes_freed.saturating_add(record.result.map_or(0, |r| r.bytes_freed));
                 if output_unknown {
                     result.bytes_freed = 0;
                     if !result.skipped.iter().any(|s| s.contains(OUTPUT_INTERRUPTED)) {
@@ -205,10 +194,10 @@ impl Exec {
     pub(super) async fn release_build_checked(&self, effect: &CleanupEffect, after_check: impl FnOnce()) -> Result<CleanupResult> {
         let tree = effect.tree.as_ref().map_or_else(|| self.item_tree_for(&effect.workspace, &effect.item, effect.restart.as_deref()), |t| PathBuf::from(&t.path));
         let held = self.tree_lock(&tree).try_write_owned().map_err(|_| Error::Refused("cleanup tree is busy"))?;
-        self.release_build_attempt(effect, &tree, held, after_check, false).await
+        self.release_build_attempt(effect, &tree, held, after_check).await
     }
     async fn release_build_attempt(&self, effect: &CleanupEffect, tree: &Path, tree_guard: OwnedRwLockWriteGuard<()>,
-        after_check: impl FnOnce(), reconcile: bool) -> Result<CleanupResult>
+        after_check: impl FnOnce()) -> Result<CleanupResult>
     {
         let skip = |why: &str| CleanupResult { skipped: vec![why.into()], ..CleanupResult::default() };
         // The service shares this fence with provision_named, adoption and worktree.create.
@@ -228,16 +217,12 @@ impl Exec {
         let adopted = effect.tree.as_ref().filter(|t| t.adopted);
         if let Some(why) = self.store.workflow_cleanup_skip(effect)? { return Ok(skip(&why)); }
         let held = Arc::new(CleanupFences { _tree: tree_guard, _repository: repository_guard });
-        let group_recovery = reconcile && effect.tree.is_none() && self.ended_group(effect)?;
-        let exists = tree.try_exists()?;
-        if !exists && !group_recovery { return Ok(skip("worktree is absent")); }
-        // Recovery may find .git already removed. Its registration is checked before deletion.
-        // A main checkout, symlink or moved binding is still never ours to clean.
-        let canonical = if exists { tree.canonicalize()? } else { tree.to_path_buf() };
+        if !tree.try_exists()? { return Ok(skip("worktree is absent")); }
+        let canonical = tree.canonicalize()?;
         let linked = match tree.join(".git").symlink_metadata() {
             Ok(meta) => meta.file_type().is_file(),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => group_recovery,
-            Err(e) => return Err(e.into()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => return Err(error.into()),
         };
         if canonical != tree || !linked { return Ok(skip("worktree is not an exclusive linked tree")); }
         for workspace in &self.store.workflow_workspaces()? {
@@ -276,16 +261,15 @@ impl Exec {
                 return Ok(skip("adopted worktree branch has changed"));
             }
         }
-        after_check();
-        if group_recovery || effect.tree.is_none() && self.finished_landing_group(effect)? {
-            return Ok(match self.release_group_tree(tree, held, effect, group_recovery).await {
-                Ok(bytes_freed) => CleanupResult { bytes_freed, ..CleanupResult::default() },
-                Err(why) => CleanupResult { retry: true, skipped: vec![why], ..CleanupResult::default() },
-            });
+        let ended_group = self.ended_group(effect)?;
+        if ended_group && !registered_private_checkout(tree).await {
+            return Ok(skip("group has no matching Git registration"));
         }
+        after_check();
+        let selective = adopted.is_some() || ended_group;
         let mut result = CleanupResult::default();
         let mut paths = BTreeSet::new();
-        for folder in build_folders(&effect.folders, adopted.is_some()) {
+        for folder in build_folders(&effect.folders, selective) {
             for path in folder_paths(tree, folder) {
                 match path {
                     Ok(Some(path)) => { paths.insert(path); }
@@ -306,8 +290,8 @@ impl Exec {
             if removed.iter().any(|p| path.starts_with(p)) { continue; }
             let label = path.strip_prefix(tree).unwrap().to_string_lossy().into_owned();
             let mut retry = None;
-            let selective = adopted.is_some() || discovered.contains(&path);
-            let answer = self.release_folder(tree, &path, held.clone(), &mut retry, selective).await;
+            let answer = self.release_folder(tree, &path, held.clone(), &mut retry,
+                selective || discovered.contains(&path)).await;
             result.retry |= retry.is_some();
             match answer {
                 Ok(bytes) => { result.bytes_freed = result.bytes_freed.saturating_add(bytes); removed.push(path); }
@@ -316,13 +300,6 @@ impl Exec {
             if retry == Some(CHECKOUT_RETRY) {
                 result.retry_at_ms = Some(now().saturating_add(CHECKOUT_RETRY.as_millis() as i64));
                 break;
-            }
-        }
-        if !result.retry && self.ended_group(effect)? && effect.tree.is_none() {
-            let released = self.release_group_tree(tree, held, effect, false).await;
-            match released {
-                Ok(bytes) => result.bytes_freed = result.bytes_freed.saturating_add(bytes),
-                Err(why) => { result.retry = true; result.skipped.push(why); }
             }
         }
         if result.skipped.iter().any(|s| s.contains(OUTPUT_INTERRUPTED)) { result.bytes_freed = 0; }

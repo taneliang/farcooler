@@ -49,8 +49,15 @@ const GATE: &str = r#"elif stage == 'gate':
         __import__('shutil').rmtree(tools.parent)
         if found != 0: sys.exit(found)
     if mode == 'build':
-        warm = pathlib.Path('target', 'built').exists()
-        pathlib.Path('target').mkdir(exist_ok=True); pathlib.Path('target', 'built').write_text('x')
+        output = pathlib.Path('apps/android/app/build/outputs/apk/debug/app-debug.apk')
+        warm = output.exists()
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b'PK\x03\x04landing fixture')
+        output.with_name('output-metadata.json').write_text(json.dumps({
+            'version': 3, 'artifactType': {'type': 'APK', 'kind': 'Directory'},
+            'applicationId': 'com.example.cleanup', 'variantName': 'debug',
+            'elements': [{'type': 'SINGLE', 'filters': [], 'outputFile': output.name}],
+        }))
         with open(os.environ['MARKER'], 'a') as f: f.write('warm\n' if warm else 'cold\n')
     if mode == 'lane-env':
         seen = {k: os.environ.get(k) for k in ('USER', 'LOGNAME')}
@@ -274,7 +281,7 @@ async fn a_conflict_returns_the_ticket_to_build_with_paths_and_frees_the_target(
     assert_eq!(outbox(&runtime, StageKind::Run), 0, "the fold stopped the group; the gate never ran on a half-folded tree");
     let group = state.items.iter().find(|(_, i)| i.group_of.is_some()).map(|(_, i)| i.phase.clone());
     assert_eq!(group, Some(Phase::Failed));
-    // A failed fold releases its checkout; its durable receipt still reconciles (ov-1351).
+    // A failed fold keeps its checkout and the durable receipt still reconciles (ov-1351).
     let tree = runtime.store.workflow_outbox("w").unwrap().into_iter().find(|s| s.effect.kind == EffectKind::Execute(StageKind::Fold)).unwrap();
     let binding = Binding::new("w", &tree.effect, tree.resource_generation.unwrap(), 0,
         &runtime.item_base("w", &tree.effect).unwrap());
@@ -282,7 +289,7 @@ async fn a_conflict_returns_the_ticket_to_build_with_paths_and_frees_the_target(
     assert!(matches!(recovered, Outcome::FoldConflict { ref evidence, ref files, .. }
         if evidence.candidate == theirs && files == &["shared.txt".to_string()]), "{recovered:?}");
     let tree = runtime.tree(&binding);
-    assert!(!tree.exists(), "{}", tree.display());
+    assert!(tree.join(".git").is_file(), "{}", tree.display());
 }
 
 #[tokio::test]

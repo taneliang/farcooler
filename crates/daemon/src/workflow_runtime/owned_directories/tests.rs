@@ -156,7 +156,7 @@ async fn native_codex_build_review_and_landing_release_owned_output() {
 async fn build_review_send_back_and_landing_release_owned_output() {
     let (dir, mut runtime) = lander("pass").await;
     let repo = runtime.repository();
-    std::fs::write(repo.join(".git/info/exclude"), "target/\n").unwrap();
+    std::fs::write(repo.join(".git/info/exclude"), "target/\n/apps/android/app/build/\n").unwrap();
     let adapter = dir.path().join("adapter.py");
     let script = std::fs::read_to_string(&adapter).unwrap()
         .replace("if stage == 'build':\n", concat!(
@@ -179,8 +179,14 @@ async fn build_review_send_back_and_landing_release_owned_output() {
             "    logs = pathlib.Path(os.environ['FARCOOLER_LANE_GATE_LOG_DIR'])\n",
             "    assert logs.is_dir()\n",
             "    (logs / 'gate.log').write_bytes(b'log')\n",
-            "    pathlib.Path('target').mkdir(exist_ok=True)\n",
-            "    pathlib.Path('target/landing').write_bytes(b'l' * (32 << 20))\n"));
+            "    output = pathlib.Path('apps/android/app/build/outputs/apk/debug/app-debug.apk')\n",
+            "    output.parent.mkdir(parents=True)\n",
+            "    output.write_bytes(b'PK\\x03\\x04' + b'l' * ((32 << 20) - 4))\n",
+            "    output.with_name('output-metadata.json').write_text(json.dumps({\n",
+            "        'version': 3, 'artifactType': {'type': 'APK', 'kind': 'Directory'},\n",
+            "        'applicationId': 'com.example.cleanup', 'variantName': 'debug',\n",
+            "        'elements': [{'type': 'SINGLE', 'filters': [], 'outputFile': output.name}],\n",
+            "    }))\n"));
     std::fs::write(&adapter, script).unwrap();
 
     let config = runtime.coding.as_mut().unwrap();
@@ -218,7 +224,9 @@ async fn build_review_send_back_and_landing_release_owned_output() {
     let group = state.items.iter().find(|(_, item)| item.group_of.is_some()).map(|(id, _)| id)
         .or_else(|| state.archive.iter().find(|(_, item)| item.group.is_some()).map(|(id, _)| id)).unwrap();
     assert_eq!(phase_of(&state, group), Some(Phase::Done));
-    assert!(!runtime.item_tree("w", group).exists());
+    let group_tree = runtime.item_tree("w", group);
+    assert!(group_tree.join(".git").is_file());
+    assert!(!group_tree.join("apps/android/app/build/outputs/apk/debug/app-debug.apk").exists());
     let after = available(&runtime.root);
     let records = runtime.store.workflow_cleanups("w").unwrap();
     let gate_logs = records.iter().filter(|r| r.effect.item == *group)
