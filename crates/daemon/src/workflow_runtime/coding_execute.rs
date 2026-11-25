@@ -126,6 +126,24 @@ pub struct CodingCiReceipt {
 }
 
 impl Exec {
+    pub(super) fn provision_lock_path(&self, effect: &Effect) -> PathBuf {
+        self.root.join("receipts").join(format!("{}.provision.lock", digest(effect)))
+    }
+
+    /// Persist the lock's identity before admitting the effect. An older
+    /// admitted effect without this file may have launched untracked Git.
+    pub(super) fn prepare_provision_lock(&self, effect: &Effect) -> Result<()> {
+        if !matches!(effect.kind, EffectKind::Execute(StageKind::Provision)) { return Ok(()); }
+        match durable(&self.provision_lock_path(effect), b"") {
+            Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+            result => result,
+        }
+    }
+
+    pub(super) fn lock_provision(&self, binding: &Binding) -> std::io::Result<File> {
+        crate::git::try_provision_lock(&self.provision_lock_path(&binding.effect))
+    }
+
     fn fact_path(&self, binding: &Binding) -> PathBuf { self.effect_fact_path(&binding.effect) }
     fn effect_fact_path(&self, effect: &Effect) -> PathBuf {
         self.root.join("receipts").join(format!("{}.process.json", digest(effect)))
@@ -608,6 +626,36 @@ impl Exec {
         self.write_process_fact(binding, command.argv, command.environment,
             completed.map(|passed| if passed { 0 } else { 1 }), restarting && completed.is_none())
     }
+    async fn provision_checkout(&self, workspace: &str, binding: &Binding, tree: &Path) -> Result<Option<String>> {
+        if binding.effect.reuse_checkout {
+            self.verify_tree_identity(binding).await?;
+        } else {
+            match &binding.effect.tree {
+                Some(named) => match self.provision_named(workspace, binding, named).await {
+                    // A refusal said as a sentence comes before anything is made (an adopted tree with changes, or
+                    // a pane still in it): the step fails with it, kept so a restart reads it (ov-1074).
+                    Err(Error::Domain(refused)) => {
+                        return Ok(Some(refused.to_string()));
+                    }
+                    other => other?,
+                },
+                None => {
+                    let branch = adapters::private_branch(workspace, &binding.effect);
+                    if let Err(error) = crate::git::create_worktree_with(&self.repository(), &branch, &binding.base, tree, true).await {
+                        // Nothing made fails the step with a sentence (ov-1220); git's own reason is in the warning just above.
+                        tracing::warn!(item = %binding.effect.item, %error, "worktree provisioning failed");
+                        return match named_tree::unmade(&self.repository(), tree, Some(&branch), error, "configured worktree provisioning uncertain").await {
+                            Error::Domain(refused) => Ok(Some(refused.to_string())),
+                            uncertain => Err(uncertain),
+                        };
+                    }
+                }
+            }
+        }
+        spotlight::exclude_builds(tree).await;
+        Ok(None)
+    }
+
     pub(super) async fn execute_coding(&self, workspace: &str, binding: &Binding,
         cancel: tokio::sync::watch::Receiver<bool>) -> Result<Outcome> {
         self.check_binding(workspace, binding)?;
@@ -624,32 +672,13 @@ impl Exec {
                 if let Err(why) = self.ensure_start_objects(&binding.base, &log).await {
                     return self.refuse_unstarted(binding, why);
                 }
-                if binding.effect.reuse_checkout {
-                    self.verify_tree_identity(binding).await?;
-                } else {
-                    match &binding.effect.tree {
-                        Some(named) => match self.provision_named(workspace, binding, named).await {
-                            // A refusal said as a sentence comes before anything is made (an adopted tree with changes, or
-                            // a pane still in it): the step fails with it, kept so a restart reads it (ov-1074).
-                            Err(Error::Domain(refused)) => {
-                                return self.refuse_unstarted(binding, refused.to_string());
-                            }
-                            other => other?,
-                        },
-                        None => {
-                            let branch = adapters::private_branch(workspace, &binding.effect);
-                            if let Err(error) = crate::git::create_worktree_with(&self.repository(), &branch, &binding.base, &tree, true).await {
-                                // Nothing made fails the step with a sentence (ov-1220); git's own reason is in the warning just above.
-                                tracing::warn!(item = %binding.effect.item, %error, "worktree provisioning failed");
-                                return match named_tree::unmade(&self.repository(), &tree, Some(&branch), error, "configured worktree provisioning uncertain").await {
-                                    Error::Domain(refused) => self.refuse_unstarted(binding, refused.to_string()),
-                                    uncertain => Err(uncertain),
-                                };
-                            }
-                        }
-                    }
+                let provisioned = crate::git::PROVISION_WRITERS.scope(self.provision_lock_path(&binding.effect),
+                    self.provision_checkout(workspace, binding, &tree)).await?;
+                let _quiescent = self.lock_provision(binding)?;
+                if let Some(why) = provisioned {
+                    return self.refuse_unstarted(binding, why);
                 }
-                spotlight::exclude_builds(&tree).await;
+                self.record_git_settlement(binding)?;
             },
             StageKind::AwaitBase | StageKind::Fold | StageKind::Push | StageKind::AwaitCi | StageKind::RerunCi | StageKind::Route
                 | StageKind::PushCandidate => return self.execute_verb(binding, kind, cancel).await,
@@ -740,9 +769,7 @@ impl Exec {
             }
             _ => return Err(Error::Refused("unsupported configured stage")),
         }
-        if matches!(kind, StageKind::Provision | StageKind::Land) {
-            // Written only after the retained bounded Git operation has returned.
-            // A visible ref/worktree alone cannot prove its old process is done.
+        if matches!(kind, StageKind::Land) {
             self.record_git_settlement(binding)?;
         }
         self.reconcile_coding(binding).await

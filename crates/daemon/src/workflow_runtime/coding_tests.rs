@@ -222,6 +222,7 @@ pub(super) async fn admitted_in(runtime: &Runtime, workspace: &str) -> Binding {
     let stored = runtime.store.workflow_outbox(workspace).unwrap().into_iter().find(|s| s.active).unwrap();
     let claim = runtime.store.workflow_claim_effect(workspace, &stored.effect.id, "crash-test", state.revision, state.epoch, 10, 100).unwrap().unwrap();
     let base = runtime.pin_base(workspace, &stored.effect).await.unwrap();
+    runtime.prepare_provision_lock(&stored.effect).unwrap();
     assert!(runtime.store.workflow_admit_effect(&claim, 10).unwrap());
     Binding::new(workspace, &stored.effect, claim.resource_generation, state.items[&stored.effect.item].iteration, &base)
 }
@@ -1026,6 +1027,7 @@ async fn mismatched_provision() -> (tempfile::TempDir, Runtime, String, Binding)
 #[tokio::test]
 async fn workflow_coding_base_mismatch_writes_unstarted_and_fails_safely() {
     let (dir, runtime, workspace, binding) = mismatched_provision().await;
+    runtime.prepare_provision_lock(&binding.effect).unwrap();
     let (_, cancel) = tokio::sync::watch::channel(false);
     let outcome = runtime.execute_coding(&workspace, &binding, cancel).await.unwrap();
     assert!(matches!(outcome, Outcome::SafeFailureBecause(_)), "{outcome:?}");

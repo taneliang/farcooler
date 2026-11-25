@@ -204,6 +204,17 @@ impl Exec {
                 another run's worktree in this repository. Resolve it again in a moment.")))?),
             None => None,
         };
+        let _quiescent = match self.lock_provision(binding) {
+            Ok(file) => Some(file),
+            // A controller can still resolve older provisions after checking
+            // them by hand. The runner has no process evidence for these.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound && !automatic => None,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound =>
+                return Err(Error::Refused("no provisioning process lock was recorded, so Git may still be running")),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock =>
+                return Err(Error::Refused("the provisioning Git process may still be running")),
+            Err(error) => return Err(error.into()),
+        };
         if automatic && path.symlink_metadata().is_ok_and(|meta| meta.is_dir()) && self.provision_intact(binding, &path).await? {
             self.record_git_settlement(binding)?;
             return self.reconcile_coding(binding).await;

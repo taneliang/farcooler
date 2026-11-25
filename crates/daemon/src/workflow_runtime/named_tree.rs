@@ -368,6 +368,11 @@ fn said(sentence: &str) -> Error { Error::Domain(DomainError::refused(sentence.i
 /// fails too, leaves the outcome unknown (`uncertain`) for a person to settle.
 pub(super) async fn unmade(repository: &Path, path: &Path, made: Option<&str>, error: DomainError, uncertain: &'static str) -> Error {
     tracing::warn!(path = %path.display(), ?error, "making a run's worktree failed; looking at what is there");
+    // A timed-out Git child or helper may still hold the write lock. Check
+    // before looking for absence, while no further provisioning commands run.
+    if !crate::git::PROVISION_WRITERS.try_with(|lock| crate::git::try_provision_lock(lock).is_ok()).unwrap_or(false) {
+        return Error::Refused("the provisioning Git process could not be confirmed to have exited");
+    }
     if let Some(there) = what_is_there(repository, path, made).await {
         tracing::warn!(path = %path.display(), %there, "the run's worktree is left uncertain");
         return Error::Refused(uncertain);
