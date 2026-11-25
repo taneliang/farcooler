@@ -167,7 +167,8 @@ fn nextest_failures(log: &str, job: &str, step: &str) -> Option<BTreeSet<String>
         Some(fields.next()?.split_once(' ')?.1.trim())
     }).collect();
     let summary = lines.iter().rposition(|line| line.starts_with("Summary ["))?;
-    let (_, counts) = lines[summary].split_once(" tests run: ")?;
+    let (_, counts) = lines[summary].split_once(" tests run: ")
+        .or_else(|| lines[summary].split_once(" test run: "))?;
     let mut lines = lines.into_iter().skip(summary + 1);
     let count = counts.split(", ").find_map(|n| n.strip_suffix(" failed"))?.parse::<usize>().ok()?;
     if count == 0 { return None; }
@@ -218,30 +219,33 @@ job, steps = os.environ['TEST_JOB'], json.loads(os.environ['TEST_STEPS'])
 if sys.argv[1] == 'api':
     run = int(sys.argv[4].split('/')[5])
     print(json.dumps([dict(id=run, name=job, conclusion='failure',
-        steps=[dict(name=step, conclusion='failure') for step, _ in steps])]))
+        steps=[dict(name=step, conclusion='failure') for step, _, _ in steps])]))
 else:
     run = int(sys.argv[3])
-    for step, binary in steps:
-        tests = ['tests::one', 'tests::two']
+    for step, binary, test_count in steps:
+        tests = ['tests::one'] if test_count == 1 else ['tests::one', 'tests::two']
         if run == 102 and step == os.environ['NEW_FAILURE_STEP']:
-            tests[1] = 'tests::regression'
-        lines = ['Summary [ 1.000s] 20 tests run: 18 passed, 2 failed, 0 skipped']
-        lines += [f'^[[31;1mFAIL^[[0m [ 0.113s] ({i}/20) {binary} {test}' for i, test in enumerate(tests, 1)]
+            tests[-1] = 'tests::regression'
+        noun = 'test' if test_count == 1 else 'tests'
+        lines = [f'Summary [ 1.000s] {test_count} {noun} run: {test_count - len(tests)} passed, {len(tests)} failed, 0 skipped']
+        lines += [f'^[[31;1mFAIL^[[0m [ 0.113s] ({i}/{test_count}) {binary} {test}' for i, test in enumerate(tests, 1)]
         lines += ['error: test run failed']
         for line in lines:
             print(job + '\t' + step + '\t2026-11-25T00:11:00Z     ' + line)
 "#;
 
-    const SHARD: (&str, &str) = ("Full Rust workspace shard", "farcooler-daemon");
-    const TAILCAT: (&str, &str) = (
-        "Run cargo nextest run --profile ci -p farcooler-tailcat --features helper", "farcooler-tailcat",
+    type TestStep = (&'static str, &'static str, usize);
+    const SHARD: TestStep = ("Full Rust workspace shard", "farcooler-daemon", 20);
+    const TAILCAT: TestStep = (
+        "Run cargo nextest run --profile ci -p farcooler-tailcat --features helper", "farcooler-tailcat", 20,
     );
-    const TAILCAT_INTEGRATION: (&str, &str) = (
+    const TAILCAT_INTEGRATION: TestStep = (
         "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test an_empty_allowlist_starts_no_tunnel",
-        "farcooler-daemon::an_empty_allowlist_starts_no_tunnel",
+        "farcooler-daemon::an_empty_allowlist_starts_no_tunnel", 4,
     );
+    const SINGLE_TEST: TestStep = ("Run targeted Rust test", "farcooler-daemon", 1);
 
-    async fn exercise(new_failure_step: Option<&str>, job: &str, steps: &[(&str, &str)]) {
+    async fn exercise(new_failure_step: Option<&str>, job: &str, steps: &[TestStep]) {
         let (dir, runtime) = lander("pass").await;
         let provider = dir.path().join("provider.py");
         let gh = dir.path().join("gh");
@@ -281,8 +285,8 @@ else:
             } else {
                 assert_eq!(fact["label"], "passed");
                 let note = state.items[*ticket].landing_ci.as_ref().and_then(LandingCi::note).unwrap();
-                for (step, binary) in steps {
-                    for test in ["tests::one", "tests::two"] {
+                for &(step, binary, test_count) in steps {
+                    for test in ["tests::one", "tests::two"].into_iter().take(test_count) {
                         assert!(note.contains(&format!("{job} / {step} — {binary} {test}")), "{note}");
                     }
                 }
@@ -304,6 +308,11 @@ else:
     #[tokio::test]
     async fn an_inherited_failure_in_the_linux_tailcat_step_still_lands() {
         exercise(None, "Rust (ubuntu-24.04)", &[TAILCAT]).await;
+    }
+
+    #[tokio::test]
+    async fn an_inherited_single_test_failure_still_lands() {
+        exercise(None, "Rust (ubuntu-24.04)", &[SINGLE_TEST]).await;
     }
 
     #[tokio::test]
