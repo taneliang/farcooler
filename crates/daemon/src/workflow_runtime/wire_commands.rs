@@ -85,6 +85,10 @@ fn retain_plan_items(state: &mut State) {
     state.grouping = None;
     state.items.retain(|_, item| !item.definition.is_ticket()
         && !(item.group_of.is_some() && matches!(item.phase, Phase::Done | Phase::Cancelled)));
+    // Plan renders the current run. Prior runs can grow without bound across restarts.
+    for item in state.items.values_mut() {
+        item.history.clear();
+    }
 }
 
 /// Released Plan reads one unmarked workflow snapshot. Keep the complete reply
@@ -127,6 +131,12 @@ pub(crate) fn encode_legacy_get(mut value: serde_json::Value) -> String {
     }
     if let Some(sequences) = value.pointer_mut("/state/source_sequences").and_then(|v| v.as_object_mut()) {
         sequences.retain(|key, _| Some(key.as_str()) == source.as_deref());
+    }
+    // Keep the current run visible even if its previous runs fill the frame.
+    if let Some(items) = value.pointer_mut("/state/items").and_then(|v| v.as_object_mut()) {
+        for item in items.values_mut().filter_map(|v| v.as_object_mut()) {
+            item.remove("history");
+        }
     }
     let json = value.to_string();
     if json.len() <= PLAN_WORKFLOW_BYTES {
