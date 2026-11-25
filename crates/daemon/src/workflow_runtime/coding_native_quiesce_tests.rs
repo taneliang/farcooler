@@ -21,7 +21,16 @@ fn on_tty(tty: &str) -> Vec<i32> {
 }
 fn alive(pid: i32) -> bool { unsafe { libc::kill(pid, 0) == 0 } }
 async fn closed(host: &Host, owner: &NativeOwner) -> bool {
-    host.0.pane_life(&owner.pane, owner.terminal).await.unwrap() == farcooler_tmux::PaneLife::Gone
+    let probe = || host.0.pane_life(&owner.pane, owner.terminal);
+    let life = match probe().await {
+        Err(farcooler_core::DomainError::TmuxUnavailable) => {
+            // The last pane just closed. Give tmux's exiting server time to leave an absent socket.
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            probe().await
+        }
+        result => result,
+    };
+    life.unwrap() == farcooler_tmux::PaneLife::Gone
 }
 async fn wait_not_live(host: &Host, owner: &NativeOwner) {
     for _ in 0..500 {

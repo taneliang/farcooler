@@ -209,3 +209,23 @@ The loaded reads launched zero tmux clients. The idle minute recorded 23 `lsof` 
 The pane latency test exceeded its 100 ms deadline on three runs, with maxima of 317 ms, 120 ms, and 125 ms as the probe completed. A standalone run with fixture data under `FARCOOLER_SCRATCH` passed. All ten echoes arrived within 49.6 ms. Eight overlapped the open-file probe, and the test also observed the accounting walk and verified the cleanup receipt. The cause of the earlier timing misses remains unresolved.
 
 All 15 CI watcher tests passed. Nextest ran 4,728 tests across the daemon, CLI, store, and workflow suites and selected socket integrations. The parallel run passed 4,725. All three initial failures passed in a serial rerun with the same binaries. They covered native notice cleanup, a recorded verdict without a turn-end event, and recovery of an admitted CI effect after reconfiguration. Migration lint and its self-test, daemon-layer, file-size, doc-comment, and workflow lint checks passed.
+
+## Verification on landing base `ab1c6074d`
+
+Git replayed all 12 ticket commits cleanly. The patch series matched the previous candidate, including the changes to `process_logs.rs` and `wire_commands.rs`.
+
+| Loaded RPC | Rebased latency | Budget |
+| --- | ---: | ---: |
+| Plan | 322 ms | < 2 s |
+| Plan theme list | 324 ms | < 2 s |
+| Workflow Get | 139 ms | < 1 s |
+| Task List, first page | 29 ms | — |
+| Worktree List | 0.28 ms | < 2 s |
+
+The loaded reads made zero tmux calls. The idle minute recorded 23 `lsof` launches (12 recursive), 72 Git launches (one remote-head probe), one `gh` launch (zero polls of the finished run), and 64 tmux launches.
+
+The first pane latency run exceeded the 100 ms deadline by 6.2 ms. The standalone rerun passed with seven echoes, a maximum of 88.4 ms, five echoes during the open-file probe, and an echo during the accounting walk. It also verified the cleanup receipt's byte count. After the test-only rebuild, one run reached 112.5 ms and the standalone rerun passed with ten echoes and a maximum of 47.0 ms. Eight echoes overlapped the probe and the test observed the accounting walk. The source of the timing misses remains unmeasured. [Tmux overhead follow-up (ov-1450)](farcooler://task/-/ov-1450)
+
+Nextest ran 4,736 tests across the daemon, CLI, store, and workflow suites and three workflow socket integrations. The parallel run passed 4,732. Two native delivery and steering cases passed after building the runnable CLI in scratch. Two quiescence cases failed on the immediate pane check after shutdown. The test helper now retries a transient tmux error once after 20 ms and still requires tmux to report the pane gone. All six native quiescence tests passed on the rebuilt candidate. The opt-in CLI test also passed while reading workflow logs from a pane that was writing output.
+
+Migration lint and its self-test, daemon-layer, file-size, doc-comment, and workflow lint checks passed.
