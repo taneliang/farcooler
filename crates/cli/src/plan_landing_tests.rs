@@ -64,7 +64,7 @@ async fn show_takes_the_number_and_reads_the_timeline() {
     }
     let mut link = runner();
     assert_eq!(landing_say(&mut link, "show 12").await.unwrap_err().to_string(), "No landing here is number 12. `farcooler landing list` shows them.");
-    assert_eq!(landing_say(&mut link, "show soon").await.unwrap_err().to_string(), "Name a landing by its number, like 12. \"soon\" isn't one.");
+    assert_eq!(landing_say(&mut link, "show soon").await.unwrap_err().to_string(), "Use a historical landing number or an engine group UUID from `farcooler landing list`. Got \"soon\".");
     let json: Value = serde_json::from_str(&landing_in(&mut link, "show 9", true).await.unwrap()).unwrap();
     assert_eq!((json["number"].as_u64(), json["events"].as_array().map(Vec::len)), (Some(9), Some(0)));
 }

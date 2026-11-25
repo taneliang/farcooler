@@ -8,58 +8,79 @@ use farcooler_workflow::{Archived, ArchivedGroup, Phase, State};
 use in_process::*;
 use serde_json::Value;
 
-async fn landing(h: &Harness, repo: &Repo, args: &[&str]) -> Value {
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_farcooler"))
+async fn run_landing(h: &Harness, repo: &Repo, args: &[&str]) -> std::process::Output {
+    tokio::process::Command::new(env!("CARGO_BIN_EXE_farcooler"))
         .env("FARCOOLER_HOME", h.socket.parent().unwrap())
         .env_remove("FARCOOLER_WORKSPACE")
         .env_remove("FARCOOLER_ACTOR")
-        .args(["landing", "--json", "--repo", &repo.id.to_string(), "--workspace", &repo.workspace.to_string()])
+        .args(["landing", "--repo", &repo.id.to_string(), "--workspace", &repo.workspace.to_string()])
         .args(args)
-        .output().await.unwrap();
+        .output().await.unwrap()
+}
+
+async fn landing(h: &Harness, repo: &Repo, args: &[&str]) -> Value {
+    let output = run_landing(h, repo, &[&["--json"], args].concat()).await;
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
 #[tokio::test]
-async fn list_and_show_read_an_engine_group() {
+async fn list_and_show_distinguish_engine_groups() {
     let h = start(Scope::Read).await;
     let repo = a_repository(&h);
     let store = &h.service.store;
-    let task = store.create_task(repo.workspace, "Engine landing", Actor::Manager).unwrap();
     let mut state = State::empty(repo.workspace.to_string(), 1);
-    state.revision = 1;
-    state.archive.insert("group-00000000000000000001-landing".into(), Archived {
-        phase: Phase::Done,
-        candidate: Some("abcdef1".into()),
-        group: Some(ArchivedGroup {
-            name: "landing".into(),
-            tickets: vec![task.key.clone()],
-            pushed: Some("abcdef1".into()),
-            since_ms: now_millis(),
-        }),
-        start_load: None,
-        last_run: None,
-        history: Vec::new(),
-        closed: None,
-    });
+    state.revision = 2;
+    let mut keys = Vec::new();
+    for (n, sha) in [(1, "abcdef1"), (2, "abcdef2")] {
+        let task = store.create_task(repo.workspace, &format!("Engine landing {n}"), Actor::Manager).unwrap();
+        state.archive.insert(format!("group-{n:020}-landing"), Archived {
+            phase: Phase::Done,
+            candidate: Some(sha.into()),
+            group: Some(ArchivedGroup {
+                name: "landing".into(),
+                tickets: vec![task.key.clone()],
+                pushed: Some(sha.into()),
+                since_ms: now_millis(),
+            }),
+            start_load: None,
+            last_run: None,
+            history: Vec::new(),
+            closed: None,
+        });
+        exec_for_tests(store, &format!(
+            "INSERT INTO workflow_owned_items(workspace, item, task_id) VALUES ('{}', '{}', X'{}')",
+            repo.workspace, task.key, task.id.simple(),
+        ));
+        keys.push(task.key);
+    }
     let json = serde_json::to_string(&state).unwrap().replace('\'', "''");
     exec_for_tests(store, &format!(
         "INSERT INTO workflow_states(workspace, revision, epoch, state) VALUES ('{}', {}, 1, '{json}')",
         repo.workspace, state.revision,
     ));
-    exec_for_tests(store, &format!(
-        "INSERT INTO workflow_owned_items(workspace, item, task_id) VALUES ('{}', '{}', X'{}')",
-        repo.workspace, task.key, task.id.simple(),
-    ));
     std::os::unix::fs::symlink(&h.socket, h.socket.with_file_name("farcoolerd.sock")).unwrap();
 
     let list = landing(&h, &repo, &["list"]).await;
-    let [listed] = list["landings"].as_array().unwrap().as_slice() else { panic!("{list}") };
-    assert_eq!(listed["number"], 0);
-    assert_eq!(listed["tickets"][0]["key"], task.key);
-    let mut shown = landing(&h, &repo, &["show", "0"]).await;
-    assert_eq!(shown.as_object_mut().unwrap().remove("events"), Some(serde_json::json!([])));
-    assert_eq!(&shown, listed);
+    let [first, second] = list["landings"].as_array().unwrap().as_slice() else { panic!("{list}") };
+    assert_ne!(first["id"], second["id"]);
+    assert_ne!(first["tickets"], second["tickets"]);
+    let text = run_landing(&h, &repo, &["list"]).await;
+    assert!(text.status.success(), "{}", String::from_utf8_lossy(&text.stderr));
+    let text = String::from_utf8(text.stdout).unwrap();
+    for listed in [first, second] {
+        assert_eq!(listed["number"], 0);
+        let key = listed["tickets"][0]["key"].as_str().unwrap();
+        assert!(keys.iter().any(|expected| expected == key));
+        let id = listed["id"].as_str().unwrap();
+        let mut shown = landing(&h, &repo, &["show", id]).await;
+        assert_eq!(shown.as_object_mut().unwrap().remove("events"), Some(serde_json::json!([])));
+        assert_eq!(&shown, listed);
+        assert!(text.lines().any(|line| line.contains(id) && line.contains(key)), "{text}");
+    }
+    let ambiguous = run_landing(&h, &repo, &["show", "0"]).await;
+    assert!(!ambiguous.status.success());
+    assert!(String::from_utf8_lossy(&ambiguous.stderr).contains("More than one engine landing"));
 }
 
 #[tokio::test]

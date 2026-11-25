@@ -2,16 +2,16 @@
 //!
 //! The workflow engine lands now (ov-960): its landing groups draw here as
 //! landings, and the landings from before it are kept as history, each read
-//! as where it ended. Historical landings are numbered per board, and
-//! engine landing groups appear as Landing 0.
+//! as where it ended. Historical landings are numbered per board. Engine
+//! landing groups are identified by the UUIDs shown in the list.
 //!
 //! ```text
 //! farcooler landing list
 //! farcooler landing show 12
 //! ```
 //!
-//! `landing show` prints a landing's timeline. Tickets are landed through the
-//! board's workflow (`farcooler workflow get <board>`), not from here.
+//! `landing show` prints the landing's details and the timeline for stored
+//! landings. The board's workflow lands tickets (`farcooler workflow get <board>`).
 //!
 //! A child of `plan.rs`, whose board and refusal helpers it shares.
 
@@ -20,7 +20,10 @@ use farcooler_protocol::v1 as pb;
 use serde_json::json;
 
 use super::overview_text::{agent_name, key_of};
-use super::{Common, Failed, age, ago, events_json, events_of, get_plan, needs_the_line, on_a_board, spend_words, unreadable};
+use super::{
+    Common, Failed, age, ago, events_json, events_of, get_plan, id_text, needs_the_line, on_a_board,
+    spend_words, unreadable,
+};
 use crate::ci_words::{landing_phase_word, landing_state_word, read_for, stale, summary};
 use crate::tasks::{Board, DispatchLink};
 
@@ -39,8 +42,8 @@ pub(crate) enum LandingCmd {
     List,
     /// One landing: its tickets, lander, CI and timeline.
     Show {
-        /// Its number: 12 for a historical landing, 0 for an engine group.
-        number: String,
+        /// The historical landing number or the engine group UUID from landing list.
+        selector: String,
     },
 }
 
@@ -49,23 +52,37 @@ pub(super) fn is_settled(l: &pb::Landing) -> bool {
     l.state == pb::LandingState::Landed as i32 || l.state == pb::LandingState::Dropped as i32
 }
 
-/// "Landing 12", or "Mac polish (Landing 12)" for one with a title of its own.
+/// "Landing 12", "Mac polish (Landing 12)", or an engine group's title.
 pub(super) fn landing_label(l: &pb::Landing) -> String {
+    if l.number == 0 {
+        return if l.title.is_empty() { "Landing".into() } else { l.title.clone() };
+    }
     let number = format!("Landing {}", l.number);
     if l.title.is_empty() || l.title.eq_ignore_ascii_case(&number) { number } else { format!("{} ({number})", l.title) }
 }
 
-/// A landing by its number: "12", "#12", "Landing 12" or "landing-12".
-fn landing_number(given: &str) -> Result<u32, Failed> {
+/// Match an engine group UUID or a historical number such as "12", "#12",
+/// "Landing 12" or "landing-12".
+fn find_landing<'a>(plan: &'a pb::Plan, given: &str) -> Result<&'a pb::Landing, Failed> {
+    if let Ok(id) = uuid::Uuid::parse_str(given.trim()) {
+        return plan.landings.iter()
+            .find(|l| l.number == 0 && l.id.as_ref() == id.as_bytes())
+            .ok_or_else(|| format!("No engine landing here has ID {id}. `farcooler landing list` shows them.").into());
+    }
     let text = given.trim().to_lowercase();
     let text = text.strip_prefix("landing").unwrap_or(&text).trim_start_matches(['#', '-', ' ']);
     let Ok(number) = text.parse::<u32>() else {
-        return Err(format!("Name a landing by its number, like 12. {given:?} isn't one.").into());
+        return Err(format!("Use a historical landing number or an engine group UUID from `farcooler landing list`. Got {given:?}.").into());
     };
-    plan.landings
-        .iter()
-        .find(|l| l.number == number)
-        .ok_or_else(|| format!("No landing here is number {number}. `farcooler landing list` shows them.").into())
+    let mut matches = plan.landings.iter().filter(|l| l.number == number);
+    let found = matches.next().ok_or_else(|| {
+        Failed::from(format!("No landing here is number {number}. `farcooler landing list` shows them."))
+    })?;
+    // Older callers could use 0 when there was only one engine group.
+    if number == 0 && matches.next().is_some() {
+        return Err("More than one engine landing. Use a group UUID from `farcooler landing list`.".into());
+    }
+    Ok(found)
 }
 
 /// A landing's CI read, once the runner has one.
@@ -139,7 +156,11 @@ pub(super) fn landing_line(plan: &pb::Plan, l: &pb::Landing) -> String {
 /// `landing list` and `landing show`'s lines for one landing: its line, its
 /// base, what it carries, and any job that didn't pass.
 fn landing_text(plan: &pb::Plan, l: &pb::Landing, now: i64) -> Vec<String> {
-    let mut out = vec![landing_line(plan, l)];
+    let mut line = landing_line(plan, l);
+    if l.number == 0 {
+        line.push_str(&format!(" · {}", id_text(&l.id)));
+    }
+    let mut out = vec![line];
     let mut facts = Vec::new();
     if !l.base.is_empty() {
         facts.push(format!("cut from {}", l.base));
@@ -201,8 +222,8 @@ pub(super) async fn run_on<L: DispatchLink>(
         } else {
             plan.landings.iter().flat_map(|l| landing_text(&plan, l, now)).collect::<Vec<_>>().join("\n")
         }),
-        LandingCmd::Show { number } => {
-            let found = find_landing(&plan, &number)?;
+        LandingCmd::Show { selector } => {
+            let found = find_landing(&plan, &selector)?;
             // Engine groups have workflow history. The line timeline only accepts stored landing IDs.
             let events = if found.number == 0 {
                 Vec::new()

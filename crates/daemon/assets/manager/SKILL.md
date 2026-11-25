@@ -185,9 +185,9 @@ for its gate by itself when nothing is ahead. The group folds, gates, pushes and
 batch gate splits it in two. `workflow queue` puts a ticket waiting at its landing step into the group and `workflow leave` takes one
 out before the group leaves. A push whose outcome was lost: look at the target yourself, then `workflow settle … --landed true`
 (or `false`). Follow active groups in the Engine view or with `workflow get`.
-Use `landing list` and `landing show <N>` to read numbered landings from before the engine.
+Use `landing list` to find each engine group UUID or historical landing number, then pass it to `landing show`.
 ```
-{{cli}} landing show <N> --repo <repo>
+{{cli}} landing show <UUID-or-number> --repo <repo>
 ```
 **Changing the workflow.** You publish your workspace's workflow: `workspace set-workflow <ws> --file <f> --reason "<why>"`, and
 after an app update `workspace re-pin <ws> --out <f>` first. The owner sees each on a card and can roll it back. A changed command,

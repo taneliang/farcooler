@@ -195,7 +195,7 @@ fn the_engine_lands_and_the_orchestrator_cleans_up() {
             "The group folds, gates, pushes and watches CI",
             "`workflow queue` puts a ticket waiting at its landing step into the group",
             "look at the target yourself, then `workflow settle … --landed true`",
-            "Use `landing list` and `landing show <N>` to read numbered landings from before the engine.",
+            "Use `landing list` to find each engine group UUID or historical landing number, then pass it to `landing show`.",
             "**Changing the workflow.** You publish your workspace's workflow",
             "needs a person, as does all of it once the owner reserves publishing",
             "farcooler workspace workflow-draft <ws> batched-push --reason",
