@@ -23,7 +23,7 @@ use rusqlite::{OptionalExtension, params};
 use uuid::Uuid;
 
 use farcooler_core::Result;
-use farcooler_workflow::{Item, Phase, State, StageKind, digest};
+use farcooler_workflow::{Item, LandingCi, Phase, State, StageKind, digest};
 
 use crate::board_ci::{CiRead, CiStatus, sha_subject};
 use crate::error::map_err;
@@ -127,7 +127,7 @@ pub fn groups_in(state: &State, task_of: &dyn Fn(&str) -> Option<Uuid>, since: &
             group: id.clone(), name,
             tickets: item.members.iter().map(|m| &m.item).chain(&item.handed).filter_map(|i| task_of(i)).collect(),
             after_push: sha.is_some(), pushed_sha: sha, since: if item.since_ms > 0 { item.since_ms } else { since(id) },
-            reason: item.failed_reason(), phase: item.phase.clone(), verb: item.definition.stages.get(item.stage).map(|s| s.kind.clone()),
+            reason: item.failed_reason().or_else(|| item.landing_ci.as_ref().and_then(LandingCi::note)), phase: item.phase.clone(), verb: item.definition.stages.get(item.stage).map(|s| s.kind.clone()),
         }
     }).collect();
     // A group that landed has left live state; its archive entry keeps what the board draws.
@@ -138,7 +138,7 @@ pub fn groups_in(state: &State, task_of: &dyn Fn(&str) -> Option<Uuid>, since: &
             tickets: group.tickets.iter().filter_map(|i| task_of(i)).collect(),
             pushed_sha: group.pushed.clone(), after_push: group.pushed.is_some(),
             since: if group.since_ms > 0 { group.since_ms } else { since(id) },
-            reason: None, phase: Phase::Done, verb: None,
+            reason: group.landing_ci.as_ref().and_then(LandingCi::note), phase: Phase::Done, verb: None,
         });
     }
     let finished = GroupLanding::is_finished;
@@ -153,14 +153,36 @@ pub fn groups_in(state: &State, task_of: &dyn Fn(&str) -> Option<Uuid>, since: &
     all.into_iter().zip(keep).filter_map(|(g, k)| k.then_some(g)).collect()
 }
 
+pub(crate) struct MainLandingCi {
+    pub sha: String,
+    pub since: i64,
+    pub result: LandingCi,
+}
+
+/// Preserve the current main verdict even if every ticket it carried left the board.
+fn main_ci_in(state: &State) -> Option<MainLandingCi> {
+    let live = state.items.iter().filter(|(_, i)| is_group(i) && matches!(i.phase, Phase::Done | Phase::Failed | Phase::Cancelled))
+        .filter_map(|(id, i)| Some((id, i.pushed.as_ref()?, i.landing_ci.as_ref()?)));
+    let archived = state.archive.iter().filter_map(|(id, a)| {
+        let group = a.group.as_ref()?;
+        Some((id, group.pushed.as_ref()?, group.landing_ci.as_ref()?))
+    });
+    live.chain(archived).max_by_key(|(id, _, ci)| (ci.observed_ms(), *id))
+        .map(|(_, sha, result)| MainLandingCi { since: result.observed_ms(), sha: sha.clone(), result: result.clone() })
+}
+
 impl Store {
     /// The live landing groups on `workspace`, drawn as landings.
     pub fn workflow_groups(&self, workspace: Uuid) -> Result<Vec<GroupLanding>> {
+        Ok(self.workflow_groups_and_main_ci(workspace)?.0)
+    }
+
+    pub(crate) fn workflow_groups_and_main_ci(&self, workspace: Uuid) -> Result<(Vec<GroupLanding>, Option<MainLandingCi>)> {
         let name = workspace.to_string();
         let Some(state) = self.workflow_state(&name).map_err(|e| { tracing::warn!(error = %e, "workflow state unreadable"); farcooler_core::DomainError::OperationFailed })? else {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), None));
         };
-        if !state.items.values().any(is_group) && !state.archive.values().any(|a| a.group.is_some()) { return Ok(Vec::new()); }
+        if !state.items.values().any(is_group) && !state.archive.values().any(|a| a.group.is_some()) { return Ok((Vec::new(), None)); }
         let conn = self.conn();
         let owned: BTreeMap<String, Uuid> = {
             let mut stmt = conn
@@ -185,7 +207,7 @@ impl Store {
                 .and_then(|v| v.get("now_ms").and_then(serde_json::Value::as_i64))
                 .unwrap_or(0)
         };
-        Ok(groups_in(&state, &|item| owned.get(item).copied(), &moved))
+        Ok((groups_in(&state, &|item| owned.get(item).copied(), &moved), main_ci_in(&state)))
     }
 
     /// Every board's pushed group commits, for the CI watch to read (`ci_watch::wanted`).
@@ -193,9 +215,13 @@ impl Store {
         let mut out = Vec::new();
         for name in self.workflow_workspaces().map_err(|e| { tracing::warn!(error = %e, "workflow state unreadable"); farcooler_core::DomainError::OperationFailed })? {
             let Ok(workspace) = Uuid::parse_str(&name) else { continue };
-            for group in self.workflow_groups(workspace)? {
-                if group.phase != Phase::Done && let Some(sha) = group.pushed_sha { out.push((workspace, sha_subject(&sha))); }
+            let (groups, main) = self.workflow_groups_and_main_ci(workspace)?;
+            let mut subjects: std::collections::BTreeSet<_> = groups.into_iter().filter(|g| g.phase != Phase::Done)
+                .filter_map(|g| g.pushed_sha).collect();
+            if let Some(main) = main.filter(|ci| matches!(ci.result, LandingCi::Red { .. })) {
+                subjects.insert(main.sha);
             }
+            out.extend(subjects.iter().map(|sha| (workspace, sha_subject(sha))));
         }
         Ok(out)
     }

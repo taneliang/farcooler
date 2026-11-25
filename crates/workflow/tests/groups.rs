@@ -743,7 +743,7 @@ fn flaky_definition() -> Definition {
 }
 fn ci_answer(log: &mut Log, group: &str, label: &str, attempt: u32, jobs: &[&str]) -> Transition {
     let evidence = log.evidence(group);
-    log.outcome(group, Outcome::CiResult { label: label.into(), evidence,
+    log.outcome(group, Outcome::CiResult { landing_ci: None, label: label.into(), evidence,
         run: Some(CiRun { id: 73, attempt, failed_jobs: jobs.iter().map(|j| (*j).into()).collect(), failed_steps: vec![] }), failure: None })
 }
 #[test]
@@ -768,7 +768,7 @@ fn a_listed_ci_failure_reruns_once_then_green_lands_or_second_red_routes_rejecte
         assert_eq!(log.state.items[&group].phase, Phase::Running, "rerun acceptance is not green CI");
         // A stale red/green from attempt 1 cannot finish the look at attempt 2.
         let evidence = log.evidence(&group);
-        assert_eq!(log.try_outcome(&group, Outcome::CiResult { label: "passed".into(), evidence,
+        assert_eq!(log.try_outcome(&group, Outcome::CiResult { landing_ci: None, label: "passed".into(), evidence,
             run: Some(CiRun { id: 73, attempt: 1, failed_jobs: vec![], failed_steps: vec![] }), failure: None }), Err(Refusal::Evidence));
         let result = ci_answer(&mut log, &group, if green { "passed" } else { "rejected" }, 2,
             if green { &[] } else { &["iOS UI tests"] });
@@ -787,7 +787,7 @@ fn outage(attempt: u32, own: bool) -> CiRun {
 }
 fn ci_run(log: &mut Log, group: &str, label: &str, run: CiRun) -> Transition {
     let evidence = log.evidence(group);
-    log.outcome(group, Outcome::CiResult { label: label.into(), evidence, run: Some(run), failure: None })
+    log.outcome(group, Outcome::CiResult { landing_ci: None, label: label.into(), evidence, run: Some(run), failure: None })
 }
 #[test]
 fn a_setup_only_ci_failure_reruns_once_with_no_policy_then_its_verdict_decides() {
@@ -884,7 +884,7 @@ fn a_ci_receipt_can_resolve_uncertainty_without_firing_a_rerun_policy() {
         let item = &log.state.items[&group];
         let command = Command::Resolve { item: group.clone(), effect: item.pending.clone().unwrap(),
             run: item.run.clone(), fence: item.fence,
-            outcome: Outcome::CiResult { label: label.into(), evidence: log.evidence(&group),
+            outcome: Outcome::CiResult { landing_ci: None, label: label.into(), evidence: log.evidence(&group),
                 run: Some(CiRun { id: 73, attempt: 1, failed_jobs: vec!["iOS UI tests".into()], failed_steps: vec![] }), failure: None } };
         let result = log.run(command, Grant::Controller);
         assert_eq!(result.state.items[&group].phase, if label == "passed" { Phase::Done } else { Phase::Failed });
@@ -1318,7 +1318,7 @@ fn ci_diagnostics_survive_a_failed_rerun() {
     ci_answer(&mut log, &group, "rejected", 1, &["iOS UI tests"]);
     log.pass(&group);
     let evidence = log.evidence(&group);
-    let result = log.outcome(&group, Outcome::CiResult {
+    let result = log.outcome(&group, Outcome::CiResult { landing_ci: None,
         label: "rejected".into(), evidence,
         run: Some(CiRun { id: 73, attempt: 2, failed_jobs: vec!["iOS UI tests".into()], failed_steps: vec![] }),
         failure: Some(GroupFailure { job: "iOS UI tests".into(), first_line: "error: failed".into(), split: false }),

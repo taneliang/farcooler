@@ -31,6 +31,7 @@ pub const ITEM_FIELDS: &[(&str, Decision)] = &[
     ("reuse_checkout", Decision::Refused("the replacement must verify and reuse its legacy checkout first")),
     ("carried_progress", Decision::Dropped("the pipeline derives usage from the retained visits")),
     ("history", Decision::Dropped("the legacy log keeps the events of each earlier run")),
+    ("landing_ci", Decision::Dropped("the legacy log keeps the CI settlement and the board keeps its note")),
     ("reason", Decision::Dropped("the legacy log keeps the observation or verdict that produced the reason")),
     ("pending", Decision::Mapped("Work::pending, or a queued token with its outbox row suppressed")),
     ("candidate", Decision::Mapped("coding data candidate; a member's in Membership::data")),

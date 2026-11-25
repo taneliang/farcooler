@@ -9,7 +9,10 @@
 //! whose CI went red doesn't hold the push back while the target is still at the head the gate ran on (ov-1291).
 use super::*;
 use super::coding::{sha, wait_times};
-use farcooler_workflow::FailedStep;
+use farcooler_workflow::{FailedStep, LandingCi};
+
+#[path = "coding_inherited_ci.rs"]
+mod inherited_ci;
 use farcooler_store::board_ci::CiStatus;
 use farcooler_protocol::workflow_config::CiUnrun;
 use std::collections::BTreeMap;
@@ -27,6 +30,15 @@ struct CiObservation {
     status: CiStatus,
     run: Option<CiRun>,
     retry_pending: bool,
+    required: Vec<CiCheck>,
+    failure_conclusion: bool,
+}
+
+struct CiCheck {
+    workflow: String,
+    status: CiStatus,
+    run: Option<CiRun>,
+    failure_conclusion: bool,
 }
 
 /// What a push came to, from its exit, its porcelain output and the remote afterwards.
@@ -280,10 +292,12 @@ impl Exec {
         let evidence = Evidence { candidate: fact.candidate, manifest, receipt, policy_pin: binding.effect.policy_pin.clone() };
         if *kind == StageKind::AwaitCi && (binding.effect.ci_retry.is_some()
             || fact.detail.get("run").is_some_and(|r| !r.is_null())
-            || fact.detail.get("failure").is_some_and(|f| !f.is_null())) {
+            || fact.detail.get("failure").is_some_and(|f| !f.is_null())
+            || fact.detail.get("landing_ci").is_some_and(|ci| !ci.is_null())) {
             return Ok(Outcome::CiResult { label: fact.label, evidence,
                 run: fact.detail.get("run").filter(|r| !r.is_null()).map(|r| serde_json::from_value(r.clone())).transpose()?,
-                failure: fact.detail.get("failure").filter(|f| !f.is_null()).map(|f| serde_json::from_value(f.clone())).transpose()? });
+                failure: fact.detail.get("failure").filter(|f| !f.is_null()).map(|f| serde_json::from_value(f.clone())).transpose()?,
+                landing_ci: fact.detail.get("landing_ci").filter(|ci| !ci.is_null()).map(|ci| serde_json::from_value(ci.clone())).transpose()? });
         }
         if *kind == StageKind::Fold && fact.label == "conflict" {
             return Ok(Outcome::FoldConflict { evidence,
@@ -464,16 +478,17 @@ impl Exec {
         loop {
             if *cancel.borrow() { return Err(Error::Refused("push wait interrupted")); }
             let state = self.store.workflow_state(&predecessor.0)?.ok_or(Error::Refused("missing predecessor board"))?;
-            let phase = if let Some(item) = state.items.get(&predecessor.1) {
+            let (phase, ci) = if let Some(item) = state.items.get(&predecessor.1) {
                 if item.pushed.as_deref() != Some(base) { return Err(Error::Refused("predecessor changed")); }
-                &item.phase
+                (&item.phase, item.landing_ci.as_ref())
             } else {
-                &state.archive.get(&predecessor.1).filter(|a| a.group.as_ref()
-                    .is_some_and(|g| g.pushed.as_deref() == Some(base)))
-                    .ok_or(Error::Refused("missing predecessor"))?.phase
+                let archived = state.archive.get(&predecessor.1).ok_or(Error::Refused("missing predecessor"))?;
+                let group = archived.group.as_ref().filter(|g| g.pushed.as_deref() == Some(base))
+                    .ok_or(Error::Refused("predecessor changed"))?;
+                (&archived.phase, group.landing_ci.as_ref())
             };
             match phase {
-                Phase::Done => return Ok(true),
+                Phase::Done => return Ok(!matches!(ci, Some(LandingCi::Red { .. }))),
                 Phase::Failed | Phase::Cancelled => return Ok(false),
                 _ => {}
             }
@@ -514,10 +529,13 @@ impl Exec {
         let (every, patience) = wait_times(&binding.effect.operation).ok_or(Error::Refused("unsound wait times"))?;
         let candidate = binding.effect.candidate.clone().filter(|c| sha(c)).ok_or(Error::Refused("missing CI candidate"))?;
         let deadline = binding.effect.created_ms.saturating_add(i64::try_from(patience).unwrap_or(i64::MAX));
+        let landed = self.store.workflow_state(&binding.workspace)?.and_then(|state|
+            state.items.get(&binding.effect.item).and_then(|item| item.pushed.clone())).as_deref() == Some(&candidate);
+        let main = landed && self.landing().is_ok_and(|landing| landing.target == "refs/heads/main");
         for poll in 0u32.. {
             if *cancel.borrow() { return Ok(Outcome::Interrupted); }
-            let CiObservation { mut status, run, retry_pending } = self.ci_poll(binding, &candidate, poll, &cancel)
-                .await?.unwrap_or(CiObservation { status: CiStatus::Unknown, run: None, retry_pending: false });
+            let CiObservation { mut status, run, retry_pending, required, .. } = self.ci_poll(binding, &candidate, poll, &cancel)
+                .await?.unwrap_or(CiObservation { status: CiStatus::Unknown, run: None, retry_pending: false, required: Vec::new(), failure_conclusion: false });
             if let Some(retry) = &binding.effect.ci_retry {
                 if !run.as_ref().is_some_and(|r| r.id == retry.run.id && r.attempt > retry.run.attempt) {
                     status = CiStatus::Unknown;
@@ -526,6 +544,13 @@ impl Exec {
             // An active controller or rerun owns the retry budget. Keep looking
             // even if the original CI wait has used up its patience.
             let label = match (retry_pending, status) {
+                // A workflow still running can add a regression to an otherwise inherited failure.
+                (false, CiStatus::Failed) if main && self.can_read_failed_tests()
+                    && required.iter().any(|check| matches!(check.status, CiStatus::Running | CiStatus::Queued | CiStatus::Unknown))
+                    && self.clock_ms() < deadline => {
+                        if pause(every, &cancel).await { return Ok(Outcome::Interrupted); }
+                        continue;
+                    }
                 (false, CiStatus::Passed) => "passed",
                 (false, CiStatus::Failed) => "rejected",
                 (false, CiStatus::Superseded) => "cancelled",
@@ -535,7 +560,19 @@ impl Exec {
                     continue;
                 }
             };
-            let mut detail = serde_json::json!({ "polls": poll + 1, "run": run });
+            let landing_ci = match label {
+                "passed" if main => Some(LandingCi::Green { observed_ms: self.clock_ms() }),
+                // A failed run with no failed job (for example a runner that
+                // never started) has no test evidence to compare.
+                "rejected" if main && self.can_read_failed_tests() && required.iter().any(|check|
+                    check.status == CiStatus::Failed && check.run.as_ref().is_some_and(|run| !run.failed_jobs.is_empty())) =>
+                    Some(self.red_landing_ci(binding, &candidate, &required, poll, &cancel).await),
+                "rejected" if main => Some(LandingCi::Red { observed_ms: self.clock_ms(), origin: None, inherited: Vec::new() }),
+                _ => None,
+            };
+            if *cancel.borrow() { return Ok(Outcome::Interrupted); }
+            let label = if landing_ci.as_ref().and_then(LandingCi::note).is_some() { "passed" } else { label };
+            let mut detail = serde_json::json!({ "polls": poll + 1, "run": run, "landing_ci": landing_ci });
             if label != "passed" {
                 detail["failure"] = serde_json::to_value(self.ci_failure(binding, label, run.as_ref(), poll).await?)?;
             }
@@ -614,14 +651,14 @@ impl Exec {
             _ => Vec::new(),
         };
         let Some(mut observed) = self.ci_look(binding, sha, poll, &config.ci.workflow, 0, cancel).await? else { return Ok(None) };
-        let mut all = vec![observed.status];
+        observed.required.push(CiCheck { workflow: config.ci.workflow.clone(), status: observed.status, run: observed.run.clone(), failure_conclusion: observed.failure_conclusion });
         for (index, name) in also.iter().enumerate() {
             if let Some(other) = self.ci_look(binding, sha, poll, name, index + 1, cancel).await? {
-                all.push(other.status);
+                observed.required.push(CiCheck { workflow: name.clone(), status: other.status, run: other.run, failure_conclusion: other.failure_conclusion });
                 observed.retry_pending |= other.retry_pending;
             }
         }
-        observed.status = combined(&all);
+        observed.status = combined(&observed.required.iter().map(|check| check.status).collect::<Vec<_>>());
         Ok(Some(observed))
     }
     /// One look at one workflow's newest run on `sha`: the configured provider hook runs once, told which workflow in
@@ -638,12 +675,12 @@ impl Exec {
         let mut command = config.ci.command.clone();
         self.pin_context(&mut command, binding, sha, &receipt)?;
         command.environment.insert("FARCOOLER_CI_WORKFLOW".into(), workflow.into());
-        if index != 0 { command.environment.remove("FARCOOLER_CI_RUN"); }
+        if index != 0 || binding.effect.candidate.as_deref() != Some(sha) { command.environment.remove("FARCOOLER_CI_RUN"); }
         durable(&log, b"")?;
         let exit = crate::effect_runner::configured(&self.repository(), &command.argv, &command.environment, &log,
             Duration::from_millis(command.timeout_ms), cancel.clone()).await?;
         if exit != Some(0) {
-            return Ok(Some(CiObservation { status: CiStatus::Unknown, run: None, retry_pending: false }));
+            return Ok(Some(CiObservation { status: CiStatus::Unknown, run: None, retry_pending: false, required: Vec::new(), failure_conclusion: false }));
         }
         let raw = match self.bytes(&receipt) {
             Ok(raw) => raw,
@@ -675,9 +712,10 @@ impl Exec {
                     _ => RetryRead::Unavailable,
                 }
             }).await;
+        let failure_conclusion = run.status == "completed" && run.conclusion.as_deref() == Some("failure");
         let status = if pending { CiStatus::Queued }
             else { crate::ci_watch::summarize(&format!("sha:{sha}"), &[(run, None)]).status };
-        Ok(Some(CiObservation { status, run: facts, retry_pending: pending }))
+        Ok(Some(CiObservation { status, run: facts, retry_pending: pending, required: Vec::new(), failure_conclusion }))
     }
 
     /// Apply every member's commits, in order, onto the base in a fresh tree. The tree is made new

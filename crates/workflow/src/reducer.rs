@@ -10,7 +10,7 @@ fn new_item(definition: &Definition, policy_pin: &str, resource: &str,
         start_load: None, execution: None, definition: definition.clone(), pin: definition.pin(), policy_pin: policy_pin.into(),
         dependencies: dependencies.clone(), resource: resource.into(), stage: 0, iteration: 0, attempt: 1, fence: 1,
         phase: Phase::Blocked, run: String::new(), pending: None, candidate: initial_candidate.clone(),
-        restart: None, reuse_checkout: false, carried_progress: false, history: Vec::new(), reason: None, last_evidence: None, stopping: None, stopped_from: None,
+        restart: None, reuse_checkout: false, carried_progress: false, history: Vec::new(), reason: None, landing_ci: None, last_evidence: None, stopping: None, stopped_from: None,
         cancel_reason: None, closed: None, failure: None, queue_hold: None, group_failure: None, deciding: None,
         hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, landed: None,
         rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
@@ -368,7 +368,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                             route(&mut item, id, input, "rejected", Some(e), Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
                         }
                         _ if rerunning => { item.phase = Phase::Uncertain; }
-                        Outcome::CiResult { label, evidence, run, failure } => {
+                        Outcome::CiResult { label, evidence, run, failure, landing_ci } => {
                             if item.run.starts_with("cancel:")
                                 || item.definition.stages[item.stage].kind != StageKind::AwaitCi
                                 || !matches!(label.as_str(), "passed" | "rejected" | "cancelled" | "timeout")
@@ -380,11 +380,19 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                                     return Err(Refusal::Evidence);
                                 }
                             }
+                            if let Some(ci) = landing_ci {
+                                if item.group_of.is_none() || item.pushed.as_ref() != Some(&evidence.candidate)
+                                    || matches!(ci, LandingCi::Red { origin: Some(sha), .. }
+                                        if sha.len() != 40 || !sha.bytes().all(|b| b.is_ascii_hexdigit()))
+                                    || ci.note().is_some_and(|note| !valid_rework_reason(&note) || note.chars().any(char::is_control))
+                                { return Err(Refusal::Evidence); }
+                            }
                             // A recovered receipt can settle uncertainty, but Uncertain is never a policy point.
                             if !resolving && label == "rejected" && crate::ci::rerun(&mut item, id, input, run.as_ref(), &mut effects)? {
                                 item.last_evidence = Some(evidence.clone());
                             } else {
                                 item.ci_retry = None;
+                                item.landing_ci = landing_ci.clone();
                                 if label != "passed" {
                                     if let Some(detail) = failure {
                                         if detail.job.is_empty() || detail.job.len() > 1024 || detail.first_line.len() > 4096
@@ -710,7 +718,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                             let gid = group_id(state, name);
                             let resource = definition.groups[name].exclusive.clone();
                             let definition = definition.group_definition(name).ok_or(Refusal::Definition)?;
-                            next.items.insert(gid.clone(), Item { start_load: None, execution: None, restart: None, reuse_checkout: false, carried_progress: false, history: Vec::new(), reason: None, pin: definition.pin(), definition,
+                            next.items.insert(gid.clone(), Item { start_load: None, execution: None, restart: None, reuse_checkout: false, carried_progress: false, history: Vec::new(), reason: None, landing_ci: None, pin: definition.pin(), definition,
                                 policy_pin: policy_pin.clone(), dependencies: BTreeSet::new(), resource,
                                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked,
                                 run: String::new(), pending: None, candidate: None, last_evidence: None,
@@ -899,7 +907,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
         if next.items.get(&id).is_some_and(|i| matches!(i.phase, Phase::Done | Phase::Cancelled)) {
             let item = next.items.remove(&id).ok_or(Refusal::Missing)?;
             let group = item.group_of.as_ref().map(|g| ArchivedGroup {
-                name: g.name.clone(), tickets: item.handed.clone(), pushed: item.pushed.clone().or_else(|| item.candidate.clone()), since_ms: item.since_ms });
+                name: g.name.clone(), tickets: item.handed.clone(), pushed: item.pushed.clone().or_else(|| item.candidate.clone()), since_ms: item.since_ms, landing_ci: item.landing_ci.clone() });
             let last_run = (group.is_none() && (!item.definition.is_ticket() || item.phase == Phase::Cancelled)).then(|| item.last_run());
             next.archive.insert(id, Archived { start_load: item.start_load, closed:item.closed, phase: item.phase, candidate: item.candidate,
                 group, last_run, history: item.history });
@@ -925,6 +933,8 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
             StageKind::Run | StageKind::Check | StageKind::Review(_)))
             .then(|| group.brief.clone()).flatten();
         let group_reason = group.failed_reason();
+        let group_pushed = group.pushed.clone();
+        let inherited = group.landing_ci.as_ref().filter(|ci| label == "passed" && ci.note().is_some()).cloned();
         let members = std::mem::take(&mut group.members);
         // Remember whom it ran: the board still draws a finished group with its tickets.
         group.handed = members.iter().map(|m| m.item.clone()).collect();
@@ -951,6 +961,10 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
             } else {
                 if let Some(brief) = &gate_brief { ticket.brief = Some(brief.clone()); }
                 route(&mut ticket, &member.item, input, label, None, Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
+                if ticket.phase == Phase::Done && inherited.is_some() {
+                    ticket.landing_ci = inherited.clone();
+                    ticket.landed = group_pushed.clone();
+                }
                 if ticket.phase == Phase::Failed && let Some(reason) = &group_reason {
                     describe_failure(&mut ticket, &format!("Group {gid} failed at {reason}"), None);
                 }
@@ -961,11 +975,11 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
     // A run that lands takes the tickets that follow it with it (ov-970). A cancelled one hands them back at
     // rest, as they were before it started: cancelling a run drops its own ticket, not the others it carried.
     // A failed one keeps them.
-    let closing: Vec<(String, Phase, Option<String>)> = next.items.values().filter(|i| matches!(i.phase, Phase::Done | Phase::Cancelled))
-        .flat_map(|lead| lead.followers.iter().map(|f| (f.clone(), lead.phase.clone(), lead.landed.clone()))).collect();
-    for (follower, phase, landed) in closing {
+    let closing: Vec<_> = next.items.values().filter(|i| matches!(i.phase, Phase::Done | Phase::Cancelled))
+        .flat_map(|lead| lead.followers.iter().map(|f| (f.clone(), lead.phase.clone(), lead.landed.clone(), lead.landing_ci.clone()))).collect();
+    for (follower, phase, landed, landing_ci) in closing {
         let Some(ticket) = next.items.get_mut(&follower).filter(|t| t.follows.is_some()) else { continue };
-        if phase == Phase::Done { ticket.stage = ticket.definition.stages.len(); ticket.phase = Phase::Done; ticket.landed = landed; }
+        if phase == Phase::Done { ticket.stage = ticket.definition.stages.len(); ticket.phase = Phase::Done; ticket.landed = landed; ticket.landing_ci = landing_ci; }
         ticket.fence = ticket.fence.checked_add(1).ok_or(Refusal::Limit)?;
         ticket.follows = None;
     }

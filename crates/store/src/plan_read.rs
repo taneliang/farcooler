@@ -20,7 +20,7 @@ use farcooler_core::Result;
 use crate::board_ci::{CiRead, ci_of};
 use crate::error::map_err;
 use crate::landing_phase::{LandingPhase, history};
-use crate::landings::{Landing, landing_title, landings_for_plan};
+use crate::landings::{Landing, LandingState, Route, landing_title, landings_for_plan};
 use crate::models::{TaskStatus, get_uuid, uuid_blob};
 use crate::plan::{BoardTheme, THEME_COLS, row_to_theme};
 use crate::plan_cost::{PlanCost, TREND_DAYS, budgets_of, cost_of, ticket_days, trend_start};
@@ -29,6 +29,34 @@ use crate::store::Store;
 use crate::tasks::now_millis;
 use crate::ticket_lines::{Stage, TicketLine};
 use crate::ticket_work::TicketWork;
+
+// Reuse the culprit's card when it's still on this board. An external or
+// archived culprit gets one board-wide row, without assigning it any tickets.
+fn draw_red_main(landings: &mut Vec<LandingView>, workspace: Uuid, since: i64, origin: Option<&str>) {
+    let title = "Main is red";
+    if let Some(culprit) = landings.iter_mut().find(|view| origin.is_some() && view.landing.pushed_sha.as_deref() == origin
+        && matches!(view.phase, LandingPhase::CiFailed | LandingPhase::Stalled)) {
+        culprit.title = title.into();
+        culprit.landing.title = title.into();
+        culprit.phase = LandingPhase::CiFailed;
+        culprit.landing.state = LandingState::Red;
+        return;
+    }
+    landings.push(LandingView {
+        title: title.into(),
+        summary: String::new(),
+        spend: Spend::default(),
+        phase: LandingPhase::CiFailed,
+        phase_since: since,
+        reason: origin.is_none().then(|| "The first failing commit could not be verified.".into()),
+        landing: Landing {
+            id: Uuid::parse_str(&farcooler_workflow::digest(&("main-ci", workspace))[4..36]).unwrap_or_else(|_| Uuid::nil()), workspace_id: workspace, number: 0, route: Route::Push,
+            base: String::new(), pushed_sha: origin.map(str::to_owned), state: LandingState::Red, state_since: since,
+            lander_id: None, title: title.into(), collecting: false, actor: "runner".into(),
+            created_at: since, landed_at: None, resource_version: 0, tickets: Vec::new(),
+        },
+    });
+}
 
 /// A ticket sitting in one stage longer than this reads as stale. Derived from
 /// `stage_since`, so nothing ever has to clear it.
@@ -391,7 +419,8 @@ impl Store {
         let ci = ci_of(&conn, workspace)?;
         // The engine's landing groups draw as landings too (ov-958); their tickets are named here.
         drop(conn);
-        for mut group in self.workflow_groups(workspace)? {
+        let (groups, main_ci) = self.workflow_groups_and_main_ci(workspace)?;
+        for mut group in groups {
             // A ticket that left this board is not drawn on it; a finished group left empty goes too.
             group.tickets.retain(|t| statuses.contains_key(t));
             if group.tickets.is_empty() && group.is_finished() {
@@ -409,6 +438,12 @@ impl Store {
                 title: landing_title(&landing), landing, summary, spend: Spend::default(),
                 phase: group.phase(read), phase_since: group.since, reason: group.reason,
             });
+        }
+        if let Some(main) = main_ci
+            && let farcooler_workflow::LandingCi::Red { origin, .. } = main.result
+            && !ci.iter().any(|read| read.sha == main.sha && read.fetched_at >= main.since && read.status == crate::board_ci::CiStatus::Passed)
+        {
+            draw_red_main(&mut landings, workspace, main.since, origin.as_deref());
         }
         let conn = self.conn();
         let mut board_counts = StatusCounts::default();

@@ -313,7 +313,7 @@ fn at_candidate_ci() -> (Walk, String) {
     }
 }
 fn ci(w: &mut Walk, group: &str, label: &str, failure: Option<GroupFailure>) {
-    w.outcome(group, |evidence| Outcome::CiResult { label: label.into(), evidence, run: None, failure: failure.clone() });
+    w.outcome(group, |evidence| Outcome::CiResult { landing_ci: None, label: label.into(), evidence, run: None, failure: failure.clone() });
 }
 #[test]
 fn a_green_candidate_ci_lets_the_push_move_the_target_to_that_commit() {

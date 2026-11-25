@@ -4,7 +4,7 @@
 //! accepted the command, so a card can never disagree with the state that
 //! moved it. Nobody else writes them: a hand move on such a card is refused in
 //! plain words (`refuse_if_owned`). Cards outside a run stay hand-moved (R-98).
-use crate::models::{Actor, TaskStatus};
+use crate::models::{Actor, NoteKind, TaskStatus};
 use crate::ticket_lines::{LineSubject, Stage};
 use crate::workflow::{Result, WorkflowError};
 use farcooler_core::{DomainError, Result as DomainResult};
@@ -140,10 +140,11 @@ pub(crate) fn project(tx: &Transaction<'_>, workspace: &str, state: &State, by: 
         let differs = have.as_deref() != Some(status.as_str()) || (!ticket && line.as_deref() != Some(stage.as_str()));
         // A run closed as landed names its commit, which the line keeps (ov-1231).
         let landed = if stage == Stage::Landed { lead.unwrap_or(item).landed.clone().or_else(|| item.landed.clone()) } else { None };
-        if differs { moves.push((task, status, stage, have, line, ticket, landed)); }
+        let note = if stage == Stage::Landed { item.landing_ci.as_ref().and_then(|ci| ci.note()) } else { None };
+        if differs { moves.push((task, status, stage, have, line, ticket, landed, note)); }
     }
     if moves.is_empty() { return Ok(Vec::new()); }
-    let moved = moves.iter().filter_map(|(task, to, _, from, _, _, _)| Some(BoardMove {
+    let moved = moves.iter().filter_map(|(task, to, _, from, _, _, _, _)| Some(BoardMove {
         task: uuid::Uuid::from_slice(task).ok()?, from: from.as_deref().and_then(TaskStatus::parse), to: *to })).collect();
     let saved: Vec<String> = {
         let mut statement = tx.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name IN (SELECT value FROM json_each(?1)) ORDER BY name")?;
@@ -184,14 +185,18 @@ pub type CommitListener = std::sync::Arc<dyn Fn(&str) + Send + Sync>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BoardMove { pub task: uuid::Uuid, pub from: Option<TaskStatus>, pub to: TaskStatus }
 /// A card to move: its id, where the run puts it, and what the board has now.
-type Move = (Vec<u8>, TaskStatus, Stage, Option<String>, Option<String>, bool, Option<String>);
+type Move = (Vec<u8>, TaskStatus, Stage, Option<String>, Option<String>, bool, Option<String>, Option<String>);
 fn write(tx: &Transaction<'_>, moves: Vec<Move>, by: Actor) -> Result<()> {
     let now = crate::tasks::now_millis();
     let board = |e: DomainError| WorkflowError::Board(e.to_string());
-    for (task, status, stage, have, line, ticket, landed) in moves {
+    for (task, status, stage, have, line, ticket, landed, note) in moves {
         let id = uuid::Uuid::from_slice(&task).map_err(|e| WorkflowError::Board(e.to_string()))?;
         if let Some(from) = have.as_deref().and_then(TaskStatus::parse).filter(|from| *from != status) {
             crate::tasks::move_in(tx, id, from, status, by, now).map_err(board)?;
+        }
+        if let Some(note) = note {
+            crate::tasks::insert_note(tx, id, NoteKind::Comment, Actor::Runner, &note,
+                &serde_json::json!({ "sha": landed }), None).map_err(board)?;
         }
         if ticket || line.as_deref() == Some(stage.as_str()) { continue; }
         if line.is_none() {

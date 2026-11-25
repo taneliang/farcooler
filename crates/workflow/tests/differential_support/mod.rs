@@ -201,7 +201,7 @@ impl Old {
                 (K::AwaitCi, l) => {
                     self.ci_attempt += 1;
                     let (label, jobs) = match l { "red:flaky" => ("rejected", vec!["flaky"]), "red" => ("rejected", vec!["unit"]), other => (other, vec![]) };
-                    old::Outcome::CiResult { label: label.into(), evidence: Self::ev(&cand), failure: None,
+                    old::Outcome::CiResult { landing_ci: None, label: label.into(), evidence: Self::ev(&cand), failure: None,
                         run: Some(old::CiRun { id: 1, attempt: self.ci_attempt, failed_jobs: jobs.into_iter().map(String::from).collect(), failed_steps: vec![] }) }
                 }
                 (_, l) => old::Outcome::Labeled(l.into(), Self::ev(&cand)),

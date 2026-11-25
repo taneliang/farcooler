@@ -69,6 +69,8 @@ pub struct Item {
     pub history: Vec<RunRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub landing_ci: Option<LandingCi>,
     pub pending: Option<String>,
     pub candidate: Option<String>,
     pub last_evidence: Option<Evidence>,
@@ -372,6 +374,36 @@ pub struct ArchivedGroup {
     pub tickets: Vec<String>,
     pub pushed: Option<String>,
     pub since_ms: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub landing_ci: Option<LandingCi>,
+}
+
+/// CI on a commit actually pushed by an engine landing group.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LandingCi {
+    Green { observed_ms: i64 },
+    Red {
+        observed_ms: i64,
+        /// First red commit in the first-parent history, when the boundary was observed.
+        origin: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        inherited: Vec<String>,
+    },
+}
+impl LandingCi {
+    pub fn observed_ms(&self) -> i64 {
+        match self {
+            Self::Green { observed_ms } | Self::Red { observed_ms, .. } => *observed_ms,
+        }
+    }
+
+    pub fn note(&self) -> Option<String> {
+        match self {
+            Self::Red { inherited, .. } if !inherited.is_empty() =>
+                Some(format!("Landed with inherited CI failures in {}", inherited.join(", "))),
+            _ => None,
+        }
+    }
 }
 impl State {
     pub fn empty(workspace: String, epoch: u64) -> Self {
@@ -489,7 +521,8 @@ pub struct Evidence {
 pub enum Outcome {
     Hook(crate::HookResult),
     /// CI facts are authenticated operation input, so the pure rule sees the same facts on replay.
-    CiResult { label: String, evidence: Evidence, run: Option<CiRun>, #[serde(default, skip_serializing_if = "Option::is_none")] failure: Option<GroupFailure> },
+    CiResult { label: String, evidence: Evidence, run: Option<CiRun>, #[serde(default, skip_serializing_if = "Option::is_none")] failure: Option<GroupFailure>,
+        #[serde(default, skip_serializing_if = "Option::is_none")] landing_ci: Option<LandingCi> },
     /// A fold receipt carries conflict paths into the next build, including after recovery.
     FoldConflict { evidence: Evidence, #[serde(default)] files: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")] members: Option<Vec<String>> },

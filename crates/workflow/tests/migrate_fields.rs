@@ -61,7 +61,7 @@ fn every_field_set() -> Value {
             "call": "c", "revision": 0, "now_ms": 0, "subject": "a", "fence": 0, "policy_pin": "p", "label": null, "candidate": null,
             "failure": null, "evidence": null, "groups": [], "members": [], "retries": 0, "allowed": [] } },
         "queue_hold": { "reason": "held", "since_ms": 5, "notified": false },
-        "hook_calls": { "p": 1 }, "hook_refused": "no", "group_failure": { "job": "j", "firstLine": "l" }, "landed": "c",
+        "hook_calls": { "p": 1 }, "hook_refused": "no", "group_failure": { "job": "j", "firstLine": "l" }, "landed": "c", "landing_ci": { "Green": { "observed_ms": 1 } },
     });
     for (k, x) in set.as_object().unwrap().iter().chain(more.as_object().unwrap()) { v[k] = x.clone(); }
     v

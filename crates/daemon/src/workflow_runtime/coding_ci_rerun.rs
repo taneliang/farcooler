@@ -3,13 +3,19 @@ use super::*;
 
 impl Exec {
     pub(super) async fn ci_gh(&self, binding: &Binding, tag: &str, args: &[&str]) -> Result<(Option<i32>, Vec<u8>)> {
+        let (_hold, cancel) = tokio::sync::watch::channel(false);
+        self.ci_gh_cancel(binding, tag, args, cancel).await
+    }
+
+    pub(super) async fn ci_gh_cancel(&self, binding: &Binding, tag: &str, args: &[&str],
+        cancel: tokio::sync::watch::Receiver<bool>) -> Result<(Option<i32>, Vec<u8>)>
+    {
         let ci = &self.coding.as_ref().ok_or(Error::Refused("missing coding config"))?.ci;
         let gh = ci.command.environment.get("CI_GH").filter(|p| Path::new(p).is_absolute())
             .ok_or(Error::Refused("missing pinned CI_GH"))?;
         let argv: Vec<String> = std::iter::once(gh.clone()).chain(args.iter().map(|a| a.to_string())).collect();
         let log = self.root.join("receipts").join(format!("{}.ci-{tag}-{}.output", digest(&binding.effect), Uuid::now_v7()));
         durable(&log, b"")?;
-        let (_hold, cancel) = tokio::sync::watch::channel(false);
         let exit = crate::effect_runner::configured(&self.repository(), &argv, &ci.command.environment, &log,
             Duration::from_millis(ci.command.timeout_ms), cancel).await?;
         Ok((exit, self.bytes(&log)?))
