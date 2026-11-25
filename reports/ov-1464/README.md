@@ -9,7 +9,7 @@ for an orchestrator message. Times below are UTC.
 | 14:55:45.961 | The Codex rollout for session `01a20da4-c6a4-7961-9a5e-569f3b58f014` records a `wait` tool call at line 1520. There is no result, Stop, or hook-exit record before the rollout ends. |
 | 14:55:54.202 | The runner database records the only `message_wakes` row addressed to that terminal. Its note actor is `manager`. |
 | 14:55:54.215–.216 | The wake was claimed and completed with the runner note “Couldn't confirm the engine agent got the message.” |
-| 14:55:54.217696 | Line 574 of Canary `farcoolerd.log` logged “the native turn could not be read” for the same effect with `runtime I/O: Broken pipe (os error 32)`. |
+| 14:55:54.217696 | Line 574 of Canary `farcoolerd.log.1` logged “the native turn could not be read” for the same effect with `runtime I/O: Broken pipe (os error 32)`. |
 | 14:55:54.385 | The native settlement receipt `wf1:bff8faa3…` recorded a failed build. The runner later wrote the process and outcome receipts. |
 
 The writer was `farcoolerd` in `native_followup`. It tried to send the steering
@@ -47,6 +47,8 @@ actual close reason remains unverified.
   connection timestamp. The error path writes the native settlement with
   zero hook frames, discarding the in-memory frames.
 - The process receipt's captured PTY output contains no hook-exit diagnostic.
+  Its exit value of `1` is the runner's translation of the failed native
+  settlement. The hook subprocess has no recorded exit status.
   The rollout's final `wait` call precedes the error by 8.257 seconds.
   The Codex thread history still marks the turn in progress and has no
   completion for that call or hook result. The 8.257 seconds measure the
@@ -60,10 +62,17 @@ actual close reason remains unverified.
 - The retained macOS Special trace `0000000000001bb3.tracev3` contains
   1,221 records in the incident window (14:54:30–14:56:00 UTC). No decoded
   entry in that window identifies the runner, Codex, or the hook process.
+- The rotated `system.log.2.gz` has one entry in the incident minutes
+  (22:54–22:56 local time) with no runner, Codex, tmux, or process
+  termination marker. The user and retired crash report directories have
+  no report for a matching process at the time of the disconnect. Time
+  Machine lists no local snapshots to recover the earlier Codex log
+  database from.
 
 The timeout regression reproduces the normal exit path and its engine
-failure. Confirming that path for wf1 requires a record tied to the failed
-connection that identifies why the hook stopped reading.
+failure. The historical close-reason acceptance item remains open pending
+a hook exit or deadline record tied to the failed connection, or the ticket
+owner's acceptance of the evidence gap.
 
 ## Message delivery
 
@@ -90,12 +99,15 @@ build settled as `SafeFailureBecause` with the same
 `Broken pipe (os error 32)`. With the fix, the same admitted build recorded
 the unconfirmed delivery, committed, and settled as passed.
 
-The niced four-worker daemon library and binary unit run recorded 3,412
-passes, eight failures, and 18 skipped. All eight failures passed in a
-serial rerun with ARM64 Python first on `PATH`. The hook timeout regression
-also passed in that rerun.
+The follow-up verification built the workspace binaries in the ticket
+scratch directory and ran the niced daemon library and binary unit suites
+with four Nextest workers and ARM64 Python. Nextest recorded 3,416 passes,
+four failures, and 18 skipped. All four failures passed in a niced serial
+rerun, along with the hook timeout regression. The serial run used a lower
+nice value so the builder priority test could lower its own priority
+without hitting the macOS ceiling.
 `cargo clippy --locked --offline --workspace --all-targets -- -D warnings`
-passed.
+passed with six build jobs.
 
 ## Recovery after a genuine interruption
 
