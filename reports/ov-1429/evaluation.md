@@ -229,3 +229,19 @@ The first pane latency run exceeded the 100 ms deadline by 6.2 ms. The standalon
 Nextest ran 4,736 tests across the daemon, CLI, store, and workflow suites and three workflow socket integrations. The parallel run passed 4,732. Two native delivery and steering cases passed after building the runnable CLI in scratch. Two quiescence cases failed on the immediate pane check after shutdown. The test helper now retries a transient tmux error once after 20 ms and still requires tmux to report the pane gone. All six native quiescence tests passed on the rebuilt candidate. The opt-in CLI test also passed while reading workflow logs from a pane that was writing output.
 
 Migration lint and its self-test, daemon-layer, file-size, doc-comment, and workflow lint checks passed.
+
+## Verification on landing base `dbae6e7fa`
+
+The rebase keeps restart pacing, startup cleanup, and recurring log pruning in the same runtime. Restart pacing reads only indexed active effects. The loaded benchmark stages fresh work in a continuous dispatch sweep, and it follows the same Plan overview and theme detail pages as the rebased CLI. The extracted workflow RPC retains the full, summary, Plan, legacy, bundle, and re-pin replies and uses the starter settings cache.
+
+| Loaded read | Latency | Budget |
+| --- | ---: | ---: |
+| Plan | 743 ms | < 2 s |
+| Plan theme list | 609 ms | < 2 s |
+| Workflow Get | 140 ms | < 1 s |
+| Task List, first page | 50 ms | — |
+| Worktree List | 0.40 ms | < 2 s |
+
+The read sequence launched zero tmux clients. The idle minute recorded 13 `lsof` launches (12 recursive), 52 Git launches (one remote-head probe), one `gh` launch (zero polls of the finished run), and two tmux launches. All 20 pane echoes arrived within 100 ms. The slowest took 25.5 ms, ten overlapped the open-file probe, and an echo overlapped the accounting walk. The cleanup receipt recorded all 48,000 bytes.
+
+Nextest passed 4,826 of 4,828 tests across the daemon, CLI, store, and workflow unit suites and five socket and CLI integration suites. Both failures repeated in isolation with the same assertions on the unmodified landing base. The macOS native-hold tests reported `ended` for a stray process and found the same PID for the relay and the hold. Migration lint and its self-test, daemon-layer, file-size, doc-comment, Nightly dispatch, and workflow lint checks passed.

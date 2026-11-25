@@ -3,7 +3,8 @@ use super::{CodingHarness, CommandHandle, Definition, Phase, Runtime, StageKind,
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use uuid::Uuid;
-use farcooler_protocol::v1::{self as pb, request, response, Scope};
+use farcooler_client::plan_pages::PlanPages;
+use farcooler_protocol::v1::{self as pb, request, response, result, Scope};
 use farcooler_transport::{Handler, Peer};
 use std::sync::Arc;
 
@@ -13,20 +14,32 @@ async fn read_requests(service: &Arc<crate::service::Service>, handle: CommandHa
     let rpc = crate::rpc::RpcFactory::new(service.clone(), crate::watch::Watcher::new(service.clone()),
         Arc::new(tokio::sync::Notify::new()), Peer { client_id: None, scope: Scope::Control })
         .with_workflow_fixture(handle);
+    let mut times = Vec::new();
+    let theme_list = Some(pb::plan_detail_read::Subject::ThemeName(String::new()));
+    for (name, mut pages) in [
+        ("plan", PlanPages::overview(board_bytes.clone())),
+        ("plan theme list", PlanPages::detail(board_bytes.clone(), theme_list)),
+    ] {
+        let start = std::time::Instant::now();
+        loop {
+            let reply = rpc.handle(pb::Request {
+                method: "plan.get".into(),
+                payload: Some(request::Payload::PlanGet(pages.request())),
+                ..Default::default()
+            }).await;
+            let Some(response::Outcome::Result(pb::Result { value: Some(result::Value::Plan(page)), .. })) = reply.outcome else {
+                panic!("{name}: {:?}", reply.outcome);
+            };
+            if pages.push(page).unwrap().is_some() { break; }
+        }
+        let elapsed = start.elapsed();
+        println!("{name}: {:.3} ms", elapsed.as_secs_f64() * 1000.0);
+        times.push((name.to_owned(), elapsed));
+    }
+
     let mut workflow = super::admission_tests::request(board, &farcooler_protocol::workflow_commands::Action::Get);
     workflow.accepts.push("workflow_summary_v1".into());
-    let plan = pb::Request {
-        method: "plan.get".into(),
-        payload: Some(request::Payload::PlanGet(pb::PlanGetRequest { workspace_id: board_bytes.clone(), include_closed: false })),
-        ..Default::default()
-    };
     let cases = [
-        ("plan", plan.clone()),
-        // The CLI's theme list uses the same plan.get RPC and projects the themes locally.
-        ("plan theme list", pb::Request {
-            payload: Some(request::Payload::PlanGet(pb::PlanGetRequest { workspace_id: board_bytes.clone(), include_closed: true })),
-            ..plan
-        }),
         ("workflow get", workflow),
         ("task list", pb::Request {
             method: "task.list".into(),
@@ -38,7 +51,6 @@ async fn read_requests(service: &Arc<crate::service::Service>, handle: CommandHa
         }),
         ("worktree list", pb::Request { method: "worktree.list".into(), ..Default::default() }),
     ];
-    let mut times = Vec::new();
     for (name, request) in cases {
         let start = std::time::Instant::now();
         let reply = rpc.handle(request).await;
@@ -217,7 +229,11 @@ if stage in ('build', 'check'):
 
     let handle = runtime.command_handle(&runtime.controller()).unwrap();
     let (stop, shutdown) = tokio::sync::watch::channel(false);
-    let worker = tokio::spawn(async move { runtime.run(shutdown).await });
+    // This fixture stages fresh work in a running engine. Going through
+    // startup would classify the five pending effects as interrupted runs.
+    runtime.continuous = true;
+    runtime.shutdown = Some(shutdown);
+    let worker = tokio::spawn(async move { runtime.pump(super::now()).await });
     let ready = wait_until(tokio::time::Instant::now() + Duration::from_secs(30), Duration::from_millis(30), || {
         std::fs::read_dir(load_dir.path()).unwrap().flatten()
             .filter(|e| e.file_name().to_string_lossy().starts_with("active-")).count() == 5

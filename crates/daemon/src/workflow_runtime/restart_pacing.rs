@@ -12,8 +12,8 @@ pub(super) struct RestartPacing {
 impl Runtime {
     pub(super) fn retain_interrupted_runs(&mut self) -> Result<()> {
         for workspace in self.store.workflow_workspaces()? {
-            for stored in self.store.workflow_outbox(&workspace)? {
-                if stored.active && !matches!(stored.effect.kind, EffectKind::Stop { .. }) {
+            for stored in self.store.workflow_dispatch_effects(&workspace, &[])? {
+                if !matches!(stored.effect.kind, EffectKind::Stop { .. }) {
                     self.restart_pacing.pending.insert((workspace.clone(), stored.effect.run));
                 }
             }
