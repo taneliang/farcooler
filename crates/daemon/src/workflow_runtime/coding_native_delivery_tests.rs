@@ -114,3 +114,54 @@ async fn accepted_native_claude_delivers_message_and_acceptance_before_turn_ends
     assert!(hooks.iter().any(|h| h.event == "Stop"));
     for key in [&primary.key, &task.key] { assert!(crate::watch_view::lookup(&workspace, key).is_none()); }
 }
+
+#[tokio::test]
+async fn ov_1464_closed_tool_hook_does_not_end_the_build() {
+    use farcooler_agent_hooks::wire::TAKES_UPDATED_INPUT;
+    use std::io::Write;
+
+    let (dir, mut runtime, _fake) = tests::native_agent("disconnected-hook", "codex").await;
+    let host = Uuid::now_v7();
+    let repository = runtime.repository();
+    let root = runtime.store.create_repository_root(host, dir.path().to_str().unwrap(), 0).unwrap();
+    let repo = runtime.store.create_repository(host, root.id, "Native", repository.join(".git").to_str().unwrap(), "").unwrap();
+    let board = runtime.store.ensure_main_workspace(repo.id).unwrap();
+    let task = runtime.store.create_task(board.id, "Steer this", Actor::User).unwrap();
+    let workspace = board.id.to_string();
+    let definition = runtime.configured_definition().unwrap();
+    super::super::tests::enqueue(&mut runtime, &workspace, &task.key, definition);
+    runtime.pump(2).await.unwrap();
+    let binding = super::super::coding_tests::admitted_in(&runtime, &workspace).await;
+    let (_cancel, cancel) = tokio::sync::watch::channel(false);
+    let run = runtime.execute_coding(&workspace, &binding, cancel);
+    tokio::pin!(run);
+
+    let id = terminal(&binding);
+    let started = dir.path().join("started");
+    let steer = async {
+        assert!(super::wait_until(tokio::time::Instant::now() + Duration::from_secs(10),
+            Duration::from_millis(10), || started.exists()).await, "the build did not start");
+        runtime.store.send_manual_message(task.id, Actor::Manager, "Use the new API", Some(id), serde_json::json!({})).unwrap();
+        // Emulate a CLI that has sent its gating request and dropped the socket before the reply.
+        // Perform send and close in one poll so the runner cannot win the race to reply.
+        let mut socket = std::os::unix::net::UnixStream::connect(runtime.native_socket(&binding)).unwrap();
+        let line = HookLine { agent: Agent::Codex, event: "PreToolUse".into(), takes: vec![TAKES_UPDATED_INPUT.into()],
+            payload: serde_json::json!({"session_id": id, "cwd": runtime.tree(&binding), "tool_name": "Write"}), launch: None };
+        let mut frame = serde_json::to_vec(&line).unwrap();
+        frame.push(b'\n');
+        socket.write_all(&frame).unwrap();
+        drop(socket);
+        assert!(super::wait_until(tokio::time::Instant::now() + Duration::from_secs(10),
+            Duration::from_millis(10), || runtime.store.notes_for(task.id, None).unwrap().iter()
+                .any(|n| n.body.contains("Couldn't confirm the engine agent got the message"))).await,
+            "the failed delivery must be recorded");
+        std::fs::write(dir.path().join("direction-ready"), "").unwrap();
+    };
+    tokio::select! {
+        outcome = &mut run => panic!("the disconnected hook ended the build: {outcome:?}"),
+        _ = steer => {}
+    }
+    let outcome = run.await;
+    assert!(matches!(outcome, Ok(Outcome::Passed(_))), "the same build must commit and pass: {outcome:?}");
+    assert!(runtime.store.pending_message_wakes().unwrap().is_empty());
+}

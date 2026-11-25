@@ -1,6 +1,7 @@
 //! Retained managed tmux PTY + normalized hook ownership, without Service activation.
 use super::*;
 use super::coding::FileValidation;
+use super::native_messages::{Followup, send_native_reply};
 use farcooler_agent_core::event::{AgentEvent, EndReason};
 use farcooler_agent_hooks::{Agent, assemble::MessageAssembler, facts::facts, wire::HookLine};
 use farcooler_tmux::TmuxServer;
@@ -417,8 +418,7 @@ impl Exec {
             // a duplicate empty queue check must not settle the step before that continuation runs.
             let keyed_stop = agent == Agent::Codex && line.event == "Stop" && line.payload["turn_id"].is_string();
             if keyed_stop && let Some((payload, reply)) = &continued_stop && payload == &line.payload {
-                stream.get_mut().write_all(reply).await?;
-                stream.get_mut().write_all(b"\n").await?;
+                send_native_reply(binding, &line, stream.get_mut(), reply).await?;
                 continue;
             }
             let events = assembler.accept(line.agent, &line.event, &line.payload);
@@ -429,12 +429,13 @@ impl Exec {
             let waiting = ended && building && self.unfinished_build(binding, &tree).await.ok().flatten().is_some();
             let followup = if prompted && (ended || line.event == "PreToolUse") {
                 self.native_followup(binding, &line, stream.get_mut(), ended && !waiting).await?
-            } else { None };
-            let continued = followup.is_some();
-            if keyed_stop && let Some(reply) = followup { continued_stop = Some((line.payload.clone(), reply)); }
-            if !continued && !crate::watch::answer_wake::engine::context_reply(terminal(binding), &line, stream.get_mut()).await {
+            } else { Followup::NoMessage };
+            let continued = matches!(followup, Followup::Sent(_));
+            if matches!(followup, Followup::NoMessage)
+                && !crate::watch::answer_wake::engine::context_reply(terminal(binding), &line, stream.get_mut()).await {
                 let _ = stream.get_mut().write_all(b"{}\n").await;
             }
+            if keyed_stop && let Followup::Sent(reply) = followup { continued_stop = Some((line.payload.clone(), reply)); }
             hooks.push(line);
             if hooks.len() > 4096 { return Err(Error::Refused("too many native hooks")); }
             if continued { unfinished = None; continue; }
@@ -845,6 +846,10 @@ hook('sessionStart' if agent == 'cursor' else 'SessionStart')
 prompt = pathlib.Path(os.environ['TEST_LAUNCHED_PROMPT_FILE']).read_text() if 'TEST_LAUNCHED_PROMPT_FILE' in os.environ else os.environ['TEST_LAUNCHED_PROMPT']
 hook('beforeSubmitPrompt' if agent == 'cursor' else 'UserPromptSubmit', prompt=prompt)
 pathlib.Path(os.environ['STARTED']).write_text(str(os.getpid()))
+if mode == 'disconnected-hook':
+    ready = pathlib.Path(os.environ['STARTED']).with_name('direction-ready')
+    while not ready.exists():
+        time.sleep(0.01)
 if mode in ('steering', 'active-steering'):
     ready = pathlib.Path(os.environ['STARTED']).with_name('direction-ready')
     for _ in range(500):

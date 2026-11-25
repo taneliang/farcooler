@@ -2,6 +2,27 @@
 //! continuation boundary between tools; its final queue check also closes admission.
 use super::*;
 use farcooler_agent_hooks::wire::{HookLine, TAKES_FOLLOWUP};
+use tokio::io::AsyncWriteExt;
+
+pub(super) enum Followup {
+    NoMessage,
+    Sent(Vec<u8>),
+    Disconnected,
+}
+
+/// A hook can give up waiting for its reply while the agent itself is still working.
+pub(super) async fn send_native_reply(binding: &Binding, line: &HookLine,
+    stream: &mut tokio::net::UnixStream, reply: &[u8]) -> Result<bool> {
+    let sent = async { stream.write_all(reply).await?; stream.write_all(b"\n").await }.await;
+    match sent {
+        Ok(()) => Ok(true),
+        Err(error) if matches!(error.kind(), std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset) => {
+            tracing::warn!(effect = %binding.effect.id, hook = %line.event, %error, "native hook disconnected before receiving its reply");
+            Ok(false)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
 
 /// Any exit (timeout, cancellation, failed capture, or normal settlement) closes admission and
 /// records undelivered direction on its original ticket. The durable queue remains recoverable if
@@ -36,12 +57,12 @@ impl Exec {
         Ok(keys.into_iter().collect())
     }
     pub(super) async fn native_followup(&self, binding: &Binding, line: &HookLine,
-        stream: &mut tokio::net::UnixStream, closing: bool) -> Result<Option<Vec<u8>>> {
+        stream: &mut tokio::net::UnixStream, closing: bool) -> Result<Followup> {
         use farcooler_store::models::Actor;
         let tool = matches!(line.agent, farcooler_agent_hooks::Agent::Claude | farcooler_agent_hooks::Agent::Codex) && line.event == "PreToolUse"
             && line.takes_updated_input();
         let stop = line.event == "Stop" && line.takes.iter().any(|t| t == TAKES_FOLLOWUP);
-        if !(tool || stop) || line.payload.get("agent_id").is_some() { return Ok(None); }
+        if !(tool || stop) || line.payload.get("agent_id").is_some() { return Ok(Followup::NoMessage); }
         let id = super::coding_native::terminal(binding);
         let workspace = Uuid::parse_str(&binding.workspace).ok();
         // Explicit messages were admitted for this exact live agent. The answer-wake
@@ -57,12 +78,11 @@ impl Exec {
             if closing && stop && claimed.is_empty() { *open = false; }
             Ok(claimed)
         }).map_err(Error::Domain)?;
-        if claimed.is_empty() { return Ok(None); }
+        if claimed.is_empty() { return Ok(Followup::NoMessage); }
         let text = claimed.iter().map(|(w, key)| {
             let from = match w.actor { Actor::Manager => "the orchestrator", Actor::User => "the owner", _ => "a collaborator" };
             format!("[from {from} on {key}] {}", w.body)
         }).collect::<Vec<_>>().join("\n");
-        use tokio::io::AsyncWriteExt;
         // Deny this tool, handing the direction to the agent before it can make the old change.
         // A plain allow would bypass a permission check, and a Stop continuation would arrive late.
         // Informational runner notices (ov-1171) provide context; explicit direction still fences the tool.
@@ -73,13 +93,17 @@ impl Exec {
             else if tool { serde_json::json!({"decision":{"behavior":"deny", "message":text}}) }
             else { serde_json::json!({"followup_message":text}) };
         let reply = serde_json::to_vec(&response)?;
-        let sent = async { stream.write_all(&reply).await?; stream.write_all(b"\n").await }.await;
+        let sent = send_native_reply(binding, line, stream, &reply).await;
+        let record = (!matches!(sent, Ok(true))).then_some("Couldn't confirm the engine agent got the message");
         for (wake, _) in claimed {
-            let record = sent.as_ref().err().map(|_| "Couldn't confirm the engine agent got the message");
             self.store.finish_wake(&wake, record).map_err(Error::Domain)?;
         }
-        sent?;
-        Ok(Some(reply))
+        let sent = sent?;
+        if !sent && closing && stop {
+            // This Stop had no continuation. Close admission before normal settlement.
+            crate::engine_steering::inbox(id, |open| { *open = false; Ok(()) }).map_err(Error::Domain)?;
+        }
+        Ok(if sent { Followup::Sent(reply) } else { Followup::Disconnected })
     }
 }
 
@@ -111,14 +135,14 @@ mod tests {
             let foreign = svc.store.send_manual_message(task.id, Actor::Manager, "Another step", Some(Uuid::now_v7()), serde_json::json!({})).unwrap();
             let (mut writer, reader) = tokio::net::UnixStream::pair().unwrap();
             let mut line = HookLine { agent, event:"Stop".into(), payload:serde_json::json!({}), takes:vec![], launch:None };
-            assert!(runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap().is_none(), "an old hook cannot read a response");
+            assert!(matches!(runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap(), Followup::NoMessage), "an old hook cannot read a response");
             line.takes.push(TAKES_FOLLOWUP.into());
-            assert!(runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap().is_some());
+            assert!(matches!(runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap(), Followup::Sent(_)));
             let mut text = String::new();
             tokio::io::BufReader::new(reader).read_line(&mut text).await.unwrap();
             let response:serde_json::Value = serde_json::from_str(&text).unwrap();
             assert_eq!(response["followup_message"], format!("[from the orchestrator on {}] Use the new API", task.key));
-            assert!(runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap().is_none(), "never sent twice");
+            assert!(matches!(runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap(), Followup::NoMessage), "never sent twice");
             let pending = svc.store.pending_message_wakes().unwrap();
             assert!(!pending.iter().any(|w| w.note == note.id));
             let other = pending.iter().find(|w| w.note == foreign.id).unwrap();
@@ -158,17 +182,17 @@ mod tests {
             let line = HookLine { agent, event:"PreToolUse".into(), payload:serde_json::json!({}),
                 takes:vec![farcooler_agent_hooks::wire::TAKES_UPDATED_INPUT.into()], launch:None };
             let mut foreign = line.clone(); foreign.payload["agent_id"] = "subagent".into();
-            assert!(runtime.native_followup(&binding, &foreign, &mut writer, true).await.unwrap().is_none());
+            assert!(matches!(runtime.native_followup(&binding, &foreign, &mut writer, true).await.unwrap(), Followup::NoMessage));
             let mut old = line.clone(); old.takes.clear();
-            assert!(runtime.native_followup(&binding, &old, &mut writer, true).await.unwrap().is_none());
-            assert!(runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap().is_some(), "{agent:?}, wake_on_answer={wake_on_answer}: direction must arrive before the tool call, without a Stop");
+            assert!(matches!(runtime.native_followup(&binding, &old, &mut writer, true).await.unwrap(), Followup::NoMessage));
+            assert!(matches!(runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap(), Followup::Sent(_)), "{agent:?}, wake_on_answer={wake_on_answer}: direction must arrive before the tool call, without a Stop");
             let mut text = String::new();
             tokio::io::BufReader::new(reader).read_line(&mut text).await.unwrap();
             let response:serde_json::Value = serde_json::from_str(&text).unwrap();
             assert_eq!(response["decision"]["behavior"], "deny");
             assert!(response["decision"]["message"].as_str().unwrap().contains("Use the new API"));
             assert!(svc.store.pending_message_wakes().unwrap().is_empty());
-            assert!(runtime.native_followup(&binding, &line, &mut writer, false).await.unwrap().is_none(),
+            assert!(matches!(runtime.native_followup(&binding, &line, &mut writer, false).await.unwrap(), Followup::NoMessage),
                 "direction is consumed once");
         }
     }
@@ -203,12 +227,12 @@ mod tests {
                 takes:vec![TAKES_FOLLOWUP.into()], launch:None };
             // A message admitted before the final check must extend this exact session.
             watcher.message_send(request(), crate::people::Person::Owner).await.unwrap();
-            assert!(runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap().is_some());
+            assert!(matches!(runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap(), Followup::Sent(_)));
             let mut text = String::new();
             tokio::io::BufReader::new(reader).read_line(&mut text).await.unwrap();
             assert!(text.contains("Direction at handoff"));
             // Hold the live row past the last Stop, as capture/quiescence do in production.
-            assert!(runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap().is_none());
+            assert!(matches!(runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap(), Followup::NoMessage));
             assert!(watcher.message_send(request(), crate::people::Person::Owner).await.is_err(),
                 "{agent:?}: a final Stop must close admission before settlement starts");
             assert!(svc.store.pending_message_wakes().unwrap().is_empty());
