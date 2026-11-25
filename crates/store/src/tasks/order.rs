@@ -154,10 +154,10 @@ mod tests {
         assert_eq!(store.board_task_keys(workspace).unwrap(), [&c.key, &b.key, &a.key].map(String::as_str));
         store.set_line_order(workspace, &[b.id, c.id], Actor::User).unwrap();
         let facts = |id| store.task_facts(&[store.get_task(id).unwrap()]).unwrap().remove(0);
-        assert_eq!(facts(c.id).ahead, [b.key.clone()]);
+        assert_eq!(facts(c.id).ahead.as_slice(), std::slice::from_ref(&b.key));
         assert_eq!(store.ticket_line(b.id).unwrap().plan_rank, Some(1));
         store.reorder_task(c.id, b.id, false).unwrap();
-        assert_eq!(facts(b.id).ahead, [c.key.clone()]);
+        assert_eq!(facts(b.id).ahead.as_slice(), std::slice::from_ref(&c.key));
         assert_eq!(store.ticket_line(c.id).unwrap().plan_rank, Some(1));
         store.set_line(workspace, TaskLine::Agent, &[], Actor::User).unwrap();
         store.set_line_order(workspace, &[], Actor::User).unwrap();
