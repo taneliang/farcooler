@@ -116,11 +116,11 @@ async fn accepted_native_claude_delivers_message_and_acceptance_before_turn_ends
 }
 
 #[tokio::test]
-async fn ov_1464_closed_tool_hook_does_not_end_the_build() {
-    use farcooler_agent_hooks::wire::TAKES_UPDATED_INPUT;
-    use std::io::Write;
-
-    let (dir, mut runtime, _fake) = tests::native_agent("disconnected-hook", "codex").await;
+async fn ov_1464_tool_hook_reply_timeout_does_not_end_the_build() {
+    let exe = std::env::current_exe().unwrap();
+    let cli = farcooler_core::scratch::cargo_profile(&exe).unwrap().join("farcooler");
+    assert!(cli.is_file(), "build the real hook CLI first: cargo build -p farcooler-cli --bin farcooler");
+    let (dir, mut runtime, _fake) = tests::native_agent("hook-reply-timeout", "codex").await;
     let host = Uuid::now_v7();
     let repository = runtime.repository();
     let root = runtime.store.create_repository_root(host, dir.path().to_str().unwrap(), 0).unwrap();
@@ -138,19 +138,33 @@ async fn ov_1464_closed_tool_hook_does_not_end_the_build() {
 
     let id = terminal(&binding);
     let started = dir.path().join("started");
-    let steer = async {
-        assert!(super::wait_until(tokio::time::Instant::now() + Duration::from_secs(10),
-            Duration::from_millis(10), || started.exists()).await, "the build did not start");
-        runtime.store.send_manual_message(task.id, Actor::Manager, "Use the new API", Some(id), serde_json::json!({})).unwrap();
-        // Emulate a CLI that has sent its gating request and dropped the socket before the reply.
-        // Perform send and close in one poll so the runner cannot win the race to reply.
-        let mut socket = std::os::unix::net::UnixStream::connect(runtime.native_socket(&binding)).unwrap();
-        let line = HookLine { agent: Agent::Codex, event: "PreToolUse".into(), takes: vec![TAKES_UPDATED_INPUT.into()],
-            payload: serde_json::json!({"session_id": id, "cwd": runtime.tree(&binding), "tool_name": "Write"}), launch: None };
-        let mut frame = serde_json::to_vec(&line).unwrap();
-        frame.push(b'\n');
-        socket.write_all(&frame).unwrap();
-        drop(socket);
+    tokio::select! {
+        outcome = &mut run => panic!("the build ended before the tool hook: {outcome:?}"),
+        ready = super::wait_until(tokio::time::Instant::now() + Duration::from_secs(10),
+            Duration::from_millis(10), || started.exists()) => assert!(ready, "the build did not start"),
+    }
+    runtime.store.send_manual_message(task.id, Actor::Manager, "Use the new API", Some(id), serde_json::json!({})).unwrap();
+    let socket = runtime.native_socket(&binding);
+    let payload = serde_json::json!({"session_id": id, "cwd": runtime.tree(&binding), "tool_name": "Write"});
+    let called = tokio::time::Instant::now();
+    let mut hook = tokio::process::Command::new(cli)
+        .args(["hook", "--agent", "codex", "--event", "PreToolUse", "--gating", "--socket"])
+        .arg(&socket)
+        .env("FARCOOLER_NATIVE_HOOK_SOCKET", &socket)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn().unwrap();
+    hook.stdin.take().unwrap().write_all(payload.to_string().as_bytes()).await.unwrap();
+    // Leave the listener bound but stop polling the turn until the CLI exits on its own.
+    // The CLI writes directly to the runner's socket. The delivery note below proves
+    // the complete frame reached the runner, so the timeout was waiting for its reply.
+    let output = tokio::time::timeout(Duration::from_secs(5), hook.wait_with_output()).await.unwrap().unwrap();
+    assert!(output.status.success());
+    assert!(output.stdout.is_empty(), "the timed-out hook must let Codex proceed");
+    assert!(called.elapsed() >= Duration::from_millis(400));
+
+    let finish = async {
         assert!(super::wait_until(tokio::time::Instant::now() + Duration::from_secs(10),
             Duration::from_millis(10), || runtime.store.notes_for(task.id, None).unwrap().iter()
                 .any(|n| n.body.contains("Couldn't confirm the engine agent got the message"))).await,
@@ -158,8 +172,8 @@ async fn ov_1464_closed_tool_hook_does_not_end_the_build() {
         std::fs::write(dir.path().join("direction-ready"), "").unwrap();
     };
     tokio::select! {
-        outcome = &mut run => panic!("the disconnected hook ended the build: {outcome:?}"),
-        _ = steer => {}
+        outcome = &mut run => panic!("the timed-out hook ended the build: {outcome:?}"),
+        _ = finish => {}
     }
     let outcome = run.await;
     assert!(matches!(outcome, Ok(Outcome::Passed(_))), "the same build must commit and pass: {outcome:?}");

@@ -846,7 +846,7 @@ hook('sessionStart' if agent == 'cursor' else 'SessionStart')
 prompt = pathlib.Path(os.environ['TEST_LAUNCHED_PROMPT_FILE']).read_text() if 'TEST_LAUNCHED_PROMPT_FILE' in os.environ else os.environ['TEST_LAUNCHED_PROMPT']
 hook('beforeSubmitPrompt' if agent == 'cursor' else 'UserPromptSubmit', prompt=prompt)
 pathlib.Path(os.environ['STARTED']).write_text(str(os.getpid()))
-if mode == 'disconnected-hook':
+if mode == 'hook-reply-timeout':
     ready = pathlib.Path(os.environ['STARTED']).with_name('direction-ready')
     while not ready.exists():
         time.sleep(0.01)
@@ -921,7 +921,12 @@ else:
     time.sleep(30)
 "#).unwrap();
         let CodingHarness::Command(mut process) = runtime.coding.as_ref().unwrap().harness.clone() else { unreachable!() };
-        process.argv.clear(); process.timeout_ms = if mode == "foreign-only" { 300 } else { 5000 };
+        process.argv.clear();
+        process.timeout_ms = match mode {
+            "foreign-only" => 300,
+            "hook-reply-timeout" => 15_000,
+            _ => 5000,
+        };
         if mode == "active-steering" && matches!(agent, "claude" | "codex") {
             let exe = std::env::current_exe().unwrap();
             let profile = farcooler_core::scratch::cargo_profile(&exe).unwrap();
