@@ -37,6 +37,19 @@ async fn plan(link: &mut Link, workspace: Uuid) -> pb::Plan {
     }
 }
 
+async fn board_order(link: &mut Link, repository: Uuid, workspace: Uuid) -> Vec<bytes::Bytes> {
+    let mut list = request("task.list");
+    list.payload = Some(payload::Payload::TaskList(pb::TaskListRequest {
+        repository_id: id(repository),
+        workspace_id: Some(id(workspace)),
+        ..Default::default()
+    }));
+    let Some(result::Value::TaskList(tasks)) = link.call(list).await.unwrap().value else {
+        panic!("expected the board");
+    };
+    tasks.items.into_iter().map(|task| task.id).collect()
+}
+
 /// `line.set` for `task`, as `manager`, with what `fill` writes.
 fn line_set(task: Uuid, fill: impl FnOnce(&mut pb::TicketLineSet)) -> payload::Payload {
     let mut p = pb::TicketLineSet { task_id: id(task), actor: "manager".into(), ..Default::default() };
@@ -158,16 +171,7 @@ async fn a_board_reorder_is_visible_to_a_second_client() {
     assert_eq!(tasks[0].task_id, id(second.id));
     assert_eq!(tasks[0].workspace_id, Some(id(repo.workspace)));
 
-    let mut list = request("task.list");
-    list.payload = Some(payload::Payload::TaskList(pb::TaskListRequest {
-        repository_id: id(repo.id),
-        workspace_id: Some(id(repo.workspace)),
-        ..Default::default()
-    }));
-    let Some(result::Value::TaskList(tasks)) = reader.call(list).await.unwrap().value else {
-        panic!("expected the board");
-    };
-    assert_eq!(tasks.items.iter().map(|task| task.id.clone()).collect::<Vec<_>>(), [id(second.id), id(first.id)]);
+    assert_eq!(board_order(&mut reader, repo.id, repo.workspace).await, [id(second.id), id(first.id)]);
 }
 
 /// Theme and line writes announce plan changes. Changing the order also
@@ -180,6 +184,7 @@ async fn a_theme_a_ticket_and_the_plan_round_trip_and_announce() {
     let task = h.service.store.create_task(repo.workspace, "Mac: a jump", Actor::User).unwrap();
     let mut a = connect(&h).await;
     let mut listener = connect(&h).await;
+    assert_eq!(board_order(&mut listener, repo.id, repo.workspace).await, [id(earlier.id), id(task.id)]);
 
     let theme = call(
         &mut a,
@@ -212,7 +217,6 @@ async fn a_theme_a_ticket_and_the_plan_round_trip_and_announce() {
         panic!("wrong result")
     };
     assert_eq!(p.lines[0].plan_rank, Some(1), "the answer is the new plan");
-    assert_eq!(h.service.store.board_task_keys(repo.workspace).unwrap(), [task.key.clone(), earlier.key]);
 
     let read = plan(&mut connect(&h).await, repo.workspace).await;
     assert_eq!(read.themes.len(), 1);
@@ -238,6 +242,7 @@ async fn a_theme_a_ticket_and_the_plan_round_trip_and_announce() {
     assert_eq!(tasks[0].task_id, id(task.id));
     assert_eq!(tasks[0].workspace_id, Some(id(repo.workspace)));
     assert_eq!(tasks[0].actor, "manager");
+    assert_eq!(board_order(&mut listener, repo.id, repo.workspace).await, [id(task.id), id(earlier.id)]);
 }
 
 /// An agent recorded over the wire works its tickets, which go on the line;
