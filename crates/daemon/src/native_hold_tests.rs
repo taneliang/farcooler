@@ -176,6 +176,32 @@ fn working(dir: &Path) -> bool {
     work(dir) > at
 }
 
+/// Some macOS launch environments report each process as responsible for itself.
+/// Probe with a child independent of the hold so a broken relay cannot hide a regression.
+#[cfg(target_os = "macos")]
+fn inherits_responsibility() -> bool {
+    let mut child = std::process::Command::new("/bin/sh")
+        .args(["-c", "echo ready; read -r stop || :"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn().unwrap();
+    let mut ready = String::new();
+    let read = BufReader::new(child.stdout.take().unwrap()).read_line(&mut ready);
+    let pid = child.id() as i32;
+    let responsible = responsibility::of(pid);
+    drop(child.stdin.take());
+    assert!(child.wait().unwrap().success(), "the responsibility probe exited cleanly");
+    read.unwrap();
+    assert_eq!(ready.trim(), "ready");
+    if responsible == Some(pid) {
+        eprintln!("macOS reports the probe child as responsible for itself; inherited responsibility is unavailable");
+        return false;
+    }
+    assert_eq!(responsible, responsibility::of(std::process::id() as i32));
+    assert!(responsible.is_some(), "macOS must identify the probe child's responsible process");
+    true
+}
+
 /// What the hold must say about a stray that is still working: `unsettled`, its socket kept, and `ended` only once the
 /// stray is gone.
 fn refuses_until_the_stray_is_gone(mut h: Hold) {
@@ -214,6 +240,8 @@ fn a_stray_whose_parent_exited_first_is_still_accounted_for() {
 /// writes.
 #[test]
 fn a_stray_whose_parent_the_hold_never_saw_keeps_end_from_succeeding() {
+    #[cfg(target_os = "macos")]
+    if !inherits_responsibility() { return; }
     refuses_until_the_stray_is_gone(hold_with(&format!("( {STRAY} & echo $! > stray ); while :; do sleep 1; done"), &[(BLIND, "1")]));
 }
 
@@ -222,14 +250,17 @@ fn a_stray_whose_parent_the_hold_never_saw_keeps_end_from_succeeding() {
 #[cfg(target_os = "macos")]
 #[test]
 fn the_hold_is_responsible_for_its_agent_and_the_relay_is_not() {
+    if !inherits_responsibility() { return; }
     let mut h = hold("echo $PPID > hold; echo $$ > agent; while :; do sleep 1; done");
     let (relay, held, agent) = (h.child.id() as i32, pid_in(h.dir.path(), "hold"), pid_in(h.dir.path(), "agent"));
-    assert_ne!(relay, held, "tmux's process relays to a hold of its own");
-    assert_eq!(responsibility::of(held), Some(held));
-    assert_eq!(responsibility::of(agent), Some(held));
-    assert_ne!(responsibility::of(relay), Some(held));
+    let (held_responsibility, agent_responsibility, relay_responsibility) =
+        (responsibility::of(held), responsibility::of(agent), responsibility::of(relay));
     assert_eq!(ask_blocking(&h.socket, "end", Duration::from_secs(30)), Answer::Said("ended".into()));
     assert_eq!(h.child.wait().unwrap().code(), Some(128 + libc::SIGTERM), "the relay exits with the hold's status");
+    assert_ne!(relay, held, "tmux's process relays to a hold of its own");
+    assert_eq!(held_responsibility, Some(held));
+    assert_eq!(agent_responsibility, Some(held));
+    assert_ne!(relay_responsibility, Some(held));
 }
 
 /// An agent that ends what it started outside its group on SIGTERM (as Codex does) ends cleanly.
