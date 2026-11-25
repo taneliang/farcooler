@@ -24,26 +24,40 @@ still return a successful response within one second while the stall is held.
 - Linux aarch64 in `fcdiag`. The named test at `d51b9eb09` reproduced the
   panic `sampler reached the unrelated process's arguments: Elapsed(())`
   with both tmux 3.4 and tmux 3.6. The corrected test passed with both
-  versions (1 passed, 0 failed in each run). The same five daemon test
-  modules listed below passed with tmux 3.4 (64 tests).
-- macOS arm64, tmux 3.8. The named regression passed in the daemon library
-  test target. The November 26 recheck passed both individually (1 test) and
-  with the daemon test modules for workflow admission, caller seats, foreground
-  sampling, the process table, and process-read lanes (66 tests).
+  versions. On rebased candidate `2ed5cee1b` with tmux 3.6, the named test
+  passed in 0.600 seconds and the focused suite passed all 64 tests.
+- On GitHub's Ubuntu 24.04 runner, the named test passed in 0.309 seconds
+  on `2ed5cee1b` and all four Linux Rust test shards passed.
+  [Rust tests (3/4)](https://github.com/taneliang/farcooler/actions/runs/45683358983/job/139452543897)
+- macOS arm64, tmux 3.8. On the same candidate, the named test passed in
+  0.522 seconds. The focused suite passed all 66 tests, including on the
+  final local rerun before landing.
+- In GitHub's macOS native shard, the named test passed in 0.858 seconds
+  on `2ed5cee1b`.
+  [Rust native tests (macOS 1/2)](https://github.com/taneliang/farcooler/actions/runs/45683358983/job/139473766732)
+- The focused suites covered daemon workflow admission, caller seats,
+  foreground sampling, the process table, and process-read lanes. The
+  tmux leak checker passed on both platforms.
 - `cargo clippy --locked -p farcooler-daemon --all-targets -- -D warnings`
   passed on macOS. The daemon-layer, file-size-budget, and shared-core lints
   passed.
 
 ## Main CI
 
-GitHub reported `8c85d3179e00de94c02cd89974764c41973c1f67` as the head of
-`main` on November 26, 2026 (SGT). Its admission test still arms the stall
-using tmux’s `pane_pid`. The `CI` workflow for that push completed with
-`failure` on attempt 2. Rust tests (3/4) logged the same panic at
-`admission_tests.rs:573`, `sampler reached the unrelated process's arguments: Elapsed(())`.
-[CI run 45669588871, attempt 2](https://github.com/taneliang/farcooler/actions/runs/45669588871/attempts/2)
-[Rust tests (3/4) job log](https://github.com/taneliang/farcooler/actions/runs/45669588871/job/139421754114)
+The `CI` push run on `main` for landing commit
+`2ed5cee1b46304dcde0a82d9824b9342191a94bd` completed with `success` on
+attempt 1. Its Changes job found the successful landing run for the same
+SHA and reused that result, so the app jobs were skipped.
+[Main CI run 45693542956](https://github.com/taneliang/farcooler/actions/runs/45693542956)
+[Changes job log](https://github.com/taneliang/farcooler/actions/runs/45693542956/job/139484929370)
 
-The fix is on the ticket branch at `6eb3b744b1fdd441edf8520608baf64115547886`.
-The main CI acceptance item remains open until GitHub reports a successful
-`CI` push run with the SHA that lands the fix on `main`.
+`main` fast-forwarded from `8c85d3179e00de94c02cd89974764c41973c1f67` to
+`2ed5cee1b46304dcde0a82d9824b9342191a94bd` on November 26, 2026 (SGT).
+Landing CI passed on attempt 2 after retrying two macOS jobs that had been
+cancelled before GitHub assigned runners.
+[Landing CI run 45683358983, attempt 2](https://github.com/taneliang/farcooler/actions/runs/45683358983/attempts/2)
+
+The prior main push at `8c85d3179` failed on attempt 2. Rust tests (3/4)
+logged the same timeout at `admission_tests.rs:573` while the test still
+armed the stall on tmux’s `pane_pid`.
+[Prior main CI run 45669588871, attempt 2](https://github.com/taneliang/farcooler/actions/runs/45669588871/attempts/2)
