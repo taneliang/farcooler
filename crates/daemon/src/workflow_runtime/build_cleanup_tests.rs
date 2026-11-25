@@ -1008,6 +1008,10 @@ async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output(
     let dep = separate_output.with_extension("d");
     std::fs::write(&dep, format!("{}: src/lib.rs\n\n{}: src/lib.rs\n",
         dep.display(), separate_output.display())).unwrap();
+    let idle = runtime.root.join(format!("tree-wf1-{}", "d".repeat(64)));
+    adapters::git(&runtime.repository(), &["worktree", "add", "--detach", idle.to_str().unwrap(), "HEAD"]).await.unwrap();
+    seed_nextest_archive(&idle);
+    std::fs::write(idle.join("uncommitted.txt"), b"keep this").unwrap();
     assert_eq!(runtime.state("w").unwrap().unwrap().items[&group].phase, Phase::Running);
     // Even in the absence of a process lock, the running group's state protects real artifacts.
     let live_output = active_tree.join(layouts[0].0);
@@ -1033,6 +1037,9 @@ async fn startup_reclaims_unrecorded_private_output_and_keeps_live_group_output(
     let reader = File::open(orphan_trees[0].join("uncommitted.txt")).unwrap();
     let lock = runtime.tree_lock(&orphan_trees[1]).read_owned().await;
     runtime.pump(100).await.unwrap();
+    assert!(!idle.join("target/rust-tests.tar.zst").exists());
+    assert_eq!(std::fs::read(idle.join("uncommitted.txt")).unwrap(), b"keep this");
+    assert!(idle.join(".git").is_file());
     assert_eq!(std::fs::read(&separate_output).unwrap(), layouts[0].1);
     let held_deadline = runtime.orphan_cleanup_retries[&orphan_trees[0]];
     let lock_deadline = runtime.orphan_cleanup_retries[&orphan_trees[1]];
