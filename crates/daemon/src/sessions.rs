@@ -85,9 +85,8 @@ pub fn is_known_device(svc: &crate::service::Service, device: &str) -> bool {
 /// Every connection this daemon is currently serving.
 ///
 /// One per `Service`, because that is the unit a runner's live state belongs
-/// to. A `farcoolerd --stdio` process that could not reach a running daemon
-/// opens its own `Service` and therefore its own registry, which is honest: it
-/// can only close what it is serving, and it is serving exactly one session.
+/// to. SSH relays and local socket clients share the same registry on the
+/// runner they connect to.
 #[derive(Default)]
 pub struct Sessions {
     live: Mutex<HashMap<u64, Live>>,

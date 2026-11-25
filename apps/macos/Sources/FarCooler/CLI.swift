@@ -50,7 +50,7 @@ enum CLI {
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
-    private static let writerInstance = UUID().uuidString
+    static let writerInstance = UUID().uuidString
 
     /// Deliberately does NOT set FARCOOLER_HOME.
     ///

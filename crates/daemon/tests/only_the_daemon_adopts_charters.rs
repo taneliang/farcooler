@@ -78,8 +78,7 @@ async fn a_stream_or_stdio_session_adopts_no_charter_and_the_daemon_does() {
     std::fs::create_dir_all(repo.join(".farcooler")).unwrap();
     std::fs::write(repo.join(".farcooler/manager.md"), "ship small").unwrap();
 
-    // A stdio session with no daemon to relay to opens its own `Service`,
-    // and the handshake is answered only once that's open.
+    // A stdio session uses the lightweight runner in the absence of a daemon.
     {
         let (_child, mut client) = spawn(&home).await;
         client.call(request("repository.list")).await.expect("repository.list");
@@ -106,6 +105,15 @@ async fn a_stream_or_stdio_session_adopts_no_charter_and_the_daemon_does() {
     let said = String::from_utf8_lossy(&stream.stderr);
     assert!(said.contains("cannot stream that terminal"), "it never opened the service: {said}");
     assert!(!charter.exists(), "a stream adopted a charter");
+
+    // Let the on-demand runner finish its idle grace period so the ordinary
+    // daemon can acquire the socket and perform its own startup.
+    let socket = home.join("farcoolerd.sock");
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while socket.exists() {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }).await.expect("the runner stopped after its last stdio client left");
 
     // The daemon adopts it at its start. Polled, because it may do so after
     // it's listening: a slow volume mustn't hold up the socket either.

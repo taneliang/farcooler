@@ -7,6 +7,7 @@
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::net::UnixListener;
@@ -153,12 +154,29 @@ impl UnixListenerServer {
         H: Handler,
         F: Fn(Option<SessionPreamble>, Option<i32>) -> Option<(HandshakeConfig, H)> + Send + Sync + 'static,
     {
+        self.serve_sessions(None, move |preamble, pid| Ok(session(preamble, pid))).await
+    }
+
+    /// Serve a runner started on demand until its last connection has gone
+    /// and no new connection arrives within the idle grace period.
+    pub async fn serve_until_idle<H, F>(&self, idle: Duration, session: F) -> std::io::Result<()>
+    where
+        H: Handler,
+        F: Fn(Option<SessionPreamble>, Option<i32>) -> Result<(HandshakeConfig, H), farcooler_core::DomainError> + Send + Sync + 'static,
+    {
+        self.serve_sessions(Some(idle), move |preamble, pid| session(preamble, pid).map(Some)).await
+    }
+
+    async fn serve_sessions<H, F>(&self, idle: Option<Duration>, session: F) -> std::io::Result<()>
+    where
+        H: Handler,
+        F: Fn(Option<SessionPreamble>, Option<i32>) -> Result<Option<(HandshakeConfig, H)>, farcooler_core::DomainError> + Send + Sync + 'static,
+    {
         let session = Arc::new(session);
-        loop {
-            let (stream, _addr) = self.listener.accept().await?;
+        self.accept(idle, move |stream| {
             let session = session.clone();
             let pid = peer_pid(&stream);
-            tokio::spawn(async move {
+            async move {
                 let (mut read_half, write_half) = stream.into_split();
                 let opening = match read_opening(&mut read_half).await {
                     Ok(opening) => opening,
@@ -172,20 +190,24 @@ impl UnixListenerServer {
                     Opening::Frames(rest) => (None, rest),
                 };
 
-                // Refused in silence, and that is not a gap: the only thing that
-                // sends a preamble is this daemon's own stdio relay, which
-                // validates its arguments and exits with a message on stderr
-                // before it ever connects. Anything else reaching here wrote the
-                // line by hand.
-                // Only a device's relayed session names itself; a local
-                // caller (the Mac app, a pane) does not, and is not logged.
+                // A device's relay names itself in the preamble. A local
+                // caller (the Mac app, a pane) has no such log identity.
                 let device = preamble.as_ref().map(|p| (p.client.clone().unwrap_or_else(|| "-".into()), p.scope.clone()));
-                let Some((cfg, handler)) = session(preamble, pid) else {
-                    tracing::warn!("refused a session whose preamble named no scope this daemon has");
-                    return;
+                let reader = std::io::Cursor::new(buffered).chain(read_half);
+                let (cfg, handler) = match session(preamble, pid) {
+                    Ok(Some(session)) => session,
+                    Ok(None) => {
+                        tracing::warn!("refused a session whose preamble was not admitted");
+                        return;
+                    }
+                    Err(err) => {
+                        if let Err(e) = refuse(reader, write_half, err).await {
+                            tracing::debug!(error = %e, "connection closed before it could be refused");
+                        }
+                        return;
+                    }
                 };
 
-                let reader = std::io::Cursor::new(buffered).chain(read_half);
                 let mut conn = Connection::new(reader, write_half);
                 if let Some((client, scope)) = &device {
                     tracing::info!(%client, %scope, "a device session began");
@@ -197,7 +219,36 @@ impl UnixListenerServer {
                 if let Some((client, _)) = &device {
                     log_session_end(client, &served);
                 }
-            });
+            }
+        }).await
+    }
+
+    async fn accept<F, Fut>(&self, idle: Option<Duration>, serve: F) -> std::io::Result<()>
+    where
+        F: Fn(tokio::net::UnixStream) -> Fut,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        let mut connections = tokio::task::JoinSet::new();
+        loop {
+            tokio::select! {
+                biased;
+                joined = connections.join_next(), if !connections.is_empty() => {
+                    if let Some(Err(err)) = joined {
+                        tracing::warn!(error = %err, "connection task stopped");
+                    }
+                }
+                accepted = self.listener.accept() => {
+                    let serving = serve(accepted?.0);
+                    if idle.is_some() {
+                        connections.spawn(serving);
+                    } else {
+                        tokio::spawn(serving);
+                    }
+                }
+                _ = tokio::time::sleep(idle.unwrap_or_default()), if idle.is_some() && connections.is_empty() => {
+                    return Ok(());
+                }
+            }
         }
     }
 }

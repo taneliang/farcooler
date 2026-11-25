@@ -15,8 +15,8 @@
 //! the process says, so a pane that names itself is taken at its word.
 //!
 //! A remote device (a phone, the web, a watch through its phone) reaches the
-//! runner through `farcoolerd --stdio`, either in-process (no local pid: a
-//! person) or piped to the daemon's socket, whose process walks up to pid 1
+//! runner through `farcoolerd --stdio`, piped to the daemon's socket. The
+//! relay process walks up to pid 1
 //! with no agent above it: a person too. The Mac app is a person the same way.
 
 use farcooler_core::{DomainError, Result};
@@ -31,24 +31,29 @@ use crate::watch::Watcher;
 /// Answer `p` for the caller `peer`, whose local process is `caller_pid`,
 /// in the pane `caller_pane` once walked (`caller_person`). Returns the pane
 /// answered, for the caller to read back.
-pub(crate) async fn answer(
+pub(crate) async fn answer<F>(
     svc: &Service,
     watcher: &Watcher,
     peer: &Peer,
     (caller_pid, caller_pane): (Option<i32>, &std::sync::OnceLock<Uuid>),
     p: AgentAnswer,
-) -> Result<Uuid> {
+    admit_input: impl FnOnce(Uuid) -> F,
+) -> Result<Uuid>
+where
+    F: std::future::Future<Output = Result<crate::terminal_writers::WriteGuard>>,
+{
     let id = crate::wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
     if let Ok(actor) = crate::task_ops::actor_from_wire(&p.actor) {
         crate::people::refuse_rep_answer(&svc.store, actor, None)?; // a rep answers nothing (ov-494)
     }
     // claude's folder-trust prompt, answered from Needs You (ov-493). The
-    // route refuses anyone but a person (`answer_wake::route::deliver`).
+    // person check precedes writer admission.
     if p.request_id.starts_with(crate::needs_you::TRUST_ASK_PREFIX) {
         use crate::watch::answer_wake::route::{Author, Delivery, Press};
-        let press = Press::Trust { ask: p.request_id.clone(), option: p.option_id.clone() };
-        let author = Author::of(seat_of(svc, caller_pid, &p.actor).await);
-        watcher.deliver(id, Delivery { author, ..Delivery::key(press) }).await?;
+        may_answer(seat_of(svc, caller_pid, &p.actor).await)?;
+        let press = Press::Trust { ask: p.request_id, option: p.option_id };
+        let _writer = admit_input(id).await?;
+        watcher.deliver(id, Delivery { author: Author::Person, ..Delivery::key(press) }).await?;
         watcher.mark_seen_by(&answerer(svc, peer, caller_pid, caller_pane), id).await;
         return Ok(id);
     }

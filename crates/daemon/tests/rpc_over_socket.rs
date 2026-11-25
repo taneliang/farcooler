@@ -4588,3 +4588,87 @@ async fn only_one_connection_can_type_into_a_terminal() {
     assert_ne!(new_generation, first_generation);
     first.call(input(Some(new_generation), b"OV1454_REACQUIRED")).await.unwrap();
 }
+
+#[tokio::test]
+async fn every_terminal_input_route_claims_the_vacant_lease() {
+    use farcooler_protocol::v1::{
+        AgentAnswer, AgentCancel, AgentPrompt, AgentPromptBlock, BringDraft, TerminalFilePut,
+        TerminalWriterRequest, agent_prompt_block, terminal_writer_request::Action,
+    };
+
+    let h = start(Scope::HostAdmin).await;
+    let mut first = connect(&h).await;
+    let mut second = connect(&h).await;
+    let (_repo, repository) = registered_repository(&mut first).await;
+    let worktree = create_worktree(&mut first, repository, "lease", "feat/lease", "shell").await;
+    let terminal_id = terminals_of(&mut first, &worktree.id).await.remove(0).id;
+    let prompt = request::Payload::AgentPrompt(AgentPrompt {
+        terminal_id: terminal_id.clone(),
+        blocks: vec![AgentPromptBlock {
+            content: Some(agent_prompt_block::Content::Text("hello".into())),
+        }],
+        ..Default::default()
+    });
+    let key = request::Payload::AgentCancel(AgentCancel { terminal_id: terminal_id.clone() });
+    let paste = request::Payload::TerminalFilePut(TerminalFilePut {
+        terminal_id: terminal_id.clone(),
+        transfer_id: farcooler_protocol::ids::new_id(),
+        name: "lease.txt".into(),
+        total_size: 5,
+        chunk: bytes::Bytes::from_static(b"hello"),
+        ..Default::default()
+    });
+    let clear = request::Payload::BringDraft(BringDraft {
+        terminal_id: terminal_id.clone(),
+        expected: "clear me".into(),
+    });
+    let trust = request::Payload::AgentAnswer(AgentAnswer {
+        terminal_id: terminal_id.clone(),
+        request_id: format!("{}test", farcooler_daemon::needs_you::TRUST_ASK_PREFIX),
+        option_id: "allow".into(),
+        ..Default::default()
+    });
+    let access = |action: Action, generation| {
+        let mut req = request("terminal.writer");
+        req.target_resource_id = Some(terminal_id.clone());
+        req.expected_lease_generation = generation;
+        req.payload = Some(request::Payload::TerminalWriter(TerminalWriterRequest { action: action as i32 }));
+        req
+    };
+    let state = |reply: farcooler_protocol::v1::Result| match reply.value {
+        Some(result::Value::TerminalWriter(state)) => state,
+        other => panic!("expected writer state, got {other:?}"),
+    };
+
+    let mut failures = Vec::new();
+    for (method, payload) in [
+        ("terminal.paste_file", paste),
+        ("terminal.tell", prompt.clone()),
+        ("terminal.compose", prompt.clone()),
+        ("terminal.draft_prompt", prompt),
+        ("terminal.interrupt", key.clone()),
+        ("terminal.send_now", key),
+        ("terminal.bring_draft", clear),
+        ("terminal.agent_answer", trust),
+    ] {
+        let mut req = request(method);
+        req.target_resource_id = Some(terminal_id.clone());
+        req.payload = Some(payload);
+        // A shell accepts the file paste. Agent-only routes may refuse it at
+        // their delivery gate, which is independent of writer admission.
+        let admitted = first.call(req.clone()).await;
+        if method == "terminal.paste_file" {
+            admitted.expect("the first client can paste into a live shell");
+        }
+        let owner = state(first.call(access(Action::Status, None)).await.unwrap());
+        let rival = second.call(req).await;
+        if owner.generation.is_none()
+            || !matches!(&rival, Err(ClientError::Daemon { code, what, .. })
+                if *code == ErrorCode::ResourceConflict as i32 && what == "writer_busy")
+        {
+            failures.push(format!("{method}: owner {owner:?}, rival {rival:?}"));
+        }
+        first.call(access(Action::Release, owner.generation)).await.unwrap();
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

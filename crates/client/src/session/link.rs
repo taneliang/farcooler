@@ -111,6 +111,14 @@ impl Session {
     /// Connect over SSH and start a daemon session on the far side.
     #[cfg(feature = "native")]
     pub async fn connect_ssh(destination: &ssh::Destination) -> Result<Self, SessionError> {
+        Self::connect_ssh_with_writer_instance(destination, bytes::Bytes::new()).await
+    }
+
+    #[cfg(feature = "native")]
+    pub(crate) async fn connect_ssh_with_writer_instance(
+        destination: &ssh::Destination,
+        writer_instance: bytes::Bytes,
+    ) -> Result<Self, SessionError> {
         // The rendezvous, applied before the dial that needs it. tailcat's
         // default DERP map is documented as best-effort and revocable at any
         // time, and DERP is where every tunneled connection meets rather than
@@ -128,7 +136,7 @@ impl Session {
             farcooler_tailcat::set_derp_map_url(&destination.derp_map);
         }
         let transport = ssh::Session::open(destination).await?;
-        Self::over_link(Box::new(transport), NATIVE_CLIENT).await
+        Self::over_link(Box::new(transport), NATIVE_CLIENT, writer_instance).await
     }
 
     /// Start a daemon session over an SSH connection somebody else made and
@@ -142,10 +150,14 @@ impl Session {
         connection: russh::client::Handle<H>,
         client_name: &'static str,
     ) -> Result<Self, SessionError> {
-        Self::over_link(Box::new(connection), client_name).await
+        Self::over_link(Box::new(connection), client_name, bytes::Bytes::new()).await
     }
 
-    async fn over_link(link: Box<dyn ssh::Exec>, client_name: &'static str) -> Result<Self, SessionError> {
+    async fn over_link(
+        link: Box<dyn ssh::Exec>,
+        client_name: &'static str,
+        writer_instance: bytes::Bytes,
+    ) -> Result<Self, SessionError> {
         // Named by tilde, not bare: a non-login ssh exec's PATH often lacks
         // ~/.local/bin, where `runner install` puts the binary.
         //
@@ -155,11 +167,12 @@ impl Session {
         // having to negotiate.
         let streams = link.exec(&format!("~/.local/bin/{} --stdio", daemon_binary())).await?;
 
-        let client = Client::over(
+        let client = Client::over_with_writer_instance(
             Box::new(streams.reader) as Reader,
             Box::new(streams.writer) as Writer,
             client_name,
             env!("CARGO_PKG_VERSION"),
+            writer_instance,
         )
         .await?;
 
@@ -531,15 +544,24 @@ impl Session {
     /// client that wants the same API as the mobile one.
     #[cfg(feature = "native")]
     pub async fn connect_local(socket: &std::path::Path) -> Result<Self, SessionError> {
+        Self::connect_local_with_writer_instance(socket, bytes::Bytes::new()).await
+    }
+
+    #[cfg(feature = "native")]
+    pub(crate) async fn connect_local_with_writer_instance(
+        socket: &std::path::Path,
+        writer_instance: bytes::Bytes,
+    ) -> Result<Self, SessionError> {
         let stream = tokio::net::UnixStream::connect(socket)
             .await
             .map_err(|e| SessionError::Protocol(format!("cannot reach the daemon: {e}")))?;
         let (read, write) = stream.into_split();
-        let client = Client::over(
+        let client = Client::over_with_writer_instance(
             Box::new(read) as Reader,
             Box::new(write) as Writer,
             NATIVE_CLIENT,
             env!("CARGO_PKG_VERSION"),
+            writer_instance,
         )
         .await?;
         client.ignore_events();

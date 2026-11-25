@@ -763,10 +763,11 @@ impl Rpc {
     }
 
     async fn terminal_write_admission(
-        &self, id: Uuid, generation: Option<u64>, claim: bool,
+        &self, id: Uuid, generation: Option<u64>,
     ) -> Result<crate::terminal_writers::WriteGuard> {
+        self.service.store.get_terminal(id)?;
         self.service.sessions().terminal_writers
-            .write(id, &self.session, &self.push, generation, claim).await
+            .write(id, &self.session, &self.push, generation).await
     }
 
     async fn dispatch(&self, req: Request) -> Result<result::Value> {
@@ -1578,7 +1579,7 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 svc.runtime().live_pane(id)?;
-                let writer = self.terminal_write_admission(id, req.expected_lease_generation, true).await?;
+                let writer = self.terminal_write_admission(id, req.expected_lease_generation).await?;
                 svc.send_bytes(id, &p.payload).await?;
                 drop(writer);
                 if req.expected_lease_generation.is_some() {
@@ -1607,7 +1608,7 @@ impl Rpc {
                     };
                     return Ok(result::Value::TerminalFilePut(farcooler_protocol::v1::TerminalFilePutResult { stored, path }));
                 }
-                let _writer = self.terminal_write_admission(id, req.expected_lease_generation, false).await?;
+                let _writer = self.terminal_write_admission(id, req.expected_lease_generation).await?;
                 let stored = crate::pastes::put_chunk(
                     svc.root_dir(),
                     &p.transfer_id,
@@ -1638,7 +1639,8 @@ impl Rpc {
                 let Some(request::Payload::TerminalResize(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
-                let _writer = self.terminal_write_admission(id, req.expected_lease_generation, false).await?;
+                let _writer = svc.sessions().terminal_writers
+                    .check(id, &self.session, req.expected_lease_generation).await?;
                 svc.resize_terminal(id, p.columns, p.rows).await?;
                 self.terminal_result(id).await
             }
@@ -1785,7 +1787,7 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                let _writer = self.terminal_write_admission(id, req.expected_lease_generation, false).await?;
+                let _writer = self.terminal_write_admission(id, req.expected_lease_generation).await?;
                 let text = wire::prompt_text(&p.blocks);
                 let said = match req.method.as_str() {
                     "terminal.tell" => self.watcher.tell_into(id, &text, author).await?.into(),
@@ -1815,7 +1817,7 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                let _writer = self.terminal_write_admission(id, req.expected_lease_generation, false).await?;
+                let _writer = self.terminal_write_admission(id, req.expected_lease_generation).await?;
                 let press = if req.method == "terminal.interrupt" { Press::Interrupt } else { Press::SendNow };
                 self.watcher.deliver(id, Delivery::key(press)).await?;
                 self.terminal_result(id).await
@@ -1825,7 +1827,11 @@ impl Rpc {
             "terminal.bring_draft" => {
                 let Some(request::Payload::BringDraft(p)) = req.payload else { return Err(DomainError::InvalidArgument { what: "payload" }) };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                let _writer = self.terminal_write_admission(id, req.expected_lease_generation, false).await?;
+                let _writer = if p.expected.is_empty() {
+                    svc.sessions().terminal_writers.check(id, &self.session, req.expected_lease_generation).await?
+                } else {
+                    self.terminal_write_admission(id, req.expected_lease_generation).await?
+                };
                 Ok(result::Value::BroughtDraft(self.watcher.bring_draft_wire(&p).await?))
             }
 
@@ -2198,7 +2204,10 @@ impl Rpc {
                 let Some(request::Payload::AgentAnswer(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
-                let id = crate::rpc_agent_answer::answer(svc, &self.watcher, &self.peer, (self.caller_pid, &self.caller_pane), p).await?;
+                let id = crate::rpc_agent_answer::answer(
+                    svc, &self.watcher, &self.peer, (self.caller_pid, &self.caller_pane), p,
+                    |id| self.terminal_write_admission(id, req.expected_lease_generation),
+                ).await?;
                 self.terminal_result(id).await
             }
 

@@ -336,3 +336,46 @@ async fn stdio_sessions_share_the_writer_when_the_runner_starts_without_a_daemon
     assert!(matches!(&reply, Err(ClientError::Daemon { what, .. }) if what == "writer_busy"),
         "a second stdio process must reach the same lease, got {reply:?}");
 }
+
+#[tokio::test]
+async fn a_stdio_writer_survives_the_starting_ssh_session() {
+    use farcooler_protocol::v1::{TerminalWriterRequest, terminal_writer_request::Action};
+    use std::time::Duration;
+
+    let home = tempfile::tempdir().unwrap();
+    let (mut first_child, mut first) = spawn(home.path()).await;
+    let repo = tempfile::tempdir().unwrap();
+    let worktree = a_worktree(&mut first, repo.path()).await;
+    let terminal = a_terminal(&mut first, &worktree.id, "surviving writer").await;
+    let (_second_child, mut second) = spawn(home.path()).await;
+
+    let access = |action: Action| {
+        let mut req = request("terminal.writer");
+        req.target_resource_id = Some(terminal.id.clone());
+        req.payload = Some(request::Payload::TerminalWriter(TerminalWriterRequest { action: action as i32 }));
+        req
+    };
+    let state = |reply: farcooler_protocol::v1::Result| match reply.value {
+        Some(result::Value::TerminalWriter(state)) => state,
+        other => panic!("expected writer state, got {other:?}"),
+    };
+    let generation = state(second.call(access(Action::Claim)).await.unwrap())
+        .generation.expect("second client owns the terminal");
+
+    drop(first);
+    tokio::time::timeout(Duration::from_secs(10), first_child.child.wait())
+        .await.expect("the first SSH command must exit").expect("wait for the first command");
+
+    let mut write = request("terminal.write");
+    write.target_resource_id = Some(terminal.id.clone());
+    write.expected_lease_generation = Some(generation);
+    write.payload = Some(request::Payload::TerminalWrite(farcooler_protocol::v1::TerminalWrite {
+        payload: bytes::Bytes::from_static(b"x"),
+    }));
+    second.call(write).await.expect("surviving client can still use its original lease");
+
+    let (_third_child, mut third) = spawn(home.path()).await;
+    let viewer = state(third.call(access(Action::Claim)).await.unwrap());
+    assert_eq!(viewer.generation, None);
+    assert_eq!(viewer.reason, "writer_busy");
+}

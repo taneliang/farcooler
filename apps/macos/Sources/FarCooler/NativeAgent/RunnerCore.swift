@@ -79,7 +79,8 @@ actor RunnerCore {
     @discardableResult
     func connect(socket: String) async throws -> Set<String> {
         let data = try await submit { handle in
-            Self.json(["socket": socket]).withCString { farcooler_client_connect(handle, $0) }
+            Self.json(["socket": socket, "writer_client_instance": CLI.writerInstance])
+                .withCString { farcooler_client_connect(handle, $0) }
         }
         let object = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
         capabilities = Set(object["capabilities"] as? [String] ?? [])
@@ -93,7 +94,10 @@ actor RunnerCore {
     /// unpinned connect never authenticates.
     @discardableResult
     func connect(reach: RemoteReach, privateKey: String, fingerprint: String?) async throws -> Set<String> {
-        var config: [String: Any] = ["host": reach.host, "port": reach.port, "user": reach.user, "private_key": privateKey]
+        var config: [String: Any] = [
+            "host": reach.host, "port": reach.port, "user": reach.user, "private_key": privateKey,
+            "writer_client_instance": CLI.writerInstance,
+        ]
         // Through Far Cooler's tunnel `ProxyCommand` (ov-496): the core spawns
         // the CLI that carries it and speaks ssh over that.
         if let pipe = reach.pipe { config["pipe"] = pipe }

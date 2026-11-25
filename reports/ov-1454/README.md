@@ -10,12 +10,13 @@ notification.
 The runner holds a per-terminal lock from input admission through delivery.
 A lease generation fences queued input after a takeover. A browser releases
 its lease when leaving a pane, and the runner frees leases when their owning
-connection closes or is revoked. Older RPC clients acquire a vacant lease on
-their first raw write. The updated Mac input process goes through the same RPC
-and shares an app-instance identity with its resize and file-paste helpers.
-If SSH starts the runner before a daemon is listening, the first stdio session
-holds the runner lock and accepts later connections on the same socket for
-the lifetime of that session.
+connection closes or is revoked. An input RPC without a generation claims a
+vacant lease before delivery. This includes prompts, file pastes and keys
+sent on behalf of a client. The Mac's terminal input process, native client
+connection and CLI helpers share an app-instance identity. If no daemon is
+listening, the stdio relay starts a detached runner. The runner holds the lock
+and serves the shared socket while clients are connected. It exits after
+five seconds with no connections.
 
 The browser probes the lease RPC on its existing control connection. On an
 older runner it retains legacy terminal behavior and leaves the Writer badge
@@ -71,3 +72,42 @@ The broad run was stopped after its daemon unit failure verdict. A targeted
 retry of those 14 cases with the native macOS tools first on PATH passed 11.
 Three still failed: a Codex queued-answer timing case and two workflow
 script-hook recovery cases.
+
+## Review follow-up
+
+| New regression | Failure on `ed98d7134` | Result after the fix |
+| --- | --- | --- |
+| `every_terminal_input_route_claims_the_vacant_lease` | All eight routes left the lease vacant. Both clients successfully pasted a file into the same pane. The other requests reached their agent-specific delivery gates. | The first request through each route acquired the lease, and the competing client received `writer_busy`. |
+| `a_stdio_writer_survives_the_starting_ssh_session` | The first SSH command exited and the surviving client's write failed with `Closed`. | The first SSH command exited, the second client wrote with its original generation, and a third client was refused with `writer_busy`. |
+
+The foreground runner integration build passed. The socket, stdio, relay
+scope, forced-SSH and agent transport suites passed 115 tests, with one
+latency measurement ignored.
+
+Another 94 integration tests passed across cutover recovery, real SSH scope
+and revocation, relay exit, passkey support, daemon startup and log handling.
+The final detached-runner build also passed all 13 stdio transport tests again.
+
+The Rust WASM check, both TypeScript checks and all 14 Chromium work checks
+passed again. The two-client cases exercised explicit takeover and viewer
+feedback at 320 px and 1280 px.
+
+The Mac app and test targets built. An isolated smoke check held a live
+terminal lease through the CLI input process. The native FFI connection with
+the same app identity reached the compose delivery gate. A different app
+identity received `writer_busy`.
+
+The focused Mac test run exercised 196 tests in the native and conversation
+target. Two tests initially could not find a fixture in the scratch copy.
+After linking the fixture directory, both passed in the five-test retry.
+The other selected Mac test target passed its three tests.
+
+The Rust CLI and shared client unit suites passed 639 and 408 tests,
+respectively. All 54 transport unit and integration tests passed. The broad
+live-client suite passed 30 of 34 tests. In the four failures, the shared
+Claude permission fixture timed out before any permission event reached the
+ring. A retry with the native system tools first on PATH had the same result.
+
+The daemon executable passed all six unit tests. The complete daemon library
+run reported 3,399 passed, nine failed and 18 ignored. All nine failures
+passed on serial retry with native system tools first on PATH.

@@ -17,14 +17,20 @@ use crate::session::Session;
 
 /// The session `config` names, or the connect line's failure.
 pub(super) async fn open(config: &str) -> Result<Session, Value> {
+    let writer_instance = serde_json::from_str::<Value>(config).ok()
+        .and_then(|value| uuid::Uuid::parse_str(value.get("writer_client_instance")?.as_str()?).ok())
+        .map(|id| bytes::Bytes::copy_from_slice(id.as_bytes()))
+        .unwrap_or_default();
     if let Some(socket) = socket_of(config) {
         if both(config) || !socket.starts_with('/') {
             return Err(json!({ "error": "a socket is an absolute path, named without a host or a token", "trouble": BAD_CONFIG }));
         }
-        return Session::connect_local(std::path::Path::new(&socket)).await.map_err(|e| connect_failure(&e));
+        return Session::connect_local_with_writer_instance(std::path::Path::new(&socket), writer_instance)
+            .await.map_err(|e| connect_failure(&e));
     }
     match parse_destination(config) {
-        Ok(destination) => Session::connect_ssh(&destination).await.map_err(|e| connect_failure(&e)),
+        Ok(destination) => Session::connect_ssh_with_writer_instance(&destination, writer_instance)
+            .await.map_err(|e| connect_failure(&e)),
         // A config this boundary could not read never left the device, so
         // it is no failure of the runner's; it gets a word of its own rather
         // than none, on `trouble`'s terms.

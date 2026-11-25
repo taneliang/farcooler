@@ -22,7 +22,7 @@ pub(crate) struct TerminalWriters {
 }
 
 pub(crate) struct WriteGuard {
-    _lease: OwnedMutexGuard<Option<Writer>>,
+    lease: OwnedMutexGuard<Option<Writer>>,
 }
 
 struct Writer {
@@ -126,9 +126,23 @@ impl TerminalWriters {
         session: &Arc<Session>,
         push: &PushSender,
         generation: Option<u64>,
-        claim: bool,
     ) -> Result<WriteGuard> {
-        let mut lease = self.current(id, session).await?;
+        let mut guard = self.check(id, session, generation).await?;
+        if guard.lease.is_none() {
+            *guard.lease = Some(self.grant(id, session, push));
+        }
+        Ok(guard)
+    }
+
+    /// Geometry and draft reads respect the current writer without claiming
+    /// an empty lease.
+    pub(crate) async fn check(
+        &self,
+        id: Uuid,
+        session: &Arc<Session>,
+        generation: Option<u64>,
+    ) -> Result<WriteGuard> {
+        let lease = self.current(id, session).await?;
         match lease.as_ref() {
             Some(w) if w.is_ours(session) => {
                 if let Some(generation) = generation {
@@ -154,10 +168,9 @@ impl TerminalWriters {
                     what: "writer_taken_over",
                 });
             }
-            None if claim => *lease = Some(self.grant(id, session, push)),
             None => {}
         }
-        Ok(WriteGuard { _lease: lease })
+        Ok(WriteGuard { lease })
     }
 }
 

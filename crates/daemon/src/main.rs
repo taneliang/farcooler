@@ -16,6 +16,7 @@
 //! which is why streaming a terminal does not have to come through here.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 // The scope words come from `fence` rather than from a pair of matches here,
 // because that module WRITES the `--scope` word this one reads back off the
@@ -30,7 +31,7 @@ use farcooler_daemon::{
     watch::Watcher,
 };
 use farcooler_protocol::v1::Scope;
-use farcooler_transport::{HandshakeConfig, Peer, UnixListenerServer};
+use farcooler_transport::{HandshakeConfig, UnixListenerServer};
 
 #[tokio::main]
 async fn main() {
@@ -73,7 +74,7 @@ async fn main() {
 /// Failing to open it is not a reason to not run: stderr stays as it was.
 fn kept_log(selected: &paths::RuntimeSelection) -> Option<farcooler_daemon::daemon_log::RotatingLog> {
     use farcooler_daemon::daemon_log as log;
-    let modes = ["--stdio", "--stream", "--fanout", "--version", "-V"];
+    let modes = ["--stdio", "--stdio-runner", "--stream", "--fanout", "--version", "-V"];
     if std::env::args().any(|a| modes.contains(&a.as_str())) {
         return None;
     }
@@ -105,7 +106,10 @@ async fn run(selected: &paths::RuntimeSelection) -> Result<(), i32> {
     }
 
     if std::env::args().any(|a| a == "--stdio") {
-        return serve_stdio_session().await;
+        return serve_stdio_session(selected).await;
+    }
+    if std::env::args().any(|a| a == "--stdio-runner") {
+        return serve_stdio_runner(selected).await;
     }
 
     // `farcoolerd --stream <terminal>` is the data plane, and it is deliberately
@@ -492,7 +496,7 @@ async fn stream_terminal(terminal: &str) -> Result<(), i32> {
     })
 }
 
-/// The local listener and the stdio fallback use the same trusted peer
+/// The local listener and the on-demand runner use the same trusted peer
 /// preamble and the same runner state for every accepted connection.
 fn socket_sessions(
     service: Arc<Service>,
@@ -620,112 +624,157 @@ fn requested_session() -> Result<Session, i32> {
     Ok(Session { scope, client: after("--client").filter(|c| !c.is_empty()) })
 }
 
-/// Relay to the runner. If it hasn't been started, the first stdio
-/// process owns the runner for its session and accepts other clients on
-/// the same socket. A concurrent startup must wait for that socket:
-/// separate cores would grant independent leases on the same tmux pane.
-async fn serve_stdio_session() -> Result<(), i32> {
-    // A typo in an sshd forced command must be refused before dialing.
+/// Every stdio command is a relay. The on-demand runner owns a separate
+/// process and socket, so a relay can exit while other clients still use it.
+async fn serve_stdio_session(selected: &paths::RuntimeSelection) -> Result<(), i32> {
+    use tokio::io::AsyncWriteExt;
+
     let session = requested_session()?;
-    let granted = session.granted();
-    let socket = paths::socket_path().map_err(|e| {
+    let socket = selected.socket_path().map_err(|e| {
         eprintln!("cannot determine the runner socket: {e}");
         1
     })?;
     let lock_path = socket.with_extension("lock");
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
-    let _owner = loop {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let mut starter: Option<tokio::process::Child> = None;
+    loop {
         if let Ok(mut stream) = tokio::net::UnixStream::connect(&socket).await {
-            // Preserve sshd's authenticated scope and device before relaying
-            // the protocol bytes without interpreting them.
             if let Some(preamble) = session.preamble() {
-                use tokio::io::AsyncWriteExt;
-                if stream.write_all(preamble.as_bytes()).await.is_err() {
-                    eprintln!("cannot reach the daemon on this runner");
-                    return Err(1);
-                }
+                stream.write_all(preamble.as_bytes()).await.map_err(|e| {
+                    eprintln!("cannot reach the daemon on this runner: {e}");
+                    1
+                })?;
             }
             return relay_stdio(stream).await;
         }
-        match acquire_daemon_lock(&lock_path) {
-            Ok(Some(owner)) => break owner,
-            Ok(None) if tokio::time::Instant::now() < deadline => {
-                tokio::time::sleep(std::time::Duration::from_millis(40)).await;
-            }
-            Ok(None) => {
-                eprintln!("the runner owns this socket but is not accepting connections");
-                return Err(1);
-            }
-            Err(e) => {
-                eprintln!("cannot lock {}: {e}", lock_path.display());
-                return Err(1);
-            }
-        }
-    };
-
-    // Nothing may be printed to stdout: it is the wire.
-    let service = match Service::open().await {
-        Ok(service) => Arc::new(service),
-        // Said to the device on the other end, which is the one place it can
-        // be read. On stderr alone, ssh would carry it to nobody and the
-        // phone would ask whether Far Cooler is installed. See `refusal`.
-        Err(e) if farcooler_daemon::refusal::stays_up_for(&e) => {
-            eprintln!("{e}");
-            if let Err(sent) = farcooler_transport::refuse_stdio(e).await {
-                tracing::debug!(error = %sent, "the session closed before it could be refused");
-            }
+        if tokio::time::Instant::now() >= deadline {
+            eprintln!("the runner is not accepting connections");
             return Err(1);
         }
-        Err(e) => {
-            eprintln!("cannot open the service: {e}");
-            return Err(1);
+
+        if let Some(child) = starter.as_mut()
+            && let Some(status) = child.try_wait().map_err(|e| {
+                eprintln!("cannot check the on-demand runner: {e}");
+                1
+            })?
+        {
+            if !status.success() {
+                let refusal = match status.code() {
+                    Some(STDIO_RUNNER_NEWER_DATA) => Some(farcooler_core::DomainError::NewerData),
+                    Some(STDIO_RUNNER_CUTOVER_HELD) => Some(farcooler_core::DomainError::CutoverHeld),
+                    _ => None,
+                };
+                if let Some(reason) = refusal {
+                    eprintln!("{reason}");
+                    if let Err(e) = farcooler_transport::refuse_stdio(reason).await {
+                        tracing::debug!(error = %e, "the session closed before it could be refused");
+                    }
+                    return Err(1);
+                }
+                eprintln!("the on-demand runner exited: {status}");
+                return Err(1);
+            }
+            // Another runner can win the startup lock.
+            starter = None;
         }
-    };
-
-    let watcher = Watcher::new(service.clone());
-    tokio::spawn(watcher.clone().run());
-    // This process answers the hello itself, so it asks too (ov-765).
-    farcooler_daemon::sshd_version::offer_passkey_keys().await;
-
-    let cfg = HandshakeConfig { daemon_version: farcooler_protocol::BUILD.to_string() };
-
-    // Check the first SSH session as the socket checks subsequent preambles.
-    if let Some(device) = session.client.as_deref()
-        && !farcooler_daemon::sessions::is_known_device(&service, device)
-    {
-        tracing::warn!(device, "refused: a session naming a device this runner has no record of");
-        if let Err(sent) = farcooler_transport::refuse_stdio(farcooler_core::DomainError::NotYours { what: "not_yours" }).await {
-            tracing::debug!(error = %sent, "the session closed before it could be refused");
+        if starter.is_none() && runner_can_start(&lock_path)? {
+            starter = Some(start_stdio_runner().map_err(|e| {
+                eprintln!("cannot start the on-demand runner: {e}");
+                1
+            })?);
         }
-        return Err(1);
+        tokio::time::sleep(Duration::from_millis(40)).await;
     }
-    let stop = Arc::new(tokio::sync::Notify::new());
-    let listener = UnixListenerServer::bind(&socket).map_err(|e| {
-        eprintln!("cannot bind {}: {e}", socket.display());
+}
+
+/// A relay probes the lock to avoid spawning while another runner initializes.
+/// The child takes the actual lock before opening the service.
+fn runner_can_start(lock_path: &std::path::Path) -> Result<bool, i32> {
+    acquire_daemon_lock(lock_path).map(|lock| lock.is_some()).map_err(|e| {
+        eprintln!("cannot lock {}: {e}", lock_path.display());
+        1
+    })
+}
+
+fn start_stdio_runner() -> std::io::Result<tokio::process::Child> {
+    use std::process::Stdio;
+
+    let mut runner = tokio::process::Command::new(std::env::current_exe()?);
+    runner.arg("--stdio-runner")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    // SAFETY: setsid and reading errno on failure are safe after fork.
+    // No SSH channel owns the runner's stdio, process group or session.
+    unsafe {
+        runner.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    runner.spawn()
+}
+
+// Startup refusals travel back to the relay as exit codes. A runner with
+// held data leaves the socket free for the ordinary daemon's recovery listener.
+const STDIO_RUNNER_NEWER_DATA: i32 = 20;
+const STDIO_RUNNER_CUTOVER_HELD: i32 = 21;
+
+/// The lightweight runner used when nobody has started the local daemon.
+/// The idle period covers quick reconnects. Accepted connections, including
+/// ones still doing their handshake, keep the runner and its leases alive.
+async fn serve_stdio_runner(selected: &paths::RuntimeSelection) -> Result<(), i32> {
+    const IDLE: Duration = Duration::from_secs(5);
+
+    let socket = selected.socket_path().map_err(|e| {
+        tracing::error!(error = %e, "cannot determine the runner socket");
         1
     })?;
-    let sessions = socket_sessions(service.clone(), watcher.clone(), stop.clone());
-    let served = farcooler_transport::serve_stdio(
-        cfg,
-        RpcFactory::new(
-            service,
-            watcher,
-            stop.clone(),
-            Peer { client_id: session.client.clone(), scope: granted },
-        ),
-    );
+    let lock_path = socket.with_extension("lock");
+    let Some(_owner) = acquire_daemon_lock(&lock_path).map_err(|e| {
+        tracing::error!(error = %e, "cannot lock {}", lock_path.display());
+        1
+    })? else {
+        return Ok(());
+    };
 
+    let service = match Service::open().await {
+        Ok(service) => Arc::new(service),
+        Err(farcooler_core::DomainError::NewerData) => return Err(STDIO_RUNNER_NEWER_DATA),
+        Err(farcooler_core::DomainError::CutoverHeld) => return Err(STDIO_RUNNER_CUTOVER_HELD),
+        Err(e) => {
+            tracing::error!(error = %e, "cannot open the service");
+            return Err(1);
+        }
+    };
+    farcooler_daemon::sshd_version::offer_passkey_keys().await;
+
+    let watcher = Watcher::new(service.clone());
+    let watching = tokio::spawn(watcher.clone().run());
+    let signaled = farcooler_daemon::refusal::signaled();
+    let listener = UnixListenerServer::bind(&socket).map_err(|e| {
+        tracing::error!(error = %e, "cannot bind {}", socket.display());
+        1
+    })?;
+    let stop = Arc::new(tokio::sync::Notify::new());
+    let sessions = socket_sessions(service, watcher, stop.clone());
+    let serve = listener.serve_until_idle(IDLE, move |preamble, pid| {
+        // Preserve the first client's refusal when it names an unknown device.
+        sessions(preamble, pid).ok_or(farcooler_core::DomainError::NotYours { what: "not_yours" })
+    });
     let result = tokio::select! {
-        result = served => result.map_err(|e| {
-            eprintln!("stdio session ended: {e}");
-            1
-        }),
-        result = listener.serve_with_pid(sessions) => result.map_err(|e| {
-            eprintln!("runner socket stopped: {e}");
+        result = serve => result.map_err(|e| {
+            tracing::error!(error = %e, "runner socket stopped");
             1
         }),
         _ = stop.notified() => Ok(()),
+        _ = signaled => Ok(()),
     };
+    drop(listener);
+    watching.abort();
+    let _ = watching.await;
     let _ = std::fs::remove_file(&socket);
     result
 }
