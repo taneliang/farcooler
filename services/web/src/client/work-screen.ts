@@ -262,7 +262,9 @@ export function mountWork(options: Options) {
     if (focused) [...list.querySelectorAll('a')].find(link => link.href === focused)?.focus()
     manage.hidden = !terminal
     get('terminal-name').textContent = terminal?.title ?? ''
-    get('terminal-access').textContent = terminal?.access ?? ''
+    const access = get('terminal-access')
+    access.textContent = terminal?.access ?? ''
+    access.hidden = !terminal?.access
     get('terminal-state').textContent = terminal?.state ?? ''
     action(rename, terminal?.rename?.label, () => {
       if (!terminal?.rename) return

@@ -335,8 +335,12 @@ button.danger { color: var(--danger); }
   .workspace-panes { flex-direction: column; }
   #workspace-side { border-left: 0; border-top: 1px solid var(--rule); }
 }
-.workspace-screen { height: 100%; }
-.workspace-screen:not(:has(> :not([hidden]))) { display: none; }
+.workspace-screen { display: flex; flex-direction: column; height: 100%; min-width: 0; }
+.workspace-screen[hidden], .terminal-writer[hidden] { display: none; }
+.workspace-screen-content { flex: 1; min-height: 0; position: relative; }
+.terminal-writer { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 4px 8px 6px; background: var(--card); font-size: 13px; }
+.terminal-writer-status { display: flex; flex-wrap: wrap; gap: 0 8px; color: var(--text-2); }
+.terminal-writer button { padding: 3px 9px; font-size: inherit; }
 .terminal, .needs, .plan, .detail-scroll, .plan-sheet-body { min-height: 0; }
 .sidebar { display: flex; flex-direction: column; overflow: hidden; }
 .sidebar > :not(.terminal-list) { flex-shrink: 0; }

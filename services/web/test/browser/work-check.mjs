@@ -19,10 +19,31 @@ const origin = 'https://work.test'
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH })
 const failures = []
 
-async function test(name, run, { query = '', width = 1280 } = {}) {
+async function test(name, run, { query = '', width = 1280, sharedWriter = false } = {}) {
   const context = await browser.newContext({ viewport: { width, height: 850 }, isMobile: width < 500 })
+  const writers = new Map()
+  const displaced = new Map()
   await context.route(origin + '/**', async route => {
     const path = new URL(route.request().url()).pathname
+    if (path === '/writer') {
+      const { client, terminal, action } = JSON.parse(route.request().postData())
+      const key = sharedWriter ? terminal : `${client}:${terminal}`
+      const owner = writers.get(key)
+      if (action === 'write') return route.fulfill({ status: owner === client ? 200 : 409 })
+      if (action === 'take-over' || (action === 'claim' && !owner)) {
+        if (owner && owner !== client) displaced.set(key, owner)
+        writers.set(key, client)
+      } else if (action === 'release' && owner === client) writers.delete(key)
+      const writable = writers.get(key) === client
+      const occupied = writers.has(key)
+      return route.fulfill({ json: {
+        writable,
+        label: writable ? 'Writer' : 'Viewer',
+        reason: writable ? '' : displaced.get(key) === client ? 'Another client took over this terminal.'
+          : occupied ? 'Another client is writing to this terminal.' : 'This terminal is available for input.',
+        action: writable ? null : occupied ? { label: 'Take Over', intent: 'take-over' } : { label: 'Request Input', intent: 'claim' },
+      } })
+    }
     if (path === '/projection' || path === '/failure') {
       const body = execFileSync(process.env.WORK_VIEW_BIN, [path], { input: route.request().postData(), encoding: 'utf8' })
       return route.fulfill({ body })
@@ -174,6 +195,42 @@ try {
     assert.equal(await page.evaluate(() => window.visualViewport.offsetLeft), 0)
     if (out) await page.screenshot({ path: join(out, `start-work-${width}.png`) })
   }, { width })
+
+  // Each page has its own session, even when both use the same grant.
+  for (const width of [320, 1280]) {
+    await test(`exclusive writer and explicit takeover at ${width}px`, async (first, context) => {
+      const second = await context.newPage()
+      try {
+        await first.getByText('Writer', { exact: true }).waitFor()
+        await second.goto(origin + '/')
+        await second.getByText('Another client is writing to this terminal.', { exact: true }).waitFor({ timeout: 2500 })
+        assert.equal(await first.getByText('Writer', { exact: true }).count(), 1)
+        for (const page of [first, second]) await page.locator('[data-attached=true]:visible').waitFor()
+        const input = page => page.locator('.xterm-helper-textarea:visible')
+        await input(first).press('a')
+        await first.waitForFunction(() => window.calls.some(c => c.action === 'write'))
+        await input(second).press('b')
+        assert.equal(await rpc(second, 'write'), undefined)
+        await second.getByRole('button', { name: 'Take Over' }).click()
+        await second.getByText('Writer', { exact: true }).waitFor()
+        await first.getByText('Another client took over this terminal.', { exact: true }).waitFor()
+        assert.equal(await first.getByText('Writer', { exact: true }).count(), 0)
+        await input(second).press('c')
+        await second.waitForFunction(() => window.calls.some(c => c.action === 'write' && c.text === 'c'))
+        await input(first).press('d')
+        assert.equal((await rpc(first, 'write')).text, 'a')
+        for (const page of [first, second]) {
+          assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+        }
+        if (out) {
+          await first.screenshot({ path: join(out, `viewer-${width}.png`) })
+          await second.screenshot({ path: join(out, `writer-${width}.png`) })
+        }
+      } finally {
+        await second.close()
+      }
+    }, { width, sharedWriter: true })
+  }
 } finally {
   await browser.close()
 }

@@ -56,6 +56,7 @@ export class ChatView implements Pane<WebRunner> {
   private readonly empty = el('p', 'chat-empty')
   private readonly latest = el('button', 'chat-latest', 'Latest')
   private readonly note = el('p', 'chat-note')
+  private writable = true
   private readonly working = el('div', 'chat-working')
   private readonly stop = el('button', 'quiet chat-stop', 'Stop')
   private readonly box = el('textarea', 'chat-input')
@@ -367,6 +368,13 @@ export class ChatView implements Pane<WebRunner> {
 
   /// Everything but the list: what the foot says, whether the box can send,
   /// the placeholder, and the empty state.
+  setWritable(writable: boolean): void {
+    if (this.writable === writable) return
+    this.writable = writable
+    this.stop.disabled = !writable
+    this.paint()
+  }
+
   private paint(): void {
     const newest = this.ledger.newestTurn
     const turn = newest ? bodyOf(newest) : null
@@ -383,7 +391,7 @@ export class ChatView implements Pane<WebRunner> {
     this.note.textContent = trouble
     this.note.hidden = trouble === ''
     this.host.dataset.stale = trouble ? 'true' : 'false'
-    this.send.disabled = !!this.outbox?.busy || (this.box.value.trim() === '' && this.images.length === 0)
+    this.send.disabled = !this.writable || !!this.outbox?.busy || (this.box.value.trim() === '' && this.images.length === 0)
   }
 
   private toBottom(): void {
@@ -399,7 +407,7 @@ export class ChatView implements Pane<WebRunner> {
   private sizeBox(): void {
     this.box.style.height = 'auto'
     this.box.style.height = `${Math.min(this.box.scrollHeight, 200)}px`
-    this.send.disabled = !!this.outbox?.busy || (this.box.value.trim() === '' && this.images.length === 0)
+    this.send.disabled = !this.writable || !!this.outbox?.busy || (this.box.value.trim() === '' && this.images.length === 0)
   }
 
   private say(text: string): void {
@@ -479,7 +487,7 @@ export class ChatView implements Pane<WebRunner> {
   private async submit(): Promise<void> {
     const text = this.box.value
     const sent = this.images
-    if (!this.outbox) return
+    if (!this.writable || !this.outbox) return
     this.say('')
     const sending = this.outbox.send(text, sent)
     this.paint()
@@ -500,11 +508,11 @@ export class ChatView implements Pane<WebRunner> {
   }
 
   private async interrupt(): Promise<void> {
-    if (!this.outbox) return
+    if (!this.writable || !this.outbox) return
     this.stop.disabled = true
     this.say('')
     const done = await this.outbox.stop()
     if (!done.ok && !done.ignored) this.say(done.message)
-    this.stop.disabled = false
+    this.stop.disabled = !this.writable
   }
 }

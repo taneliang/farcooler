@@ -91,6 +91,7 @@ pub fn is_known_device(svc: &crate::service::Service, device: &str) -> bool {
 #[derive(Default)]
 pub struct Sessions {
     live: Mutex<HashMap<u64, Live>>,
+    pub(crate) terminal_writers: crate::terminal_writers::TerminalWriters,
     /// Devices revoked, until each is enrolled again (ov-820 review B1),
     /// kept in the store across a restart when [`Sessions::persisted`]. A connection one of them opens later, a new
     /// channel on an ssh transport the revoke hasn't severed yet, say while a
@@ -159,7 +160,7 @@ impl Sessions {
         let quiet = Arc::new(AtomicBool::new(false));
         live.insert(id, Live { client_id: client_id.clone(), gate: gate.clone(), said: said.clone(), quiet: quiet.clone() });
         drop(live);
-        Arc::new(Session { sessions: self.clone(), id, client_id, revocations_at_open, gate, said, quiet, challenges: Default::default() })
+        Arc::new(Session { sessions: self.clone(), id, client_id, revocations_at_open, gate, said, quiet, challenges: Default::default(), writer_instance: Default::default(), displaced_terminals: Default::default() })
     }
 
     /// Close every connection this device is holding. Answers with how many.
@@ -332,6 +333,8 @@ pub struct Session {
     /// The step-up challenges this connection asked for (ov-856, S9): never
     /// shared with another connection, so one session's nonce is no other's.
     challenges: crate::step_up::Challenges,
+    pub(crate) writer_instance: std::sync::OnceLock<uuid::Uuid>,
+    pub(crate) displaced_terminals: Mutex<std::collections::HashSet<uuid::Uuid>>,
 }
 
 impl Session {

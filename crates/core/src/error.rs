@@ -374,6 +374,9 @@ const SENTENCES: &[(&str, &str)] = &[
     ("handoff_task", "That task isn't on this workspace's board."),
     // `terminal.agent_answer`'s two conflicts (`DomainError::Conflict`).
     ("not_held", "Someone already answered this."),
+    ("writer_busy", "Another client is writing to this terminal."),
+    ("writer_taken_over", "Another client took over this terminal."),
+    ("writer_available", "This terminal is available for input."),
     ("not_delivered", "The answer didn't reach the agent. Try again."),
     // `terminal.dismiss_lost` on a terminal that is not lost (any more): it was
     // restarted or dismissed since the app drew it.

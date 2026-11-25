@@ -1000,6 +1000,7 @@ pub mod method {
         TerminalCreate = "terminal.create" => TERMINALS,
         TerminalScreen = "terminal.screen" => TERMINALS,
         TerminalWrite = "terminal.write" => TERMINALS,
+        TerminalWriter = "terminal.writer" => TERMINALS,
         TerminalResize = "terminal.resize" => TERMINALS,
         TerminalStop = "terminal.stop" => TERMINALS,
         TerminalSeen = "terminal.seen" => TERMINALS,

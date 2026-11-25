@@ -297,6 +297,26 @@ impl WebRunner {
         self.0.lost()
     }
 
+    pub fn terminal_writer_supported(&self) -> bool {
+        self.0.terminal_writer_supported()
+    }
+
+    pub fn terminal_writer(&self, terminal: String, action: String) -> Promise {
+        let runner = self.0.clone();
+        wasm_bindgen_futures::future_to_promise(async move {
+            use farcooler_protocol::v1::terminal_writer_request::Action;
+            let id = Uuid::parse_str(&terminal).map_err(|_| failure("protocol", "invalid terminal id"))?;
+            let action = match action.as_str() {
+                "status" => Action::Status,
+                "claim" => Action::Claim,
+                "take-over" => Action::TakeOver,
+                "release" => Action::Release,
+                _ => return Err(failure("protocol", "invalid writer action")),
+            };
+            Ok(JsValue::from_str(&runner.terminal_writer(id, action).await.map_err(web_failure)?.to_string()))
+        })
+    }
+
     pub async fn work_inventory(&self) -> Result<String, JsValue> {
         let inventory = self.0.session.work_inventory().await.map_err(|e| web_failure(e.into()))?;
         serde_json::to_string(&inventory).map_err(|e| failure("protocol", &e.to_string()))

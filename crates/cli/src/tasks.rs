@@ -1806,6 +1806,9 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "engine_stage" => "this workspace runs its work through its workflow, so a ticket's stage follows its run. \
              move it with `farcooler workflow move`",
         // `terminal.agent_answer`'s conflicts (no command here sends `pr.thread_reply`, ov-647).
+        "writer_busy" => "another client is writing to this terminal",
+        "writer_taken_over" => "another client took over this terminal",
+        "writer_available" => "this terminal is available for input",
         "not_held" => "someone already answered this",
         "not_delivered" => "the answer didn't reach the agent. try again",
         "not_a_person" => "only a person can answer this, not an agent: tell the owner it's waiting in Needs You",

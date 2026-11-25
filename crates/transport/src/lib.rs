@@ -95,6 +95,10 @@ pub trait Handler: Send + Sync + 'static {
     /// dangerous.
     fn peer(&self) -> Peer;
 
+    /// Observe client metadata after a successful protocol handshake. The peer
+    /// remains the authenticated identity of the connection.
+    fn client_hello(&self, _hello: &farcooler_protocol::v1::ClientHello) {}
+
     /// Events to push to this connection, if the handler produces any.
     ///
     /// Defaulted to none so a handler that only answers requests — a test, a

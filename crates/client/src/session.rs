@@ -31,6 +31,7 @@ mod link;
 use link::{Reader, Writer};
 pub mod draft_prompt;
 mod terminal_ids;
+mod terminal_writer;
 mod terminal_json;
 use terminal_ids::{split_of, task_of, with_draft_hold};
 mod files;
@@ -343,7 +344,7 @@ impl FleetEvent {
             Payload::StackChanged(s) => {
                 Some(FleetEvent::Stack { repository: uuid_of(&s.repository_id) })
             }
-            Payload::TerminalFrame(_) | Payload::AgentEvents(_) => None,
+            Payload::TerminalFrame(_) | Payload::AgentEvents(_) | Payload::TerminalWriterLost(_) => None,
             // A task notice (ov-94): the phones hear it as a push from the
             // relay, which their notification code draws; nothing to re-read.
             Payload::Notice(_) => None,
@@ -927,7 +928,7 @@ impl Session {
         let payload = request::Payload::TerminalWrite(farcooler_protocol::v1::TerminalWrite {
             payload: bytes.into(),
         });
-        self.start("terminal.write", Some(terminal), Some(payload), Vec::new())
+        self.start_terminal_input("terminal.write", terminal, payload, None)
     }
 
     /// Send a file into a terminal, and return the path it landed at.
@@ -981,7 +982,7 @@ impl Session {
             rows,
             view_activity_id: 0,
         });
-        self.start("terminal.resize", Some(terminal), Some(payload), Vec::new())
+        self.start_terminal_input("terminal.resize", terminal, payload, None)
     }
 
     // ---- agent channel ----

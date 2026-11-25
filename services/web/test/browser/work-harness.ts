@@ -1,6 +1,7 @@
 import type { WebRunner } from 'fc-web'
 import { PaneSet } from '../../src/client/panes'
 import { PaneView } from '../../src/client/terminal'
+import { TerminalWriter } from '../../src/client/terminal-writer'
 import { mountWork } from '../../src/client/work-screen'
 
 const runner = 'paired-runner'
@@ -30,16 +31,28 @@ let data: typeof seed = JSON.parse(localStorage.getItem('test-work') ?? JSON.str
 const params = new URLSearchParams(location.search)
 const scope = params.has('read') ? 'read' : 'control'
 const calls: unknown[] = []
+const client = crypto.randomUUID()
 Object.assign(window, { calls })
 
 let dropStream: (() => void) | undefined
 const fake = {
+  terminal_writer_supported: () => scope === 'control',
+  terminal_writer: async (terminal: string, action: string) => {
+    const response = await fetch('/writer', { method: 'POST', body: JSON.stringify({ client, terminal, action }) })
+    return response.text()
+  },
   terminals: async () => JSON.stringify(data.terminals),
   attach: async (terminal: string, output: (bytes: Uint8Array) => void, ended: () => void) => {
     calls.push({ action: 'attach', terminal })
     dropStream = ended
     output(new TextEncoder().encode('$ git status --short\r\n$ git branch --show-current\r\n' + branch + '\r\n$ '))
-    return { write: async () => {}, resize: async () => {}, close() {}, free() {} }
+    return { write: async (bytes: Uint8Array) => {
+      const sent = await fetch('/writer', {
+        method: 'POST', body: JSON.stringify({ client, terminal, action: 'write' }),
+      })
+      if (!sent.ok) throw new Error('viewer input was refused')
+      calls.push({ action: 'write', terminal, text: new TextDecoder().decode(bytes) })
+    }, resize: async () => {}, close() {}, free() {} }
   },
   work_inventory: async () => JSON.stringify({ ...data, scope, workspaces, repositories: roots }),
   work_intent: async (json: string): Promise<string | undefined> => {
@@ -73,11 +86,23 @@ const fake = {
 }
 
 const stage = document.getElementById('terminal')!
-const panes = new PaneSet<WebRunner>(() => {
+const writers = new Map<string, { root: HTMLDivElement; view: TerminalWriter }>()
+const panes = new PaneSet<WebRunner>(id => {
+  const root = document.createElement('div')
+  root.className = 'workspace-screen'
+  const content = document.createElement('div')
+  content.className = 'workspace-screen-content'
   const host = document.createElement('div')
   host.className = 'terminal-host'
-  stage.append(host)
-  return new PaneView(host, word => { throw new Error(word) })
+  content.append(host)
+  root.append(content)
+  stage.append(root)
+  const pane = new PaneView(host, word => { throw new Error(word) })
+  writers.set(id, {
+    root,
+    view: new TerminalWriter(root, id, writable => pane.setWritable(writable), fakeFailure),
+  })
+  return pane
 })
 document.getElementById('status')!.hidden = true
 document.getElementById('work')!.hidden = false
@@ -90,9 +115,18 @@ const screen = mountWork({
     return await reply.text()
   },
   select: (_view, terminal, open, replace) => {
-    if (replace) panes.forget(replace)
+    if (replace) {
+      panes.forget(replace)
+      writers.get(replace)?.view.show(null)
+      writers.get(replace)?.root.remove()
+      writers.delete(replace)
+    }
     if (!terminal?.attach) panes.clear()
     else if (open) void panes.open(terminal.id, fake as unknown as WebRunner, () => screen.streamEnded(terminal.id))
+    for (const [id, { root, view }] of writers) {
+      root.hidden = id !== terminal?.id || !terminal.attach
+      view.show(root.hidden ? null : fake)
+    }
   },
   started: () => {},
   note: (words: string) => {
@@ -102,6 +136,12 @@ const screen = mountWork({
   },
   prefer: () => null,
   failure: (error: Error & { code?: string }) => fakeFailure(error),
+})
+window.addEventListener('pagehide', () => {
+  for (const [id] of writers) {
+    // The test endpoint lacks an SSH connection to close for a navigated tab.
+    navigator.sendBeacon('/writer', JSON.stringify({ client, terminal: id, action: 'release' }))
+  }
 })
 Object.assign(window, { dropStream: () => dropStream?.(), chooseTerminal: screen.chooseTerminal })
 void screen.refresh(true, 'replaceState')

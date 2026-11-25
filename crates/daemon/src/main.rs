@@ -434,55 +434,7 @@ async fn run(selected: &paths::RuntimeSelection) -> Result<(), i32> {
         }
     };
 
-    // Who an accepted connection is, decided per connection.
-    //
-    // Almost every caller here is a local one and gets host_admin. The exception
-    // is a `--stdio` process relaying an ssh session into this daemon: sshd gave
-    // it a scope and a device id, it says so in one line before the first frame,
-    // and both have to survive the relay. The scope, or a read-enrolled device
-    // would hold host admin on every runner where a daemon happens to be
-    // running — which is every runner in normal use. The device id, or nothing
-    // in this daemon can say which connections belong to a device, and
-    // `client.revoke` cannot close what it revoked.
-    let sessions = {
-        let service = service.clone();
-        let watcher = watcher.clone();
-        let stop = stop.clone();
-        move |preamble: Option<farcooler_transport::SessionPreamble>, pid: Option<i32>| {
-            // A local socket caller holds host_admin.
-            //
-            // Reaching this socket already requires being the owning user on
-            // this host, who can read the database and the worktrees directly
-            // anyway. Granting less here would protect nothing; it would only
-            // stop the user's own Mac app from showing them their own paths.
-            // Remote clients arrive over SSH and are scoped there, where the
-            // distinction is real.
-            //
-            // So an absent preamble is not a lesser session: it is every client
-            // installed before the preamble existed, and it means exactly what
-            // it has always meant. It also names no device, which is what keeps
-            // a revocation from ever closing the Mac app's own connection.
-            //
-            // Present but unreadable is a different matter, and refuses. See
-            // `scope_from_word`.
-            //
-            // The rules live in `sessions` rather than here, because
-            // this is a binary: a test cannot call this closure, and the copy it
-            // would have to write instead is a second answer about who a caller
-            // is — asserted against, while the daemon uses the first one.
-            //
-            // A device id this runner has no record of is refused too
-            // (ov-980, `admit_preamble`): any local process can write one.
-            let peer = admit_preamble(&service, preamble.as_ref())?;
-            Some((
-                HandshakeConfig { daemon_version: farcooler_protocol::BUILD.to_string() },
-                // Which pane a local caller runs in is read from its pid, never
-                // from what it says (ov-494, `people::gate`); a pid the kernel
-                // didn't say is no person's (ov-649).
-                RpcFactory::new(service.clone(), watcher.clone(), stop.clone(), peer).with_socket_caller(pid),
-            ))
-        }
-    };
+    let sessions = socket_sessions(service.clone(), watcher.clone(), stop.clone());
 
     farcooler_protocol::capability::offer(farcooler_protocol::capability::LANDING_UPDATE_LOCK);
     let result = tokio::select! {
@@ -538,6 +490,22 @@ async fn stream_terminal(terminal: &str) -> Result<(), i32> {
         eprintln!("cannot stream that terminal: {e}");
         1
     })
+}
+
+/// The local listener and the stdio fallback use the same trusted peer
+/// preamble and the same runner state for every accepted connection.
+fn socket_sessions(
+    service: Arc<Service>,
+    watcher: Arc<Watcher>,
+    stop: Arc<tokio::sync::Notify>,
+) -> impl Fn(Option<farcooler_transport::SessionPreamble>, Option<i32>) -> Option<(HandshakeConfig, RpcFactory)> {
+    move |preamble, pid| {
+        let peer = admit_preamble(&service, preamble.as_ref())?;
+        Some((
+            HandshakeConfig { daemon_version: farcooler_protocol::BUILD.to_string() },
+            RpcFactory::new(service.clone(), watcher.clone(), stop.clone(), peer).with_socket_caller(pid),
+        ))
+    }
 }
 
 /// Pump bytes between this process's stdio and the running daemon.
@@ -652,50 +620,24 @@ fn requested_session() -> Result<Session, i32> {
     Ok(Session { scope, client: after("--client").filter(|c| !c.is_empty()) })
 }
 
-/// Serve exactly one session over stdin/stdout, then exit.
-///
-/// One session per process, because that is what sshd gives us: a connection is
-/// a process. It opens its own `Service`, which is the one place a second
-/// SQLite handle exists — brief, single-threaded, and gone when the ssh session
-/// ends. Long-lived state stays in tmux, which is shared safely by design.
+/// Relay to the runner. If it hasn't been started, the first stdio
+/// process owns the runner for its session and accepts other clients on
+/// the same socket. A concurrent startup must wait for that socket:
+/// separate cores would grant independent leases on the same tmux pane.
 async fn serve_stdio_session() -> Result<(), i32> {
-    // Before anything else, and before a socket is dialled: a session whose
-    // scope is a typo must not be served at either end.
+    // A typo in an sshd forced command must be refused before dialing.
     let session = requested_session()?;
     let granted = session.granted();
-
-    // A daemon already running here owns everything that is not in SQLite.
-    //
-    // This used to open a second `Service` unconditionally, and for anything
-    // read from the database that was fine — worktrees and terminals came back
-    // correct, so it looked like it worked. But an agent's TRANSCRIPT lives in
-    // this process's memory (`AgentSupervisor`), and the shims that produce it
-    // are connected to the sockets the FIRST daemon bound. A second service has
-    // no shims, so it answers every `agent_subscribe` with epoch 0 and no
-    // events — which a client cannot tell apart from a conversation nobody has
-    // started.
-    //
-    // The effect was that agent chat could never work over ssh: not on the
-    // phone, which reaches every runner this way, and not on any remote runner from
-    // the Mac. The fleet listed perfectly and the chat was permanently empty.
-    //
-    // So when a daemon is listening, this becomes a pipe to it. One daemon per
-    // runner owns the live state and every entry point reaches that one, which is
-    // what the rest of the design already assumes.
-    if let Ok(socket) = paths::socket_path() {
+    let socket = paths::socket_path().map_err(|e| {
+        eprintln!("cannot determine the runner socket: {e}");
+        1
+    })?;
+    let lock_path = socket.with_extension("lock");
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    let _owner = loop {
         if let Ok(mut stream) = tokio::net::UnixStream::connect(&socket).await {
-            // Say what this session is before any frame.
-            //
-            // The pipe below is deliberately dumb and must stay that way, so the
-            // scope cannot ride inside the protocol — this process would have to
-            // parse a conversation the two ends already agree about, which is a
-            // third opinion to keep in step. One line before the conversation
-            // starts is the whole mechanism. See `Session::preamble` for when
-            // there is nothing to say.
-            //
-            // Anything that can reach this socket is already the owning user,
-            // who holds host_admin regardless, so a caller that lies here gains
-            // nothing it did not already have.
+            // Preserve sshd's authenticated scope and device before relaying
+            // the protocol bytes without interpreting them.
             if let Some(preamble) = session.preamble() {
                 use tokio::io::AsyncWriteExt;
                 if stream.write_all(preamble.as_bytes()).await.is_err() {
@@ -705,7 +647,21 @@ async fn serve_stdio_session() -> Result<(), i32> {
             }
             return relay_stdio(stream).await;
         }
-    }
+        match acquire_daemon_lock(&lock_path) {
+            Ok(Some(owner)) => break owner,
+            Ok(None) if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+            }
+            Ok(None) => {
+                eprintln!("the runner owns this socket but is not accepting connections");
+                return Err(1);
+            }
+            Err(e) => {
+                eprintln!("cannot lock {}: {e}", lock_path.display());
+                return Err(1);
+            }
+        }
+    };
 
     // Nothing may be printed to stdout: it is the wire.
     let service = match Service::open().await {
@@ -733,18 +689,7 @@ async fn serve_stdio_session() -> Result<(), i32> {
 
     let cfg = HandshakeConfig { daemon_version: farcooler_protocol::BUILD.to_string() };
 
-    // `daemon.shutdown` ends this session, which is the whole of what this
-    // process is. Nothing else here is shared, so there is no other daemon for
-    // it to stop — when one exists, the branch above made this a pipe to it and
-    // the request went there instead.
-    //
-    // The session is registered in this process's own `Service`, which is the
-    // honest scope of what a revocation here can close: exactly this session.
-    // A device with a session against the daemon on the socket is closed by
-    // that daemon, and this process is only ever reached when there is none.
-    // A `--client` this runner has no record of is refused, as the socket
-    // refuses it (ov-980, `admit_preamble`): a plain line's session names its
-    // own, and so can any local process that runs this.
+    // Check the first SSH session as the socket checks subsequent preambles.
     if let Some(device) = session.client.as_deref()
         && !farcooler_daemon::sessions::is_known_device(&service, device)
     {
@@ -755,6 +700,11 @@ async fn serve_stdio_session() -> Result<(), i32> {
         return Err(1);
     }
     let stop = Arc::new(tokio::sync::Notify::new());
+    let listener = UnixListenerServer::bind(&socket).map_err(|e| {
+        eprintln!("cannot bind {}: {e}", socket.display());
+        1
+    })?;
+    let sessions = socket_sessions(service.clone(), watcher.clone(), stop.clone());
     let served = farcooler_transport::serve_stdio(
         cfg,
         RpcFactory::new(
@@ -765,13 +715,19 @@ async fn serve_stdio_session() -> Result<(), i32> {
         ),
     );
 
-    tokio::select! {
+    let result = tokio::select! {
         result = served => result.map_err(|e| {
             eprintln!("stdio session ended: {e}");
             1
         }),
+        result = listener.serve_with_pid(sessions) => result.map_err(|e| {
+            eprintln!("runner socket stopped: {e}");
+            1
+        }),
         _ = stop.notified() => Ok(()),
-    }
+    };
+    let _ = std::fs::remove_file(&socket);
+    result
 }
 
 /// The daemon's exclusive claim on one runtime directory.

@@ -326,6 +326,7 @@ pub async fn connect(
     identity: Option<&Path>,
 ) -> Result<RemoteLink, Box<dyn std::error::Error>> {
     let mut command = Command::new("ssh");
+    command.env_remove(crate::terminal_input::WRITER_INSTANCE_ENV);
     command.args(ssh_args_for(target, identity, &[]).await);
     command.arg(daemon_command());
     command
@@ -340,11 +341,12 @@ pub async fn connect(
     let stdin = child.stdin.take().ok_or("ssh gave no stdin")?;
     let stdout = child.stdout.take().ok_or("ssh gave no stdout")?;
 
-    let result = Client::over(
+    let result = Client::over_with_writer_instance(
         Box::new(stdout) as Reader,
         Box::new(stdin) as Writer,
         "farcooler-cli",
         env!("CARGO_PKG_VERSION"),
+        crate::terminal_input::writer_instance(),
     )
     .await;
 
@@ -451,6 +453,7 @@ pub async fn exec(
     tty: bool,
 ) -> Result<i32, Box<dyn std::error::Error>> {
     let mut command = Command::new("ssh");
+    command.env_remove(crate::terminal_input::WRITER_INSTANCE_ENV);
     if tty {
         // A pty, so the remote program sees a terminal and Ctrl-C reaches it.
         command.arg("-t");

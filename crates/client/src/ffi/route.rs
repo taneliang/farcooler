@@ -164,7 +164,7 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         Method::CrashReport => Some(method.name()),
         // Their own C entry points, `farcooler_client_paste_file` and
         // `farcooler_client_stream_start`, because neither is one reply.
-        Method::TerminalPasteFile | Method::TerminalAttach => None,
+        Method::TerminalPasteFile | Method::TerminalAttach | Method::TerminalWriter => None,
         // Tiling is tmux's, and a phone shows one pane at a time.
         Method::LayoutList
         | Method::LayoutSplit

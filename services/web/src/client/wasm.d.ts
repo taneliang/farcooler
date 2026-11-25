@@ -61,6 +61,8 @@ declare module 'fc-web' {
   export function ticketForm(): string
   export function workFailure(word: string, code: string, what: string): string
   export class WebRunner {
+    terminal_writer_supported(): boolean
+    terminal_writer(terminal: string, action: string): Promise<string>
     board(workspace: string, repository: string): Promise<string>
     board_ticket(workspace: string, task: string): Promise<string>
     board_intent(workspace: string, intent: string): Promise<string>

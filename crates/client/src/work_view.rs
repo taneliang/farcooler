@@ -139,6 +139,8 @@ impl Preset {
     }
 }
 
+pub const TAKE_OVER_TERMINAL: &str = "Take Over";
+
 pub const READ_ONLY: &str = "This browser has read-only access to the runner. A device with control access can open the terminal and make changes.";
 
 pub fn failure(word: &str, code: &str, what: &str) -> &'static str {
@@ -152,6 +154,8 @@ pub fn failure(word: &str, code: &str, what: &str) -> &'static str {
         (_, "invalid-argument", "branch_name") => "Enter a valid Git branch name, such as feature/fix-build.",
         (_, "invalid-argument", _) => "Check the name or branch and try again.",
         (_, "running-processes", _) => "The terminal is running. Refresh its state before trying again.",
+        (_, _, reason @ ("writer_busy" | "writer_taken_over" | "writer_available")) =>
+            farcooler_core::error::sentence(reason).unwrap_or_default(),
         (_, _, "terminal_state_unknown" | "terminal_state_changed") => "The terminal’s state changed. Refresh it before trying again.",
         ("closed", _, _) => "The runner connection was lost. Reconnect and check whether the action finished before trying again.",
         ("runner_too_old", _, _) => "Update Far Cooler on the runner to use this action.",
@@ -161,10 +165,10 @@ pub fn failure(word: &str, code: &str, what: &str) -> &'static str {
 
 pub fn view(inventory: &Inventory, selection: &Selection) -> Value {
     let Inventory { scope, workspaces, repositories, worktrees, terminals } = inventory;
-    // The runner gates both terminal bytes and input at Control. Its writer
-    // lease fields are currently unused and do not imply an exclusive holder.
-    let writer = matches!(scope.as_str(), "control" | "host_admin");
-    let readable = writer || scope != "read";
+    // Control grants terminal operations. Input ownership comes from the
+    // runner's separate terminal.writer response.
+    let control = matches!(scope.as_str(), "control" | "host_admin");
+    let readable = control || scope != "read";
     let requested = selection.terminal.as_deref().and_then(|id| terminals.iter().find(|t| t.id == id));
     let main = |repository: Option<&str>| {
         let in_repo = |w: &&Workspace| repository.is_none_or(|r| w.repository == r);
@@ -213,7 +217,7 @@ pub fn view(inventory: &Inventory, selection: &Selection) -> Value {
 
     let terminal_rows: Vec<_> = visible.into_iter().map(|t| {
         let running = t.state == "running";
-        let recover = if t.state == "lost" && writer {
+        let recover = if t.state == "lost" && control {
             json!({"action": "restart", "label": "Recover Terminal"})
         } else if running && readable && selected.is_some_and(|s| s.id == t.id) && selection.stream_ended {
             json!({"action": "reattach", "label": "Reconnect Terminal"})
@@ -224,15 +228,15 @@ pub fn view(inventory: &Inventory, selection: &Selection) -> Value {
             "running" => "Running", "starting" => "Starting", "exited" => "Exited",
             "error" => "Error", "lost" => "Lost", _ => "State unknown",
         };
-        let close = writer && matches!(t.state.as_str(), "running" | "starting" | "exited" | "error" | "lost");
+        let close = control && matches!(t.state.as_str(), "running" | "starting" | "exited" | "error" | "lost");
         json!({
             "id": t.id, "title": t.title, "agent": t.agent, "state": state, "running": running,
             "attach": readable && running,
             "attachNote": if !readable { READ_ONLY } else if t.state == "lost" {
                 "This terminal’s process was lost. Recover it to continue."
             } else if !running { "This terminal is currently unavailable." } else { "" },
-            "access": if writer { "Writer" } else if readable { "Access unknown" } else { "Read-only" },
-            "rename": writer.then_some(json!({"label": "Rename", "prompt": "Terminal name"})),
+            "access": if readable { "" } else { "Read-only" },
+            "rename": control.then_some(json!({"label": "Rename", "prompt": "Terminal name"})),
             "close": close.then(|| json!({
                 "label": "Close Terminal",
                 "prompt": if matches!(t.state.as_str(), "running" | "starting") {
@@ -268,10 +272,10 @@ pub fn view(inventory: &Inventory, selection: &Selection) -> Value {
             "open": "Start Work", "link": "Workspace Link", "repository": "Repository", "worktree": "Worktree",
             "close": "Done", "refresh": "Refresh", "emptyTree": "No worktrees available",
         },
-        "create": (writer && repository.is_some() && !missing_workspace).then_some(json!({
+        "create": (control && repository.is_some() && !missing_workspace).then_some(json!({
             "open": "New Worktree", "submit": "Create Worktree", "name": "Worktree Name", "branch": "Branch",
         })),
-        "start": (writer && chosen_tree.is_some()).then(|| json!({
+        "start": (control && chosen_tree.is_some()).then(|| json!({
             "preset": "Terminal Type", "submit": "Start Terminal",
             "presets": ([Preset::Shell, Preset::Codex, Preset::Claude].map(|preset| json!({"id": preset.command(), "label": preset.label()}))),
         })),

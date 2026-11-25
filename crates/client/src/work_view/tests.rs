@@ -75,7 +75,7 @@ fn grant_controls_actions_and_stream_recovery_is_an_attach() {
     assert!(read["terminals"][0]["close"].is_null());
     assert!(read["terminals"][0]["recover"].is_null());
     let write = view(&inventory("control"), &Selection { stream_ended: true, ..Default::default() });
-    assert_eq!(write["terminals"][0]["access"], "Writer");
+    assert_eq!(write["terminals"][0]["access"], "");
     assert_eq!(write["terminals"][0]["attach"], true);
     assert_eq!(write["terminals"][0]["recover"]["action"], "reattach");
     assert_eq!(write["start"]["presets"][0]["id"], "shell");

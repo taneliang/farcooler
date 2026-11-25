@@ -193,7 +193,7 @@ pub fn member_ruling(method: M) -> Ruling {
         | M::TerminalRename
         | M::TerminalDismissLost
         // Acting on a pane: `gate`'s rules for reps and the orchestrator.
-        | M::TerminalWrite
+        | M::TerminalWrite | M::TerminalWriter
         | M::TerminalPasteFile
         | M::TerminalStop
         | M::TerminalRestart

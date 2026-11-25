@@ -46,6 +46,7 @@ async fn an_oversized_answer_in_the_eof_drain_preserves_the_following_answer() {
     writer.write_frame(&pb::WireEnvelope { protocol_version: PROTOCOL_VERSION, message_id: ids::new_id(),
         body: Some(wire_envelope::Body::ClientHello(pb::ClientHello {
             supported_protocol_versions: vec![PROTOCOL_VERSION], client_name: "eof".into(), client_version: "1".into(),
+            writer_client_instance: Default::default(),
         })) }).await.unwrap();
     reader.read_frame().await.unwrap().unwrap();
     let mut requests = Vec::new();

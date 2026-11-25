@@ -261,6 +261,7 @@ async fn a_client_that_half_closes_is_still_answered() {
                 supported_protocol_versions: vec![PROTOCOL_VERSION],
                 client_name: "half".into(),
                 client_version: "0".into(),
+                writer_client_instance: Default::default(),
             })),
         })
         .await

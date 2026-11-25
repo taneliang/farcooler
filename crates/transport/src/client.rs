@@ -382,6 +382,16 @@ where
         client_name: &str,
         client_version: &str,
     ) -> Result<Self, ClientError> {
+        Self::over_with_writer_instance(read, write, client_name, client_version, Bytes::new()).await
+    }
+
+    pub async fn over_with_writer_instance(
+        read: R,
+        write: W,
+        client_name: &str,
+        client_version: &str,
+        writer_client_instance: Bytes,
+    ) -> Result<Self, ClientError> {
         let mut reader = FrameReader::new(read);
         let mut writer = FrameWriter::new(write);
 
@@ -393,6 +403,7 @@ where
                     supported_protocol_versions: vec![PROTOCOL_VERSION],
                     client_name: client_name.to_string(),
                     client_version: client_version.to_string(),
+                    writer_client_instance,
                 })),
             })
             .await?;

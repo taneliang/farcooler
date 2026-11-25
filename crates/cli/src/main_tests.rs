@@ -859,7 +859,9 @@ fn every_kind_of_event_the_proto_carries_is_decided_on() {
     // Dropped on purpose: `host_changed`, `repository_root_changed`,
     // `repository_changed`, `operation_changed`, `agent_events` and
     // `terminal_frame`. See `a_payload_with_no_reader_is_still_dropped`.
-    const NO_READER: &[u32] = &[10, 11, 12, 15, 17, 20];
+    // `terminal_writer_lost` is private to the input connection and is
+    // handled by `terminal input`, outside this fleet event stream.
+    const NO_READER: &[u32] = &[10, 11, 12, 15, 17, 20, 30];
     let mut kinds = 0;
     // From 3: tags 1 and 2 are `event_id` and `sequence`, not payloads.
     for tag in 3..256 {

@@ -23,6 +23,7 @@ struct TerminalSurface: View {
 
     /// One queue per pane, so two panes uploading at once each show their own.
     @StateObject private var pastes = ImagePasteQueue()
+    @StateObject private var writer = TerminalWriterNotice()
 
     var body: some View {
         TerminalCanvas(
@@ -33,11 +34,40 @@ struct TerminalSurface: View {
             linkGeneration: linkGeneration,
             onResize: onResize,
             pastes: pastes,
+            writer: writer,
             fontRevision: fontRevision,
             isFocused: isFocused,
             grid: grid
         )
         .overlay(alignment: .bottom) { ImagePasteChips(queue: pastes) }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if let notice = writer.notice, let message = notice.message, let action = notice.action {
+                HStack {
+                    Text(message)
+                    Spacer()
+                    Button(action) { writer.input?.takeOver() }
+                }
+                .padding(8)
+                .background(.regularMaterial)
+            }
+        }
+    }
+}
+
+@MainActor
+final class TerminalWriterNotice: ObservableObject {
+    struct Notice: Decodable {
+        let message: String?
+        let action: String?
+    }
+
+    @Published var notice: Notice?
+    weak var input: TerminalInput?
+    var inputID: UUID?
+
+    func receive(_ status: String) {
+        guard let decoded = try? JSONDecoder().decode(Notice.self, from: Data(status.utf8)) else { return }
+        notice = decoded.message == nil ? nil : decoded
     }
 }
 
@@ -92,6 +122,7 @@ struct TerminalCanvas: NSViewRepresentable {
     /// Where a pasted image goes. Held rather than passed through a closure so
     /// the canvas can give it the one thing only the view can do: type.
     let pastes: ImagePasteQueue
+    let writer: TerminalWriterNotice
 
     /// Bumped by preferences, so a font change reaches a live terminal.
     var fontRevision: Int = 0
@@ -206,9 +237,24 @@ struct TerminalCanvas: NSViewRepresentable {
         let onResize = self.onResize
 
         let input = TerminalInput()
+        let writer = self.writer
+        let inputID = UUID()
+        writer.inputID = inputID
+        writer.input = input
+        if writer.notice != nil {
+            Task { @MainActor in
+                if writer.inputID == inputID { writer.notice = nil }
+            }
+        }
         if let binary {
             input.start(
-                binary: binary, terminal: terminal, environment: environment, host: hostArguments)
+                binary: binary, terminal: terminal, environment: environment, host: hostArguments
+            ) { [weak writer] status in
+                Task { @MainActor in
+                    guard let writer, writer.inputID == inputID else { return }
+                    writer.receive(status)
+                }
+            }
         }
         coord.input = input
         view.onInput = { bytes in input.send(bytes) }

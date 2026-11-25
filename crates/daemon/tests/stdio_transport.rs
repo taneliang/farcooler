@@ -315,3 +315,24 @@ async fn an_unknown_terminal_is_refused_over_stdio_the_same_way() {
         other => panic!("expected NOT_FOUND, got {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn stdio_sessions_share_the_writer_when_the_runner_starts_without_a_daemon() {
+    let home = tempfile::tempdir().unwrap();
+    let (_first_child, mut first) = spawn(home.path()).await;
+    let repo = tempfile::tempdir().unwrap();
+    let worktree = a_worktree(&mut first, repo.path()).await;
+    let terminal = a_terminal(&mut first, &worktree.id, "lease").await;
+
+    let mut write = request("terminal.write");
+    write.target_resource_id = Some(terminal.id.clone());
+    write.payload = Some(request::Payload::TerminalWrite(farcooler_protocol::v1::TerminalWrite {
+        payload: bytes::Bytes::from_static(b"x"),
+    }));
+    first.call(write.clone()).await.expect("first writer");
+
+    let (_second_child, mut second) = spawn(home.path()).await;
+    let reply = second.call(write).await;
+    assert!(matches!(&reply, Err(ClientError::Daemon { what, .. }) if what == "writer_busy"),
+        "a second stdio process must reach the same lease, got {reply:?}");
+}

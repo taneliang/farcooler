@@ -9,6 +9,7 @@ pub mod cutover_admin;
 pub mod cutover_delegate;
 pub mod cutover_grant;
 pub mod code_identity;
+mod terminal_writers;
 pub mod writer_gate;
 pub mod writer_join;
 pub mod answered_for;

@@ -4486,3 +4486,105 @@ async fn a_worktree_holds_only_so_many_web_pages() {
     let made = terminals_of(&mut client, &worktree.id).await;
     assert_eq!(made.len(), farcooler_daemon::web_pane::MOST_PER_WORKTREE + 1, "no ninth pane");
 }
+
+#[tokio::test]
+async fn only_one_connection_can_type_into_a_terminal() {
+    use farcooler_protocol::v1::{TerminalWriterRequest, event, terminal_writer_request::Action};
+
+    let h = start(Scope::HostAdmin).await;
+    let native_instance = uuid::Uuid::parse_str("26fc42db-7980-4d28-b2c7-234e3e608db3").unwrap();
+    let native = || async {
+        let (read, write) = tokio::net::UnixStream::connect(&h.socket).await.unwrap().into_split();
+        Client::over_with_writer_instance(
+            read, write, "farcooler-cli", "0.0.0", bytes::Bytes::copy_from_slice(native_instance.as_bytes()),
+        ).await.unwrap()
+    };
+    let mut first = native().await;
+    let (_repo, terminal) = pane_with_scrollback(&mut first).await;
+    let mut second = connect(&h).await;
+    let input = |generation, payload: &'static [u8]| {
+        let mut req = request("terminal.write");
+        req.target_resource_id = Some(terminal.clone());
+        req.expected_lease_generation = generation;
+        req.payload = Some(request::Payload::TerminalWrite(
+            farcooler_protocol::v1::TerminalWrite { payload: bytes::Bytes::from_static(payload) },
+        ));
+        req
+    };
+    let access = |action, generation| {
+        let mut req = request("terminal.writer");
+        req.target_resource_id = Some(terminal.clone());
+        req.expected_lease_generation = generation;
+        req.payload = Some(request::Payload::TerminalWriter(TerminalWriterRequest { action: action as i32 }));
+        req
+    };
+    let state = |reply: farcooler_protocol::v1::Result| match reply.value {
+        Some(result::Value::TerminalWriter(state)) => state,
+        other => panic!("expected writer state, got {other:?}"),
+    };
+
+    let reply = second.call(input(None, b"OV1454_BLOCKED")).await;
+    assert!(matches!(&reply, Err(ClientError::Daemon { code, what, .. })
+        if *code == ErrorCode::ResourceConflict as i32 && what == "writer_busy"),
+        "expected the runner to refuse the second writer, got {reply:?}");
+    let mut resize = request("terminal.resize");
+    resize.target_resource_id = Some(terminal.clone());
+    resize.payload = Some(request::Payload::TerminalResize(farcooler_protocol::v1::TerminalResize {
+        columns: 100, rows: 30, view_activity_id: 0,
+    }));
+    // The app's geometry subprocess has its own RPC connection but the same
+    // app instance. A different app or browser still cannot resize or type.
+    native().await.call(resize.clone()).await.expect("native geometry");
+    assert!(matches!(second.call(resize).await,
+        Err(ClientError::Daemon { what, .. }) if what == "writer_busy"));
+    let first_generation = state(first.call(access(Action::Status, None)).await.unwrap()).generation.unwrap();
+    let viewer = state(second.call(access(Action::Claim, None)).await.unwrap());
+    assert_eq!((viewer.generation, viewer.reason.as_str()), (None, "writer_busy"));
+
+    let second_generation = state(second.call(access(Action::TakeOver, None)).await.unwrap()).generation.unwrap();
+    assert_ne!(second_generation, first_generation);
+    // Only the displaced connection receives the event. It also gets the
+    // reason back on status, including if it missed the push.
+    tokio::time::timeout(PATIENCE, async {
+        loop {
+            if let Some(event::Payload::TerminalWriterLost(lost)) = first.next_event().await.unwrap().payload {
+                assert_eq!((lost.terminal_id, lost.generation), (terminal.clone(), first_generation));
+                break;
+            }
+        }
+    }).await.unwrap();
+    let old = state(first.call(access(Action::Status, None)).await.unwrap());
+    assert_eq!((old.generation, old.reason.as_str()), (None, "writer_taken_over"));
+    assert!(matches!(first.call(input(Some(first_generation), b"OV1454_STALE")).await,
+        Err(ClientError::Daemon { what, .. }) if what == "writer_taken_over"));
+    assert!(matches!(second.call(input(Some(first_generation), b"OV1454_STALE")).await,
+        Err(ClientError::Daemon { what, .. }) if what == "writer_taken_over"));
+    second.call(input(Some(second_generation), b"OV1454_GRANTED")).await.unwrap();
+    tokio::time::timeout(PATIENCE, async {
+        loop {
+            let screen = screen_of(&mut second, &terminal, 0).await;
+            let text = String::from_utf8_lossy(&screen.contents);
+            assert!(!text.contains("OV1454_BLOCKED") && !text.contains("OV1454_STALE"), "{text}");
+            if text.contains("OV1454_GRANTED") {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    }).await.unwrap();
+
+    // Even a delayed release can't clear a newer lease.
+    let stale = state(second.call(access(Action::Release, Some(first_generation))).await.unwrap());
+    assert_eq!(stale.generation, Some(second_generation));
+    drop(second);
+    let new_generation = tokio::time::timeout(PATIENCE, async {
+        loop {
+            let attempt = state(first.call(access(Action::Claim, None)).await.unwrap());
+            if let Some(generation) = attempt.generation {
+                break generation;
+            }
+            tokio::task::yield_now().await;
+        }
+    }).await.unwrap();
+    assert_ne!(new_generation, first_generation);
+    first.call(input(Some(new_generation), b"OV1454_REACQUIRED")).await.unwrap();
+}

@@ -16,6 +16,8 @@
 //! What is left here is the page's: its shapes for a terminal list, a pane
 //! that hands its bytes to callbacks, and the words a failure crosses as.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::future::Future;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -23,7 +25,7 @@ use std::sync::Arc;
 use farcooler_client::session::{Session, SessionError};
 use farcooler_client::ssh::SshError;
 use farcooler_protocol::capability;
-use farcooler_protocol::v1::ErrorCode;
+use farcooler_protocol::v1::{ErrorCode, TerminalResize, TerminalWrite, request, terminal_writer_request::Action};
 use tokio::io::AsyncReadExt;
 use uuid::Uuid;
 
@@ -74,9 +76,16 @@ impl From<SessionError> for WebError {
     }
 }
 
+#[derive(Default)]
+struct WriterAccess {
+    supported: Option<bool>,
+    generations: HashMap<Uuid, u64>,
+}
+
 /// A connected runner: the client core's session over one SSH connection.
 pub struct Runner {
     pub(crate) session: Rc<Session>,
+    writer_access: Rc<RefCell<WriterAccess>>,
     /// What this connection has heard, when it is watched (`start_watched`).
     link: Option<Arc<Link>>,
     /// Dropped with the runner, which is what stops the watching task.
@@ -87,7 +96,7 @@ impl Runner {
     /// Start the control session on an authenticated connection.
     pub async fn start(conn: Connection) -> Result<Runner, WebError> {
         let session = Session::over_ssh(conn, CLIENT_NAME).await?;
-        Ok(Runner { session: Rc::new(session), link: None, _watching: None })
+        Ok(Runner { session: Rc::new(session), writer_access: Default::default(), link: None, _watching: None })
     }
 
     /// Start the control session and watch the connection (ov-772).
@@ -123,7 +132,7 @@ impl Runner {
                 on_lost();
             }
         });
-        Ok(Runner { session, link: Some(link), _watching: Some(stop) })
+        Ok(Runner { session, writer_access: Default::default(), link: Some(link), _watching: Some(stop) })
     }
 
     /// Whether the connection answers, right now: the foreground probe
@@ -159,6 +168,43 @@ impl Runner {
 
     pub fn capabilities(&self) -> &[String] {
         self.session.capabilities()
+    }
+
+    pub fn terminal_writer_supported(&self) -> bool {
+        self.writer_access.borrow().supported != Some(false)
+            && matches!(self.session.granted_scope(), "control" | "host_admin")
+    }
+
+    pub async fn terminal_writer(&self, terminal: Uuid, action: Action) -> Result<serde_json::Value, WebError> {
+        let generation = if action == Action::Release {
+            self.writer_access.borrow().generations.get(&terminal).copied()
+        } else {
+            None
+        };
+        let state = match self.session.terminal_writer(terminal, action, generation).await {
+            Ok(state) => state,
+            Err(SessionError::Refused { code, .. }) if code == ErrorCode::CapabilityUnsupported as i32 => {
+                self.writer_access.borrow_mut().supported = Some(false);
+                return Ok(serde_json::Value::Null);
+            }
+            Err(e) => return Err(e.into()),
+        };
+        let mut access = self.writer_access.borrow_mut();
+        access.supported = Some(true);
+        if let Some(generation) = state.generation {
+            access.generations.insert(terminal, generation);
+        } else {
+            access.generations.remove(&terminal);
+        }
+        let writable = state.generation.is_some();
+        Ok(serde_json::json!({
+            "writable": writable,
+            "label": if writable { "Writer" } else { "Viewer" },
+            "reason": if writable { "" } else { farcooler_client::work_view::failure("", "", &state.reason) },
+            "action": if writable { serde_json::Value::Null }
+                else if state.occupied { serde_json::json!({"label": farcooler_client::work_view::TAKE_OVER_TERMINAL, "intent": "take-over"}) }
+                else { serde_json::json!({"label": "Request Input", "intent": "claim"}) },
+        }))
     }
 
     /// Terminal dimensions for the pane renderer.
@@ -275,7 +321,9 @@ impl Runner {
             }
             ended();
         });
-        Ok(Pane { terminal, session: self.session.clone(), close: Some(close) })
+        Ok(Pane {
+            terminal, session: self.session.clone(), writer_access: self.writer_access.clone(), close: Some(close),
+        })
     }
 }
 
@@ -284,25 +332,36 @@ impl Runner {
 pub struct Pane {
     terminal: Uuid,
     session: Rc<Session>,
+    writer_access: Rc<RefCell<WriterAccess>>,
     /// Sent, or dropped with the pane, to stop reading: see `close`.
     close: Option<futures::channel::oneshot::Sender<()>>,
 }
 
 impl Pane {
+    fn generation(&self) -> Option<u64> {
+        let access = self.writer_access.borrow();
+        (access.supported == Some(true)).then(|| {
+            // Zero is never granted. The runner refuses input without a
+            // lease even if a stale browser event reaches this path.
+            access.generations.get(&self.terminal).copied().unwrap_or(0)
+        })
+    }
+
     /// Type into the terminal.
     ///
-    /// Not `async` on purpose: the write is queued before this returns
-    /// (`Session::start_write`), so two writes made one after the other reach
+    /// The write is queued before this returns, so two writes made one after the other reach
     /// the runner in that order however their answers are awaited. Keystrokes
     /// depend on it.
     pub fn write(&self, bytes: &[u8]) -> impl Future<Output = Result<(), WebError>> + 'static {
-        let queued = self.session.start_write(self.terminal, bytes.to_vec());
+        let payload = request::Payload::TerminalWrite(TerminalWrite { payload: bytes.to_vec().into() });
+        let queued = self.session.start_terminal_input("terminal.write", self.terminal, payload, self.generation());
         async move { Ok(queued?.value().await.map(|_| ())?) }
     }
 
     /// Tell the runner this pane's size. Queued as `write` is.
     pub fn resize(&self, columns: u32, rows: u32) -> impl Future<Output = Result<(), WebError>> + 'static {
-        let queued = self.session.start_resize(self.terminal, columns, rows);
+        let payload = request::Payload::TerminalResize(TerminalResize { columns, rows, view_activity_id: 0 });
+        let queued = self.session.start_terminal_input("terminal.resize", self.terminal, payload, self.generation());
         async move { Ok(queued?.value().await.map(|_| ())?) }
     }
 

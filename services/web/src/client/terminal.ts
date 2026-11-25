@@ -29,6 +29,7 @@ export class PaneView implements Pane<WebRunner> {
   private typedEarly: Uint8Array[] | null = null
   private typedEarlyBytes = 0
   private generation = 0
+  private writable = true
   /// Attached, or attaching: holding a channel, or about to (`Pane.active`).
   private holding = false
   /// Has shown a terminal, so the screen is worth keeping (`Pane.used`).
@@ -101,6 +102,17 @@ export class PaneView implements Pane<WebRunner> {
     if (this.autoFocus) this.focus()
   }
 
+  setWritable(writable: boolean): void {
+    if (this.writable === writable) return
+    this.writable = writable
+    this.term.options.disableStdin = !writable
+    if (writable) this.refit(true)
+    else {
+      this.typedEarly = null
+      this.lease.release()
+    }
+  }
+
   focus(): void {
     this.term.focus()
   }
@@ -137,7 +149,7 @@ export class PaneView implements Pane<WebRunner> {
     const generation = ++this.generation
     const replacement = this.replacement
     const current = () => this.generation === generation
-    this.typedEarly = []
+    this.typedEarly = this.writable ? [] : null
     this.typedEarlyBytes = 0
     if (this.autoFocus) this.focus()
     let pane: WebPane
@@ -206,7 +218,7 @@ export class PaneView implements Pane<WebRunner> {
   /// This page is being used: send its size, so a Mac that reshaped the pane
   /// meanwhile gives way (`Claim`).
   private claimSize(focus: boolean): void {
-    if (this.pane && this.claim.due(Date.now(), focus)) this.refit(true)
+    if (this.writable && this.pane && this.claim.due(Date.now(), focus)) this.refit(true)
   }
 
   /// Put the pane back to the size it had before this page fitted it. Queued
@@ -242,6 +254,7 @@ export class PaneView implements Pane<WebRunner> {
   }
 
   private send(bytes: Uint8Array): void {
+    if (!this.writable) return
     if (this.typedEarly) {
       // Held for the pane that's attaching, up to a paste's worth; past that
       // the person is told rather than having keystrokes vanish.
@@ -265,7 +278,7 @@ export class PaneView implements Pane<WebRunner> {
     }
     clearTimeout(this.resizing)
     const tell = () => {
-      if (!this.pane) return
+      if (!this.writable || !this.pane) return
       this.lease.reshape()
       this.pane.resize(this.term.cols, this.term.rows).catch(() => {})
     }

@@ -194,7 +194,7 @@ fn acted_on(req: &Request) -> Option<Uuid> {
     let named = |id: &[u8]| crate::wire::parse_id(id);
     match (req.method.as_str(), req.payload.as_ref()) {
         (
-            "terminal.write" | "terminal.paste_file" | "terminal.stop" | "terminal.restart" | "terminal.remove"
+            "terminal.write" | "terminal.writer" | "terminal.paste_file" | "terminal.stop" | "terminal.restart" | "terminal.remove"
             | "terminal.set_role",
             _,
         ) => req.target_resource_id.as_deref().and_then(named),

@@ -385,8 +385,8 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
         intent: t.intent as i32,
         state: view.state() as i32,
         exit_status,
-        // Writer leases are not yet enforced, so there is no holder to report.
-        // Reporting a fabricated one would be worse than reporting none.
+        // Lease ownership is relative to a connection. The inventory is
+        // shared across clients, so terminal.writer reports ownership.
         writer_client_id: None,
         columns: t.columns,
         rows: t.rows,

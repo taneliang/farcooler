@@ -50,6 +50,8 @@ enum CLI {
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
+    private static let writerInstance = UUID().uuidString
+
     /// Deliberately does NOT set FARCOOLER_HOME.
     ///
     /// The CLI already resolves its own runtime directory. Setting a second
@@ -62,6 +64,7 @@ enum CLI {
     static var environment: [String: String] {
         var environment = ProcessInfo.processInfo.environment
         if let path = searchPath.value { environment["PATH"] = path }
+        environment["FARCOOLER_WRITER_INSTANCE"] = writerInstance
         return environment
     }
 

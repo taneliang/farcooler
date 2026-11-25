@@ -10,10 +10,12 @@ import Foundation
 final class TerminalInput {
     private var process: Process?
     private var stdin: FileHandle?
+    private var output: FileHandle?
     private let lock = NSLock()
 
     func start(
-        binary: String, terminal: String, environment: [String: String], host: [String] = []
+        binary: String, terminal: String, environment: [String: String], host: [String] = [],
+        onWriterStatus: @escaping @Sendable (String) -> Void = { _ in }
     ) {
         stop()
 
@@ -24,25 +26,41 @@ final class TerminalInput {
 
         let inPipe = Pipe()
         p.standardInput = inPipe
-        p.standardOutput = Pipe()
-        p.standardError = Pipe()
+        let outPipe = Pipe()
+        p.standardOutput = outPipe
+        p.standardError = FileHandle.nullDevice
+        let handle = outPipe.fileHandleForReading
+        let buffer = LineBuffer()
+        handle.readabilityHandler = { h in
+            let data = h.availableData
+            if data.isEmpty { return }
+            for line in buffer.take(data) {
+                onWriterStatus(String(decoding: line, as: UTF8.self))
+            }
+        }
+        output = handle
 
         do {
             try p.run()
             process = p
             stdin = inPipe.fileHandleForWriting
         } catch {
-            process = nil
-            stdin = nil
+            stop()
         }
     }
 
     /// Send exact bytes. One hex run per line, in the order submitted.
     func send(_ bytes: [UInt8]) {
         guard !bytes.isEmpty else { return }
-        let hex = bytes.map { String(format: "%02x", $0) }.joined() + "\n"
-        guard let data = hex.data(using: .ascii) else { return }
+        sendLine(bytes.map { String(format: "%02x", $0) }.joined())
+    }
 
+    func takeOver() {
+        sendLine("take-over")
+    }
+
+    private func sendLine(_ line: String) {
+        let data = Data((line + "\n").utf8)
         // Serialize writes so two keystrokes cannot interleave mid-line.
         lock.lock()
         defer { lock.unlock() }
@@ -72,6 +90,8 @@ final class TerminalInput {
     func stop() {
         lock.lock()
         defer { lock.unlock() }
+        output?.readabilityHandler = nil
+        output = nil
         try? stdin?.close()
         stdin = nil
         if let p = process, p.isRunning { p.terminate() }

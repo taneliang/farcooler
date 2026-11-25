@@ -277,6 +277,14 @@ impl Handler for RpcFactory {
         self.peer.clone()
     }
 
+    fn client_hello(&self, hello: &farcooler_protocol::v1::ClientHello) {
+        if let Ok(instance) = Uuid::from_slice(&hello.writer_client_instance)
+            && instance.get_version_num() == 4
+        {
+            let _ = self.session.writer_instance.set(instance);
+        }
+    }
+
     fn handle(&self, req: Request) -> impl std::future::Future<Output = Response> + Send {
         let session = self.session.clone();
         async move {
@@ -441,7 +449,7 @@ fn scope_of(method: Method) -> Scope {
         // images — the restriction protected nothing and cost the case people
         // actually want, which is dropping a PDF or a log on a pane.
         | Method::TerminalPasteFile
-        | Method::TerminalWrite => Scope::Control,
+        | Method::TerminalWrite | Method::TerminalWriter => Scope::Control,
         // A pane's agent channel is exactly as sensitive as its screen — it is
         // the same conversation, just structured — so it sits at the same
         // scope rather than behind `host_admin`. Search returns
@@ -752,6 +760,13 @@ impl Rpc {
             .as_deref()
             .and_then(wire::parse_id)
             .ok_or(DomainError::NotFound)
+    }
+
+    async fn terminal_write_admission(
+        &self, id: Uuid, generation: Option<u64>, claim: bool,
+    ) -> Result<crate::terminal_writers::WriteGuard> {
+        self.service.sessions().terminal_writers
+            .write(id, &self.session, &self.push, generation, claim).await
     }
 
     async fn dispatch(&self, req: Request) -> Result<result::Value> {
@@ -1542,13 +1557,35 @@ impl Rpc {
                 ))
             }
 
+            "terminal.writer" => {
+                use farcooler_protocol::v1::terminal_writer_request::Action;
+                let id = Self::target(&req)?;
+                let Some(request::Payload::TerminalWriter(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let action = Action::try_from(p.action).map_err(|_| DomainError::InvalidArgument { what: "action" })?;
+                if action != Action::Release {
+                    svc.runtime().live_pane(id)?;
+                }
+                let state = svc.sessions().terminal_writers
+                    .access(id, &self.session, &self.push, action, req.expected_lease_generation).await?;
+                Ok(result::Value::TerminalWriter(state))
+            }
+
             "terminal.write" => {
                 let id = Self::target(&req)?;
                 let Some(request::Payload::TerminalWrite(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
+                svc.runtime().live_pane(id)?;
+                let writer = self.terminal_write_admission(id, req.expected_lease_generation, true).await?;
                 svc.send_bytes(id, &p.payload).await?;
-                self.terminal_result(id).await
+                drop(writer);
+                if req.expected_lease_generation.is_some() {
+                    Ok(result::Value::Empty(Empty {}))
+                } else {
+                    self.terminal_result(id).await
+                }
             }
 
             // One chunk of a file on its way into a pane. The last one names
@@ -1570,6 +1607,7 @@ impl Rpc {
                     };
                     return Ok(result::Value::TerminalFilePut(farcooler_protocol::v1::TerminalFilePutResult { stored, path }));
                 }
+                let _writer = self.terminal_write_admission(id, req.expected_lease_generation, false).await?;
                 let stored = crate::pastes::put_chunk(
                     svc.root_dir(),
                     &p.transfer_id,
@@ -1600,6 +1638,7 @@ impl Rpc {
                 let Some(request::Payload::TerminalResize(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
+                let _writer = self.terminal_write_admission(id, req.expected_lease_generation, false).await?;
                 svc.resize_terminal(id, p.columns, p.rows).await?;
                 self.terminal_result(id).await
             }
@@ -1746,6 +1785,7 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
+                let _writer = self.terminal_write_admission(id, req.expected_lease_generation, false).await?;
                 let text = wire::prompt_text(&p.blocks);
                 let said = match req.method.as_str() {
                     "terminal.tell" => self.watcher.tell_into(id, &text, author).await?.into(),
@@ -1775,6 +1815,7 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
+                let _writer = self.terminal_write_admission(id, req.expected_lease_generation, false).await?;
                 let press = if req.method == "terminal.interrupt" { Press::Interrupt } else { Press::SendNow };
                 self.watcher.deliver(id, Delivery::key(press)).await?;
                 self.terminal_result(id).await
@@ -1783,6 +1824,8 @@ impl Rpc {
             // Bring Here (ov-369): the box's draft read; with `expected`, cleared too.
             "terminal.bring_draft" => {
                 let Some(request::Payload::BringDraft(p)) = req.payload else { return Err(DomainError::InvalidArgument { what: "payload" }) };
+                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
+                let _writer = self.terminal_write_admission(id, req.expected_lease_generation, false).await?;
                 Ok(result::Value::BroughtDraft(self.watcher.bring_draft_wire(&p).await?))
             }
 

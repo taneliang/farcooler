@@ -206,6 +206,7 @@ async fn truncated_frame_after_handshake_does_not_dispatch() {
             supported_protocol_versions: vec![PROTOCOL_VERSION],
             client_name: "itest".into(),
             client_version: "0.1.0".into(),
+            writer_client_instance: Default::default(),
         })),
     };
     raw_writer.write_frame(&hello).await.unwrap();

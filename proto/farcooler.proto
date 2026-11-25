@@ -31,6 +31,9 @@ message ClientHello {
   repeated uint32 supported_protocol_versions = 1;
   string client_name = 2;
   string client_version = 3;
+  // A random, per-app-process UUID for a native client that uses several
+  // connections. The runner also requires the same authenticated principal.
+  bytes writer_client_instance = 4;
 }
 
 message ServerHello {
@@ -146,6 +149,7 @@ message Request {
     // now, so there is nothing for a client to import. The tag is retired
     // rather than reused.
     TerminalWrite terminal_write = 31;
+    TerminalWriterRequest terminal_writer = 651;
     TerminalScreenRequest terminal_screen_request = 32;
     // 33 was SetPaneMode, and 37 and 40-45 the chat pane's mode, model,
     // config, queue and adapter payloads. Chat mode was retired (ov-377): an
@@ -449,6 +453,7 @@ message Result {
     Operation operation = 10;
     DaemonVersion daemon_version = 11;
     TerminalAttachResult terminal_attach = 12;
+    TerminalWriterState terminal_writer = 651;
     BranchList branch_list = 13;
     PaneGroupList pane_group_list = 14;
     DiscoveredWorktreeList discovered_worktree_list = 15;
@@ -1105,6 +1110,7 @@ message Event {
     // same as a runner that is asleep. A device offline at the time never gets
     // it. A client keeps it for this runner until a dial gets in again.
     Empty device_released = 29;
+    TerminalWriterLost terminal_writer_lost = 30;
   }
   reserved 28;
   reserved "pages_changed";
@@ -2402,6 +2408,30 @@ message TerminalScreen {
 // the way would have to know the terminal's mode to get them right.
 message TerminalWrite {
   bytes payload = 1;
+}
+
+// The target terminal and any expected generation are on the request envelope.
+message TerminalWriterRequest {
+  enum Action {
+    STATUS = 0;
+    CLAIM = 1;
+    TAKE_OVER = 2;
+    RELEASE = 3;
+  }
+  Action action = 1;
+}
+
+message TerminalWriterState {
+  // Only the writer receives a generation for use in input requests.
+  optional uint64 generation = 1;
+  // A stable reason for the viewer, or empty when this client owns the lease.
+  string reason = 2;
+  bool occupied = 3;
+}
+
+message TerminalWriterLost {
+  bytes terminal_id = 1;
+  uint64 generation = 2;
 }
 
 // One chunk of a file on its way to a terminal.

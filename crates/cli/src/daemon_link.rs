@@ -118,11 +118,12 @@ async fn dial(socket: &std::path::Path) -> Result<Link, ClientError> {
     let stream = tokio::net::UnixStream::connect(socket).await.map_err(ClientError::Connect)?;
     let peer = peer_pid(&stream);
     let (read, write) = stream.into_split();
-    let client = Client::over(
+    let client = Client::over_with_writer_instance(
         Box::new(read) as Reader,
         Box::new(write) as Writer,
         "farcooler-cli",
         env!("CARGO_PKG_VERSION"),
+        crate::terminal_input::writer_instance(),
     )
     .await?;
     Ok(Link { client, _ssh: None, peer })
@@ -480,6 +481,8 @@ fn spawn_daemon() -> Result<(), Box<dyn std::error::Error>> {
 /// what it hands the daemon.
 fn daemon_command(binary: &Path, stub_switch: Option<&std::ffi::OsStr>) -> std::process::Command {
     let mut command = std::process::Command::new(binary);
+    // Only the app's own connections share its writer identity.
+    command.env_remove(crate::terminal_input::WRITER_INSTANCE_ENV);
     // A test run's shell (`shell::TEST_SHELL`) is for the daemons a test
     // starts, which all say so with the stub switch. One a developer's
     // `cargo run` starts outlives the command and would keep `/bin/sh` for

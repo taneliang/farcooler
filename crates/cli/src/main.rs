@@ -78,6 +78,7 @@ use agent_answer::answer_refused;
 use images::mime_for;
 use send_route::{SendRoute, send_route};
 mod report;
+mod terminal_input;
 mod terminal_requests;
 mod task_ask;
 mod task_usage;
@@ -2763,26 +2764,15 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
             println!("restarted {} as epoch {}", short_bytes(&t.id), t.epoch);
         }
 
-        // Live bytes. No daemon and no database — tmux is the authority, and
-        // holding a request/response conversation open for the life of a
-        // stream would be the wrong shape for both.
-        //
-        // On a remote runner they run over their own ssh session, hitting the
-        // runner's own CLI. ssh is already a byte pipe and so are these, so the
-        // honest implementation is to connect the two and get out of the way.
         TerminalCmd::Send { terminal, data, if_empty } => match send_route(if_empty, runner.is_some()) {
             SendRoute::Compose => compose::run(runner, &terminal, data, Vec::new(), Vec::new(), json).await?,
-            SendRoute::Proxy => return proxy(runner, &["terminal".into(), "send".into(), terminal, data]).await,
-            SendRoute::Local => {
-                let runtime = Runtime::open().await?;
-                let id = runtime.resolve_terminal(&terminal)?;
-                runtime.send_input(id, &data).await?;
-                println!("sent {} bytes", data.len());
+            SendRoute::Proxy | SendRoute::Local => {
+                let (mut link, id) = terminal_by_record(runner, &terminal).await?;
+                let size = data.len();
+                terminal_input::send(&mut link, id, data.into_bytes(), None).await?;
+                println!("sent {size} bytes");
             }
         },
-        TerminalCmd::SendHex { terminal, hex } if runner.is_some() => {
-            return proxy(runner, &["terminal".into(), "send-hex".into(), terminal, hex]).await;
-        }
         TerminalCmd::Stream { terminal, sizes } if runner.is_some() => {
             // Forwarded only when asked for, so a stream without it still runs
             // against a runner whose CLI predates the flag.
@@ -2792,22 +2782,12 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
             }
             return proxy(runner, &args).await;
         }
-        TerminalCmd::Input { terminal } if runner.is_some() => {
-            return proxy(runner, &["terminal".into(), "input".into(), terminal]).await;
-        }
         TerminalCmd::Screen { terminal } if runner.is_some() => {
             let mut args = vec!["terminal".into(), "screen".into(), terminal];
             if json {
                 args.push("--json".into());
             }
             return proxy(runner, &args).await;
-        }
-        TerminalCmd::Resize { terminal, columns, rows } if runner.is_some() => {
-            return proxy(
-                runner,
-                &["terminal".into(), "resize".into(), terminal, columns.to_string(), rows.to_string()],
-            )
-            .await;
         }
         TerminalCmd::Read { terminal, lines } if runner.is_some() => {
             return proxy(
@@ -2818,9 +2798,9 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
         }
 
         TerminalCmd::SendHex { terminal, hex } => {
-            let runtime = Runtime::open().await?;
-            let id = runtime.resolve_terminal(&terminal)?;
-            runtime.send_bytes_hex(id, &hex).await?;
+            let bytes = terminal_input::decode_hex(&hex)?;
+            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
+            terminal_input::send(&mut link, id, bytes, None).await?;
         }
 
         TerminalCmd::Stream { terminal, sizes } => {
@@ -2830,9 +2810,7 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
         }
 
         TerminalCmd::Input { terminal } => {
-            let runtime = Runtime::open().await?;
-            let id = runtime.resolve_terminal(&terminal)?;
-            runtime.input_channel(id).await?;
+            terminal_input::input(runner, &terminal).await?;
         }
 
         TerminalCmd::Screen { terminal } => {
@@ -2850,9 +2828,11 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
         }
 
         TerminalCmd::Resize { terminal, columns, rows } => {
-            let runtime = Runtime::open().await?;
-            let id = runtime.resolve_terminal(&terminal)?;
-            runtime.resize_terminal(id, columns, rows).await?;
+            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
+            let payload = farcooler_protocol::v1::TerminalResize {
+                columns, rows, view_activity_id: 0,
+            };
+            link.call(with(req_for("terminal.resize", id), request::Payload::TerminalResize(payload))).await?;
         }
 
         TerminalCmd::Read { terminal, lines } => {

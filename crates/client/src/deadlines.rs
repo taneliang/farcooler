@@ -73,7 +73,7 @@ pub fn ends_the_link(method: &str, error: &crate::session::SessionError) -> bool
 
 /// Keystrokes and the size they are typed into: what a person is waiting on
 /// with their fingers.
-const INPUT_METHODS: &[&str] = &["terminal.write", "terminal.resize"];
+const INPUT_METHODS: &[&str] = &["terminal.write", "terminal.resize", "terminal.writer"];
 
 /// Prefixes and names of calls that do real work on the runner.
 const WORK_METHODS: &[&str] = &[

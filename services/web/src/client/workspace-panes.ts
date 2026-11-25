@@ -5,6 +5,7 @@ import { ChatView } from './chat'
 import { connectFailure } from './copy'
 import { PaneSet, type Budget } from './panes'
 import { PaneView } from './terminal'
+import { TerminalWriter } from './terminal-writer'
 import { readLocal, type LayoutView, type PaneModel, type Slot, writeLocal } from './workspace-layout'
 
 const node = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
@@ -12,7 +13,7 @@ const slots = ['main', 'side'] as const
 
 export class WorkspacePanes {
   private readonly set: PaneSet<WebRunner>
-  private readonly mounts = new Map<string, { root: HTMLElement; pane: PaneView | AgentPane<WebRunner> }>()
+  private readonly mounts = new Map<string, { root: HTMLElement; pane: PaneView | AgentPane<WebRunner>; writer: TerminalWriter }>()
   private readonly models = new Map<string, PaneModel>()
   private view: LayoutView | undefined
   private content = ''
@@ -31,24 +32,40 @@ export class WorkspacePanes {
       const root = document.createElement('div')
       root.className = 'workspace-screen'
       this.stage(id).append(root)
+      const content = document.createElement('div')
+      content.className = 'workspace-screen-content'
+      root.append(content)
       const host = () => {
         const element = document.createElement('div')
         element.className = 'terminal-host'
-        root.append(element)
+        content.append(element)
         return element
       }
       const key = `${scope}:terminal:${JSON.stringify(id)}`
-      const shell = () => new PaneView(host(), (word, code, what) => this.problem(this.failure({ message: word, code, what }), id), false, {
-        load: () => readLocal(`${key}:raw-scroll`),
-        save: value => writeLocal(`${key}:raw-scroll`, value),
-      })
-      const pane = model.agent ? new AgentPane(new ChatView(host(), label, undefined, {
+      let writable = false
+      let raw: PaneView | undefined
+      const shell = () => {
+        raw = new PaneView(host(), (word, code, what) => this.problem(this.failure({ message: word, code, what }), id), false, {
+          load: () => readLocal(`${key}:raw-scroll`),
+          save: value => writeLocal(`${key}:raw-scroll`, value),
+        })
+        raw.setWritable(writable)
+        return raw
+      }
+      const chat = model.agent ? new ChatView(host(), label, undefined, {
         load: () => readLocal(`${key}:draft`),
         save: text => writeLocal(`${key}:draft`, text),
         position: () => readLocal(`${key}:chat-scroll`),
         savePosition: value => writeLocal(`${key}:chat-scroll`, value),
-      }), shell) : shell()
-      this.mounts.set(id, { root, pane })
+      }) : null
+      chat?.setWritable(false)
+      const pane = chat ? new AgentPane(chat, shell) : shell()
+      const writer = new TerminalWriter(root, id, allowed => {
+        writable = allowed
+        raw?.setWritable(allowed)
+        chat?.setWritable(allowed)
+      }, error => workFailure(error.message, (error as WorkError).code ?? '', (error as WorkError).what ?? ''))
+      this.mounts.set(id, { root, pane, writer })
       return pane
     }, budget)
   }
@@ -82,12 +99,11 @@ export class WorkspacePanes {
       const mount = this.mounts.get(id)
       if (!mount) continue
       if (this.models.get(id)!.agent !== (mount.pane instanceof AgentPane)) {
-        this.set.forget(id)
-        mount.root.remove()
-        this.mounts.delete(id)
+        this.forget(id)
       } else if (mount.root.parentElement !== this.stage(id)) this.stage(id).append(mount.root)
     }
     this.set.display(ids)
+    this.showWriters(ids, this.runner())
     for (const slot of slots) {
       const model = view[slot]
       if (!model) continue
@@ -132,17 +148,19 @@ export class WorkspacePanes {
 
   forget(id: string): void {
     this.set.forget(id)
+    this.mounts.get(id)?.writer.show(null)
     this.mounts.get(id)?.root.remove()
     this.mounts.delete(id)
   }
 
   private failure(error: Pick<WorkError, 'message' | 'code' | 'what'>): string {
-    return error.code === 'scope-denied'
-      ? workFailure(error.message, error.code, error.what ?? '')
+    return error.code === 'scope-denied' || error.what?.startsWith('writer_')
+      ? workFailure(error.message, error.code ?? '', error.what ?? '')
       : connectFailure(error.message, this.label)
   }
 
   resume(runner: WebRunner): Promise<void> {
+    this.showWriters(slots.flatMap(slot => this.view?.[slot]?.attach ? this.view[slot]?.terminal ?? [] : []), runner)
     return this.enqueue(() => this.set.resume(runner, id => this.ended(runner, id), (id, error) => {
       if (this.runner() === runner && !this.stopped) this.problem(this.failure(error as WorkError), id)
     }))
@@ -156,8 +174,19 @@ export class WorkspacePanes {
   dispose(): void {
     this.stopped = true
     this.set.dispose()
-    for (const mount of this.mounts.values()) mount.root.remove()
+    for (const mount of this.mounts.values()) {
+      mount.writer.show(null)
+      mount.root.remove()
+    }
     this.mounts.clear()
+  }
+
+  private showWriters(ids: string[], runner: WebRunner | null): void {
+    for (const [id, mount] of this.mounts) {
+      const visible = ids.includes(id)
+      mount.root.hidden = !visible
+      mount.writer.show(visible ? runner : null)
+    }
   }
 
   private note(slot: Slot, text: string): void {

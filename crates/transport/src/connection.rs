@@ -317,6 +317,7 @@ impl<R: AsyncRead + Unpin> Connection<R> {
                 supported_protocol_versions: versions.to_vec(),
                 client_name: client_name.to_string(),
                 client_version: client_version.to_string(),
+                writer_client_instance: Default::default(),
             })),
         };
         self.send(&hello).await?;
@@ -485,7 +486,8 @@ where
     H: Handler,
 {
     let peer = handler.peer();
-    conn.handshake(cfg, peer.scope).await?;
+    let hello = conn.handshake(cfg, peer.scope).await?;
+    handler.client_hello(&hello);
 
     // Created once, before the first request, so nothing can be dispatched
     // between "this connection was closed" and this loop noticing. Polled from
@@ -912,6 +914,7 @@ mod tests {
                 supported_protocol_versions: vec![PROTOCOL_VERSION],
                 client_name: "backpressure-test".into(),
                 client_version: "0.1.0".into(),
+                writer_client_instance: Default::default(),
             })),
         }
     }

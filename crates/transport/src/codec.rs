@@ -112,6 +112,7 @@ mod tests {
                 supported_protocol_versions: vec![1],
                 client_name: "test".into(),
                 client_version: "0.1.0".into(),
+                writer_client_instance: Default::default(),
             })),
         }
     }
