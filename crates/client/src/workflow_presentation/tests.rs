@@ -322,7 +322,8 @@ fn a_stopped_run_shows_why() {
 /// `scripts/copy-lint.py` and `scripts/shared-core-lint.py` read, instead of being linted by nobody.
 fn phases() -> Vec<Phase> {
     vec![Phase::Blocked, Phase::WaitingApproval, Phase::WaitingReview, Phase::Running, Phase::Uncertain,
-        Phase::Cancelling, Phase::Done, Phase::Failed, Phase::Cancelled, Phase::WaitingJoin, Phase::Joined]
+        Phase::Cancelling, Phase::Done, Phase::Failed, Phase::Cancelled, Phase::WaitingJoin, Phase::Joined,
+        Phase::WaitingSlot, Phase::Starting, Phase::Stalled]
 }
 fn kinds() -> Vec<StageKind> {
     vec![StageKind::Provision, StageKind::Build, StageKind::Check, StageKind::Review(Reviewer::Dispatch),
@@ -343,7 +344,7 @@ fn actions() -> Vec<ActionKind> {
 fn phase_slot(p: &Phase) -> usize {
     match p { Phase::Blocked => 0, Phase::WaitingApproval => 1, Phase::WaitingReview => 2, Phase::Running => 3,
         Phase::Uncertain => 4, Phase::Cancelling => 5, Phase::Done => 6, Phase::Failed => 7, Phase::Cancelled => 8,
-        Phase::WaitingJoin => 9, Phase::Joined => 10, Phase::WaitingSlot => 11, Phase::Starting => 12 }
+        Phase::WaitingJoin => 9, Phase::Joined => 10, Phase::WaitingSlot => 11, Phase::Starting => 12, Phase::Stalled => 13 }
 }
 fn kind_slot(k: &StageKind) -> usize {
     match k { StageKind::Provision => 0, StageKind::Build => 1, StageKind::Check => 2, StageKind::Review(_) => 3,
@@ -372,7 +373,7 @@ fn every_variant_is_listed() {
         slots.sort();
         assert_eq!(slots, (0..of).collect::<Vec<_>>(), "the {what} list in `labels` misses a variant, or lists one twice");
     }
-    filled(&phases(), phase_slot, 11, "Phase");
+    filled(&phases(), phase_slot, 14, "Phase");
     filled(&kinds(), kind_slot, 21, "StageKind");
     filled(&reasons(), reason_slot, 12, "Reason");
     filled(&actions(), action_slot, 8, "ActionKind");
@@ -463,6 +464,7 @@ fn execution_facts_drive_every_shared_run_slot() {
         (Dispatch::Pending, Phase::WaitingSlot, "Waiting for a Slot"),
         (Dispatch::Claimed { alive: false, lost: None }, Phase::Starting, "Starting"),
         (Dispatch::Claimed { alive: true, lost: None }, Phase::Running, "Running"),
+        (Dispatch::Stalled("Codex has not reported its start."), Phase::Stalled, "Stalled"),
         (Dispatch::Claimed { alive: false, lost: Some("The session was lost without a receipt.") }, Phase::Uncertain, "Outcome Uncertain"),
     ] {
         let execution = execution_view(dispatch, Some(2), vec!["board/other".into()]);

@@ -485,6 +485,9 @@ enum class Phase(val string: String) {
 	/// Queued into a group (`grouped_in`). Holds no resource.
 	@SerialName("Joined")
 	Joined("Joined"),
+	/// The live runner has yet to hear from the agent. This phase is only projected on reads.
+	@SerialName("Stalled")
+	Stalled("Stalled"),
 }
 
 /// The engine's run of a ticket, from the plan's line for it (ov-1040):

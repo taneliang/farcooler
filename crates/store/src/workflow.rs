@@ -172,6 +172,21 @@ impl Store {
         ).optional()?;
         raw.map(|s| serde_json::from_str(&s)).transpose().map_err(Into::into)
     }
+    /// A runner diagnostic requiring operator attention persists through the step's automatic retries.
+    pub fn workflow_failures_with_prefix(&self, prefix: &str) -> Result<Vec<(String, String, i64, String)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT s.workspace, i.key, COALESCE(json_extract(i.value, '$.since_ms'), 0), json_extract(i.value, '$.failure')
+             FROM workflow_states s, json_each(s.state, '$.items') i
+             WHERE instr(json_extract(i.value, '$.failure'), ?1) = 1
+             AND (json_extract(i.value, '$.phase') = 'Failed'
+                 OR (json_extract(i.value, '$.phase') IN ('Running', 'WaitingApproval')
+                     AND json_extract(i.value, '$.attempt') > 1))",
+        )?;
+        Ok(stmt.query_map([prefix], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
     /// Test-only: replace a workspace's state as it stands, outside the reducer, for a fixture that needs a
     /// history the reducer would take thousands of steps to build, such as hundreds of archived runs (ov-1298).
     #[cfg(any(test, feature = "testing"))]

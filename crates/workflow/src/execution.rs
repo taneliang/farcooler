@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub enum Dispatch<'a> {
     Pending,
     Claimed { alive: bool, lost: Option<&'a str> },
+    Stalled(&'a str),
     Uncertain,
     UncertainBecause(&'a str),
 }
@@ -30,6 +31,7 @@ pub fn execution_view(dispatch: Dispatch<'_>, position: Option<usize>, holders: 
         (Dispatch::Claimed { lost: Some(reason), .. }, _) => (Phase::Uncertain, None, reason.into()),
         (Dispatch::Claimed { alive: true, lost: None }, _) => (Phase::Running, None, "The runner is executing this step or verifying its result.".into()),
         (Dispatch::Claimed { alive: false, lost: None }, _) => (Phase::Starting, None, "The effect is claimed and its session is starting.".into()),
+        (Dispatch::Stalled(reason), _) => (Phase::Stalled, None, reason.into()),
         (Dispatch::UncertainBecause(reason), _) => (Phase::Uncertain, None, reason.into()),
         (Dispatch::Uncertain, _) => (Phase::Uncertain, None, "The effect lost its runtime session without a receipt. Check it before it continues.".into()),
     };

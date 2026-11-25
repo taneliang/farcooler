@@ -25,11 +25,9 @@ const LOOK: Duration = Duration::from_secs(2);
 #[cfg(test)]
 const LOOK: Duration = Duration::from_millis(50);
 
-/// How long an agent has to be heard from before it is reported as not started.
-#[cfg(not(test))]
-pub(crate) const START_WITHIN: Duration = Duration::from_secs(20);
-#[cfg(test)]
-pub(crate) const START_WITHIN: Duration = Duration::from_millis(300);
+/// How long an agent has to be heard from once its launch barrier is released.
+const START_WITHIN: Duration = Duration::from_secs(60);
+pub(crate) const QUARANTINE_PREFIX: &str = "Agent launch blocked by macOS quarantine.";
 
 /// One stuck build.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,11 +76,63 @@ pub(crate) fn uncertain(store: &farcooler_store::Store) -> Vec<Stuck> {
     items
 }
 
+/// Keep the more specific quarantine diagnostic, including while an automatic retry is queued.
+pub(crate) fn include_refusals(store: &farcooler_store::Store, stuck: &mut Vec<Stuck>) {
+    match store.workflow_failures_with_prefix(QUARANTINE_PREFIX) {
+        Ok(failures) => for (workspace, item, since_ms, question) in failures {
+            stuck.retain(|s| s.workspace != workspace || s.item != item);
+            stuck.push(Stuck { workspace, item, since_ms, question });
+        },
+        Err(error) => tracing::warn!(%error, "could not read refused agent launches"),
+    }
+}
+
 /// Unlists the build when its run ends, however it ends.
-struct Listed(Key);
-impl Drop for Listed {
+pub(crate) struct Startup {
+    key: Key,
+    command: String,
+    opened: tokio::time::Instant,
+    activity: Option<std::sync::Arc<crate::workflow_runtime::execution::Activity>>,
+}
+impl Startup {
+    pub(crate) fn new(workspace: &str, item: &str, command: &str) -> Self {
+        Self {
+            key: (workspace.into(), item.into()),
+            command: command.into(),
+            opened: tokio::time::Instant::now(),
+            activity: crate::workflow_runtime::execution::ACTIVITY.try_with(std::sync::Arc::clone).ok(),
+        }
+    }
+
+    pub(crate) fn observe(&self, heard: bool, held: bool, question: Option<&str>) {
+        let stalled = !heard && self.opened.elapsed() >= START_WITHIN;
+        let fallback = stalled.then(|| format!(
+            "{} has not reported its start within {} seconds. {}",
+            self.command, START_WITHIN.as_secs(),
+            if held { "The builder is paused for a landing check." }
+            else { "The agent may be blocked during launch or waiting for input." },
+        ));
+        let reason = question.or(fallback.as_deref());
+        if let Some(activity) = &self.activity
+            && let Ok(mut state) = activity.startup_stall.lock() {
+            *state = reason.filter(|_| stalled).map(str::to_owned);
+        }
+        if let Some(reason) = reason {
+            let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_millis() as i64);
+            set(&self.key, reason.to_owned(), now_ms);
+        } else {
+            clear(&self.key);
+        }
+    }
+}
+impl Drop for Startup {
     fn drop(&mut self) {
-        clear(&self.0);
+        if let Some(activity) = &self.activity
+            && let Ok(mut state) = activity.startup_stall.lock() {
+            *state = None;
+        }
+        clear(&self.key);
     }
 }
 
@@ -134,25 +184,27 @@ fn asking(command: &str, screen: &str) -> Option<String> {
 /// Watch one build's pane until the caller drops this future. `heard` is set once the agent's session has
 /// spoken. Never returns.
 pub(crate) async fn watch(
-    workspace: &str, item: &str, command: &str, tmux: &TmuxServer, pane: &str, heard: &AtomicBool,
+    startup: Startup, tmux: &TmuxServer, pane: &str, heard: &AtomicBool,
+    builder: Option<&crate::yielding::BuilderGuard>,
 ) -> std::convert::Infallible {
-    let key = (workspace.to_string(), item.to_string());
-    let _listed = Listed(key.clone());
-    let opened = tokio::time::Instant::now();
+    let mut look = tokio::time::interval_at(startup.opened + LOOK, LOOK);
+    look.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let deadline = tokio::time::sleep_until(startup.opened + START_WITHIN);
+    tokio::pin!(deadline);
+    let mut deadline_passed = false;
+    let mut question = None;
     loop {
-        tokio::time::sleep(LOOK).await;
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_millis() as i64);
-        // A screen that can't be read says nothing, so what was said stays.
-        let screen = tmux.capture_screen(pane).await.unwrap_or_default();
-        match asking(command, &screen) {
-            Some(question) => set(&key, question, now_ms),
-            None if !heard.load(Ordering::Relaxed) && opened.elapsed() >= START_WITHIN => {
-                set(&key, format!("Hasn’t started: nothing from {command} in the first {} seconds.", START_WITHIN.as_secs()), now_ms)
+        tokio::select! {
+            biased;
+            _ = &mut deadline, if !deadline_passed => deadline_passed = true,
+            screen = async {
+                look.tick().await;
+                tmux.capture_screen(pane).await
+            } => {
+                if let Ok(screen) = screen { question = asking(&startup.command, &screen); }
             }
-            None => clear(&key),
         }
+        startup.observe(heard.load(Ordering::Relaxed), builder.is_some_and(|b| b.held().1), question.as_deref());
     }
 }
 

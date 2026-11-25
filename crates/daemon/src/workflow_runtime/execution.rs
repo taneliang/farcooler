@@ -10,6 +10,7 @@ pub(crate) struct Activity {
     process: AtomicU32,
     started: AtomicBool,
     settling: AtomicBool,
+    pub(crate) startup_stall: Mutex<Option<String>>,
     pub(super) session: AtomicBool,
     pub(super) lost: AtomicBool,
 }
@@ -95,6 +96,7 @@ impl Exec {
                 }
                 continue;
             }
+            let startup_stall = activity.and_then(|a| a.startup_stall.lock().ok()?.clone());
             let dispatch = match stored.map(|s| s.dispatch_state.as_str()) {
                 Some("pending") => Dispatch::Pending,
                 Some("claimed") if stored.and_then(|s| s.lease_until).is_some_and(|t| t > now_ms) =>
@@ -103,9 +105,13 @@ impl Exec {
                 Some("admitted") if activity.is_some() => {
                     let activity = activity.unwrap();
                     let alive = activity.alive();
-                    Dispatch::Claimed { alive, lost: (activity.lost.load(Ordering::SeqCst)
+                    let lost = (activity.lost.load(Ordering::SeqCst)
                         || (!alive && activity.started.load(Ordering::SeqCst)))
-                        .then_some("The claimed process or session was lost without a receipt.") }
+                        .then_some("The claimed process or session was lost without a receipt.");
+                    match startup_stall.as_deref() {
+                        Some(reason) if lost.is_none() && alive => Dispatch::Stalled(reason),
+                        _ => Dispatch::Claimed { alive, lost },
+                    }
                 }
                 _ => Dispatch::Uncertain,
             };
@@ -149,6 +155,42 @@ mod tests {
             state.epoch, now, now + 30_000).unwrap().unwrap();
         assert!(runtime.store.workflow_admit_effect(&claim, now).unwrap());
         effect
+    }
+
+    #[tokio::test]
+    async fn a_silent_native_agent_is_stalled_and_needs_you_at_sixty_seconds() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+        let ticket = "ov-1469";
+        enqueue_item(&mut runtime, "w", ticket, coding_definition(false));
+        let effect = admit(&runtime);
+        let activity = Arc::new(Activity::default());
+        activity.session.store(true, Ordering::SeqCst);
+        runtime.activities.lock().unwrap().insert(("w".into(), effect.id), activity.clone());
+
+        tokio::time::pause();
+        ACTIVITY.scope(activity, async {
+            let startup = crate::engine_stuck::Startup::new("w", ticket, "codex");
+            tokio::time::advance(Duration::from_secs(59)).await;
+            startup.observe(false, false, None);
+            assert!(crate::engine_stuck::list().is_empty());
+            assert_ne!(runtime.execution_state("w").unwrap().unwrap().items[ticket].phase, Phase::Stalled);
+
+            tokio::time::advance(Duration::from_secs(1)).await;
+            startup.observe(false, false, None);
+            let items = crate::engine_stuck::list();
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0].item, ticket);
+            assert!(items[0].question.contains("codex has not reported its start within 60 seconds"));
+            assert!(items[0].question.contains("blocked during launch or waiting for input"));
+            let state = runtime.execution_state("w").unwrap().unwrap();
+            assert_eq!(state.items[ticket].phase, Phase::Stalled);
+            assert_eq!(state.items[ticket].execution.as_ref().unwrap().text, items[0].question);
+
+            startup.observe(true, false, None);
+            assert!(crate::engine_stuck::list().is_empty());
+            assert_eq!(runtime.execution_state("w").unwrap().unwrap().items[ticket].phase, Phase::Running);
+        }).await;
     }
 
     #[tokio::test]

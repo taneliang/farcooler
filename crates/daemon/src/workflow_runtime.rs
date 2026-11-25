@@ -1121,8 +1121,13 @@ impl Runtime {
         #[cfg(test)]
         if !resolving && self.fail_observe.swap(false, std::sync::atomic::Ordering::SeqCst) { return Err(Error::Refused("injected write failure")); }
         let uncertain = outcome == Outcome::Uncertain;
+        let quarantine = matches!(&outcome, Outcome::SafeFailureBecause(reason)
+            if reason.starts_with(crate::engine_stuck::QUARANTINE_PREFIX));
         match self.write_result(workspace, effect, outcome, resolving, now_ms)? {
-            Ok(()) => Ok(true),
+            Ok(()) => {
+                if quarantine { crate::engine_stuck::announce(); }
+                Ok(true)
+            }
             Err(reason) => {
                 tracing::warn!(effect = %effect.id, item = %effect.item, ?reason, "workflow result refused");
                 // A refused settlement of an unknown outcome has nothing further to say.

@@ -576,6 +576,8 @@ public enum WirePhase: String, Codable, Equatable, Sendable {
 	case waitingJoin = "WaitingJoin"
 	/// Queued into a group (`grouped_in`). Holds no resource.
 	case joined = "Joined"
+	/// The live runner has yet to hear from the agent. This phase is only projected on reads.
+	case stalled = "Stalled"
 }
 
 /// The engine's run of a ticket, from the plan's line for it (ov-1040):

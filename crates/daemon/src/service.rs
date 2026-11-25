@@ -265,6 +265,16 @@ pub(crate) fn agent_in_login_shell(shell: &str, payload: &str, replace_shell: bo
 fn render_preset_command(preset: &str, session_id: Option<&str>, extras: &LaunchExtras, replace_shell: bool) -> String {
     let shell = farcooler_core::shell::login_shell();
     let login = |payload: String| agent_in_login_shell(&shell, &payload, replace_shell);
+    let program = |name| {
+        let program = agent_program(name);
+        if cfg!(target_os = "macos") && replace_shell {
+            // Resolve after the login shell has loaded its PATH, then exec the same file
+            // we checked. The hold's agent still replaces every launch shell.
+            format!("/bin/sh -c {} farcooler-agent {program}", shell_quote(NATIVE_AGENT_PREFLIGHT))
+        } else {
+            program
+        }
+    };
     let (agent, model) = match preset.split_once(':') {
         Some((a, m)) if is_safe_model(m) => (a, Some(m)),
         // A model that is not a plain identifier is dropped, not escaped and
@@ -312,7 +322,8 @@ fn render_preset_command(preset: &str, session_id: Option<&str>, extras: &Launch
         // both. With no settings file the payload holds no quote at all, so
         // `shell_quote` produces exactly the `'claude…'` this arm has always
         // produced, byte for byte.
-        "claude" => login(format!("{}{flag}{session}{settings}{prompt}", claude_program(extras))),
+        "claude" => login(format!("{}{}{flag}{session}{settings}{prompt}",
+            claude_dir_assignment(extras), program("claude"))),
         // `shell_quote` around the payload now, for claude's reason: the
         // prompt is quoted in turn. With no prompt the payload holds no quote.
         //
@@ -328,7 +339,7 @@ fn render_preset_command(preset: &str, session_id: Option<&str>, extras: &Launch
             let hooks = extras.codex_hooks.as_ref().map(|hooks| format!(" --config \"$(cat {})\"", shell_quote(&hooks.display().to_string()))).unwrap_or_default();
             login(format!(
                 "{}{flag} {CODEX_NO_UPDATE_CHECK}{hooks}{}{orchestrator}{prompt}",
-                agent_program("codex"), crate::shared_logins::codex_flags(extras)
+                program("codex"), crate::shared_logins::codex_flags(extras)
             ))
         }
         // `shell_quote` around the payload for claude's reason: the plugin
@@ -343,7 +354,7 @@ fn render_preset_command(preset: &str, session_id: Option<&str>, extras: &Launch
                 .unwrap_or_default();
             let trust = if extras.trust_workspace { " --trust" } else { "" };
             let orchestrator = orchestrator_flags(crate::orchestrator::Harness::Cursor, extras);
-            login(format!("{}{flag}{trust}{plugin}{orchestrator}{prompt}", agent_program("cursor-agent")))
+            login(format!("{}{flag}{trust}{plugin}{orchestrator}{prompt}", program("cursor-agent")))
         }
         other if is_safe_model(other) => format!("{shell} -ilc '{}{flag}'", agent_program(other)),
         // An unrecognized preset that is not a plain identifier is not run at
@@ -352,6 +363,24 @@ fn render_preset_command(preset: &str, session_id: Option<&str>, extras: &Launch
         _ => format!("{shell} -il"),
     }
 }
+
+const NATIVE_AGENT_PREFLIGHT: &str = r#"
+program=$(command -v -- "$1") || {
+    printf 'Agent executable not found: %s\n' "$1" >&2
+    exit 127
+}
+shift
+case "$program" in
+    /*) ;;
+    *) program="./$program" ;;
+esac
+if /usr/bin/xattr -p com.apple.quarantine "$program" >/dev/null 2>&1; then
+    printf '%s\n' "$program" > "$FARCOOLER_NATIVE_QUARANTINE_RECEIPT"
+    exit 126
+fi
+unset FARCOOLER_NATIVE_QUARANTINE_RECEIPT
+exec "$program" "$@"
+"#;
 
 /// The program an agent launch runs: `name` itself outside tests, unless
 /// `FARCOOLER_STAND_IN_AGENT` names a stand-in or `FARCOOLER_TEST_STUB_AGENTS`

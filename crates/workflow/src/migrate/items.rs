@@ -31,7 +31,7 @@ impl Migration<'_> {
         if follows.is_some() || !followers.is_empty() { self.refuse(id, "it follows or carries another ticket's run, and the pipeline has no followers yet"); }
         if deciding.is_some() { self.refuse(id, "a decision script is running for it, and the pipeline has no scripts"); }
         if hook_refused.is_some() { self.refuse(id, "a script refused its decision, and the pipeline has no scripts"); }
-        if matches!(phase, Phase::WaitingSlot | Phase::Starting) { self.refuse(id, format!("{phase:?} is a read-time phase, never stored")); }
+        if matches!(phase, Phase::WaitingSlot | Phase::Starting | Phase::Stalled) { self.refuse(id, format!("{phase:?} is a read-time phase, never stored")); }
         if group_of.is_none() && (!members.is_empty() || pushed.is_some() || !handed.is_empty()) {
             self.refuse(id, "a ticket carries a group's members or push");
         }

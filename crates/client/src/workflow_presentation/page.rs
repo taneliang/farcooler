@@ -51,7 +51,7 @@ fn step_state(index: usize, current: usize, phase: &Phase) -> &'static str {
     if *phase == Phase::Done || index < current { return "Done"; }
     if index > current { return "Not started"; }
     match phase {
-        Phase::WaitingSlot => "Waiting for a slot", Phase::Starting => "Starting",
+        Phase::WaitingSlot => "Waiting for a slot", Phase::Starting => "Starting", Phase::Stalled => "Stalled",
         Phase::Running => "Running", Phase::Cancelling => "Stopping",
         Phase::WaitingApproval => "Awaiting approval", Phase::WaitingReview => "Awaiting review",
         Phase::Blocked | Phase::WaitingJoin | Phase::Joined => "Waiting",
@@ -66,6 +66,7 @@ pub(super) fn run_page(id: &str, item: &farcooler_workflow::Item, reasons: &[Rea
     let kept = item.failure.as_deref().map(str::trim).filter(|f| !f.is_empty()).map(str::to_owned);
     let reason = item.execution.as_ref().map(|e| e.text.clone()).or(kept.clone()).or_else(|| match item.phase {
         Phase::WaitingSlot => Some("Waiting for a slot. The runner has not reported a live claim.".into()),
+        Phase::Stalled => Some(format!("{stage} stalled during startup.")),
         Phase::Starting => Some(format!("Starting: {stage}.")),
         Phase::Running => Some(format!("Running: {stage}.")),
         Phase::Uncertain => Some(format!("{stage} may or may not have finished. Check it before it continues.")),

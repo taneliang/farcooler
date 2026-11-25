@@ -376,7 +376,7 @@ impl Projection<'_> {
         if !matches!(step.kind, StageKind::Build | StageKind::Review(Reviewer::Agent)) { return None; }
         let effect = item.pending.as_ref()?;
         let held = self.places.agent.iter().flat_map(|p| &p.holding).any(|p| p.item == id && &p.effect == effect);
-        if !held && !matches!(observed_phase(item), Phase::Running | Phase::Uncertain | Phase::Starting) { return None; }
+        if !held && !matches!(observed_phase(item), Phase::Running | Phase::Uncertain | Phase::Starting | Phase::Stalled) { return None; }
         Some(Agent { id: effect.clone(), ticket: id.into(), role: ticket.step.clone(), model: ticket.agent.clone(),
             status: ticket.status.clone(), tone: ticket.tone })
     }
@@ -414,7 +414,7 @@ fn stage_name(stage: &Stage, style: Style) -> String {
 }
 
 fn observed_phase(item: &Item) -> Phase {
-    if matches!(item.phase, Phase::Running | Phase::Starting | Phase::WaitingSlot) {
+    if matches!(item.phase, Phase::Running | Phase::Starting | Phase::WaitingSlot | Phase::Stalled) {
         item.execution.as_ref().map_or(Phase::WaitingSlot, |e| e.phase.clone())
     } else {
         item.phase.clone()
@@ -432,7 +432,7 @@ fn status(phase: &Phase, stage: Option<&Stage>, style: Style) -> String {
 
 fn tone(phase: &Phase) -> Tone {
     match phase {
-        Phase::Failed | Phase::Uncertain => Tone::Failed,
+        Phase::Failed | Phase::Uncertain | Phase::Stalled => Tone::Failed,
         Phase::Blocked | Phase::WaitingSlot | Phase::WaitingApproval | Phase::WaitingReview => Tone::Waiting,
         _ => Tone::Normal,
     }
@@ -458,7 +458,7 @@ fn reason(item: &Item, step: &Stage, phase: &Phase, state: &State, position: Opt
             else { Some(format!("Waiting for {}.", waiting.join(", "))) }
         }
         Phase::Failed => (item.failure.is_none()).then(|| "The runner hasn’t reported why this step failed.".into()),
-        Phase::WaitingSlot | Phase::Uncertain | Phase::Starting => item.execution.as_ref().map(|e| e.text.clone())
+        Phase::WaitingSlot | Phase::Uncertain | Phase::Starting | Phase::Stalled => item.execution.as_ref().map(|e| e.text.clone())
             .or_else(|| Some("The runner hasn’t reported an execution reason.".into())),
         _ => None,
     }

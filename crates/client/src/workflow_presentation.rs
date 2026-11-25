@@ -206,7 +206,7 @@ pub fn project(state: &State, auth: &Capabilities, style: Style) -> Result<Prese
     for (id, original) in &state.items {
         // Old runners send scheduling intent as Running. Without execution facts, fail closed.
         let mut observed = original.clone();
-        if matches!(original.phase, Phase::Running | Phase::WaitingSlot | Phase::Starting) {
+        if matches!(original.phase, Phase::Running | Phase::WaitingSlot | Phase::Starting | Phase::Stalled) {
             observed.phase = original.execution.as_ref().map_or(Phase::WaitingSlot, |e| e.phase.clone());
         }
         let item = &observed;
@@ -238,7 +238,7 @@ pub fn project(state: &State, auth: &Capabilities, style: Style) -> Result<Prese
             Phase::WaitingApproval => Reason::ApprovalRequired,
             Phase::WaitingReview => Reason::ReviewRequired,
             Phase::Running => Reason::Automatic,
-            Phase::WaitingSlot | Phase::Starting => Reason::DependenciesOrResource,
+            Phase::WaitingSlot | Phase::Starting | Phase::Stalled => Reason::DependenciesOrResource,
             Phase::Uncertain => Reason::EffectUncertain,
             Phase::Cancelling => Reason::Cancelling,
             Phase::Done => Reason::Completed,

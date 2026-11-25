@@ -31,7 +31,10 @@ pub enum Phase { Blocked, WaitingApproval, WaitingReview, Running, WaitingSlot, 
     /// At a `Join` step, not yet queued into a group. Holds no resource.
     WaitingJoin,
     /// Queued into a group (`grouped_in`). Holds no resource.
-    Joined }
+    Joined,
+    /// The live runner has yet to hear from the agent. This phase is only projected on reads.
+    Stalled,
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Item {
     /// Load observed and effective load threshold at an automatic start.

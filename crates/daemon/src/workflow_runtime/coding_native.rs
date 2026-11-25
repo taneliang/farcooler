@@ -175,10 +175,16 @@ fn peer_uid(stream: &tokio::net::UnixStream) -> Option<u32> { stream.peer_cred()
 const END_WAIT: Duration = Duration::from_secs(30);
 
 /// The script the hold runs for `command` (ov-1330): `pane_command` puts it under the hold.
-fn native_launch(command: &CodingCommand) -> String {
+fn native_launch(command: &CodingCommand, quarantine_receipt: &Path) -> String {
     let mut launch = String::from("env -i");
     for (key, value) in &command.environment {
         launch.push(' '); launch.push_str(&farcooler_core::shell::shell_quote(&format!("{key}={value}")));
+    }
+    if cfg!(target_os = "macos") {
+        launch.push(' ');
+        launch.push_str(&farcooler_core::shell::shell_quote(&format!(
+            "FARCOOLER_NATIVE_QUARANTINE_RECEIPT={}", quarantine_receipt.display(),
+        )));
     }
     for arg in &command.argv { launch.push(' '); launch.push_str(&farcooler_core::shell::shell_quote(arg)); }
     // Retained PTY stdin, not null: read gates launch until tags and owner are durable. The hold is the pane's
@@ -217,6 +223,17 @@ impl Exec {
     }
     fn native_path(&self, binding: &Binding, suffix: &str) -> PathBuf {
         self.root.join("receipts").join(format!("{}.native-{suffix}.json", digest(&binding.effect)))
+    }
+    fn quarantine_receipt(&self, binding: &Binding) -> PathBuf {
+        self.native_path(binding, "quarantine")
+    }
+    fn quarantine_reason(&self, binding: &Binding) -> Option<String> {
+        if !cfg!(target_os = "macos") { return None; }
+        let path = std::fs::read(self.quarantine_receipt(binding)).ok()?;
+        let path: String = String::from_utf8_lossy(&path).chars().filter(|c| !c.is_control()).take(300).collect();
+        if path.is_empty() { return None; }
+        Some(format!("{} macOS marked {path} with com.apple.quarantine. Verify the installation before retrying.",
+            crate::engine_stuck::QUARANTINE_PREFIX))
     }
     /// The agent a build runs: the model it picked at Start, or the configured preset (ov-966).
     pub(super) fn native_agent(&self, binding: &Binding) -> Result<Agent> {
@@ -345,6 +362,7 @@ impl Exec {
             let stream = tokio::select! {
                 accepted = listener.accept() => accepted?.0,
                 _ = look.tick() => {
+                    if let Some(reason) = self.quarantine_reason(binding) { return Ok((false, hooks, Some(reason))); }
                     let owner: NativeOwner = serde_json::from_slice(&self.bytes(&self.native_path(binding, "owner"))?)?;
                     let life = server(&self.root, binding).pane_life_with_exit_evidence(&owner.pane, owner.terminal).await;
                     #[cfg(test)]
@@ -474,7 +492,7 @@ impl Exec {
             return Err(Error::Refused("a native hold for this step is still listening"));
         }
         let mut diagnostic = String::new();
-        let opened = match self.held(binding, &native_launch(command)) {
+        let opened = match self.held(binding, &native_launch(command, &self.quarantine_receipt(binding))) {
             Err(error) => Err(error.to_string()),
             Ok(gated) => match tmux.create_terminal_window_diagnostic(id, id, "workflow coding",
                 &self.tree(binding).to_string_lossy(), &gated, &mut diagnostic).await {
@@ -519,11 +537,11 @@ impl Exec {
         let _watchable = crate::watch_view::publish_effect(&binding.workspace, &binding.effect, tmux.clone(), pane.clone());
         // Before the barrier, so a tmux older than 3.7 still learns the agent's first bracketed-paste request (ov-1263).
         crate::watch::answer_wake::engine::follow_bracketing(id, runtime.clone(), owner.pane.clone()).await;
+        let startup = crate::engine_stuck::Startup::new(&binding.workspace, &binding.effect.item, self.native_agent(binding)?.as_str());
         tmux.send_keys(&window.pane_id, "\n").await.map_err(|_| Error::Refused("native launch delivery uncertain"))?;
         // A build stopped on a question, or never heard from, is told in Needs You (ov-1077).
         let heard_from = std::sync::atomic::AtomicBool::new(false);
-        let stuck = crate::engine_stuck::watch(&binding.workspace, &binding.effect.item, self.native_agent(binding)?.as_str(),
-            tmux, &window.pane_id, &heard_from);
+        let stuck = crate::engine_stuck::watch(startup, tmux, &window.pane_id, &heard_from, _builder.as_ref());
         let (send, orders) = mpsc::channel(8);
         let review = !matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build));
         let _steerable = crate::engine_steering::publish(&binding.workspace, &binding.effect.item, id,
@@ -612,7 +630,10 @@ impl Exec {
                 self.capture_native_output(binding, &tmux, &owner.pane).await?;
                 self.quiesce_native(&owner).await?;
             }
-            durable(&settled, &serde_json::to_vec(&NativeSettlement::Launched { owner, hooks: Vec::new(), completed, failure: None })?)?;
+            // A refusal written before the runner stopped is a failed launch, so keep it across recovery.
+            let failure = if completed.is_none() { self.quarantine_reason(binding) } else { None };
+            let completed = if failure.is_some() { Some(false) } else { completed };
+            durable(&settled, &serde_json::to_vec(&NativeSettlement::Launched { owner, hooks: Vec::new(), completed, failure })?)?;
             completed
         };
         // The socket is this build's alone, so a leftover one is stale by construction.
@@ -975,7 +996,7 @@ os.execv('/usr/bin/python3', ['/usr/bin/python3', str(pathlib.Path(__file__).wit
         let command = runtime.coding_command(&binding).unwrap();
         assert!(command.argv.windows(2).any(|args| args == ["/bin/sh", "-c"]), "{command:?}");
         assert!(!command.environment.keys().any(|key| key.starts_with("TEST_LAUNCHED_PROMPT")));
-        let window = native_launch(&command);
+        let window = native_launch(&command, &runtime.quarantine_receipt(&binding));
         assert!(window.len() < 8192, "{} bytes", window.len());
         assert!(window.contains("launch-brief") && window.contains("launch-hooks"));
         assert!(!window.contains("hooks="));

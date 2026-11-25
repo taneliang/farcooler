@@ -1,5 +1,5 @@
 //! A pane is read the way the engine's builds are: through a real tmux, with claude's own captured screens.
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
 use uuid::Uuid;
 
@@ -42,10 +42,10 @@ impl Pane {
     }
 }
 
-/// Run the watch for `ms`, setting `heard` after `hear_at` when given.
+/// Collect what the watch reports for `ms`.
 async fn run(pane: &Pane, item: &str, heard: &AtomicBool, ms: u64) -> Vec<Stuck> {
     let mut seen = Vec::new();
-    let mut watching = std::pin::pin!(watch("ws-test", item, "claude", &pane.tmux, &pane.id, heard));
+    let mut watching = std::pin::pin!(watch(Startup::new("ws-test", item, "claude"), &pane.tmux, &pane.id, heard, None));
     let end = tokio::time::sleep(Duration::from_millis(ms));
     tokio::pin!(end);
     let mut look = tokio::time::interval(Duration::from_millis(40));
@@ -68,20 +68,6 @@ async fn a_build_on_the_trust_question_is_listed_with_it_before_any_hook() {
     assert!(seen.iter().any(|s| s.question.contains("Trust this folder")), "{seen:?}");
     assert!(list().iter().all(|s| s.item != "ov-t1"), "ending the watch unlists it");
     let _ = &pane.dir;
-}
-
-#[tokio::test]
-async fn a_build_nobody_hears_from_is_listed_after_the_window_and_one_that_spoke_is_not() {
-    let pane = Pane::showing(IDLE).await;
-    let silent = AtomicBool::new(false);
-    let early = run(&pane, "ov-t2", &silent, 150).await;
-    assert!(early.is_empty(), "quiet inside the window: {early:?}");
-    let late = run(&pane, "ov-t2", &silent, 700).await;
-    assert!(late.iter().any(|s| s.question.contains("Hasn’t started")), "{late:?}");
-
-    let spoke = AtomicBool::new(true);
-    spoke.store(true, Ordering::Relaxed);
-    assert!(run(&pane, "ov-t3", &spoke, 700).await.is_empty());
 }
 
 #[tokio::test]

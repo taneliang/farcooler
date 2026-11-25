@@ -389,6 +389,8 @@ export enum Phase {
 	WaitingJoin = "WaitingJoin",
 	/** Queued into a group (`grouped_in`). Holds no resource. */
 	Joined = "Joined",
+	/** The live runner has yet to hear from the agent. This phase is only projected on reads. */
+	Stalled = "Stalled",
 }
 
 /**

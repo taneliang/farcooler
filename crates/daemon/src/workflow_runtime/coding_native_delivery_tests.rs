@@ -253,3 +253,47 @@ with socket.socket(socket.AF_UNIX) as sock:
         HookExit::DuplicateStop => unreachable!(),
     }
 }
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn the_native_launch_refuses_a_quarantined_binary_and_lists_the_ticket() {
+    use super::super::{coding_tests::admitted, tests::enqueue};
+
+    let (dir, mut runtime, _fake) = tests::native_agent("pass", "codex-engine").await;
+    let executable = dir.path().join("quarantined codex");
+    let ran = dir.path().join("ran");
+    std::fs::write(&executable, r#"#!/bin/sh
+touch "$FC_TEST_RAN"
+"#).unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(std::process::Command::new("/usr/bin/xattr")
+        .args(["-w", "com.apple.quarantine", "0081;00000000;test;"])
+        .arg(&executable).status().unwrap().success());
+
+    let link = dir.path().join("agent link");
+    std::os::unix::fs::symlink(&executable, &link).unwrap();
+    let _stand_in = crate::service::test_agent::stand_in(&link);
+    TEST_ARGV.with(|p| p.borrow_mut().take());
+    let CodingHarness::Native { process, .. } = &mut runtime.coding.as_mut().unwrap().harness else { unreachable!() };
+    process.environment.insert("FC_TEST_RAN".into(), ran.to_string_lossy().into_owned());
+    let mut definition = runtime.configured_definition().unwrap();
+    definition.stages.iter_mut().find(|s| s.kind == StageKind::Build).unwrap().max_attempts = 2;
+    let ticket = "ov-1469";
+    enqueue(&mut runtime, "w", ticket, definition);
+    runtime.pump(2).await.unwrap();
+    let binding = admitted(&runtime).await;
+    assert!(matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build)));
+    let (_cancel, orders) = tokio::sync::watch::channel(false);
+    let outcome = runtime.execute_coding("w", &binding, orders).await.unwrap();
+    let Outcome::SafeFailureBecause(reason) = &outcome else { panic!("{outcome:?}") };
+    assert!(reason.contains("com.apple.quarantine") && reason.contains("agent link"), "{reason}");
+    assert!(!ran.exists(), "the quarantined executable ran");
+    assert!(runtime.observe("w", &binding.effect, outcome, false, 10).unwrap());
+    let item = &runtime.state("w").unwrap().unwrap().items[ticket];
+    assert_eq!(item.attempt, 2, "a queued retry still has to show the refusal");
+    let mut items = crate::engine_stuck::list();
+    crate::engine_stuck::include_refusals(&runtime.store, &mut items);
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].item, ticket);
+    assert!(items[0].question.contains("com.apple.quarantine"));
+}

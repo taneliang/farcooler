@@ -239,6 +239,7 @@ pub async fn gather(
     inputs.pr_requests = svc.pr_requests.current(millis(SystemTime::now()));
     inputs.engine_stuck = crate::engine_stuck::list();
     inputs.engine_stuck.extend(crate::engine_stuck::uncertain(&svc.store));
+    crate::engine_stuck::include_refusals(&svc.store, &mut inputs.engine_stuck);
     inputs.logins = svc.login_needs();
     inputs.runner = crate::push::runner_name().to_string();
     let since = millis(SystemTime::now()) - kept::WINDOW_MS;
