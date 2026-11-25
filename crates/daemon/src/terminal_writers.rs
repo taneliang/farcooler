@@ -1,5 +1,6 @@
-//! Session-owned terminal input leases. The same per-pane lock covers the
-//! lease check and delivery, so a takeover cannot overtake an admitted write.
+//! Terminal input leases shared by connections from one app instance.
+//! The same per-pane lock covers the lease check and delivery, so a takeover
+//! cannot overtake an admitted write.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -26,9 +27,21 @@ pub(crate) struct WriteGuard {
 }
 
 struct Writer {
+    connections: Vec<WriterConnection>,
+    generation: u64,
+}
+
+struct WriterConnection {
     session: Weak<Session>,
     push: PushSender,
-    generation: u64,
+}
+
+impl WriterConnection {
+    fn live_session(&self) -> Option<Arc<Session>> {
+        self.session
+            .upgrade()
+            .filter(|session| !session.is_closed())
+    }
 }
 
 impl TerminalWriters {
@@ -41,11 +54,8 @@ impl TerminalWriters {
         // slot can be replaced because generations are unique across slots.
         terminals.retain(|_, slot| {
             Arc::strong_count(slot) > 1
-                || slot.try_lock().map_or(true, |writer| {
-                    writer
-                        .as_ref()
-                        .and_then(|w| w.session.upgrade())
-                        .is_some_and(|s| !s.is_closed())
+                || slot.try_lock().map_or(true, |mut writer| {
+                    writer.as_mut().is_some_and(Writer::keep_live_connections)
                 })
         });
         terminals.entry(id).or_default().clone()
@@ -60,22 +70,19 @@ impl TerminalWriters {
         if session.is_closed() {
             return Err(DomainError::AuthRequired);
         }
-        if lease
-            .as_ref()
-            .is_some_and(|w| w.session.upgrade().is_none_or(|s| s.is_closed()))
-        {
+        if lease.as_mut().is_some_and(|w| !w.keep_live_connections()) {
             *lease = None;
         }
         Ok(lease)
     }
 
     fn grant(&self, id: Uuid, session: &Arc<Session>, push: &PushSender) -> Writer {
-        session.displaced_terminals.lock().unwrap().remove(&id);
-        Writer {
-            session: Arc::downgrade(session),
-            push: push.clone(),
+        let mut writer = Writer {
+            connections: Vec::new(),
             generation: self.next_generation.fetch_add(1, Ordering::Relaxed) + 1,
-        }
+        };
+        writer.join(id, session, push);
+        writer
     }
 
     pub(crate) async fn access(
@@ -100,10 +107,10 @@ impl TerminalWriters {
             }
             _ => {}
         }
-        let generation = lease
-            .as_ref()
-            .filter(|w| w.is_ours(session))
-            .map(|w| w.generation);
+        let generation = lease.as_mut().filter(|w| w.is_ours(session)).map(|w| {
+            w.join(id, session, push);
+            w.generation
+        });
         let reason = if generation.is_some() {
             ""
         } else if session.displaced_terminals.lock().unwrap().contains(&id) {
@@ -128,7 +135,9 @@ impl TerminalWriters {
         generation: Option<u64>,
     ) -> Result<WriteGuard> {
         let mut guard = self.check(id, session, generation).await?;
-        if guard.lease.is_none() {
+        if let Some(writer) = guard.lease.as_mut() {
+            writer.join(id, session, push);
+        } else {
             *guard.lease = Some(self.grant(id, session, push));
         }
         Ok(guard)
@@ -175,25 +184,55 @@ impl TerminalWriters {
 }
 
 impl Writer {
+    fn keep_live_connections(&mut self) -> bool {
+        self.connections
+            .retain(|connection| connection.live_session().is_some());
+        !self.connections.is_empty()
+    }
+
     fn is_ours(&self, session: &Arc<Session>) -> bool {
-        self.session.upgrade().is_some_and(|owner| {
-            Arc::ptr_eq(&owner, session)
-                || (session.writer_instance.get().is_some()
-                    && session.writer_instance.get() == owner.writer_instance.get()
-                    && session.client_id() == owner.client_id())
-        })
+        self.connections
+            .iter()
+            .filter_map(WriterConnection::live_session)
+            .any(|owner| {
+                Arc::ptr_eq(&owner, session)
+                    || (session.writer_instance.get().is_some()
+                        && session.writer_instance.get() == owner.writer_instance.get()
+                        && session.client_id() == owner.client_id())
+            })
+    }
+
+    // A native action may claim the lease before the terminal input connection
+    // learns its generation. Both connections participate in the same lease.
+    fn join(&mut self, id: Uuid, session: &Arc<Session>, push: &PushSender) {
+        let weak = Arc::downgrade(session);
+        if self
+            .connections
+            .iter()
+            .any(|connection| connection.session.ptr_eq(&weak))
+        {
+            return;
+        }
+        session.displaced_terminals.lock().unwrap().remove(&id);
+        self.connections.push(WriterConnection {
+            session: weak,
+            push: push.clone(),
+        });
     }
 
     fn displace(self, id: Uuid) {
-        if let Some(session) = self.session.upgrade() {
-            session.displaced_terminals.lock().unwrap().insert(id);
-        }
-        self.push.push(Event {
+        let lost = Event {
             payload: Some(event::Payload::TerminalWriterLost(TerminalWriterLost {
                 terminal_id: bytes::Bytes::copy_from_slice(id.as_bytes()),
                 generation: self.generation,
             })),
             ..Default::default()
-        });
+        };
+        for connection in self.connections {
+            if let Some(session) = connection.live_session() {
+                session.displaced_terminals.lock().unwrap().insert(id);
+                connection.push.push(lost.clone());
+            }
+        }
     }
 }

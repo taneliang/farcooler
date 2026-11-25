@@ -4590,6 +4590,105 @@ async fn only_one_connection_can_type_into_a_terminal() {
 }
 
 #[tokio::test]
+async fn takeover_notifies_native_input_after_ffi_claimed_the_lease() {
+    use farcooler_protocol::v1::{
+        AgentPrompt, AgentPromptBlock, TerminalWrite, TerminalWriterRequest, agent_prompt_block,
+        event, terminal_writer_request::Action,
+    };
+
+    let h = start(Scope::HostAdmin).await;
+    let instance = uuid::Uuid::parse_str("26fc42db-7980-4d28-b2c7-234e3e608db3").unwrap();
+    let native = |name: &'static str| {
+        let socket = &h.socket;
+        async move {
+            let (read, write) = tokio::net::UnixStream::connect(socket)
+                .await
+                .unwrap()
+                .into_split();
+            Client::over_with_writer_instance(
+                read,
+                write,
+                name,
+                "0.0.0",
+                bytes::Bytes::copy_from_slice(instance.as_bytes()),
+            )
+            .await
+            .unwrap()
+        }
+    };
+    let mut browser = connect(&h).await;
+    let (_repo, repository) = registered_repository(&mut browser).await;
+    let worktree = create_worktree(&mut browser, repository, "lease", "feat/lease", "shell").await;
+    let terminal = terminals_of(&mut browser, &worktree.id).await.remove(0).id;
+    let access = |action: Action| {
+        let mut req = request("terminal.writer");
+        req.target_resource_id = Some(terminal.clone());
+        req.payload = Some(request::Payload::TerminalWriter(TerminalWriterRequest {
+            action: action as i32,
+        }));
+        req
+    };
+    let state = |reply: farcooler_protocol::v1::Result| match reply.value {
+        Some(result::Value::TerminalWriter(state)) => state,
+        other => panic!("expected writer state, got {other:?}"),
+    };
+
+    let mut ffi = native("farcooler-mobile").await;
+    let mut tell = request("terminal.tell");
+    tell.target_resource_id = Some(terminal.clone());
+    tell.payload = Some(request::Payload::AgentPrompt(AgentPrompt {
+        terminal_id: terminal.clone(),
+        blocks: vec![AgentPromptBlock {
+            content: Some(agent_prompt_block::Content::Text("hello".into())),
+        }],
+        ..Default::default()
+    }));
+    // A shell rejects tell at the delivery gate, after writer admission.
+    assert!(matches!(ffi.call(tell).await,
+        Err(ClientError::Daemon { code, what, .. })
+            if code == ErrorCode::InvalidArgument as i32 && what == "terminal"));
+    let generation = state(ffi.call(access(Action::Status)).await.unwrap())
+        .generation
+        .unwrap();
+
+    let mut input = native("farcooler-cli").await;
+    let joined = state(input.call(access(Action::Claim)).await.unwrap());
+    assert_eq!(joined.generation, Some(generation));
+    let mut write = request("terminal.write");
+    write.target_resource_id = Some(terminal.clone());
+    write.expected_lease_generation = joined.generation;
+    write.payload = Some(request::Payload::TerminalWrite(TerminalWrite {
+        payload: bytes::Bytes::from_static(b"OV1454_NATIVE_INPUT"),
+    }));
+    input.call(write).await.unwrap();
+
+    let takeover = state(browser.call(access(Action::TakeOver)).await.unwrap());
+    assert!(takeover.generation.is_some_and(|new| new != generation));
+    for (name, client) in [("FFI", &mut ffi), ("terminal input", &mut input)] {
+        let lost = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if let Some(event::Payload::TerminalWriterLost(lost)) =
+                    client.next_event().await.unwrap().payload
+                {
+                    break lost;
+                }
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("{name} missed the takeover before another write"));
+        assert_eq!(
+            (lost.terminal_id, lost.generation),
+            (terminal.clone(), generation)
+        );
+        let old = state(client.call(access(Action::Status)).await.unwrap());
+        assert_eq!(
+            (old.generation, old.reason.as_str()),
+            (None, "writer_taken_over")
+        );
+    }
+}
+
+#[tokio::test]
 async fn every_terminal_input_route_claims_the_vacant_lease() {
     use farcooler_protocol::v1::{
         AgentAnswer, AgentCancel, AgentPrompt, AgentPromptBlock, BringDraft, TerminalFilePut,

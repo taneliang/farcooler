@@ -9,13 +9,13 @@ notification.
 
 The runner holds a per-terminal lock from input admission through delivery.
 A lease generation fences queued input after a takeover. A browser releases
-its lease when leaving a pane, and the runner frees leases when their owning
-connection closes or is revoked. An input RPC without a generation claims a
-vacant lease before delivery. This includes prompts, file pastes and keys
-sent on behalf of a client. The Mac's terminal input process, native client
-connection and CLI helpers share an app-instance identity. If no daemon is
-listening, the stdio relay starts a detached runner. The runner holds the lock
-and serves the shared socket while clients are connected. It exits after
+its lease when leaving a pane, and the runner frees leases when the last
+participating connection closes or is revoked. An input RPC without a
+generation claims a vacant lease before delivery. This includes prompts, file
+pastes and keys sent on behalf of a client. The Mac's terminal input process,
+native client connection and CLI helpers share an app-instance identity. If no
+daemon is listening, the stdio relay starts a detached runner. The runner
+holds the lock and serves the shared socket while clients are connected. It exits after
 five seconds with no connections.
 
 The browser probes the lease RPC on its existing control connection. On an
@@ -111,3 +111,32 @@ ring. A retry with the native system tools first on PATH had the same result.
 The daemon executable passed all six unit tests. The complete daemon library
 run reported 3,399 passed, nine failed and 18 ignored. All nine failures
 passed on serial retry with native system tools first on PATH.
+
+## Mac takeover notification follow-up
+
+The runner tracks each live connection participating in the same app instance's
+lease. They share one generation and each receives `TerminalWriterLost` on
+takeover. Closing one connection leaves the lease with any remaining
+participants.
+
+| Regression | Failure on `38b02823d` | Result after the fix |
+| --- | --- | --- |
+| `takeover_notifies_native_input_after_ffi_claimed_the_lease` | `terminal.tell` acquired the lease through the FFI connection, and the Mac input connection joined that generation and wrote to the pane. After takeover, the FFI received the event and the input connection timed out waiting for it. | Both connections receive the displaced generation and report `writer_taken_over`. The test waits for the notification before any further input. |
+
+The foreground integration run passed 122 tests across the live socket,
+stdio, forced SSH, relay scope, revocation and agent transport suites. One
+latency measurement was ignored.
+
+All 14 Chromium work checks passed, including the two-client handoff at
+320 px and 1280 px. The Chromium board check and both TypeScript checks passed.
+
+The CLI and shared client unit suites passed 639 and 408 tests, respectively.
+Each suite had one ignored test. The standalone CLI and daemon built, and all
+six daemon executable unit tests passed.
+
+The first daemon library run reported 3,337 passed, 71 failed and 18 ignored.
+The scratch path exceeded the Unix socket length limit after native workflow
+fixtures resolved the symlink. The failed cases were retried using macOS's
+shorter runtime directory for fixture data, with build output kept in the
+ticket scratch directory. Sixty-seven passed on that retry. The four remaining
+tests passed on serial retry.
