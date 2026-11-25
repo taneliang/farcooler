@@ -20,6 +20,7 @@ struct Step {
 struct Failure {
     workflow: String,
     job: String,
+    step: String,
     test: String,
 }
 
@@ -53,7 +54,9 @@ impl Exec {
                 && let Some(parent) = self.failed_tests(binding, &previous.required, cancel).await
                 && child.is_subset(&parent)
             {
-                let names = child.into_iter().map(|f| format!("{} / {} — {}", f.workflow, f.job, f.test)).collect::<Vec<_>>();
+                let names = child.into_iter()
+                    .map(|f| format!("{} / {} / {} — {}", f.workflow, f.job, f.step, f.test))
+                    .collect::<Vec<_>>();
                 // The entire list goes on the ticket. Oversized evidence can't clear the failure.
                 let red = LandingCi::Red { observed_ms, origin: None, inherited: names };
                 if red.note().is_some_and(|note| farcooler_workflow::valid_rework_reason(&note) && !note.chars().any(char::is_control))
@@ -120,20 +123,33 @@ impl Exec {
                     _ => return None,
                 }
                 failed_jobs.insert(&job.name);
-                if job.steps.iter().any(|s| !matches!(s.conclusion.as_str(), "success" | "skipped" | "failure")) {
-                    return None;
+                let mut failed_steps = Vec::new();
+                for step in &job.steps {
+                    match step.conclusion.as_str() {
+                        "success" | "skipped" => {}
+                        "failure" => failed_steps.push(step),
+                        _ => return None,
+                    }
                 }
-                let mut failed = job.steps.iter().filter(|s| s.conclusion == "failure");
-                let step = failed.next()?;
-                if failed.next().is_some() || !matches!(step.name.as_str(), "Full Rust workspace shard" | "macOS native Rust tests") {
-                    return None;
-                }
+                if failed_steps.is_empty() { return None; }
                 let (exit, log) = self.ci_gh_cancel(binding, "test-log", &["run", "view", &run.id.to_string(),
                     "--attempt", &run.attempt.to_string(), "--repo", repo, "--job", &job.id.to_string(), "--log-failed"],
                     cancel.clone()).await.ok()?;
                 if exit != Some(0) { return None; }
-                for test in nextest_failures(std::str::from_utf8(&log).ok()?, &job.name, &step.name)? {
-                    failures.insert(Failure { workflow: check.workflow.clone(), job: job.name.clone(), test });
+                let plain = farcooler_core::activity::strip_ansi(&std::str::from_utf8(&log).ok()?.replace("^[[", "\x1b["));
+                // Use log evidence for every failed step. An ambiguous step name
+                // or missing test summary leaves the job's failure unexplained.
+                for step in failed_steps {
+                    if step.name.is_empty() || step.name.chars().any(char::is_control)
+                        || job.steps.iter().filter(|s| s.name == step.name).count() != 1
+                    {
+                        return None;
+                    }
+                    for test in nextest_failures(&plain, &job.name, &step.name)? {
+                        failures.insert(Failure {
+                            workflow: check.workflow.clone(), job: job.name.clone(), step: step.name.clone(), test,
+                        });
+                    }
                 }
             }
             if failed_jobs.is_empty() || failed_jobs != run.failed_jobs.iter().collect() { return None; }
@@ -145,8 +161,7 @@ impl Exec {
 /// Use nextest's final summary so a test that recovered on retry is never
 /// counted. Every failure in that summary must have an ordinary FAIL line.
 fn nextest_failures(log: &str, job: &str, step: &str) -> Option<BTreeSet<String>> {
-    let plain = farcooler_core::activity::strip_ansi(&log.replace("^[[", "\x1b["));
-    let lines: Vec<_> = plain.lines().filter_map(|line| {
+    let lines: Vec<_> = log.lines().filter_map(|line| {
         let mut fields = line.splitn(3, '\t');
         if fields.next()? != job || fields.next()? != step { return None; }
         Some(fields.next()?.split_once(' ')?.1.trim())
@@ -188,7 +203,7 @@ if candidate not in commits:
     commits.append(candidate)
     registry.write_text('\n'.join(commits))
 run = 100 + commits.index(candidate)
-job = 'Rust Linux shard 1'
+job = os.environ['TEST_JOB']
 pathlib.Path(os.environ['FARCOOLER_RECEIPT']).write_text(json.dumps(dict(
     binding=os.environ['FARCOOLER_OPERATION_BINDING'], repository='offline/repository',
     failed_jobs=[job] if run > 100 else [],
@@ -199,22 +214,34 @@ pathlib.Path(os.environ['FARCOOLER_RECEIPT']).write_text(json.dumps(dict(
 
     const GH: &str = r#"#!/usr/bin/python3
 import json, os, sys
-job, step = 'Rust Linux shard 1', 'Full Rust workspace shard'
+job, steps = os.environ['TEST_JOB'], json.loads(os.environ['TEST_STEPS'])
 if sys.argv[1] == 'api':
     run = int(sys.argv[4].split('/')[5])
     print(json.dumps([dict(id=run, name=job, conclusion='failure',
-        steps=[dict(name=step, conclusion='failure')])]))
+        steps=[dict(name=step, conclusion='failure') for step, _ in steps])]))
 else:
     run = int(sys.argv[3])
-    tests = ['pause_hold::one', 'pause_hold::two'] if run != 102 or os.environ['NEW_FAILURE'] == 'no' else ['pause_hold::one', 'regression']
-    lines = ['Summary [ 1.000s] 20 tests run: 18 passed, 2 failed, 0 skipped']
-    lines += ['FAIL [ 0.113s] (1/20) farcooler-daemon ' + test for test in tests]
-    lines += ['error: test run failed', 'test-leak-check: the run left nothing in TMPDIR or the preferences folder.']
-    for line in lines:
-        print(job + '\t' + step + '\t2026-11-25T00:11:00Z     ' + line)
+    for step, binary in steps:
+        tests = ['tests::one', 'tests::two']
+        if run == 102 and step == os.environ['NEW_FAILURE_STEP']:
+            tests[1] = 'tests::regression'
+        lines = ['Summary [ 1.000s] 20 tests run: 18 passed, 2 failed, 0 skipped']
+        lines += [f'^[[31;1mFAIL^[[0m [ 0.113s] ({i}/20) {binary} {test}' for i, test in enumerate(tests, 1)]
+        lines += ['error: test run failed']
+        for line in lines:
+            print(job + '\t' + step + '\t2026-11-25T00:11:00Z     ' + line)
 "#;
 
-    async fn exercise(new_failure: bool) {
+    const SHARD: (&str, &str) = ("Full Rust workspace shard", "farcooler-daemon");
+    const TAILCAT: (&str, &str) = (
+        "Run cargo nextest run --profile ci -p farcooler-tailcat --features helper", "farcooler-tailcat",
+    );
+    const TAILCAT_INTEGRATION: (&str, &str) = (
+        "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test an_empty_allowlist_starts_no_tunnel",
+        "farcooler-daemon::an_empty_allowlist_starts_no_tunnel",
+    );
+
+    async fn exercise(new_failure_step: Option<&str>, job: &str, steps: &[(&str, &str)]) {
         let (dir, runtime) = lander("pass").await;
         let provider = dir.path().join("provider.py");
         let gh = dir.path().join("gh");
@@ -225,7 +252,9 @@ else:
         let mut config = runtime.coding.clone().unwrap();
         config.ci.command.argv = vec!["/usr/bin/python3".into(), provider.to_string_lossy().into_owned()];
         config.ci.command.environment.insert("CI_GH".into(), gh.to_string_lossy().into_owned());
-        config.ci.command.environment.insert("NEW_FAILURE".into(), if new_failure { "yes" } else { "no" }.into());
+        config.ci.command.environment.insert("NEW_FAILURE_STEP".into(), new_failure_step.unwrap_or_default().into());
+        config.ci.command.environment.insert("TEST_JOB".into(), job.into());
+        config.ci.command.environment.insert("TEST_STEPS".into(), serde_json::to_string(steps).unwrap());
         std::fs::write(root.join("coding.json"), serde_json::to_vec(&config).unwrap()).unwrap();
         drop(runtime);
 
@@ -235,6 +264,7 @@ else:
         command(&runtime, Command::Queue { item: "breaker".into() });
         until(&mut runtime, |s| phase_of(s, "breaker") == Some(Phase::Failed)).await;
         let root_red = remote_head(&runtime).await;
+        let new_failure = new_failure_step.is_some();
         let expected = if new_failure { Phase::Failed } else { Phase::Done };
         let tickets: &[&str] = if new_failure { &["later"] } else { &["later", "third"] };
         for ticket in tickets {
@@ -251,7 +281,11 @@ else:
             } else {
                 assert_eq!(fact["label"], "passed");
                 let note = state.items[*ticket].landing_ci.as_ref().and_then(LandingCi::note).unwrap();
-                assert!(note.contains("pause_hold::one") && note.contains("pause_hold::two"), "{note}");
+                for (step, binary) in steps {
+                    for test in ["tests::one", "tests::two"] {
+                        assert!(note.contains(&format!("{job} / {step} — {binary} {test}")), "{note}");
+                    }
+                }
                 assert_eq!(state.items[*ticket].landed.as_deref(), Some(remote_head(&runtime).await.as_str()));
             }
         }
@@ -259,12 +293,22 @@ else:
 
     #[tokio::test]
     async fn a_red_main_only_fails_the_ticket_that_broke_it() {
-        exercise(false).await;
+        exercise(None, "Rust tests (1/4)", &[SHARD]).await;
     }
 
     #[tokio::test]
     async fn a_new_failure_on_an_already_red_main_still_fails_the_ticket() {
-        exercise(true).await;
+        exercise(Some(TAILCAT_INTEGRATION.0), "Rust (ubuntu-24.04)", &[TAILCAT, TAILCAT_INTEGRATION]).await;
+    }
+
+    #[tokio::test]
+    async fn an_inherited_failure_in_the_linux_tailcat_step_still_lands() {
+        exercise(None, "Rust (ubuntu-24.04)", &[TAILCAT]).await;
+    }
+
+    #[tokio::test]
+    async fn every_failing_test_step_in_a_job_is_named_in_the_landing_note() {
+        exercise(None, "Rust (ubuntu-24.04)", &[TAILCAT, TAILCAT_INTEGRATION]).await;
     }
 
     #[test]
@@ -273,7 +317,7 @@ else:
         let log = |lines: &[&str]| lines.iter().map(|line| format!("{prefix}{line}\n")).collect::<String>();
         let summary = "Summary [ 1.000s] 20 tests run: 18 passed, 2 failed, 0 skipped";
         let one = "FAIL [ 0.113s] (1/20) farcooler-daemon pause_hold::one";
-        let two = "\x1b[31mFAIL\x1b[0m [ 0.125s] (2/20) farcooler-daemon pause_hold::two";
+        let two = "FAIL [ 0.125s] (2/20) farcooler-daemon pause_hold::two";
         let end = "error: test run failed";
         assert_eq!(nextest_failures(&log(&[summary, one, two, end]), "rust", "shard").unwrap().len(), 2);
         assert!(nextest_failures(&log(&[summary, one, end]), "rust", "shard").is_none());
