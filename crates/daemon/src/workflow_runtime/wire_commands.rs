@@ -546,7 +546,11 @@ impl Runtime {
                     if !state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin) {
                         self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Stale))?
                     } else {
-                        let input = input(Command::Retry { item:item.clone() },Grant::Controller);
+                        // Keep ordinary Retry events replayable with their original meaning.
+                        let command = if state.items[item].review_restart_stage().is_some() {
+                            Command::RestartReview { item: item.clone() }
+                        } else { Command::Retry { item: item.clone() } };
+                        let input = input(command, Grant::Controller);
                         self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
                     }
                 }

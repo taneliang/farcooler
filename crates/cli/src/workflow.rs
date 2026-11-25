@@ -98,7 +98,8 @@ pub enum WorkflowCmd {
     Close { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,
         #[arg(long,required_unless_present="continues_under",conflicts_with="continues_under")] sha:Option<String>,
         #[arg(long,required_unless_present="sha")] continues_under:Option<String>,#[command(flatten)] identity:Identity },
-    /// Run a failed item's step again, within its published retry allowance.
+    /// Retry a failed step within its published retry allowance. After the review send-back limit,
+    /// rebuild in the existing checkout with the last finding and a fresh allowance at that gate.
     Retry { workspace:Uuid,item:String,#[arg(long)] run:Option<String>,#[arg(long)] pin:Option<String>,#[command(flatten)] identity:RoutineIdentity },
     /// Settle a run whose worktree step is Uncertain because its git never finished, or a cancel waiting on one. The
     /// runner looks first: with nothing of the tree there (no directory, no worktree git lists, no branch it would

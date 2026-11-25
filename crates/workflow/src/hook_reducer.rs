@@ -85,8 +85,10 @@ pub(super) fn decide(state: &State, input: &Input) -> Result<Transition, Refusal
     let apply = |choice: &HookMove| -> Result<Transition, Refusal> {
         let mut next_input = input.clone(); next_input.grant = Grant::Controller;
         next_input.command = match (open.input.point, choice) {
-            (HookPoint::RunFails, HookMove::Retry) => Command::Retry { item: id.clone() },
-            (HookPoint::RunFails, HookMove::SendBack { reason }) => Command::SendBack { item: id.clone(), reason: reason.clone() },
+            (HookPoint::RunFails, HookMove::Retry) if open.input.allowed.iter().any(|m| m == "retry") =>
+                Command::Retry { item: id.clone() },
+            (HookPoint::RunFails, HookMove::SendBack { reason }) if open.input.allowed.iter().any(|m| m == "send_back") =>
+                Command::SendBack { item: id.clone(), reason: reason.clone() },
             (HookPoint::RunFails, HookMove::Cancel { reason }) if valid_rework_reason(reason) => Command::Cancel { item: id.clone(), reason: Some(reason.clone()) },
             (HookPoint::RunFails, HookMove::Leave) | (HookPoint::GroupSplits, HookMove::OwnGroup) => Command::Advance,
             (HookPoint::CiResult, HookMove::Accept | HookMove::Relabel { .. }) => {
@@ -139,7 +141,8 @@ pub(super) fn decide(state: &State, input: &Input) -> Result<Transition, Refusal
     let mut fallback = apply(&policy.fallback)?;
     if let Some(item) = fallback.state.items.get_mut(id) {
         let reason = "The rule did not return a legal decision; its fallback was applied.".to_string();
-        item.hook_refused = Some(reason.clone()); item.failure = Some(reason);
+        item.hook_refused = Some(reason.clone());
+        if item.review_limit_failure().is_none() { item.failure = Some(reason); }
     }
     Ok(fallback)
 }

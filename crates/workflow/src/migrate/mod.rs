@@ -88,7 +88,7 @@ fn mentions(log: &[Input]) -> BTreeMap<String, u64> {
         let item = match &input.command {
             Command::Decide { item, .. } | Command::Enqueue { item, .. } | Command::Approve { item, .. }
             | Command::Review { item, .. } | Command::Observe { item, .. } | Command::Cancel { item, .. }
-            | Command::Close { item, .. } | Command::Retry { item } | Command::Queue { item } | Command::Leave { item }
+            | Command::Close { item, .. } | Command::Retry { item } | Command::RestartReview { item } | Command::Queue { item } | Command::Leave { item }
             | Command::Move { item, .. } | Command::Start { item, .. } | Command::Resolve { item, .. }
             | Command::SendBack { item, .. } | Command::Land { item, .. } | Command::Reopen { item, .. }
             | Command::RefreshJoin { item, result: crate::JoinRefresh::Conflict { .. }, .. } => item,

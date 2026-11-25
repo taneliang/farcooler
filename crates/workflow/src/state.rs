@@ -134,8 +134,8 @@ pub struct Item {
     pub cancel_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub closed: Option<CloseResolution>,
-    /// Why the step's last attempt failed, when it failed before doing anything and said so (ov-1058): the landing
-    /// remote's main couldn't be downloaded, say. Kept on a Failed run so the ticket reads why; the next answer clears it.
+    /// Why the step's last attempt failed, such as a safe download failure or an exhausted review allowance.
+    /// Kept on a Failed run so the ticket reads why; the next answer clears it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure: Option<String>,
     /// The current landing preflight hold, with a durable clock for escalation.
@@ -245,6 +245,50 @@ impl Item {
                 || self.phase == Phase::WaitingApproval && self.definition.is_ticket())
     }
 
+    fn review_return_target(&self) -> Option<&str> {
+        if self.definition.schema == 2 {
+            match self.definition.stages.get(self.stage)?.routes.get("rejected") {
+                Some(crate::Target::Step(to)) => Some(to),
+                _ => None,
+            }
+        } else { self.definition.rework_target.as_deref() }
+    }
+
+    /// The gate and its exhausted allowance, including diagnoses retained by earlier engines.
+    pub fn review_limit_failure(&self) -> Option<String> {
+        if self.phase != Phase::Failed { return None; }
+        let stage = self.definition.stages.get(self.stage)?;
+        if !matches!(stage.kind, StageKind::Review(_)) { return None; }
+        let target = self.review_return_target()?;
+        let (limit, previous) = if self.definition.schema == 2 {
+            if !self.definition.stages[..=self.stage].iter().any(|step| step.id == target)
+                || self.back_edges.get(&stage.id).copied().unwrap_or(0) < stage.limit { return None; }
+            (stage.limit, back_edge_failure("rejected", stage.limit))
+        } else {
+            let limit = self.definition.max_reworks;
+            if self.iteration < limit { return None; }
+            (limit, "Review rejected the candidate.".into())
+        };
+        let reason = self.reason.as_deref()?;
+        let failure = format_reason(&stage.id, &review_limit_cause(limit), None);
+        // The old route verdict can also be followed by a finding and a receipt.
+        let previous = format_reason(&stage.id, &previous, None);
+        let has_cause = |prefix: &str| reason.strip_prefix(prefix)
+            .is_some_and(|tail| tail.is_empty() || tail.starts_with(' '));
+        (has_cause(&failure) || has_cause(&previous)).then_some(failure)
+    }
+
+    pub fn review_restart_stage(&self) -> Option<usize> {
+        if !self.can_start() { return None; }
+        self.review_limit_failure()?;
+        let target = self.review_return_target()?;
+        let mut builds = self.definition.stages[..self.stage].iter().enumerate().rev()
+            .take_while(|(_, stage)| !crate::lands(&stage.kind))
+            .filter(|(_, stage)| stage.kind == StageKind::Build);
+        builds.clone().find(|(_, stage)| stage.id == target)
+            .or_else(|| builds.next()).map(|(index, _)| index)
+    }
+
     pub fn failed_reason(&self) -> Option<String> {
         (self.phase == Phase::Failed).then(|| self.reason.clone().unwrap_or_else(|| {
             let step = &self.definition.stages[self.stage].id;
@@ -265,6 +309,14 @@ impl Item {
             rework_history: self.rework_history.clone(), sent_back: self.sent_back.clone(),
             back_edges: self.back_edges.clone() }
     }
+}
+
+pub(crate) fn back_edge_failure(label: &str, limit: u8) -> String {
+    format!("The step returned {label} and its back-edge limit of {limit} was reached.")
+}
+
+pub(crate) fn review_limit_cause(limit: u8) -> String {
+    format!("The review rejected the candidate after reaching its send-back limit of {limit}.")
 }
 
 pub(crate) fn format_reason(step: &str, cause: &str, receipt: Option<&str>) -> String {
@@ -386,6 +438,8 @@ pub enum Command {
     Close { item: String, resolution: CloseResolution },
     /// A controller runs a failed item's step again, within `MAX_RETRIES`.
     Retry { item: String },
+    /// Rebuild after an exhausted review, on the same checkout with that gate's allowance renewed.
+    RestartReview { item: String },
     /// The orchestrator queues a ticket waiting at its `Join` step into the open group.
     Queue { item: String },
     /// Record why a landing preflight could not finish for a waiting ticket.

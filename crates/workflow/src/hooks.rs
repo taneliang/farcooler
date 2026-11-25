@@ -111,7 +111,7 @@ pub(crate) fn fire(item: &mut Item, id: &str, input: &Input, point: HookPoint,
     let allowed: Vec<&str> = match point {
         HookPoint::RunFails => {
             let mut moves = vec!["leave"];
-            if item.group_of.is_none() {
+            if item.group_of.is_none() && item.review_limit_failure().is_none() {
                 if item.retries < item.definition.execution_limits().retries { moves.push("retry"); }
                 if item.sent_back.len() < usize::from(item.definition.send_back_limit())
                     && item.definition.stages[..=item.stage].iter().rev().take_while(|s| !lands(&s.kind))

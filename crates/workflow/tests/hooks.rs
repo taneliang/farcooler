@@ -161,3 +161,42 @@ fn failure_rule_advertises_the_published_retry_allowance() {
         assert_eq!(call.input.allowed.iter().any(|m| m == "retry"), allowance > 3);
     }
 }
+
+#[test]
+fn an_exhausted_review_requires_a_controller_to_rebuild() {
+    let mut definition = Definition::coding();
+    definition.max_reworks = 1;
+    definition.script_policies.insert("failure".into(), policy(HookPoint::RunFails));
+    let state = State::empty("w".into(), 1);
+    let mut state = step(&state, &input(&state, Command::Enqueue { item: "a".into(), definition,
+        policy_pin: "p".into(), resource: "r".into(), dependencies: BTreeSet::new(),
+        initial_candidate: None }, Grant::Controller)).unwrap().state;
+    let evidence = Evidence { candidate: "sha".into(), manifest: "m".into(), receipt: "r".into(), policy_pin: "p".into() };
+    for _ in 0..3 {
+        state = step(&state, &observe(&state, Outcome::Passed(evidence.clone()))).unwrap().state;
+    }
+    for round in 0..2 {
+        state = step(&state, &observe(&state, Outcome::ReviewRejected {
+            evidence: evidence.clone(), summary: format!("Finding {round}"), receipt: "review.json".into(),
+        })).unwrap().state;
+        if round == 0 {
+            for _ in 0..2 {
+                state = step(&state, &observe(&state, Outcome::Passed(evidence.clone()))).unwrap().state;
+            }
+        }
+    }
+
+    let failed = &state.items["a"];
+    assert_eq!(failed.phase, Phase::Failed);
+    let failure = failed.failure.clone().unwrap();
+    assert!(failure.contains("send-back limit of 1"), "{failure}");
+    let allowed = &failed.deciding.as_ref().unwrap().input.allowed;
+    assert!(allowed.iter().all(|move_| move_ != "retry" && move_ != "send_back"));
+    for choice in [serde_json::json!({"decision":"retry"}), serde_json::json!({"decision":"send_back","reason":"Rebuild"})] {
+        let declined = step(&state, &answer(&state, choice)).unwrap();
+        assert!(declined.effects.is_empty());
+        let still_failed = &declined.state.items["a"];
+        assert_eq!(still_failed.phase, Phase::Failed);
+        assert_eq!(still_failed.failure.as_deref(), Some(failure.as_str()));
+    }
+}

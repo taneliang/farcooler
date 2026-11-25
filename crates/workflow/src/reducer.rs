@@ -242,7 +242,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
         command => {
             let id = match command {
                 Command::Approve { item, .. } | Command::Review { item, .. }
-                | Command::Observe { item, .. } | Command::Cancel { item, .. } | Command::Retry { item }
+                | Command::Observe { item, .. } | Command::Cancel { item, .. } | Command::Retry { item } | Command::RestartReview { item }
                 | Command::Queue { item } | Command::Leave { item } | Command::RefreshJoin { item, .. }
                 | Command::HoldQueue { item, .. } | Command::Move { item, .. }
                 | Command::Resolve { item, .. } | Command::SendBack { item, .. } | Command::Close { item, .. }
@@ -760,11 +760,25 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     controller(input)?;
                     detach(&mut next, id, &mut item)?;
                 }
-                Command::Retry { .. } => {
+                Command::Retry { .. } | Command::RestartReview { .. } => {
                     controller(input)?;
                     // A failed run does not own its resource, so a retry queues like new work.
                     if item.phase != Phase::Failed || item.group_of.is_some() { return Err(Refusal::Phase); }
                     if item.retries >= item.definition.execution_limits().retries { return Err(Refusal::Limit); }
+                    if matches!(command, Command::RestartReview { .. }) {
+                        let build = item.review_restart_stage().ok_or(Refusal::Phase)?;
+                        let prior = item.last_run();
+                        item.history.push(prior);
+                        let spent = if item.definition.schema == 2 {
+                            item.back_edges.remove(&item.definition.stages[item.stage].id).unwrap_or(0)
+                        } else { item.iteration };
+                        item.iteration -= spent;
+                        item.rework_history.clear();
+                        item.stage = build;
+                        item.candidate = None;
+                        item.last_evidence = None;
+                        item.run.clear();
+                    }
                     item.retries += 1;
                     item.attempt = 1;
                     item.failure = None;
@@ -1213,7 +1227,13 @@ fn finish(item: &mut Item, id: &str, input: &Input, passed: bool, evidence: &Evi
         let cause = if matches!(item.definition.stages[item.stage].kind, StageKind::Review(_) | StageKind::Evaluate(_)) {
             "Review rejected the candidate."
         } else { "The step rejected the candidate." };
-        fail(item, cause, Some(evidence));
+        if matches!(item.definition.stages[item.stage].kind, StageKind::Review(_))
+            && item.definition.rework_target.is_some()
+        {
+            fail_review_limit(item, item.definition.max_reworks, Some(evidence));
+        } else {
+            fail(item, cause, Some(evidence));
+        }
         return Ok(());
     }
     if matches!(item.definition.stages[item.stage].kind, StageKind::Build | StageKind::Tracker | StageKind::Action(_)) {
@@ -1315,7 +1335,11 @@ fn take_route(item: &mut Item, id: &str, input: &Input, answer: (&str, Option<&E
     };
     if !split && is_back_edge(item, &target) {
         if taken >= limit {
-            fail(item, &format!("The step returned {label} and its back-edge limit of {limit} was reached."), evidence);
+            if label == "rejected" && matches!(stage.kind, StageKind::Review(_)) {
+                fail_review_limit(item, limit, evidence);
+            } else {
+                fail(item, &back_edge_failure(label, limit), evidence);
+            }
             return Ok(());
         }
         item.back_edges.insert(key, taken + 1);
@@ -1331,6 +1355,12 @@ fn take_route(item: &mut Item, id: &str, input: &Input, answer: (&str, Option<&E
         return Ok(());
     }
     enter(item, id, input, out.effects)
+}
+
+fn fail_review_limit(item: &mut Item, limit: u8, evidence: Option<&Evidence>) {
+    let cause = review_limit_cause(limit);
+    fail(item, &cause, evidence);
+    item.failure = Some(cause);
 }
 
 fn fail(item: &mut Item, cause: &str, evidence: Option<&Evidence>) {

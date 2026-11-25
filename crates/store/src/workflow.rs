@@ -421,7 +421,7 @@ fn apply_in_snapshot(tx: &Transaction<'_>, input: &Input, payload: &str, by: Opt
             .query_map([],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
         let target=match &input.command {
             Command::Enqueue {resource,..} | Command::Start {resource,..} | Command::Reopen {resource,..} => Some(resource.as_str()),
-            Command::Approve {item,..}|Command::Review {item,..}|Command::Observe {item,..}|Command::Cancel {item,..}|Command::Retry {item}|Command::Queue {item}|Command::Leave {item}|Command::Move {item,..}|Command::Resolve {item,..}
+            Command::Approve {item,..}|Command::Review {item,..}|Command::Observe {item,..}|Command::Cancel {item,..}|Command::Retry {item}|Command::RestartReview {item}|Command::Queue {item}|Command::Leave {item}|Command::Move {item,..}|Command::Resolve {item,..}
                 |Command::Decide {item,..}|Command::SendBack {item,..}|Command::Close {item,..}|Command::Land {item,..}
                 |Command::RefreshJoin {item,..}|Command::RepinPending {item,..} => state.items.get(item).map(|i|i.resource.as_str()),
             Command::HoldQueue { .. } | Command::Advance | Command::RefreshGroups { .. } | Command::AdoptPublication { .. } => None,
@@ -598,23 +598,31 @@ fn apply_in_snapshot(tx: &Transaction<'_>, input: &Input, payload: &str, by: Opt
         Ok((receipt, applied))
 }
 
-/// Keep the step’s answer with its tickets in the same transaction that accepts it.
+/// Keep the step’s answer and any exhausted review allowance with its tickets in the same transaction.
 fn record_step_note(tx: &Transaction<'_>, before: &State, after: &State, input: &Input) -> Result<()> {
     use crate::models::{Actor, NoteKind, get_uuid};
-    use farcooler_workflow::Outcome;
+    use farcooler_workflow::{Outcome, Phase};
 
-    let (Command::Observe { item, run, outcome, .. } | Command::Resolve { item, run, outcome, .. }) = &input.command
-        else { return Ok(()) };
-    let (kind, body, details) = match outcome {
-        Outcome::ReviewRejected { summary, receipt, .. } =>
-            (NoteKind::Finding, summary, serde_json::json!({"run":run, "receipt":receipt})),
-        Outcome::Interrupted if before.items.get(item)
-            .is_some_and(|item| item.definition.stages[item.stage].kind.resumes_after_runner_restart()) => {
-            let Some(reason) = after.items.get(item).and_then(|item| item.reason.as_ref()) else { return Ok(()) };
-            (NoteKind::Progress, reason, serde_json::json!({"run":run}))
-        }
+    let (item, run, outcome) = match &input.command {
+        Command::Observe { item, run, outcome, .. } | Command::Resolve { item, run, outcome, .. } =>
+            (item, run, Some(outcome)),
+        Command::Review { item, run, passed: false, .. } => (item, run, None),
         _ => return Ok(()),
     };
+    let previous = before.items.get(item);
+    let next = after.items.get(item);
+    let step_note = match outcome {
+        Some(Outcome::ReviewRejected { summary, receipt, .. }) =>
+            Some((NoteKind::Finding, summary.as_str(), serde_json::json!({"run":run, "receipt":receipt}))),
+        Some(Outcome::Interrupted) if previous
+            .is_some_and(|item| item.definition.stages[item.stage].kind.resumes_after_runner_restart()) =>
+            next.and_then(|item| item.reason.as_deref())
+                .map(|reason| (NoteKind::Progress, reason, serde_json::json!({"run":run}))),
+        _ => None,
+    };
+    let failure = previous.filter(|old| old.phase != Phase::Failed)
+        .and(next).and_then(|item| item.review_limit_failure());
+    if step_note.is_none() && failure.is_none() { return Ok(()); }
     // The verdict may split a group or hand its members back, so use the membership that was reviewed.
     let reviewed = before.items.get(item).filter(|item| item.group_of.is_some());
     let leads: Vec<&str> = match reviewed {
@@ -630,9 +638,16 @@ fn record_step_note(tx: &Transaction<'_>, before: &State, after: &State, input: 
     )?;
     for ticket in tickets {
         let task = task_for.query_row(params![input.workspace, ticket], |row| get_uuid(row, 0)).optional()?;
-        if let Some(task) = task {
-            crate::tasks::insert_note(tx, task, kind, Actor::Runner, body, &details, None)
-                .map_err(|error| WorkflowError::Board(error.to_string()))?;
+        let Some(task) = task else { continue };
+        let note = |kind, body: &str, details: &serde_json::Value| {
+            crate::tasks::insert_note(tx, task, kind, Actor::Runner, body, details, None)
+                .map_err(|error| WorkflowError::Board(error.to_string()))
+        };
+        if let Some((kind, body, details)) = &step_note {
+            note(*kind, body, details)?;
+        }
+        if let Some(reason) = &failure {
+            note(NoteKind::Decision, reason.as_str(), &serde_json::json!({"run":run}))?;
         }
     }
     Ok(())
