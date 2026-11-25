@@ -14,6 +14,13 @@ struct ReviewFixture {
     key: String,
 }
 
+const PURE_SOURCE: &str = "samples/before-pure.txt";
+const PURE_DESTINATION: &str = "samples/after-pure.txt";
+const EDITED_SOURCE: &str = "samples/before[1].txt";
+const EDITED_DESTINATION: &str = "samples/after[1].txt";
+const RENAME_TEXT: &str =
+    "first line\nsecond line\nthird line\noriginal line\nfifth line\nsixth line\nseventh line\n";
+
 fn git(path: &Path, args: &[&str]) -> String {
     let out = Process::new("git")
         .current_dir(path)
@@ -57,6 +64,16 @@ async fn fixture() -> (Harness, ReviewFixture) {
         let brief = include_str!("../../../../../../../reports/ov-1446/README.md");
         let inventory = include_str!("../../../../../../../reports/ov-1439/parity.md");
         fs::write(checkout.join("reports/previous.md"), brief).unwrap();
+        fs::create_dir(checkout.join("samples")).unwrap();
+        fs::write(checkout.join(PURE_SOURCE), brief).unwrap();
+        fs::write(checkout.join(EDITED_SOURCE), RENAME_TEXT).unwrap();
+        fs::write(checkout.join("samples/before1.txt"), "unrelated rename\n").unwrap();
+        fs::create_dir(checkout.join(EDITED_DESTINATION)).unwrap();
+        fs::write(
+            checkout.join(EDITED_DESTINATION).join("child.txt"),
+            "unrelated child rename\n",
+        )
+        .unwrap();
         git(&checkout, &["add", "."]);
         git(
             &checkout,
@@ -69,7 +86,27 @@ async fn fixture() -> (Harness, ReviewFixture) {
         )
         .unwrap();
         fs::write(checkout.join("reports/context.md"), inventory).unwrap();
-        fs::create_dir(checkout.join("samples")).unwrap();
+        fs::rename(checkout.join(PURE_SOURCE), checkout.join(PURE_DESTINATION)).unwrap();
+        // Both endpoints can match directories, and unescaped brackets can
+        // match the similarly named third rename.
+        let directory = checkout.join("samples/moved-directory");
+        fs::rename(checkout.join(EDITED_DESTINATION), &directory).unwrap();
+        fs::rename(
+            checkout.join(EDITED_SOURCE),
+            checkout.join(EDITED_DESTINATION),
+        )
+        .unwrap();
+        fs::rename(&directory, checkout.join(EDITED_SOURCE)).unwrap();
+        fs::rename(
+            checkout.join("samples/before1.txt"),
+            checkout.join("samples/after1.txt"),
+        )
+        .unwrap();
+        fs::write(
+            checkout.join(EDITED_DESTINATION),
+            RENAME_TEXT.replace("original line", "edited line"),
+        )
+        .unwrap();
         // Cross the byte and line limits independently in Git-generated patches.
         fs::write(
             checkout.join("samples/byte-limit.txt"),
@@ -155,6 +192,75 @@ async fn fixture() -> (Harness, ReviewFixture) {
     })
     .await;
     (harness, fixture.unwrap())
+}
+
+#[tokio::test]
+async fn web_review_socket_projects_pure_and_edited_renames() {
+    let (h, fixture) = fixture().await;
+    let session = Session::connect_local(&h.socket).await.unwrap();
+    let read = async |req| {
+        session
+            .web_review(
+                h.workspace,
+                fixture.ticket,
+                serde_json::from_value(req).unwrap(),
+            )
+            .await
+            .unwrap()
+    };
+    let initial = read(json!({"view":"changes"})).await;
+    for (source, destination, stats) in [
+        (PURE_SOURCE, PURE_DESTINATION, "+0 −0"),
+        (EDITED_SOURCE, EDITED_DESTINATION, "+1 −1"),
+    ] {
+        let file = initial["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|file| file["path"] == destination)
+            .unwrap();
+        assert_eq!(file["oldPath"], source);
+        assert_eq!(file["stats"], stats);
+        let view = read(json!({"view":"changes","position":file["position"]})).await;
+        assert_eq!(view["mark"]["label"], "Mark reviewed");
+        let hunks = view["diff"]["hunks"].as_array().unwrap();
+        if destination == PURE_DESTINATION {
+            assert!(
+                hunks.is_empty(),
+                "pure rename carried text hunks: {hunks:?}"
+            );
+            assert_eq!(view["diff"]["notice"], "No text changes in this file.");
+        } else {
+            assert_eq!(hunks.len(), 1);
+            let lines = hunks[0]["lines"].as_array().unwrap();
+            let edits: Vec<_> = lines.iter().filter(|line| line["sign"] != " ").collect();
+            assert_eq!(edits.len(), 2);
+            assert_eq!(edits[0]["text"], "original line");
+            assert_eq!(edits[0]["oldNumber"], 4);
+            assert!(edits[0]["newNumber"].is_null());
+            assert_eq!(edits[1]["text"], "edited line");
+            assert_eq!(edits[1]["newNumber"], 4);
+            assert!(edits[1]["oldNumber"].is_null());
+            assert_ne!(edits[0]["id"], edits[1]["id"]);
+            let position = &edits[0]["position"];
+            let posted = read(json!({"view":"changes","position":position,"edit":{
+                "action":"comment","body":"Keep the original wording here."
+            }}))
+            .await;
+            assert_eq!(posted["position"], *position);
+            let restored = read(json!({"view":"changes","position":position})).await;
+            let old_line = &restored["diff"]["hunks"][0]["lines"][3];
+            assert_eq!(old_line["id"], edits[0]["id"]);
+            assert_eq!(
+                old_line["comments"][0]["body"],
+                "Keep the original wording here."
+            );
+        }
+        let reviewed =
+            read(json!({"view":"changes","position":view["position"],"edit":view["mark"]["edit"]}))
+                .await;
+        assert_eq!(reviewed["mark"]["label"], "Mark unreviewed");
+    }
 }
 
 #[tokio::test]

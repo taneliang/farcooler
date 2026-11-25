@@ -99,6 +99,43 @@ async fn diff_args(repo: &Path, selector: &Selector) -> Result<(Vec<String>, boo
     })
 }
 
+/// Git detects renames after applying pathspecs, so find the pair on the
+/// unfiltered comparison before asking for patch text for the two endpoints.
+async fn rename_source(repo: &Path, rev_args: &[String], path: &str) -> Result<Option<String>> {
+    let mut args = vec!["diff", "--name-status", "-z", "--find-renames", "--diff-filter=R"];
+    args.extend(rev_args.iter().map(String::as_str));
+    args.push("--");
+    let raw = git_bytes(repo, &args).await?;
+    if !raw.ok {
+        return Err(DomainError::OperationFailed);
+    }
+    // Each rename has three NUL-delimited fields: R<score>, source, destination.
+    let mut fields = raw.stdout.split(|&b| b == 0);
+    while let (Some(_status), Some(source), Some(destination)) =
+        (fields.next(), fields.next(), fields.next())
+    {
+        if destination == path.as_bytes() {
+            let source = std::str::from_utf8(source).map_err(|_| DomainError::OperationFailed)?;
+            return Ok(Some(source.to_owned()));
+        }
+    }
+    Ok(None)
+}
+
+/// A literal filename match that also excludes descendants. A rename endpoint
+/// can be a directory on the other side of the diff. Force Git's glob matcher
+/// with an initial escape, and escape all glob metacharacters in the filename.
+fn exact_pathspec(path: &str) -> String {
+    let mut spec = String::from(":(glob)");
+    for (index, ch) in path.chars().enumerate() {
+        if index == 0 || matches!(ch, '\\' | '*' | '?' | '[') {
+            spec.push('\\');
+        }
+        spec.push(ch);
+    }
+    spec
+}
+
 /// Whether `path` is a file git lists as untracked (and not ignored).
 ///
 /// Also the confinement check for the untracked read: `ls-files` refuses a
@@ -240,17 +277,22 @@ pub async fn file_diff(
     for a in &rev_args {
         args.push(a);
     }
-    // The returned patch is anchored to exactly this file. A Git pathspec
-    // metacharacter in its name must not include another file in the reply.
-    let pathspec = format!(":(literal){path}");
-    args.push("--");
-    args.push(&pathspec);
-
     let patch = if let Some(p) = untracked_patch {
         p
     } else {
+        let rename_source = rename_source(repo, &rev_args, path).await?;
+        let pathspecs = if let Some(source) = rename_source.as_deref() {
+            // A second read of a mutable comparison can lose the rename.
+            // Refuse that result rather than returning an add or delete.
+            args.push("--diff-filter=R");
+            vec![exact_pathspec(source), exact_pathspec(path)]
+        } else {
+            vec![format!(":(literal){path}")]
+        };
+        args.push("--");
+        args.extend(pathspecs.iter().map(String::as_str));
         let raw = git_bytes(repo, &args).await?;
-        if !raw.ok {
+        if !raw.ok || (rename_source.is_some() && raw.stdout.is_empty()) {
             return Err(DomainError::OperationFailed);
         }
         // Patch text is read lossily on purpose: a file whose CONTENT is not

@@ -19,6 +19,8 @@ The browser check runs the production ticket and review renderers against an iso
 
 The Rust client suite covers stable anchors, current and stale candidates, read-scope refusal and rooted file reads. Against Git-generated patches, it also checks that both caps reject direct mark requests, including requests with a later hunk offset. The daemon diff suite checks that a pinned patch stays on its candidate after HEAD moves. The Web Rust, Web unit and workflow suites, Board and Work browser checks, both TypeScript checks, WASM build, and Canary wire and shared-core linters passed.
 
+The socket review tests exercise pure and edited renames from a real Git candidate. A pure rename has no text hunks. An edited rename shows the original and replacement lines with their respective line numbers, and a comment on the original line reopens at the same anchor. The fixture includes other renames with similar names and nested paths to check that each patch stays on its selected file.
+
 To rerun the browser check with the Web dependencies and Playwright Chromium installed, start the fixture from the repository root.
 
 ```sh
