@@ -22,7 +22,7 @@ use crate::service::Service;
 use crate::workflow_summary;
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::workflow_commands::{Action, Mutation};
-use farcooler_protocol::workflow_config::AdapterConfiguration;
+use farcooler_protocol::workflow_config::{AdapterConfiguration, CodingConfig};
 use farcooler_protocol::v1 as pb;
 use farcooler_store::models::{Actor, NoteKind, TaskStatus};
 use farcooler_workflow::Definition;
@@ -182,11 +182,77 @@ pub fn refuse_on_card(svc: &Service, card: Uuid, kind: Option<NoteKind>, extra: 
     Ok(())
 }
 
+fn operation_pins(definition: &mut Definition) -> impl Iterator<Item = &mut String> {
+    definition.stages.iter_mut()
+        .chain(definition.groups.values_mut().flat_map(|group| &mut group.steps))
+        .filter_map(|stage| stage.operation.arguments.first_mut())
+}
+
+/// A draft may keep the selected adapter's pin or leave its slot empty when editing that adapter.
+fn refresh_operation_pins(definition: &mut Definition, selected: Option<&AdapterConfiguration>, config: &CodingConfig) {
+    let Some(AdapterConfiguration::Coding(selected)) = selected else { return };
+    let (old, new) = (selected.pin(), config.pin());
+    if old == new { return; }
+    for pin in operation_pins(definition).filter(|pin| pin.is_empty() || **pin == old) {
+        pin.clone_from(&new);
+    }
+}
+
+/// Show the adapter's edits directly, with a stable label for the derived operation pins.
+fn bundle_for_diff(definition: &Definition, adapter: Option<&AdapterConfiguration>, adapter_changed: bool) -> serde_json::Value {
+    let mut definition = definition.clone();
+    if adapter_changed && let Some(AdapterConfiguration::Coding(config)) = adapter {
+        let expected = config.pin();
+        for pin in operation_pins(&mut definition).filter(|pin| **pin == expected) {
+            *pin = "(adapter pin)".into();
+        }
+    }
+    serde_json::json!({ "definition": definition, "adapter": adapter })
+}
+
 /// Compare every field, including fields the prose summary does not interpret. Environment values are never
 /// exposed on a card, but a change to one is still visible. Paths and values are escaped for display.
 pub(crate) fn bundle_diff(before: Option<serde_json::Value>, after: serde_json::Value) -> String {
+    use serde_json::Value;
+
+    // An insertion shifts array indices without editing the existing stages. Match by their unique IDs,
+    // and report a change in execution order if surviving stages moved relative to one another.
+    fn stages(path: &str, old: &[Value], new: &[Value], lines: &mut Vec<String>) {
+        use std::collections::BTreeMap;
+
+        fn id(stage: &Value) -> &str { stage["id"].as_str().expect("serialized stage ID") }
+        fn by_id(stages: &[Value]) -> BTreeMap<&str, &Value> {
+            stages.iter().map(|stage| (id(stage), stage)).collect()
+        }
+        let (before, after) = (by_id(old), by_id(new));
+        let order = |side: &[Value], other: &BTreeMap<&str, &Value>| {
+            side.iter().filter(|stage| other.contains_key(id(stage)))
+                .map(|stage| stage["id"].clone()).collect::<Vec<_>>()
+        };
+        let (old_order, new_order) = (Value::Array(order(old, &after)), Value::Array(order(new, &before)));
+        if old_order != new_order {
+            let (from, to) = (workflow_summary::code(&old_order.to_string()), workflow_summary::code(&new_order.to_string()));
+            lines.push(format!("- {}: {from} → {to}", workflow_summary::code(&format!("{path}/order"))));
+        }
+        for (index, stage) in new.iter().enumerate() {
+            walk(&format!("{path}/{index}"), before.get(id(stage)).copied(), Some(stage), false, lines);
+        }
+        for (index, stage) in old.iter().enumerate() {
+            if !after.contains_key(id(stage)) {
+                walk(&format!("{path}/{index}"), Some(stage), None, false, lines);
+            }
+        }
+    }
+
     fn walk(path: &str, old: Option<&serde_json::Value>, new: Option<&serde_json::Value>, secret: bool, lines: &mut Vec<String>) {
         if old == new { return; }
+        let stage_list = path == "/definition/stages"
+            || path.strip_prefix("/definition/groups/").and_then(|p| p.split_once('/'))
+                .is_some_and(|(_, field)| field == "steps");
+        if stage_list && let (Some(Value::Array(old)), Some(Value::Array(new))) = (old, new) {
+            stages(path, old, new, lines);
+            return;
+        }
         let objects = old.and_then(|v| v.as_object()).is_some() || new.and_then(|v| v.as_object()).is_some();
         if objects && old.is_none_or(|v| v.is_object()) && new.is_none_or(|v| v.is_object()) {
             let mut keys = std::collections::BTreeSet::new();
@@ -224,7 +290,7 @@ pub(crate) fn bundle_diff(before: Option<serde_json::Value>, after: serde_json::
 }
 
 /// File a proposal and ask a person. Returns the draft, already pending on its card.
-pub fn propose(svc: &Service, watcher: &crate::watch::Watcher, workspace: Uuid, reason: &str, definition: Definition, adapter: AdapterConfiguration) -> Result<Draft> {
+pub fn propose(svc: &Service, watcher: &crate::watch::Watcher, workspace: Uuid, reason: &str, mut definition: Definition, adapter: AdapterConfiguration) -> Result<Draft> {
     // A member-led orchestrator reads `workflow.get` with every environment value hidden; proposing that back would
     // publish the literal marker as the value (R-111, L9). It is refused, never kept or filled in.
     if hides_a_value(&adapter) {
@@ -239,6 +305,8 @@ pub fn propose(svc: &Service, watcher: &crate::watch::Watcher, workspace: Uuid, 
     let AdapterConfiguration::Coding(config) = &adapter;
     use crate::workflow_runtime::CodingConfigExt;
     config.validate().map_err(|error| DomainError::refused(format!("Draft adapter {}.", error.validation_rule())))?;
+    let current = svc.store.workflow_configuration(&workspace.to_string()).map_err(|_| DomainError::OperationFailed)?;
+    refresh_operation_pins(&mut definition, current.as_ref().and_then(|c| c.adapter.as_ref()), config);
     crate::workflow_runtime::PinnedDefinition::validate_pinned_definition(config, &definition)
         .map_err(|error| DomainError::refused(format!("Draft definition {}.", error.validation_rule())))?;
     // A gate can only wait on someone who could answer it (ov-1002).
@@ -247,10 +315,11 @@ pub fn propose(svc: &Service, watcher: &crate::watch::Watcher, workspace: Uuid, 
             "Draft definition stage {stage:?} field {field} must name a decider who can answer this gate."
         )));
     }
-    let current = svc.store.workflow_configuration(&workspace.to_string()).map_err(|_| DomainError::OperationFailed)?;
     let bundle = crate::landing_templates::Bundle { definition, adapter };
-    let before = current.as_ref().map(|c| serde_json::json!({"definition": c.definition, "adapter": c.adapter}));
-    let after = serde_json::to_value(&bundle).map_err(|_| DomainError::OperationFailed)?;
+    let previous_adapter = current.as_ref().and_then(|c| c.adapter.as_ref());
+    let adapter_changed = previous_adapter.is_some_and(|adapter| adapter != &bundle.adapter);
+    let before = current.as_ref().map(|c| bundle_for_diff(&c.definition, previous_adapter, adapter_changed));
+    let after = bundle_for_diff(&bundle.definition, Some(&bundle.adapter), adapter_changed);
     let summary = format!("{}\n- Field changes (environment values hidden):\n{}", workflow_summary::summarize(reason, &bundle, current.as_ref().map(|c| &c.definition), current.as_ref().and_then(|c| c.adapter.as_ref())), bundle_diff(before, after));
     let crate::landing_templates::Bundle { definition, adapter } = bundle;
     let digest = content_digest(&definition, &adapter, &summary);
@@ -467,6 +536,23 @@ mod title_tests {
 
 #[cfg(test)]
 mod diff_tests {
+    #[test]
+    fn field_diff_shows_stage_reordering_and_edits_by_id() {
+        let before = serde_json::json!({"definition": {"stages": [
+            {"id": "build", "limit": 2},
+            {"id": "check", "limit": 1}
+        ]}});
+        let after = serde_json::json!({"definition": {"stages": [
+            {"id": "check", "limit": 3},
+            {"id": "build", "limit": 2}
+        ]}});
+        let diff = super::bundle_diff(Some(before), after);
+        assert!(diff.contains("/definition/stages/order"), "{diff}");
+        assert!(diff.contains("/definition/stages/0/limit`"), "{diff}");
+        assert!(diff.contains("`1` → `3`"), "{diff}");
+        assert_eq!(diff.lines().count(), 2, "{diff}");
+    }
+
     #[test]
     fn field_diff_shows_arbitrary_changes_without_environment_values() {
         let old = serde_json::json!({"definition":{"wait":12,"jobs":[1,2]},"adapter":{"environment":{"TOKEN":"old-secret"}}});

@@ -638,3 +638,158 @@ async fn ov1456_draft_refusal_names_the_stage_and_operation_pin() {
     drop(link);
     host.close().await;
 }
+
+fn ov1468_live(host: &Host, config: &CodingConfig) -> lt::Bundle {
+    use farcooler_workflow::{Target, scheduling::{Budget, StartPolicy}};
+
+    let mut config = config.clone();
+    let hooks = |name| {
+        let path = config.repository.join(name);
+        std::fs::write(&path, b"{}").unwrap();
+        farcooler_daemon::workflow_runtime::LaunchFile {
+            path, digest: farcooler_workflow::digest(&b"{}".to_vec()),
+        }
+    };
+    // Put the engine's Codex hooks outside the repository, as on the live runner.
+    let codex_path = config.repository.parent().unwrap().join("codex-settings.json");
+    std::fs::write(&codex_path, b"{}").unwrap();
+    config.harness = CodingHarness::Native {
+        preset: "claude".into(), settings: Some(hooks("claude-settings.json")), project_hooks: None,
+        codex_hooks: Some(farcooler_daemon::workflow_runtime::LaunchFile {
+            path: codex_path, digest: farcooler_workflow::digest(&b"{}".to_vec()),
+        }),
+        plugin_dir: None, prompt: "Work the ticket.".into(),
+        process: CodingCommand { argv: vec![], environment: Default::default(), timeout_ms: 60_000 },
+    };
+    let mut live = lt::template("batched-push", &config, &["scripts/landing-gate".into()],
+        &[lt::Extra::Agent], &Options {
+            batch: Some(32), routes: vec!["services/site/public/**=ask".into()], ..Options::default()
+        }).unwrap();
+    live.definition.start_policy = Some(StartPolicy {
+        columns: ["todo".into()].into(), budget: Budget::Fixed(4), files: Default::default(),
+        dependencies: Default::default(), rotate_models: false, auto_queue: true,
+    });
+    for models in live.definition.models.values_mut() {
+        models.insert(0, "codex:gpt-6.2-sol".into());
+    }
+    live.definition.stages.iter_mut().find(|stage| stage.id == "gate-0").unwrap().limit = 3;
+    let landing = live.definition.groups.get_mut("landing").unwrap();
+    // The saved live bundle waits for CI after pushing to main.
+    landing.steps.retain(|stage| stage.id != "candidate");
+    let ci = landing.steps.iter().position(|stage| stage.id == "ci").unwrap();
+    let mut ci = landing.steps.remove(ci);
+    ci.operation.arguments[3] = "10800000".into();
+    landing.steps.push(ci);
+    for (stage, limit) in landing.steps.iter_mut().zip([4, 3, 3, 2]) {
+        stage.limit = limit;
+    }
+    let base = &mut landing.steps[0];
+    base.operation.arguments[3] = "43200000".into();
+    base.max_attempts = 5;
+    base.routes.insert("timeout".into(), Target::Step(base.id.clone()));
+    live.definition.validate_detailed().unwrap();
+
+    // Seed the selected baseline in the scratch fixture without a publication or approval.
+    use rusqlite::{Connection, params};
+    let db = Connection::open(host.service.root_dir().join("farcooler.db")).unwrap();
+    let definition_pin = live.definition.pin();
+    let pin = farcooler_store::workflow_publication::configuration_pin(&live.definition, Some(&live.adapter));
+    db.execute("INSERT INTO workflow_definitions VALUES (?1, ?2)",
+        params![definition_pin, serde_json::to_string(&live.definition).unwrap()]).unwrap();
+    db.execute("INSERT INTO workflow_bundles VALUES (?1, ?2, ?3)",
+        params![pin, definition_pin, serde_json::to_string(&live.adapter).unwrap()]).unwrap();
+    db.execute("INSERT INTO workflow_bundle_selections VALUES (?1, ?2)",
+        params![host.workspace.to_string(), pin]).unwrap();
+    live
+}
+
+fn ov1468_with_checks(live: &lt::Bundle) -> lt::Bundle {
+    use farcooler_daemon::workflow_runtime::CodingConfigExt;
+    use farcooler_protocol::workflow_config::AdapterConfiguration;
+    use farcooler_workflow::{StageKind, Target};
+
+    let mut edited = live.clone();
+    let AdapterConfiguration::Coding(original) = &live.adapter;
+    let AdapterConfiguration::Coding(config) = &mut edited.adapter;
+    for (offset, (id, mode)) in [("quick-checks", "--quick-only"), ("clippy", "--clippy-only")].into_iter().enumerate() {
+        let index = config.checks.len();
+        config.checks.push(CodingCommand {
+            argv: ["/usr/bin/env", "python3", "scripts/lane-gate.py", mode].map(String::from).into(),
+            environment: Default::default(), timeout_ms: 600_000,
+        });
+        let mut stage = original.stage(id, StageKind::Check, "coding-check/v1", &index.to_string());
+        stage.routes.insert("rejected".into(), Target::Step("build".into()));
+        stage.limit = 4;
+        edited.definition.stages.insert(2 + offset, stage);
+    }
+    edited
+}
+
+#[tokio::test]
+async fn ov1468_live_plus_checks_files_with_stale_or_placeholder_pins() {
+    if as_a_person("ov1468_live_plus_checks_files_with_stale_or_placeholder_pins").await { return; }
+    let (dir, config) = configured().await;
+    let host = Host::open(dir.path()).await;
+    let live = ov1468_live(&host, &config);
+    let selected = pin(&host);
+    let mut link = host.connect().await;
+    let edited = ov1468_with_checks(&live);
+    let farcooler_protocol::workflow_config::AdapterConfiguration::Coding(config) = &edited.adapter;
+
+    let expected_pin = config.pin();
+    let mut expected = edited.definition.clone();
+    for stage in expected.stages.iter_mut().chain(expected.groups.values_mut().flat_map(|g| &mut g.steps)) {
+        stage.operation.arguments[0] = expected_pin.clone();
+    }
+    for placeholder in [false, true] {
+        let mut input = edited.clone();
+        if placeholder {
+            for stage in input.definition.stages.iter_mut().chain(input.definition.groups.values_mut().flat_map(|g| &mut g.steps)) {
+                stage.operation.arguments[0].clear();
+            }
+        }
+        let reply = propose(&mut link, host.workspace, input, "Add two pre-review checks.").await;
+        assert_eq!(reply["draft"]["state"], "pending");
+        let id = reply["draft"]["id"].as_str().unwrap();
+        let draft = farcooler_daemon::workflow_drafts::get(&host.service, id).unwrap().unwrap();
+        assert_eq!(draft.definition, expected);
+        assert_eq!(draft.adapter, edited.adapter);
+        assert_eq!(draft.expected_pin, selected);
+        assert_eq!(pin(&host), selected);
+
+        let card = asked(&host, card_of(&reply)).0.body;
+        for summary in [draft.summary.as_str(), card.split("\n\nTo publish").next().unwrap()] {
+            let fields = summary.split_once("Field changes (environment values hidden):\n").unwrap().1;
+            let paths: std::collections::BTreeSet<_> = fields.lines().map(|line| {
+                let path = line.split('`').nth(1).unwrap();
+                path.split('/').take(if path.starts_with("/adapter/") { 5 } else { 4 }).collect::<Vec<_>>().join("/")
+            }).collect();
+            assert_eq!(paths, ["/adapter/config/checks/1", "/adapter/config/checks/2",
+                "/definition/stages/2", "/definition/stages/3"].map(String::from).into(), "{fields}");
+        }
+    }
+    drop(link);
+    host.close().await;
+}
+
+#[tokio::test]
+async fn ov1468_refuses_a_foreign_operation_pin_even_when_the_adapter_changed() {
+    if as_a_person("ov1468_refuses_a_foreign_operation_pin_even_when_the_adapter_changed").await { return; }
+    let (dir, config) = configured().await;
+    let host = Host::open(dir.path()).await;
+    let live = ov1468_live(&host, &config);
+    let mut link = host.connect().await;
+    let mut edited = ov1468_with_checks(&live);
+    edited.definition.groups.get_mut("landing").unwrap().steps[0].operation.arguments[0] = "foreign-pin".into();
+    let action = Action::Propose { reason: "Check the draft.".into(), definition: edited.definition, adapter: Box::new(edited.adapter) };
+    let mut req = farcooler_transport::request(action.method());
+    req.target_resource_id = Some(bytes::Bytes::copy_from_slice(host.workspace.as_bytes()));
+    req.payload = Some(request::Payload::WorkflowCommand(pb::WorkflowCommand { schema: 1, json: serde_json::to_string(&action).unwrap() }));
+    let refusal = link.call(req).await.unwrap_err().to_string();
+    for text in ["landing", "base", "operation.arguments[0]", "adapter pin"] {
+        assert!(refusal.contains(text), "{refusal}");
+    }
+    assert!(farcooler_daemon::workflow_drafts::list(&host.service, Some(host.workspace)).is_empty());
+    drop(link);
+    host.close().await;
+}

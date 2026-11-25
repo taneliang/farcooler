@@ -1,0 +1,84 @@
+Draft d9c7ad1ec52d: Waiting for a person to approve it.
+A card in Needs Decision asks for approval. Nothing is published until a person answers it.
+
+The orchestrator’s reason: `Run quick checks and Clippy before review.`
+
+This changes the workflow you have now.
+
+Environment variables this changes, values hidden: check 2: `HOME` (new), `PATH` (new); check 3: `CARGO_BUILD_JOBS` (new), `HOME` (new), `PATH` (new).
+
+What runs as you:
+- The agent: `claude`, as it's set up on this runner.
+- `scripts/landing-gate`
+- `/usr/bin/env` `python3` `scripts/lane-gate.py` `--quick-only`
+- `/usr/bin/nice` `-n` `10` `/usr/bin/env` `python3` `scripts/lane-gate.py` `--clippy-only`
+
+Checks that must pass:
+- `/usr/bin/env` `python3` `scripts/lane-gate.py` `--quick-only` (with `HOME=(hidden)` (new), `PATH=(hidden)` (new)) (new)
+- `/usr/bin/nice` `-n` `10` `/usr/bin/env` `python3` `scripts/lane-gate.py` `--clippy-only` (with `CARGO_BUILD_JOBS=(hidden)` (new), `HOME=(hidden)` (new), `PATH=(hidden)` (new)) (new)
+- `scripts/landing-gate` (with `ANDROID_HOME=(hidden)`, `CARGO_BUILD_JOBS=(hidden)`, `HEAVY_LOAD_LIMIT=(hidden)`, `HOME=(hidden)`, `JAVA_HOME=(hidden)`, `PATH=(hidden)`)
+
+How code lands:
+- Finished tickets queue together, up to 32 at a time, and one push puts them on `main`.
+- Each ticket takes the route its changed files earn: some go straight to landing, some ask you first.
+- It waits for CI to pass on what landed. When CI fails only while setting up, fetching a toolchain or checking out, it reruns the failed jobs once first.
+
+Who approves:
+- An agent reviews each ticket, and it must give a verdict.
+- You approve tickets routed to `ask` before they land. Path rules (first match per file): `services/site/public/**`: `ask`; otherwise `push`. The most careful file decides.
+
+Models a step may run with:
+- `build`: `codex:gpt-6.1-terra`, `claude:sonnet`, `claude:opus`, `claude:haiku`, `codex:gpt-6.1-sol`, `codex:gpt-6.1-luna`, `codex:gpt-6.2-sol`
+- `gate-0`: `codex:gpt-6.2-sol`, `claude:opus`, `claude:sonnet`, `codex:gpt-6.1-sol`, `codex:gpt-6.1-terra`, `codex:gpt-6.1-luna`
+
+In full, exactly as it runs:
+- The agent is the `claude` preset. It runs , with environment `HOME=(hidden)`, `PATH=(hidden)`, for up to 3 h.
+- Its settings: `/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/workflow-claude-hooks-71c940a353627bea.json` (digest `wf1:71c940a353627bea46c91ad7cc00d14bc4b15a976abfbc4054402715b2097941`). Its project hooks: none. Its plugins: none.
+- Codex's hooks, copied into each worktree it runs in: `/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/workflow-codex-hooks-6676013d8597ebc6.json` (digest `wf1:6676013d8597ebc6e54321f98d50ecc05a51ce8238166f42fbca20e47082e31e`).
+- Its prompt: `Work this ticket to its acceptance items and within its constraints. Run the tests your change can affect. Commit your work on this branch, with a message that names the ticket, then end your turn.`.
+- Check 1 runs `/bin/sh` `-c` `scripts/landing-gate`, with environment `ANDROID_HOME=(hidden)`, `CARGO_BUILD_JOBS=(hidden)`, `HEAVY_LOAD_LIMIT=(hidden)`, `HOME=(hidden)`, `JAVA_HOME=(hidden)`, `PATH=(hidden)`, for up to 3 h.
+- Check 2 runs `/usr/bin/env` `python3` `scripts/lane-gate.py` `--quick-only`, with environment `HOME=(hidden)` (new), `PATH=(hidden)` (new), for up to 10 min.
+- Check 3 runs `/usr/bin/nice` `-n` `10` `/usr/bin/env` `python3` `scripts/lane-gate.py` `--clippy-only`, with environment `CARGO_BUILD_JOBS=(hidden)` (new), `HOME=(hidden)` (new), `PATH=(hidden)` (new), for up to 3 h.
+- No reviewer command.
+- CI is the `CI` workflow on `push` in `taneliang/farcooler` on GitHub, read by running `/bin/sh` `-c` `out=$("$CI_GH" api "repos/$CI_REPOSITORY/actions/runs?head_sha=$FARCOOLER_CANDIDATE&event=$CI_EVENT&per_page=50" --jq '[.workflow_runs[] | select(.name == env.CI_WORKFLOW)] | max_by(.id) // empty | {binding: env.FARCOOLER_OPERATION_BINDING, repository: env.CI_REPOSITORY, run: {id, name, head_sha, status, conclusion, html_url, created_at, display_title, event, updated_at}}') || exit 1\n[ -n "$out" ] || exit 1\nprintf '%s\n' "$out" > "$FARCOOLER_RECEIPT"`, with environment `CI_EVENT=(hidden)`, `CI_GH=(hidden)`, `CI_REPOSITORY=(hidden)`, `CI_WORKFLOW=(hidden)`, `HOME=(hidden)`, `PATH=(hidden)`, for up to 2 min.
+- Code is read from `/Users/e-liang/Dev/overnight`. Each ticket starts from `refs/heads/main` on the landing remote `ssh://git@github.com/taneliang/farcooler.git` as it is when the ticket starts. The configured baseline is `3f78754f936855710dfec920fe3d492f879b610d`.
+- Code lands on `refs/heads/main` at `ssh://git@github.com/taneliang/farcooler.git`, as job `landing-main`. The push signs in with your own git and ssh settings.
+- Field changes (environment values hidden):
+- `/adapter/config/checks/1/argv/0`: (absent) → `"/usr/bin/env"`
+- `/adapter/config/checks/1/argv/1`: (absent) → `"python3"`
+- `/adapter/config/checks/1/argv/2`: (absent) → `"scripts/lane-gate.py"`
+- `/adapter/config/checks/1/argv/3`: (absent) → `"--quick-only"`
+- `/adapter/config/checks/1/environment/HOME`: (absent) → (hidden)
+- `/adapter/config/checks/1/environment/PATH`: (absent) → (hidden)
+- `/adapter/config/checks/1/timeout_ms`: (absent) → `600000`
+- `/adapter/config/checks/2/argv/0`: (absent) → `"/usr/bin/nice"`
+- `/adapter/config/checks/2/argv/1`: (absent) → `"-n"`
+- `/adapter/config/checks/2/argv/2`: (absent) → `"10"`
+- `/adapter/config/checks/2/argv/3`: (absent) → `"/usr/bin/env"`
+- `/adapter/config/checks/2/argv/4`: (absent) → `"python3"`
+- `/adapter/config/checks/2/argv/5`: (absent) → `"scripts/lane-gate.py"`
+- `/adapter/config/checks/2/argv/6`: (absent) → `"--clippy-only"`
+- `/adapter/config/checks/2/environment/CARGO_BUILD_JOBS`: (absent) → (hidden)
+- `/adapter/config/checks/2/environment/HOME`: (absent) → (hidden)
+- `/adapter/config/checks/2/environment/PATH`: (absent) → (hidden)
+- `/adapter/config/checks/2/timeout_ms`: (absent) → `10800000`
+- `/definition/stages/2/id`: (absent) → `"quick-checks"`
+- `/definition/stages/2/kind`: (absent) → `"Check"`
+- `/definition/stages/2/limit`: (absent) → `4`
+- `/definition/stages/2/max_attempts`: (absent) → `1`
+- `/definition/stages/2/operation/adapter_version`: (absent) → `"coding-check/v1"`
+- `/definition/stages/2/operation/arguments/0`: (absent) → `"(adapter pin)"`
+- `/definition/stages/2/operation/arguments/1`: (absent) → `"1"`
+- `/definition/stages/2/operation/environment`: (absent) → {}
+- `/definition/stages/2/progression`: (absent) → `"Automatic"`
+- `/definition/stages/2/routes/rejected/Step`: (absent) → `"build"`
+- `/definition/stages/3/id`: (absent) → `"clippy"`
+- `/definition/stages/3/kind`: (absent) → `"Check"`
+- `/definition/stages/3/limit`: (absent) → `4`
+- `/definition/stages/3/max_attempts`: (absent) → `1`
+- `/definition/stages/3/operation/adapter_version`: (absent) → `"coding-check/v1"`
+- `/definition/stages/3/operation/arguments/0`: (absent) → `"(adapter pin)"`
+- `/definition/stages/3/operation/arguments/1`: (absent) → `"2"`
+- `/definition/stages/3/operation/environment`: (absent) → {}
+- `/definition/stages/3/progression`: (absent) → `"Automatic"`
+- `/definition/stages/3/routes/rejected/Step`: (absent) → `"build"`
