@@ -344,6 +344,12 @@ impl WebRunner {
         Ok(self.0.session.web_board_intent(workspace, intent).await.map_err(|e| web_failure(e.into()))?.to_string())
     }
 
+    pub async fn web_review(&self, workspace: &str, ticket: &str, request: &str) -> Result<String, JsValue> {
+        let (workspace, ticket) = (board_id(workspace)?, board_id(ticket)?);
+        let request = serde_json::from_str(request).map_err(|e| failure("protocol", &e.to_string()))?;
+        Ok(self.0.session.web_review(workspace, ticket, request).await.map_err(|e| web_failure(e.into()))?.to_string())
+    }
+
     /// `terminal.list`, as JSON (`work_view::Terminal`).
     pub async fn terminals(&self) -> Result<String, JsValue> {
         let list = self.0.terminals().await.map_err(web_failure)?;
@@ -555,4 +561,15 @@ pub fn ticket_form() -> String {
 #[wasm_bindgen(js_name = boardFailure)]
 pub fn board_failure(word: &str, code: &str, what: &str) -> String {
     farcooler_client::web_board::failure(word, code, what).into()
+}
+
+
+#[wasm_bindgen(js_name = reviewFailure)]
+pub fn review_failure(word: &str, code: &str, what: &str) -> String {
+    farcooler_client::web_review::failure(word, code, what).into()
+}
+
+#[wasm_bindgen(js_name = reviewApprovalResult)]
+pub fn review_approval_result(raw: &str) -> String {
+    farcooler_client::web_review::approval_result(raw).into()
 }

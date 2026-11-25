@@ -1,3 +1,4 @@
+import type { ReviewRoute } from './review-screen'
 import { destination, linkedRunner } from './work-screen'
 import type { Page, Slot, Tab } from './workspace-layout'
 
@@ -8,6 +9,7 @@ export interface Route {
   terminal?: string
   worktree?: string
   boardTask?: string
+  review?: ReviewRoute
   slot?: Slot
   ticket?: { runner: string; id: string; key: string; title: string }
 }
@@ -18,6 +20,7 @@ export function workspaceUrl(runner: string, route: Route): URL {
   if (page === 'board') {
     url.searchParams.set('view', 'board')
     if (boardTask) url.searchParams.set('ticket', boardTask)
+    if (route.review) url.searchParams.set('review', route.review.view === 'changes' ? 'changes' : 'files')
   } else {
     const hash = new URLSearchParams({ page })
     if (ticket) hash.set('ticket', ticket.id)
@@ -63,6 +66,12 @@ export class WorkspaceHistory {
     this.show(route)
   }
 
+  rememberReview(ticket: string, review: ReviewRoute): void {
+    if (this.route.page !== 'board' || this.route.boardTask !== ticket || !this.route.review) return
+    this.route = { ...this.route, review }
+    this.write(false)
+  }
+
   leave(): void {
     if (this.leaving) return
     // Closing follows the browser's actual history when the entry has a parent.
@@ -83,7 +92,11 @@ export class WorkspaceHistory {
     const params = new URLSearchParams(location.search)
     const space = params.get('workspace') ?? this.fallback.space
     if (params.get('view') === 'board') {
-      return { space, page: 'board', tab: 'board', boardTask: params.get('ticket') ?? undefined }
+      const boardTask = params.get('ticket') ?? undefined
+      const view = params.get('review')
+      const review: ReviewRoute | undefined = view === 'changes' ? { view } :
+        view === 'files' ? { view: 'directory', path: '' } : undefined
+      return { space, page: 'board', tab: 'board', boardTask, ...(boardTask && review ? { review } : {}) }
     }
     return { ...this.fallback, space, terminal: params.get('terminal') ?? undefined, worktree: params.get('worktree') ?? undefined }
   }

@@ -157,7 +157,11 @@ impl ChangeSet {
 
 /// Resolve the merge base of `base_ref` and HEAD.
 pub async fn merge_base(repo: &Path, base_ref: &str) -> Result<String> {
-    let r = git(repo, &["merge-base", base_ref, "HEAD"]).await?;
+    merge_base_of(repo, base_ref, "HEAD").await
+}
+
+async fn merge_base_of(repo: &Path, base_ref: &str, head_commit: &str) -> Result<String> {
+    let r = git(repo, &["merge-base", base_ref, head_commit]).await?;
     if !r.ok {
         return Err(DomainError::InvalidArgument { what: "base_ref" });
     }
@@ -251,6 +255,10 @@ pub fn reflog_commits(text: &str) -> Vec<i64> {
 /// first commit of an orphan branch reports everything it added rather than
 /// nothing.
 pub async fn commits_since(repo: &Path, base_commit: &str) -> Result<Vec<Commit>> {
+    commits_between(repo, base_commit, "HEAD").await
+}
+
+async fn commits_between(repo: &Path, base_commit: &str, head_commit: &str) -> Result<Vec<Commit>> {
     // A record separator that cannot occur in a commit message, and a field
     // separator likewise. %x1e / %x1f are the ASCII record and unit separators,
     // which is what they are for.
@@ -270,7 +278,7 @@ pub async fn commits_since(repo: &Path, base_commit: &str) -> Result<Vec<Commit>
     const RENAMES: &str = "--find-renames";
     const FIRST_PARENT: &str = "--diff-merges=first-parent";
 
-    let range = format!("{base_commit}..HEAD");
+    let range = format!("{base_commit}..{head_commit}");
     let mut args = vec![
         "log", "--reverse", "--no-color", "--shortstat", RENAMES, FIRST_PARENT, FORMAT, &range,
     ];
@@ -344,19 +352,23 @@ fn parse_shortstat(text: &str) -> (u32, u32, u32) {
     (files, ins, del)
 }
 
-/// Per-file counts for `base_commit..HEAD`.
+/// Per-file counts between the two commits.
 ///
 /// `-z` because a path is bytes, not a line: one containing a newline or a quote
 /// breaks the ordinary format, and `core.quotePath` mangles anything non-ASCII.
 pub async fn numstat(repo: &Path, base_commit: &str) -> Result<Vec<FileChange>> {
+    numstat_between(repo, base_commit, "HEAD").await
+}
+
+async fn numstat_between(repo: &Path, base_commit: &str, head_commit: &str) -> Result<Vec<FileChange>> {
     let counts = git_bytes(
         repo,
-        &["diff", "--numstat", "-z", "--find-renames", base_commit, "HEAD"],
+        &["diff", "--numstat", "-z", "--find-renames", base_commit, head_commit],
     )
     .await?;
     let names = git_bytes(
         repo,
-        &["diff", "--name-status", "-z", "--find-renames", base_commit, "HEAD"],
+        &["diff", "--name-status", "-z", "--find-renames", base_commit, head_commit],
     )
     .await?;
     if !counts.ok || !names.ok {
@@ -927,9 +939,9 @@ pub async fn change_set(
     }
     let head_commit = head.stdout.trim().to_string();
 
-    let base_commit = merge_base(repo, base_ref).await?;
-    let commits = commits_since(repo, &base_commit).await?;
-    let files = numstat(repo, &base_commit).await?;
+    let base_commit = merge_base_of(repo, base_ref, &head_commit).await?;
+    let commits = commits_between(repo, &base_commit, &head_commit).await?;
+    let files = numstat_between(repo, &base_commit, &head_commit).await?;
     // Status first, then the counts `git status` has none of. Two reads for one
     // answer, the same way `numstat` above is two.
     let mut working_tree = working_tree(repo).await?;

@@ -1,3 +1,4 @@
+import { mountReview, type ReviewLinks, type ReviewOptions, type ReviewRoute } from './review-screen'
 import type { WorkError } from './work-screen'
 
 type Card = { id: string; key: string; title: string; unread?: string }
@@ -25,6 +26,7 @@ type Ticket = {
   mark: number | null
   agent?: Link
   worktree?: Link
+  review?: ReviewLinks
   sections: { label: string; lines?: string[]; criteria?: { text: string; met: boolean }[] }[]
 }
 type Runner = {
@@ -44,6 +46,7 @@ interface Options {
   openAgent(id: string): void
   openWorktree(id: string): void
   openActivity(card: Card): void
+  review?: ReviewOptions
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, className?: string): HTMLElementTagNameMap[K] {
@@ -77,7 +80,13 @@ export function mountBoard(options: Options) {
   const notice = el('p', '', 'plan-notice')
   notice.setAttribute('role', 'status')
   notice.hidden = true
-  root.replaceChildren(notice, body)
+  const reviewBody = el('div')
+  const review = options.review && mountReview(reviewBody, root, options.review)
+  const listeners = new AbortController()
+  window.addEventListener('pagehide', () => review?.remember(), { signal: listeners.signal })
+  root.replaceChildren(notice, body, reviewBody)
+  let reviewRoute: ReviewRoute | undefined
+  let reviewLinks: ReviewLinks | null = null
   let workspace: string | null = null
   let repository: string | null = null
   let task: string | null = null
@@ -92,6 +101,8 @@ export function mountBoard(options: Options) {
 
   function select(id: string | null): void {
     if (dialog.open) dialog.close()
+    review?.close()
+    reviewLinks = null
     task = id
     last = ''
     markedThrough = null
@@ -110,6 +121,10 @@ export function mountBoard(options: Options) {
   async function refresh(poll = false): Promise<void> {
     const runner = options.current()
     if (!front || !workspace || !repository || busy || (poll && (reading || dialog.open))) return
+    if (reviewRoute && reviewLinks && task) {
+      review?.show(workspace, task, reviewRoute, reviewLinks)
+      return
+    }
     if (!runner) {
       report(options.failure(new Error('closed')))
       return
@@ -128,7 +143,9 @@ export function mountBoard(options: Options) {
       last = raw
       if (task) {
         const ticket = JSON.parse(raw) as Ticket
+        reviewLinks = ticket.review ?? null
         renderTicket(ticket)
+        if (reviewRoute && reviewLinks) review?.show(workspace, task, reviewRoute, reviewLinks)
         if (ticket.mark !== null && ticket.mark !== markedThrough) {
           markedThrough = ticket.mark
           void runner.board_intent(workspace, JSON.stringify({ action: 'mark', task, through: ticket.mark }))
@@ -227,6 +244,11 @@ export function mountBoard(options: Options) {
       const tree = view.worktree
       toolbar.append(anchor(tree.label, options.href(tree.id, 'worktree'), () => options.openWorktree(tree.id)))
     }
+    if (view.review && options.review) {
+      const nav = options.review
+      if (view.review.files) toolbar.append(button(view.review.files, () => nav.navigate(view.task.id, { view: 'directory', path: '' }), true))
+      if (view.review.changes) toolbar.append(button(view.review.changes, () => nav.navigate(view.task.id, { view: 'changes' }), true))
+    }
     content.append(back, el('p', [view.task.key, view.status].filter(Boolean).join(' · '), 'board-key'), heading, toolbar)
     for (const section of view.sections) {
       if (!section.lines?.length && !section.criteria?.length) continue
@@ -299,8 +321,9 @@ export function mountBoard(options: Options) {
     dialog.showModal()
   }
 
-  function show(on: boolean, ws: string | null = null, repo: string | null = null, id: string | null = null): void {
-    if (on === front && ws === workspace && repo === repository && id === task) return
+  function show(on: boolean, ws: string | null = null, repo: string | null = null, id: string | null = null, route?: ReviewRoute): void {
+    const sameTicket = on === front && ws === workspace && repo === repository && id === task
+    if (sameTicket && JSON.stringify(route) === JSON.stringify(reviewRoute)) return
     const wasFront = front
     front = on
     workspace = ws
@@ -309,14 +332,20 @@ export function mountBoard(options: Options) {
       clearInterval(timer)
       revision++
       reading = false
+      review?.close()
       if (dialog.open) dialog.close()
       return
     }
-    select(id)
+    reviewRoute = route
+    if (!route) review?.close()
+    body.hidden = !!route
+    reviewBody.hidden = !route
+    if (sameTicket) void refresh()
+    else select(id)
     if (!wasFront) timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') void refresh(true)
     }, 5000)
   }
 
-  return { show, dispose: () => show(false) }
+  return { show, dispose: () => { show(false); listeners.abort() } }
 }

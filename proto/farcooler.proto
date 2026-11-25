@@ -2954,6 +2954,11 @@ message FileDiff {
   // The commit had more than one parent and this is its first-parent view.
   bool first_parent_of_merge = 6;
   uint64 change_set_version = 7;
+  // Git identities of the change set used to choose the comparison. These
+  // survive concurrent refreshes of the runner's cache generation.
+  string base_commit = 8;
+  string head_commit = 9;
+  string worktree_digest = 10;
 }
 
 // ---------------------------------------------------------------------------

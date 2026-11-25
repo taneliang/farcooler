@@ -157,6 +157,23 @@ async fn staged_and_unstaged_are_different_views_of_the_same_file() {
 }
 
 #[tokio::test]
+async fn a_filename_with_a_glob_character_selects_only_the_literal_file() {
+    let dir = repo();
+    let p = dir.path();
+    write(p, "section[1].txt", "literal old\n");
+    write(p, "section1.txt", "other old\n");
+    run(p, &["add", "."]);
+    run(p, &["commit", "-qm", "both files"]);
+    write(p, "section[1].txt", "literal new\n");
+    write(p, "section1.txt", "other new\n");
+
+    let patch = file_diff(p, &Selector::Local, "section[1].txt", 0, 0).await.expect("diff");
+    let text: Vec<_> = patch.diff.hunks.iter().flat_map(|h| &h.lines)
+        .map(|line| line.text.as_str()).collect();
+    assert_eq!(text, ["literal old", "literal new"]);
+}
+
+#[tokio::test]
 async fn a_range_diff_covers_the_whole_branch_not_just_the_last_commit() {
     let dir = repo();
     let p = dir.path();
@@ -168,7 +185,12 @@ async fn a_range_diff_covers_the_whole_branch_not_just_the_last_commit() {
     write(p, "shared.txt", "one\nA\nB\n");
     run(p, &["commit", "-qam", "second"]);
 
-    let r = file_diff(p, &Selector::Range { base_commit: base }, "shared.txt", 0, 0)
+    let candidate = capture(p, &["rev-parse", "HEAD"]);
+    write(p, "shared.txt", "one\nA\nC\n");
+    run(p, &["commit", "-qam", "later candidate"]);
+
+    let selector = Selector::PinnedRange { base_commit: base, head_commit: candidate };
+    let r = file_diff(p, &selector, "shared.txt", 0, 0)
         .await
         .expect("diff");
     let added: Vec<String> = r.diff.hunks[0]
@@ -179,6 +201,7 @@ async fn a_range_diff_covers_the_whole_branch_not_just_the_last_commit() {
         .collect();
     assert!(added.contains(&"A".to_string()));
     assert!(added.contains(&"B".to_string()), "both commits' work is in the branch view");
+    assert!(!added.contains(&"C".to_string()), "the patch stays on the candidate after HEAD moves");
 }
 
 #[tokio::test]

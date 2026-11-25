@@ -29,6 +29,8 @@ const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 pub enum Selector {
     /// The whole branch: merge base to HEAD.
     Range { base_commit: String },
+    /// The whole branch as observed by the change set.
+    PinnedRange { base_commit: String, head_commit: String },
     /// One commit against its first parent.
     Commit { sha: String },
     /// Index against HEAD.
@@ -76,6 +78,9 @@ async fn diff_args(repo: &Path, selector: &Selector) -> Result<(Vec<String>, boo
         Selector::Range { base_commit } => {
             (vec![base_commit.clone(), "HEAD".to_string()], false)
         }
+        Selector::PinnedRange { base_commit, head_commit } => {
+            (vec![base_commit.clone(), head_commit.clone()], false)
+        }
         Selector::Commit { sha } => {
             let merge = is_merge(repo, sha).await?;
             // `^1` rather than `^`: identical for a single-parent commit, and
@@ -108,9 +113,10 @@ async fn is_untracked(repo: &Path, path: &str) -> bool {
     if !confined {
         return false;
     }
+    let pathspec = format!(":(literal){path}");
     match git_bytes(
         repo,
-        &["ls-files", "--others", "--exclude-standard", "-z", "--full-name", "--", path],
+        &["ls-files", "--others", "--exclude-standard", "-z", "--full-name", "--", &pathspec],
     )
     .await
     {
@@ -234,8 +240,11 @@ pub async fn file_diff(
     for a in &rev_args {
         args.push(a);
     }
+    // The returned patch is anchored to exactly this file. A Git pathspec
+    // metacharacter in its name must not include another file in the reply.
+    let pathspec = format!(":(literal){path}");
     args.push("--");
-    args.push(path);
+    args.push(&pathspec);
 
     let patch = if let Some(p) = untracked_patch {
         p

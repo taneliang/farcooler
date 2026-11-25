@@ -24,8 +24,12 @@ impl Session {
             None
         };
         let value = crate::tasks_json::task_json(task, super::now_millis());
-        Ok(web_board::ticket(&value, self.granted_scope(), self.can(capability::BOARD_READS),
-            start.as_ref().map(|s| s.guard.as_str()), web_board::destinations(task, &terminals, &trees)))
+        let destinations = web_board::destinations(task, &terminals, &trees);
+        let mut ticket = web_board::ticket(&value, self.granted_scope(), self.can(capability::BOARD_READS),
+            start.as_ref().map(|s| s.guard.as_str()), destinations);
+        ticket["review"] = crate::web_review::links(self.granted_scope(), destinations.1.is_some(),
+            self.can(capability::WORKTREE_FILES), self.can(capability::CHANGES));
+        Ok(ticket)
     }
 
     pub async fn web_board_intent(&self, workspace: Uuid, intent: Intent) -> Result<Value, SessionError> {
@@ -106,7 +110,7 @@ fn ticket_id(reply: result::Value) -> Result<Value, SessionError> {
     }
 }
 
-fn on_board(detail: &pb::TaskDetail, workspace: Uuid) -> Result<&pb::Task, SessionError> {
+pub(super) fn on_board(detail: &pb::TaskDetail, workspace: Uuid) -> Result<&pb::Task, SessionError> {
     detail.task.as_ref().filter(|task| task.workspace_id.as_ref() == workspace.as_bytes())
         .ok_or_else(|| refused(ErrorCode::NotFound, ""))
 }

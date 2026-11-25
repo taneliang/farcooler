@@ -23,7 +23,7 @@
 
 import { openWorkflow, installWorkflowPort } from './workflow-view'
 import { WorkflowSessionPort } from './workflow-session'
-import init, { connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, needsYouView, openReply, passkeyKeyLine, planView, recoveryView, registrationData, registrationProof, rpId, workFailure, workView, boardFailure, ticketForm, workspaceLayout, workspaceOrchestrator, workspacePageAvailable, type WebRunner } from 'fc-web'
+import init, { connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, needsYouView, openReply, passkeyKeyLine, planView, recoveryView, registrationData, registrationProof, rpId, workFailure, workView, boardFailure, reviewFailure, reviewApprovalResult, ticketForm, workspaceLayout, workspaceOrchestrator, workspacePageAvailable, type WebRunner } from 'fc-web'
 
 import { compareWords, connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, needsYouFailure, registerFailure, restoreFailure, runnerDeferred, runnerStopped, saveFailure, sealedRefusal, unreachable } from './copy'
 import { askForCopy, assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
@@ -856,6 +856,17 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     },
     openWorktree: id => navigation?.navigate({ space: chosenSpace, page: 'terminals', tab: 'terminals', worktree: id }),
     openActivity: card => openCard(target.id, card),
+    review: {
+      current: liveRunner,
+      navigate: (boardTask, review) => navigation?.navigate({ space: chosenSpace, page: 'board', tab: 'board', boardTask, review }),
+      resolve: (boardTask, review) => navigation?.rememberReview(boardTask, review),
+      back: boardTask => navigation?.navigate({ space: chosenSpace, page: 'board', tab: 'board', boardTask }),
+      failure: e => reviewFailure(e.message, e.code ?? '', e.what ?? ''),
+      approvalResult: reviewApprovalResult,
+      workflow: workflowPort,
+      openWorkflow: () => controller.run('workflow'),
+      storageKey: scope + ':review:',
+    },
   })
   ticketBoard = board
   planTab = startPlanTab($('plan'), target.label, liveRunner, chosenSpace, {
@@ -1007,7 +1018,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
         return
       }
       inventoryWorkspace = route.space
-      board.show(route.page === 'board', view.workspace, view.repository, route.boardTask)
+      board.show(route.page === 'board', view.workspace, view.repository, route.boardTask, route.review)
       presentLayout(route.page)
       const pending = pendingTerminal
       pendingTerminal = undefined
@@ -1084,7 +1095,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     for (const tab of ['terminals', 'needs', 'board', 'plan'] as const) {
       $(`show-${tab}`).setAttribute('aria-pressed', String(tab === route.page))
     }
-    board.show(route.page === 'board', changedSpace ? null : currentWork.workspace, currentWork.repository, route.boardTask)
+    board.show(route.page === 'board', changedSpace ? null : currentWork.workspace, currentWork.repository, route.boardTask, route.review)
     if (changedSpace || pendingTerminal || changedWorktree) void screen?.show(route.space, pendingTerminal?.id, route.worktree)
     else if (inventoryWorkspace === route.space) presentLayout(route.page)
     planTab?.show(route.page === 'plan')

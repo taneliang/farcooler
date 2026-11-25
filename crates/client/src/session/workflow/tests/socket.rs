@@ -13,6 +13,10 @@ struct Harness {
 impl Drop for Harness { fn drop(&mut self) { let _=self.stop.send(true);self.server.abort();self.worker.abort(); } }
 async fn start() -> Harness { start_seeded(|_, _| {}).await }
 async fn start_seeded(seed: impl FnOnce(&std::path::Path, Uuid)) -> Harness {
+    start_with_service(|path, workspace, _| seed(path, workspace)).await
+}
+
+async fn start_with_service(seed: impl FnOnce(&std::path::Path, Uuid, &Service)) -> Harness {
     let dir=tempfile::Builder::new().prefix("wf927").tempdir_in("/tmp").unwrap();
     let mut runtime=Runtime::create(&dir.path().join("runtime")).await.unwrap();
     let handle=runtime.command_handle(&runtime.controller()).unwrap();
@@ -21,7 +25,7 @@ async fn start_seeded(seed: impl FnOnce(&std::path::Path, Uuid)) -> Harness {
     let root=service.store.create_repository_root(service.host_id,"/fixture",0).unwrap();
     let repo=service.store.create_repository(service.host_id,root.id,"fixture","/fixture/.git","").unwrap();
     let workspace=service.store.ensure_main_workspace(repo.id).unwrap().id;
-    seed(&dir.path().join("runtime/workflow.sqlite"), workspace);
+    seed(&dir.path().join("runtime/workflow.sqlite"), workspace, &service);
     let worker=tokio::spawn(async move {runtime.run(rx).await.unwrap()});
     service.store.bind_owner_device("phone",None).unwrap();
     let socket=dir.path().join("d.sock"); let listener=UnixListenerServer::bind(&socket).unwrap();
@@ -453,3 +457,5 @@ async fn web_board_collects_a_workspace_bigger_than_a_control_response() {
     assert_eq!(rows[0]["title"], "Ticket 0");
     assert_eq!(rows[count - 1]["title"], format!("Ticket {}", count - 1));
 }
+
+mod web_review;

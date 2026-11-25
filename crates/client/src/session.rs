@@ -25,6 +25,7 @@ use crate::ssh;
 
 mod board_reads;
 mod web_board;
+mod web_review;
 mod work;
 pub mod workflow;
 mod link;
@@ -1074,6 +1075,12 @@ impl Session {
         worktree: Uuid,
         fresh: bool,
     ) -> Result<serde_json::Value, SessionError> {
+        Ok(change_set_json(&self.change_set_record(worktree, fresh).await?))
+    }
+
+    async fn change_set_record(
+        &self, worktree: Uuid, fresh: bool,
+    ) -> Result<farcooler_protocol::v1::ChangeSet, SessionError> {
         let payload =
             request::Payload::ChangeSetRequest(farcooler_protocol::v1::ChangeSetRequest {
                 worktree_id: bytes::Bytes::copy_from_slice(worktree.as_bytes()),
@@ -1081,7 +1088,7 @@ impl Session {
                 fresh,
             });
         match self.value("changes.change_set", None, Some(payload)).await? {
-            result::Value::ChangeSet(cs) => Ok(change_set_json(&cs)),
+            result::Value::ChangeSet(cs) => Ok(cs),
             other => Err(wrong("change_set", &other)),
         }
     }
@@ -1099,6 +1106,12 @@ impl Session {
         scope: &str,
         context: u32,
     ) -> Result<serde_json::Value, SessionError> {
+        Ok(file_diff_json(&self.file_diff_record(worktree, path, scope, 0, context).await?))
+    }
+
+    async fn file_diff_record(
+        &self, worktree: Uuid, path: &str, scope: &str, from_hunk: u32, context: u32,
+    ) -> Result<farcooler_protocol::v1::FileDiff, SessionError> {
         use farcooler_protocol::v1::diff_selector::Kind;
         let kind = match scope {
             "local" => Kind::Local(farcooler_protocol::v1::Empty {}),
@@ -1113,11 +1126,11 @@ impl Session {
             worktree_id: bytes::Bytes::copy_from_slice(worktree.as_bytes()),
             selector: Some(farcooler_protocol::v1::DiffSelector { kind: Some(kind) }),
             path: path.to_string(),
-            from_hunk: 0,
+            from_hunk,
             context,
         });
         match self.value("changes.file_diff", None, Some(payload)).await? {
-            result::Value::FileDiff(d) => Ok(file_diff_json(&d)),
+            result::Value::FileDiff(d) => Ok(d),
             other => Err(wrong("file_diff", &other)),
         }
     }
@@ -1353,10 +1366,17 @@ impl Session {
         &self,
         append: farcooler_protocol::v1::TaskNoteAppend,
     ) -> Result<serde_json::Value, SessionError> {
+        Ok(crate::tasks_json::note_json(&self.task_note_record(append).await?))
+    }
+
+    async fn task_note_record(
+        &self,
+        append: farcooler_protocol::v1::TaskNoteAppend,
+    ) -> Result<farcooler_protocol::v1::TaskNote, SessionError> {
         require(self.capabilities(), farcooler_protocol::capability::TASKS, "task.note")?;
         let task = uuid_of(&append.task_id);
         match self.value("task.note", Some(task), Some(request::Payload::TaskNoteAppend(append))).await? {
-            result::Value::TaskNote(n) => Ok(crate::tasks_json::note_json(&n)),
+            result::Value::TaskNote(n) => Ok(n),
             other => Err(wrong("task_note", &other)),
         }
     }

@@ -40,6 +40,7 @@ mod task_board_view;
 pub use task_board_view::web as web_board;
 pub mod tasks_json;
 pub mod usage_json;
+pub mod web_review;
 pub mod work_view;
 pub mod workspaces_json;
 pub mod workflow_presentation;

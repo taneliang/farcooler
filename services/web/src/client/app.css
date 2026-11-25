@@ -385,3 +385,32 @@ button.danger { color: var(--danger); }
 }
 .board-ticket > a, .board-actions a { color: var(--button-bg); }
 .board-ticket label { display: flex; align-items: baseline; }
+
+.worktree-review { max-width: 1450px; margin: 0 auto; }
+.worktree-review nav { margin-bottom: 18px; }
+.worktree-review h2 { font-size: 16px; }
+.review-branch { margin-bottom: 0; }
+.review-columns { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(0, 3fr); gap: 16px; margin-top: 16px; align-items: start; }
+.review-files { list-style: none; padding: 0; margin: 12px 0; border: 1px solid var(--rule); border-radius: 8px; }
+.review-files li { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 4px 8px; }
+.review-files li + li { border-top: 1px solid var(--rule); }
+.review-files button { text-align: start; overflow-wrap: anywhere; }
+.review-files [aria-current="true"], .worktree-review [aria-pressed="true"] { outline: 1px solid var(--button-bg); }
+.review-preview, .review-diff { background: var(--bg-alt); border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; }
+.review-preview { white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; tab-size: 4; }
+.review-diff > header, .review-diff > p { padding-inline: 10px; }
+.review-diff > button { margin: 8px; }
+.review-hunk { background: var(--card); color: var(--text-2); padding: 6px 10px; font-family: monospace; }
+.review-line { display: grid; grid-template-columns: minmax(56px, auto) 1ch minmax(0, 1fr); gap: 6px; align-items: baseline; padding: 1px 8px 1px 2px; }
+.review-line code { white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4; }
+.review-line.added { background: color-mix(in srgb, #34a56a 15%, var(--bg-alt)); }
+.review-line.removed { background: color-mix(in srgb, #e05561 14%, var(--bg-alt)); }
+.review-number { background: transparent; color: var(--text); padding: 4px 2px; font: 11px monospace; white-space: pre; }
+.review-note { margin: 8px 10px; padding: 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--card); }
+.review-note p { white-space: pre-wrap; margin: 4px 0 0; }
+.review-note label { display: grid; gap: 4px; }
+.review-note textarea { width: 100%; min-height: 70px; resize: vertical; background: var(--bg); color: var(--text); margin-bottom: 6px; }
+@media (max-width: 680px) {
+  .review-columns { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .review-columns .review-files { max-height: 220px; overflow: auto; }
+}

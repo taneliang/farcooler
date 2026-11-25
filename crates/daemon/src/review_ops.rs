@@ -234,7 +234,7 @@ pub async fn file_diff(svc: &Service, req: &pb::FileDiffRequest) -> Result<pb::F
         Some(pb::diff_selector::Kind::Staged(_)) => Selector::Staged,
         Some(pb::diff_selector::Kind::Unstaged(_)) => Selector::Unstaged,
         Some(pb::diff_selector::Kind::Local(_)) => Selector::Local,
-        _ => Selector::Range { base_commit: c.set.base_commit.clone() },
+        _ => Selector::PinnedRange { base_commit: c.set.base_commit.clone(), head_commit: c.set.head_commit.clone() },
     };
 
     let r =
@@ -264,6 +264,9 @@ pub async fn file_diff(svc: &Service, req: &pb::FileDiffRequest) -> Result<pb::F
         }),
         first_parent_of_merge: r.first_parent_of_merge,
         change_set_version: c.version,
+        base_commit: c.set.base_commit.clone(),
+        head_commit: c.set.head_commit.clone(),
+        worktree_digest: c.set.worktree_digest.clone(),
     })
 }
 
