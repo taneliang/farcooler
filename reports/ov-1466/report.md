@@ -42,6 +42,28 @@ still return a successful response within one second while the stall is held.
   passed on macOS. The daemon-layer, file-size-budget, and shared-core lints
   passed.
 
+## Landing-gate follow-up
+
+The landing gate reported 2,761 lines in `crates/client/src/session.rs`
+against a 2,744-line ceiling. The inline tests now live in
+`crates/client/src/session/tests.rs` under the same Rust module path.
+`session.rs` is 2,036 lines in this worktree, and the generated ceiling
+is 2,086. The wire quick checks pass, including the file-size-budget
+self-test and repository scan.
+
+On macOS, the client suite passed 408 tests, including all 30 in the moved
+module, with one existing ignored test. All 66 focused daemon tests passed
+with tmux 3.8, including the named regression. Both suites passed the tmux
+leak check. Clippy passed with warnings denied for all targets of the
+client and daemon, including the client `tailcat` and daemon
+`tailcat-helper` and `tailcat` configurations.
+
+In `fcdiag` on Linux aarch64 with tmux 3.6, all 30 moved client tests
+passed. The fresh daemon regression runs stopped during compilation. The
+VM logged an out-of-memory kill for the first attempt, and the single-worker
+retry also ended with rustc receiving SIGKILL. The daemon source matches the
+Linux-verified candidate `2ed5cee1b` documented above.
+
 ## Main CI
 
 The `CI` push run on `main` for landing commit
