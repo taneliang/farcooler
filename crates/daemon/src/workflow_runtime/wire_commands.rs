@@ -699,6 +699,27 @@ mod tests {
         assert_eq!(decoded["state"], state);
     }
     #[test]
+    fn legacy_workflow_keeps_waiting_positions_when_prior_runs_fill_the_frame() {
+        let reply = serde_json::json!({
+            "schema": 1, "stops": {},
+            "state": {"schema": 1, "workspace": "fixture", "revision": 17, "epoch": 2,
+                "items": {"waiting": {
+                    "run": "current", "definition": coding_definition(false), "phase": "WaitingSlot",
+                    "history": [{"run": "prior", "reason": "x".repeat(PLAN_WORKFLOW_BYTES)}],
+                    "execution": {"phase": "WaitingSlot", "position": 2}
+                }}},
+            "places": {"waiting": [{"item": "waiting", "position": 2}]}
+        });
+        let encoded = encode_legacy_get(reply);
+        assert!(encoded.len() <= PLAN_WORKFLOW_BYTES);
+        let decoded: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        let item = &decoded["state"]["items"]["waiting"];
+        assert_eq!(item["run"], "current");
+        assert!(item.get("history").is_none());
+        assert_eq!(item["execution"]["position"], 2);
+        assert_eq!(decoded["places"]["waiting"][0]["position"], 2);
+    }
+    #[test]
     fn workflow_get_summary_hides_definitions_and_finished_groups_without_changing_tickets() {
         let input = serde_json::json!({"configuration":{"pin":"config", "definition":{"stages":[]}, "adapter":{}},
             "state":{"revision":17,"epoch":2,"source_sequences":{"wire:owner":9},"seen":["old"],
