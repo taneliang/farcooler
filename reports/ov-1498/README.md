@@ -1,10 +1,12 @@
 # ov-1498 — Mid-turn message acknowledgement
 
-The web chat shows “Message received and queued.” when the runner returns
-`TerminalTold.queued` from `terminal.compose`. The line can appear before the
-transcript updates. The manager skill also asks the orchestrator to acknowledge
-a message in one visible line at its next step and to keep turns short. The
-workspace charter can override that default.
+The web chat shows “Message received and queued.” on a message as soon as the
+runner’s transcript feed reports it as Waiting. When the row advances, chat
+shows the new state. A compose reply contains a queue flag without a message
+ID, so the acknowledgement comes from the transcript row and stays in sync
+regardless of which response arrives first. The manager skill also asks the
+orchestrator to acknowledge a message in one visible line at its next step and
+to keep turns short. The workspace charter can override that default.
 
 ## Baseline
 

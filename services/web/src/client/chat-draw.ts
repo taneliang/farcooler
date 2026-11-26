@@ -228,7 +228,9 @@ function queuedRow(row: Row): HTMLElement {
   const queued = bodyOf(row)
   const wrap = el('div', 'bubble-row')
   wrap.append(el('div', `bubble queued state-${String(queued.state).toLowerCase()}`, String(queued.text ?? '')))
-  wrap.append(el('p', 'bubble-note', queuedLabel(String(queued.state))))
+  // The row is authoritative even if it arrives before the compose reply.
+  const status = queued.state === 'Waiting' ? 'Message received and queued.' : queuedLabel(String(queued.state))
+  wrap.append(el('p', 'bubble-note', status))
   return wrap
 }
 

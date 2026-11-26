@@ -22,6 +22,7 @@ export class FakeRunner {
   rev = 0
   composed: string[] = []
   queueNext = false
+  queuedComposeReply: Promise<void> | null = null
   /// Each message's images as `type:bytes`, by message.
   composedImages: string[][] = []
   limits = { images: true, each: 1_000_000, total: 3_000_000 }
@@ -59,7 +60,8 @@ export class FakeRunner {
     this.composed.push(text)
     if (this.queueNext) {
       this.queueNext = false
-      // Let the test deliver the transcript row after the compose reply.
+      // The test controls when the row arrives relative to this reply.
+      await this.queuedComposeReply
       return true
     }
     // The Mac would show it as the person's turn, at once.
