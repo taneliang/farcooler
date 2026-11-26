@@ -140,3 +140,52 @@ fixtures resolved the symlink. The failed cases were retried using macOS's
 shorter runtime directory for fixture data, with build output kept in the
 ticket scratch directory. Sixty-seven passed on that retry. The four remaining
 tests passed on serial retry.
+
+## Landing-base rebase
+
+Rebased the three ov-1454 commits onto `ebc4b78674c9267dc69ad11f8137170afecfa9cc`.
+Git applied them cleanly. The range comparison matched each rebased patch to
+its original, so the failing-first observations above still cover this
+candidate.
+
+- All five live writer-lease regressions passed. The full socket and stdio
+  suites passed 90 and 13 tests, respectively. The forced-SSH, relay scope,
+  SSH revocation, agent transport and daemon ownership suites also passed.
+- CLI, shared client and core unit suites passed 639, 408 and 773 tests.
+  The live-client suite passed all 34 tests. The protocol and transport
+  suites passed 73 and 54 tests.
+- The focused daemon run for Engine, Needs You and the workflow modules named
+  in the rebase passed all 130 tests.
+- All 16 Chromium work checks passed, including the two-client handoff at
+  320 px and 1280 px. The board and plan-render checks passed.
+- The Chromium walk over real SSH passed with zero CSP violations. All seven
+  Chromium idle, sleep and reconnect cases passed with the split terminal.
+- Both TypeScript checks passed, along with 255 web unit tests, 50 Rust-backed
+  web adapter tests, the workflow controller tests and 83 Rust web tests.
+  The WASM target check and canary bundle build passed. The bundle measured
+  5,019,260 compressed bytes and passed the size gate.
+- The protocol, capability-name, file-size, shared-core and copy checks passed.
+- The Mac app and test targets built. The five Swift targets ran 2,019 tests.
+  One source-audit test failed because the scratch copy lacked its iOS source
+  fixture. The suite passed all three tests on retry with the fixture linked.
+
+The broad daemon library run reported 3,397 passed, 11 failed and 18 ignored.
+Eight failures passed on serial retry. The native quiesce cases
+`an_agent_that_ignores_sigterm_is_killed_after_its_grace` and
+`an_owner_that_exits_while_the_runner_ends_it_is_quiescent` still returned
+`TmuxUnavailable` when checking the closed pane. The workflow fixture
+`script_hooks_timeout_and_no_receipt_retry_once_then_fall_back` still failed
+its expected timeout and missing-receipt outcomes. The broad integration run
+had one failure when the pane-resize fixture could not reacquire a PTY number.
+All three pane-resize tests passed on serial retry.
+
+The full-bundle smoke checks exposed a stale connection and dropped early
+input. The browser now stops polling and releasing through a retired
+connection. It buffers early keystrokes locally while the first claim is
+pending, then sends them after a grant or drops them on refusal. The SSH
+browser fixture returns the same unsupported response as an older runner.
+
+| New regression | Observed before the fix | Verified after the fix |
+| --- | --- | --- |
+| `restore a writer after its runner connection is freed` | Chrome threw `null pointer passed to rust` in `TerminalWriter.show` when it queried the previous runner. | The writer badge returned on the fresh connection and typing reached the terminal. |
+| `hold keystrokes while the initial writer claim is pending` | The writer badge appeared after the delayed grant, but the key pressed during the delay never reached the runner. | The key stayed local before the grant and reached the runner after approval. |

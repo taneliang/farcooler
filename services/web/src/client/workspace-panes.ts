@@ -5,7 +5,7 @@ import { ChatView } from './chat'
 import { connectFailure } from './copy'
 import { PaneSet, type Budget } from './panes'
 import { PaneView } from './terminal'
-import { TerminalWriter } from './terminal-writer'
+import { TerminalWriter, type WriterInput } from './terminal-writer'
 import { readLocal, type LayoutView, type PaneModel, type Slot, writeLocal } from './workspace-layout'
 
 const node = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
@@ -42,14 +42,14 @@ export class WorkspacePanes {
         return element
       }
       const key = `${scope}:terminal:${JSON.stringify(id)}`
-      let writable = false
+      let input: WriterInput = 'viewing'
       let raw: PaneView | undefined
       const shell = () => {
         raw = new PaneView(host(), (word, code, what) => this.problem(this.failure({ message: word, code, what }), id), false, {
           load: () => readLocal(`${key}:raw-scroll`),
           save: value => writeLocal(`${key}:raw-scroll`, value),
         })
-        raw.setWritable(writable)
+        raw.setInput(input)
         return raw
       }
       const chat = model.agent ? new ChatView(host(), label, undefined, {
@@ -60,11 +60,12 @@ export class WorkspacePanes {
       }) : null
       chat?.setWritable(false)
       const pane = chat ? new AgentPane(chat, shell) : shell()
-      const writer = new TerminalWriter(root, id, allowed => {
-        writable = allowed
-        raw?.setWritable(allowed)
-        chat?.setWritable(allowed)
-      }, error => workFailure(error.message, (error as WorkError).code ?? '', (error as WorkError).what ?? ''))
+      const writer = new TerminalWriter(root, id, next => {
+        input = next
+        raw?.setInput(next)
+        chat?.setWritable(next === 'writable')
+      }, error => workFailure(error.message, (error as WorkError).code ?? '', (error as WorkError).what ?? ''),
+      runner => this.runner() === runner)
       this.mounts.set(id, { root, pane, writer })
       return pane
     }, budget)

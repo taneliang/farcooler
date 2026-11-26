@@ -143,6 +143,38 @@ try {
     await page.waitForFunction(() => window.calls.filter(c => c.action === 'attach').length === 2)
   })
 
+  await test('restore a writer after its runner connection is freed', async page => {
+    await page.getByText('Writer', { exact: true }).waitFor()
+    await page.locator('[data-attached=true]:visible').waitFor()
+    await page.evaluate(() => window.reconnectWriter())
+    await page.getByText('Writer', { exact: true }).waitFor()
+    await page.locator('.xterm-helper-textarea:visible').press('r')
+    await page.waitForFunction(() => window.calls.some(c => c.action === 'write' && c.text === 'r'))
+  })
+
+  await test('hold keystrokes while the initial writer claim is pending', async (_first, context) => {
+    const page = await context.newPage()
+    page.setDefaultTimeout(5000)
+    let grant
+    const waiting = new Promise(resolve => { grant = resolve })
+    try {
+      await page.route('**/writer', async route => {
+        if (JSON.parse(route.request().postData()).action === 'claim') await waiting
+        await route.fallback()
+      })
+      await page.goto(origin + '/')
+      await page.locator('[data-attached=true]:visible').waitFor()
+      await page.locator('.xterm-helper-textarea:visible').press('e')
+      assert.equal(await rpc(page, 'write'), undefined)
+      grant()
+      await page.getByText('Writer', { exact: true }).waitFor()
+      await page.waitForFunction(() => window.calls.some(c => c.action === 'write' && c.text === 'e'))
+    } finally {
+      grant()
+      await page.close()
+    }
+  })
+
   await test('read-only grant explains why terminal commands are unavailable', async page => {
     await page.getByText('Read-only', { exact: true }).waitFor()
     await page.locator('#pane-note').filter({ hasText: /This browser has read-only access/ }).waitFor()

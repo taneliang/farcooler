@@ -48,7 +48,7 @@ use std::sync::{Arc, Mutex};
 
 use bytes::{Bytes, BytesMut};
 use farcooler_protocol::v1::{
-    Empty, NeedsYouAction, NeedsYouItem, NeedsYouKind, NeedsYouList, Repository, RepositoryList, ServerHello, TaskRef, Terminal,
+    Empty, ErrorCode, NeedsYouAction, NeedsYouItem, NeedsYouKind, NeedsYouList, Repository, RepositoryList, ServerHello, TaskRef, Terminal,
     TerminalAttachResult, TerminalList, TerminalRef, TerminalRole, TerminalState, WorktreeList, request, result, wire_envelope,
 };
 use farcooler_protocol::{capability, framing};
@@ -503,6 +503,7 @@ fn main() {
                     vec![support::answer(&req, result::Value::Terminal(Terminal { id: a.terminal_id, ..Default::default() }))]
                 }
                 ("terminal.resize", _) => vec![support::answer(&req, result::Value::Empty(Empty {}))],
+                ("terminal.writer", _) => vec![support::refusal(&req, ErrorCode::CapabilityUnsupported, "a newer Far Cooler")],
                 // The page's liveness probe (ov-772): a link that never
                 // answers it is given up on after nine quiet seconds.
                 ("daemon.version", _) => vec![support::answer(

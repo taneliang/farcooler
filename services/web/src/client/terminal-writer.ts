@@ -2,6 +2,7 @@ import type { WebRunner } from 'fc-web'
 
 type Runner = Pick<WebRunner, 'terminal_writer_supported' | 'terminal_writer'>
 type Action = 'claim' | 'status' | 'take-over' | 'release'
+export type WriterInput = 'claiming' | 'writable' | 'viewing'
 interface State {
   writable: boolean
   label: string
@@ -17,14 +18,16 @@ export class TerminalWriter {
   private readonly reason = document.createElement('span')
   private readonly button = document.createElement('button')
   private runner: Runner | null = null
+  private supported = false
   private timer = 0
   private readonly pending = new WeakMap<Runner, Promise<void>>()
 
   constructor(
     host: HTMLElement,
     private readonly terminal: string,
-    private readonly setWritable: (writable: boolean) => void,
+    private readonly setInput: (input: WriterInput) => void,
     private readonly failure: (error: Error) => string | Promise<string>,
+    private readonly isConnected: (runner: Runner) => boolean,
   ) {
     this.bar.className = 'terminal-writer'
     this.bar.hidden = true
@@ -40,17 +43,21 @@ export class TerminalWriter {
   show(runner: Runner | null): void {
     if (this.runner === runner) return
     const previous = this.runner
+    const previousSupported = this.supported
     this.runner = runner
+    this.supported = runner?.terminal_writer_supported() ?? false
     clearTimeout(this.timer)
     this.bar.hidden = true
-    const supported = runner?.terminal_writer_supported()
-    if (runner || previous?.terminal_writer_supported()) this.setWritable(!!runner && !supported)
-    if (previous?.terminal_writer_supported()) {
+    if (runner || previousSupported) {
+      this.setInput(!runner ? 'viewing' : this.supported ? 'claiming' : 'writable')
+    }
+    if (previous && previousSupported && this.isConnected(previous)) {
       this.enqueue(previous, async () => {
+        if (!this.isConnected(previous)) return
         try { await previous.terminal_writer(this.terminal, 'release') } catch { /* connection can have ended */ }
       })
     }
-    if (runner && supported) this.request(runner, 'claim')
+    if (runner && this.supported) this.request(runner, 'claim')
   }
 
   private enqueue(runner: Runner, run: () => Promise<void>): void {
@@ -60,20 +67,23 @@ export class TerminalWriter {
   private request(runner: Runner, action: Action): void {
     clearTimeout(this.timer)
     this.enqueue(runner, async () => {
-      if (this.runner !== runner) return
+      const current = () => this.runner === runner && this.isConnected(runner)
+      if (!current()) return
       try {
         const view: State | null = JSON.parse(await runner.terminal_writer(this.terminal, action))
-        if (this.runner !== runner) return
+        if (!current()) return
         if (view) this.draw(runner, view)
         else {
+          this.supported = false
           this.bar.hidden = true
-          this.setWritable(true)
+          this.setInput('writable')
         }
       } catch (e) {
+        if (!current()) return
         const reason = await this.failure(e as Error)
-        if (this.runner === runner) this.draw(runner, { writable: false, label: '', reason, action: null })
+        if (current()) this.draw(runner, { writable: false, label: '', reason, action: null })
       } finally {
-        if (this.runner === runner && runner.terminal_writer_supported()) {
+        if (current() && this.supported) {
           clearTimeout(this.timer)
           this.timer = window.setTimeout(() => this.request(runner, 'status'), 1000)
         }
@@ -82,7 +92,7 @@ export class TerminalWriter {
   }
 
   private draw(runner: Runner, view: State): void {
-    this.setWritable(view.writable)
+    this.setInput(view.writable ? 'writable' : 'viewing')
     if (this.label.textContent !== view.label) this.label.textContent = view.label
     if (this.reason.textContent !== view.reason) this.reason.textContent = view.reason
     this.button.hidden = !view.action

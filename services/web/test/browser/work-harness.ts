@@ -86,6 +86,21 @@ const fake = {
 }
 
 const stage = document.getElementById('terminal')!
+function writerConnection() {
+  let freed = false
+  return {
+    terminal_writer_supported() {
+      if (freed) throw new Error('null pointer passed to rust')
+      return fake.terminal_writer_supported()
+    },
+    terminal_writer(terminal: string, action: string) {
+      if (freed) throw new Error('null pointer passed to rust')
+      return fake.terminal_writer(terminal, action)
+    },
+    free() { freed = true },
+  }
+}
+let writerRunner = writerConnection()
 const writers = new Map<string, { root: HTMLDivElement; view: TerminalWriter }>()
 const panes = new PaneSet<WebRunner>(id => {
   const root = document.createElement('div')
@@ -100,7 +115,8 @@ const panes = new PaneSet<WebRunner>(id => {
   const pane = new PaneView(host, word => { throw new Error(word) })
   writers.set(id, {
     root,
-    view: new TerminalWriter(root, id, writable => pane.setWritable(writable), fakeFailure),
+    view: new TerminalWriter(root, id, input => pane.setInput(input), fakeFailure,
+      connection => connection === writerRunner),
   })
   return pane
 })
@@ -125,7 +141,7 @@ const screen = mountWork({
     else if (open) void panes.open(terminal.id, fake as unknown as WebRunner, () => screen.streamEnded(terminal.id))
     for (const [id, { root, view }] of writers) {
       root.hidden = id !== terminal?.id || !terminal.attach
-      view.show(root.hidden ? null : fake)
+      view.show(root.hidden ? null : writerRunner)
     }
   },
   started: () => {},
@@ -143,7 +159,14 @@ window.addEventListener('pagehide', () => {
     navigator.sendBeacon('/writer', JSON.stringify({ client, terminal: id, action: 'release' }))
   }
 })
-Object.assign(window, { dropStream: () => dropStream?.(), chooseTerminal: screen.chooseTerminal })
+function reconnectWriter(): void {
+  writerRunner.free()
+  writerRunner = writerConnection()
+  for (const { root, view } of writers.values()) {
+    if (!root.hidden) view.show(writerRunner)
+  }
+}
+Object.assign(window, { dropStream: () => dropStream?.(), chooseTerminal: screen.chooseTerminal, reconnectWriter })
 void screen.refresh(true, 'replaceState')
 async function fakeFailure(error: Error & { code?: string }): Promise<string> {
   const reply = await fetch('/failure', { method: 'POST', body: JSON.stringify([error.message, error.code ?? '', '']) })

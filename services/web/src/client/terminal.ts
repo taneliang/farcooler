@@ -10,6 +10,7 @@ import { CanvasAddon } from '@xterm/addon-canvas'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import type { WebPane, WebRunner } from 'fc-web'
+import type { WriterInput } from './terminal-writer'
 
 import { Claim, SizeLease } from './lease'
 import type { Pane } from './panes'
@@ -29,7 +30,7 @@ export class PaneView implements Pane<WebRunner> {
   private typedEarly: Uint8Array[] | null = null
   private typedEarlyBytes = 0
   private generation = 0
-  private writable = true
+  private input: WriterInput = 'writable'
   /// Attached, or attaching: holding a channel, or about to (`Pane.active`).
   private holding = false
   /// Has shown a terminal, so the screen is worth keeping (`Pane.used`).
@@ -102,13 +103,15 @@ export class PaneView implements Pane<WebRunner> {
     if (this.autoFocus) this.focus()
   }
 
-  setWritable(writable: boolean): void {
-    if (this.writable === writable) return
-    this.writable = writable
-    this.term.options.disableStdin = !writable
-    if (writable) this.refit(true)
-    else {
-      this.typedEarly = null
+  setInput(input: WriterInput): void {
+    if (this.input === input && input !== 'claiming') return
+    this.input = input
+    this.term.options.disableStdin = input === 'viewing'
+    if (input === 'writable') {
+      this.refit(true)
+      this.flushEarly()
+    } else {
+      this.clearEarly()
       this.lease.release()
     }
   }
@@ -135,6 +138,8 @@ export class PaneView implements Pane<WebRunner> {
   /// accepted the attach is held and sent first, in order. `data-attached` on
   /// the host says the pane is live.
   async attach(runner: WebRunner, terminal: string, ended: () => void, resuming = false): Promise<void> {
+    const early = this.typedEarly
+    const earlyBytes = this.typedEarlyBytes
     this.detach()
     this.holding = true
     this.shownBefore = true
@@ -149,8 +154,10 @@ export class PaneView implements Pane<WebRunner> {
     const generation = ++this.generation
     const replacement = this.replacement
     const current = () => this.generation === generation
-    this.typedEarly = this.writable ? [] : null
-    this.typedEarlyBytes = 0
+    if (this.input !== 'viewing') {
+      this.typedEarly = early ?? []
+      this.typedEarlyBytes = earlyBytes
+    }
     if (this.autoFocus) this.focus()
     let pane: WebPane
     try {
@@ -169,7 +176,7 @@ export class PaneView implements Pane<WebRunner> {
       )
     } catch (e) {
       if (current()) {
-        this.typedEarly = null
+        this.clearEarly()
         this.holding = false
       }
       throw e
@@ -180,9 +187,7 @@ export class PaneView implements Pane<WebRunner> {
       return
     }
     this.pane = pane
-    const early = this.typedEarly ?? []
-    this.typedEarly = null
-    for (const bytes of early) this.send(bytes)
+    this.flushEarly()
     this.host.dataset.attached = 'true'
     this.refit(true)
     if (this.autoFocus) this.focus()
@@ -194,7 +199,7 @@ export class PaneView implements Pane<WebRunner> {
     clearTimeout(this.restoreTimer)
     this.restorePending = false
     this.holding = false
-    this.typedEarly = null
+    this.clearEarly()
     delete this.host.dataset.attached
     this.giveBack()
     // close() hands the channel's closing to a task of its own, so the wasm
@@ -218,7 +223,7 @@ export class PaneView implements Pane<WebRunner> {
   /// This page is being used: send its size, so a Mac that reshaped the pane
   /// meanwhile gives way (`Claim`).
   private claimSize(focus: boolean): void {
-    if (this.writable && this.pane && this.claim.due(Date.now(), focus)) this.refit(true)
+    if (this.input === 'writable' && this.pane && this.claim.due(Date.now(), focus)) this.refit(true)
   }
 
   /// Put the pane back to the size it had before this page fitted it. Queued
@@ -253,11 +258,23 @@ export class PaneView implements Pane<WebRunner> {
     return buffer.baseY - buffer.viewportY
   }
 
+  private clearEarly(): void {
+    this.typedEarly = null
+    this.typedEarlyBytes = 0
+  }
+
+  private flushEarly(): void {
+    if (this.input !== 'writable' || !this.pane || !this.typedEarly) return
+    const early = this.typedEarly
+    this.clearEarly()
+    for (const bytes of early) this.send(bytes)
+  }
+
   private send(bytes: Uint8Array): void {
-    if (!this.writable) return
+    if (this.input === 'viewing') return
+    if (this.input === 'claiming') this.typedEarly ??= []
     if (this.typedEarly) {
-      // Held for the pane that's attaching, up to a paste's worth; past that
-      // the person is told rather than having keystrokes vanish.
+      // Hold up to a paste's worth while the pane attaches or requests input.
       if (this.typedEarlyBytes + bytes.length > EARLY_LIMIT) return this.onProblem('still_attaching')
       this.typedEarly.push(bytes)
       this.typedEarlyBytes += bytes.length
@@ -278,7 +295,7 @@ export class PaneView implements Pane<WebRunner> {
     }
     clearTimeout(this.resizing)
     const tell = () => {
-      if (!this.writable || !this.pane) return
+      if (this.input !== 'writable' || !this.pane) return
       this.lease.reshape()
       this.pane.resize(this.term.cols, this.term.rows).catch(() => {})
     }
