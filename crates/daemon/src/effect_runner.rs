@@ -113,7 +113,8 @@ pub(crate) async fn configured_with_git_lock(tree: &Path, argv: &[String], envir
     let mut command = Command::new(program);
     command.args(&argv[1..]).env_clear().envs(environment);
     crate::git::inherit_process_lock(command.as_std_mut(), lock);
-    supervise(command, tree, log, limit, Some(cancel), None, None).await.map_err(|failure| failure.error)
+    supervise(command, tree, log, limit, Some(cancel), None, None).await
+        .map(|exit| exit.code).map_err(|failure| failure.error)
 }
 
 /// Like `configured`, but records who the process is in `owner` as soon as it exists, so that a
