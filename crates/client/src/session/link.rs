@@ -136,7 +136,7 @@ impl Session {
             farcooler_tailcat::set_derp_map_url(&destination.derp_map);
         }
         let transport = ssh::Session::open(destination).await?;
-        Self::over_link(Box::new(transport), NATIVE_CLIENT, writer_instance).await
+        Self::over_link(Box::new(transport), NATIVE_CLIENT, writer_instance, false).await
     }
 
     /// Start a daemon session over an SSH connection somebody else made and
@@ -152,13 +152,14 @@ impl Session {
         writer_instance: Option<uuid::Uuid>,
     ) -> Result<Self, SessionError> {
         let writer_instance = writer_instance.map(|id| bytes::Bytes::copy_from_slice(id.as_bytes())).unwrap_or_default();
-        Self::over_link(Box::new(connection), client_name, writer_instance).await
+        Self::over_link(Box::new(connection), client_name, writer_instance, true).await
     }
 
     async fn over_link(
         link: Box<dyn ssh::Exec>,
         client_name: &'static str,
         writer_instance: bytes::Bytes,
+        receive_control_events: bool,
     ) -> Result<Self, SessionError> {
         // Named by tilde, not bare: a non-login ssh exec's PATH often lacks
         // ~/.local/bin, where `runner install` puts the binary.
@@ -178,9 +179,11 @@ impl Session {
         )
         .await?;
 
-        // This connection's own events are dropped: fleet news comes on the
-        // channel `subscribe` opens, and nothing reads them here.
-        client.ignore_events();
+        // Native fleet news comes on the channel `subscribe` opens. The web
+        // session also reads lease changes addressed to its control channel.
+        if !receive_control_events {
+            client.ignore_events();
+        }
         Ok(Self {
             client,
             link: Some(link),

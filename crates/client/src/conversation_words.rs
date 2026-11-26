@@ -100,6 +100,8 @@ pub fn words(style: Style, agent: &str) -> Words {
         // An agent's words (ov-620): the runner read this send as an agent's.
         ("typing_off", said("This workspace doesn’t let Far Cooler type into its agents’ panes. Turn on waking agents in its settings.")),
         ("in_pane", said("Far Cooler couldn’t tell whether a person or an agent sent this, so it wasn’t sent. Send it from the app.")),
+        ("writer_busy", said(farcooler_core::error::sentence("writer_busy").unwrap_or_default())),
+        ("writer_taken_over", said(farcooler_core::error::sentence("writer_taken_over").unwrap_or_default())),
         ("word:scope-denied", said("This device can’t send messages to this runner.")),
         ("", said("The message wasn’t sent.")),
     ]);
@@ -130,6 +132,9 @@ pub fn words(style: Style, agent: &str) -> Words {
         // The composer.
         ("may_have_been_sent", "The runner didn’t answer in time. The message may have been sent, so check the terminal before sending it again.".to_string()),
         ("not_connected", "The runner isn’t connected, so the message wasn’t sent.".into()),
+        ("waiting_for_input", "Waiting for terminal input. Try sending again when it’s ready.".into()),
+        ("read_only", "This terminal is read-only. Request input before sending.".into()),
+        ("send_in_flight", "The previous message is still sending. Try again when it finishes.".into()),
         ("key_timed_out", "The runner didn’t answer in time. Check the terminal.".into()),
         ("key_not_connected", "The runner isn’t connected. Use the terminal.".into()),
         ("too_long_composed", "That message is over 100,000 characters. Shorten it, or paste it in the terminal.".into()),

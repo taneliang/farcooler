@@ -174,6 +174,7 @@ pub fn failure(word: &str, code: &str, what: &str) -> &'static str {
         (_, _, reason @ ("writer_busy" | "writer_taken_over" | "writer_available")) =>
             farcooler_core::error::sentence(reason).unwrap_or_default(),
         (_, _, "terminal_state_unknown" | "terminal_state_changed") => "The terminal’s state changed. Refresh it before trying again.",
+        ("writer_keys_refused", _, _) => "Keys typed while waiting for terminal input were not sent.",
         ("closed", _, _) => "The runner connection was lost. Reconnect and check whether the action finished before trying again.",
         ("runner_too_old", _, _) => "Update Far Cooler on the runner to use this action.",
         _ => "The runner couldn’t finish this action. Refresh the list and check its current state before trying again.",
@@ -301,6 +302,7 @@ pub fn view(inventory: &Inventory, selection: &Selection) -> Value {
     json!({
         "workspaces": workspace_rows, "repositories": repositories, "worktrees": owned_trees,
         "workspace": workspace.map(|w| &w.id), "repository": repository,
+        "orchestrator": seat.map(|terminal| &terminal.id),
         "worktree": chosen_tree.map(|w| &w.id), "terminal": selected.map(|t| &t.id), "terminals": terminal_rows,
         "notice": notice,
         "missingTerminal": selected.is_none() && selection.terminal.is_some(),

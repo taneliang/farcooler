@@ -3,6 +3,12 @@
 use super::{Pending, Session, SessionError, Uuid, request, result, wrong};
 
 impl Session {
+    /// Read the control channel's events. One consumer should drain this
+    /// channel when opening a web session with `over_ssh`.
+    pub async fn next_control_event(&self) -> Result<farcooler_protocol::v1::Event, SessionError> {
+        Ok(self.client.next_shared_event().await?)
+    }
+
     /// Start input with the runner generation from `terminal_writer`. A
     /// queued request keeps the generation it was created with.
     pub fn start_terminal_input(

@@ -159,7 +159,7 @@ impl Sessions {
         let quiet = Arc::new(AtomicBool::new(false));
         live.insert(id, Live { client_id: client_id.clone(), gate: gate.clone(), said: said.clone(), quiet: quiet.clone() });
         drop(live);
-        Arc::new(Session { sessions: self.clone(), id, client_id, revocations_at_open, gate, said, quiet, challenges: Default::default(), writer_instance: Default::default(), displaced_terminals: Default::default() })
+        Arc::new(Session { sessions: self.clone(), id, client_id, revocations_at_open, gate, said, quiet, challenges: Default::default(), writer_instance: Default::default(), track_writers: Default::default(), writer_terminals: Default::default(), displaced_terminals: Default::default() })
     }
 
     /// Close every connection this device is holding. Answers with how many.
@@ -332,6 +332,8 @@ pub struct Session {
     /// The step-up challenges this connection asked for (ov-856, S9): never
     /// shared with another connection, so one session's nonce is no other's.
     challenges: crate::step_up::Challenges,
+    track_writers: std::sync::OnceLock<()>,
+    writer_terminals: Arc<Mutex<std::collections::HashSet<uuid::Uuid>>>,
     pub(crate) writer_instance: std::sync::OnceLock<uuid::Uuid>,
     pub(crate) displaced_terminals: Mutex<std::collections::HashSet<uuid::Uuid>>,
 }
@@ -356,6 +358,23 @@ impl Session {
         // The error IS the signal: `acquire` on a zero-permit semaphore can
         // finish no other way.
         let _ = self.gate.acquire().await;
+    }
+
+    /// Wake lease viewers when this connection is revoked or goes away.
+    pub(crate) fn track_terminal_writer(&self, id: uuid::Uuid) {
+        self.writer_terminals.lock().unwrap().insert(id);
+        self.track_writers.get_or_init(|| {
+            let gate = self.gate.clone();
+            let sessions = Arc::downgrade(&self.sessions);
+            let terminals = self.writer_terminals.clone();
+            tokio::spawn(async move {
+                let _ = gate.acquire().await;
+                if let Some(sessions) = sessions.upgrade() {
+                    let ids = std::mem::take(&mut *terminals.lock().unwrap());
+                    sessions.terminal_writers.prune_closed(ids).await;
+                }
+            });
+        });
     }
 
     /// The device this session's line names, or `None` for a local caller.
@@ -395,6 +414,7 @@ impl Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
+        self.gate.close();
         // An ended connection has nothing left to say, so nobody waits on it.
         self.said.close();
         // A poisoned lock would mean a panic inside `close`, which does nothing

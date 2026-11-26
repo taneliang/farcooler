@@ -105,6 +105,7 @@ export class PaneView implements Pane<WebRunner> {
 
   setInput(input: WriterInput): void {
     if (this.input === input && input !== 'claiming') return
+    const refused = this.input === 'claiming' && input !== 'writable' && this.typedEarlyBytes > 0
     this.input = input
     this.term.options.disableStdin = input === 'viewing'
     if (input === 'writable') {
@@ -113,6 +114,7 @@ export class PaneView implements Pane<WebRunner> {
     } else {
       this.clearEarly()
       this.lease.release()
+      if (refused) this.onProblem('writer_keys_refused')
     }
   }
 

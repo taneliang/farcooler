@@ -1,7 +1,7 @@
 import type { WebRunner } from 'fc-web'
 
 type Runner = Pick<WebRunner, 'terminal_writer_supported' | 'terminal_writer'>
-type Action = 'claim' | 'status' | 'take-over' | 'release'
+type Action = 'watch' | 'claim' | 'status' | 'take-over' | 'release'
 export type WriterInput = 'claiming' | 'writable' | 'viewing'
 interface State {
   writable: boolean
@@ -19,7 +19,7 @@ export class TerminalWriter {
   private readonly button = document.createElement('button')
   private runner: Runner | null = null
   private supported = false
-  private timer = 0
+  private generation = 0
   private readonly pending = new WeakMap<Runner, Promise<void>>()
 
   constructor(
@@ -46,10 +46,10 @@ export class TerminalWriter {
     const previousSupported = this.supported
     this.runner = runner
     this.supported = runner?.terminal_writer_supported() ?? false
-    clearTimeout(this.timer)
+    this.generation++
     this.bar.hidden = true
     if (runner || previousSupported) {
-      this.setInput(!runner ? 'viewing' : this.supported ? 'claiming' : 'writable')
+      this.setInput(this.supported ? 'claiming' : 'viewing')
     }
     if (previous && previousSupported && this.isConnected(previous)) {
       this.enqueue(previous, async () => {
@@ -57,7 +57,11 @@ export class TerminalWriter {
         try { await previous.terminal_writer(this.terminal, 'release') } catch { /* connection can have ended */ }
       })
     }
-    if (runner && this.supported) this.request(runner, 'claim')
+    if (runner && this.supported) this.request(runner, 'watch')
+  }
+
+  refresh(): void {
+    if (this.runner && this.supported) this.request(this.runner, 'status')
   }
 
   private enqueue(runner: Runner, run: () => Promise<void>): void {
@@ -65,9 +69,9 @@ export class TerminalWriter {
   }
 
   private request(runner: Runner, action: Action): void {
-    clearTimeout(this.timer)
+    const generation = this.generation
     this.enqueue(runner, async () => {
-      const current = () => this.runner === runner && this.isConnected(runner)
+      const current = () => this.generation === generation && this.runner === runner && this.isConnected(runner)
       if (!current()) return
       try {
         const view: State | null = JSON.parse(await runner.terminal_writer(this.terminal, action))
@@ -82,11 +86,6 @@ export class TerminalWriter {
         if (!current()) return
         const reason = await this.failure(e as Error)
         if (current()) this.draw(runner, { writable: false, label: '', reason, action: null })
-      } finally {
-        if (current() && this.supported) {
-          clearTimeout(this.timer)
-          this.timer = window.setTimeout(() => this.request(runner, 'status'), 1000)
-        }
       }
     })
   }
@@ -101,6 +100,7 @@ export class TerminalWriter {
     const action = view.action
     this.button.onclick = action ? () => {
       this.button.disabled = true
+      this.setInput('claiming')
       this.request(runner, action.intent)
     } : null
     this.bar.hidden = false

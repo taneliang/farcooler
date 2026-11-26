@@ -36,6 +36,7 @@ export class FakeRunner {
   fetchDelay = 0
   failing: string | null = null
   failingWhat = ''
+  composeGate: Promise<void> | null = null
   private parked: (() => void)[] = []
   private log: { rev: number; kind: 'insert' | 'update'; row: Row }[] = []
 
@@ -63,6 +64,7 @@ export class FakeRunner {
   }
 
   async compose(_t: string, text: string): Promise<boolean> {
+    if (this.composeGate) await this.composeGate
     if (this.failing) throw new Error(this.failing)
     this.composed.push(text)
     if (this.queueNext) {

@@ -1142,6 +1142,8 @@ message Event {
     // it. A client keeps it for this runner until a dial gets in again.
     Empty device_released = 29;
     TerminalWriterLost terminal_writer_lost = 30;
+    // A lease changed on a terminal this connection opted into with WATCH.
+    TerminalWriterChanged terminal_writer_changed = 31;
   }
   reserved 28;
   reserved "pages_changed";
@@ -2456,8 +2458,14 @@ message TerminalWriterRequest {
     CLAIM = 1;
     TAKE_OVER = 2;
     RELEASE = 3;
+    // Claim and receive invalidations on this connection until RELEASE.
+    WATCH = 4;
   }
   Action action = 1;
+}
+
+message TerminalWriterChanged {
+  bytes terminal_id = 1;
 }
 
 message TerminalWriterState {

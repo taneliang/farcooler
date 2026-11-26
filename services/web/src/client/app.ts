@@ -23,7 +23,7 @@
 
 import { openWorkflow, installWorkflowPort } from './workflow-view'
 import { WorkflowSessionPort } from './workflow-session'
-import init, { connect, fingerprint, freshnessMs, makeOffer, mergeRunnerGrants, newReplySecret, newWriterKey, offerIsStale, needsAttention, needsYouView, runnerHealth, openReply, openCliReply, passkeyKeyLine, planView, recoveryView, registrationData, registrationProof, rpId, workFailure, workView, boardFailure, reviewFailure, reviewApprovalResult, ticketForm, workspaceLayout, workspaceOrchestrator, workspacePageAvailable, type WebRunner } from 'fc-web'
+import init, { connect, fingerprint, freshnessMs, makeOffer, mergeRunnerGrants, newReplySecret, newWriterKey, offerIsStale, needsAttention, needsYouView, runnerHealth, openReply, openCliReply, passkeyKeyLine, planView, recoveryView, registrationData, registrationProof, rpId, workFailure, workView, boardFailure, reviewFailure, reviewApprovalResult, ticketForm, workspaceLayout, workspacePageAvailable, type WebRunner } from 'fc-web'
 
 import { compareWords, connectFailure, joinDetail, joinTitle, MISMATCH, needsYouFailure, registerFailure, restoreFailure, runnerDeferred, runnerStopped, saveFailure, sealedRefusal, unreachable } from './copy'
 import { askForCopy, assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
@@ -547,9 +547,8 @@ const paneBudgets = new Map<string, Budget>()
 
 // MARK: Needs You
 
-/// How often the list is read while the tab is in view. The runner pushes
-/// nothing a browser listens to yet, so this is what shows an answer made
-/// on another device.
+/// How often the page refreshes Needs You and the workspace inventory while
+/// visible, including changes made on another device.
 const NEEDS_POLL_MS = 5000
 
 /// Every enrolled runner's Needs You on the page, read again every few seconds.
@@ -945,7 +944,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   planTab = startPlanTab($('plan'), target.label, liveRunner, chosenSpace, {
     openCard: card => openCard(target.id, { id: card.task, key: card.key, title: '' }),
     quote: async text => {
-      if (!orchestrator) return false
+      if (!orchestrator()) return false
       layout?.run('orchestrator')
       layout?.run('conversation', 'side')
       return !!await panes?.quote(text)
@@ -966,9 +965,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
         (task, anchor, after) => runner().reorderTask(task, anchor, after))
     },
   }, planView, raw => {
-    if (navigation?.route.page !== 'plan' || !raw) return
-    setOrchestrator(workspaceOrchestrator(JSON.stringify(raw)) ?? null)
-    restoreScroll('plan')
+    if (navigation?.route.page === 'plan' && raw) restoreScroll('plan')
   })
 
   panes?.dispose()
@@ -982,8 +979,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   let firstRender = true
   let focusedSlot: 'main' | 'side' = 'main'
   let pendingTerminal: { id: string; slot?: 'main' | 'side' } | undefined
-  let orchestrator: string | null = null
-  let discovery = 0
+  const orchestrator = () => currentWork.workspace === chosenSpace ? currentWork.orchestrator ?? null : null
   let pendingScroll: { page: keyof typeof scrollIds; position: number } | null = null
   let previous: Route | null = null
   let opener: { element: Element | null; task: string | null } | null = null
@@ -1074,7 +1070,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   }
 
   const presentLayout = (page: Route['page']) => {
-    controller.contextFor(chosenSpace, page, currentWork, orchestrator)
+    controller.contextFor(chosenSpace, page, currentWork, orchestrator())
   }
 
   screen = mountWork({
@@ -1134,24 +1130,6 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   })
   workScreen = screen
 
-  const setOrchestrator = (id: string | null) => {
-    if (id === orchestrator) return
-    orchestrator = id
-    if (inventoryWorkspace === chosenSpace && navigation) presentLayout(navigation.route.page)
-  }
-
-  const discover = async () => {
-    const current = liveRunner()
-    const space = chosenSpace
-    if (!current || !space || layout !== controller || navigation?.route.page === 'plan') return
-    const mine = ++discovery
-    try {
-      const id = workspaceOrchestrator(await current.plan(space)) ?? null
-      if (mine !== discovery || layout !== controller || space !== chosenSpace || current !== liveRunner()) return
-      setOrchestrator(id)
-    } catch {}
-  }
-
   const resolve = (route: Route): Route => {
     const workspace = spaces.some(space => space.id === route.space)
     const ticket = !!(route.ticket && fleet?.cardsOf(route.ticket.runner)?.deps?.task)
@@ -1176,7 +1154,6 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     const position = scrollPage ? Number(readLocal(scrollKey(scrollPage))) : 0
     pendingScroll = scrollPage && position ? { page: scrollPage, position } : null
     if (changedSpace) {
-      orchestrator = null
       if (chosenSpace && spaces.some(space => space.id === chosenSpace)) saveSpace(target.id, chosenSpace)
       planTab?.choose(chosenSpace)
     }
@@ -1216,7 +1193,6 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
       back.focus({ preventScroll: true })
       opener = null
     }
-    if (changedSpace) void discover()
   }
   navigation = new WorkspaceHistory(scope, target.id, { space: fallbackSpace, page: 'terminals', tab: 'terminals', terminal: linkedTerminal }, resolve, renderRoute)
   renderRoute(navigation.route)
@@ -1231,7 +1207,6 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     if (document.visibilityState !== 'visible') return
     void refreshRuntimeHealth()
     void mine.refresh()
-    void discover()
     void screen?.refresh()
     restoreScroll('ticket')
     restoreScroll('needs')

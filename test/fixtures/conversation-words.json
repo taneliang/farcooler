@@ -94,7 +94,9 @@
         "queued_Sent": "Sent mid-turn",
         "queued_Waiting": "Message received and queued.",
         "queued_Withdrawn": "Withdrawn",
+        "read_only": "This terminal is read-only. Request input before sending.",
         "scheduled_task": "Scheduled task",
+        "send_in_flight": "The previous message is still sending. Try again when it finishes.",
         "task": "Not started",
         "task_Completed": "Done",
         "task_InProgress": "In progress",
@@ -105,7 +107,8 @@
         "transcript_close": "Close Transcript",
         "transcript_empty": "No transcript available yet.",
         "transcript_open": "Open Transcript",
-        "transcript_title": "Agent Transcript"
+        "transcript_title": "Agent Transcript",
+        "waiting_for_input": "Waiting for terminal input. Try sending again when it’s ready."
       },
       "send": {
         "": {
@@ -247,6 +250,14 @@
         "word:scope-denied": {
           "kind": "said",
           "text": "This device can’t send messages to this runner."
+        },
+        "writer_busy": {
+          "kind": "said",
+          "text": "Another client is writing to this terminal."
+        },
+        "writer_taken_over": {
+          "kind": "said",
+          "text": "Another client took over this terminal."
         }
       },
       "send_now": {
@@ -440,7 +451,9 @@
         "queued_Sent": "Sent mid-turn",
         "queued_Waiting": "Message received and queued.",
         "queued_Withdrawn": "Withdrawn",
+        "read_only": "This terminal is read-only. Request input before sending.",
         "scheduled_task": "Scheduled task",
+        "send_in_flight": "The previous message is still sending. Try again when it finishes.",
         "task": "Not started",
         "task_Completed": "Done",
         "task_InProgress": "In progress",
@@ -451,7 +464,8 @@
         "transcript_close": "Close Transcript",
         "transcript_empty": "No transcript available yet.",
         "transcript_open": "Open Transcript",
-        "transcript_title": "Agent Transcript"
+        "transcript_title": "Agent Transcript",
+        "waiting_for_input": "Waiting for terminal input. Try sending again when it’s ready."
       },
       "send": {
         "": {
@@ -593,6 +607,14 @@
         "word:scope-denied": {
           "kind": "said",
           "text": "This device can’t send messages to this runner."
+        },
+        "writer_busy": {
+          "kind": "said",
+          "text": "Another client is writing to this terminal."
+        },
+        "writer_taken_over": {
+          "kind": "said",
+          "text": "Another client took over this terminal."
         }
       },
       "send_now": {
@@ -786,7 +808,9 @@
         "queued_Sent": "Sent mid-turn",
         "queued_Waiting": "Message received and queued.",
         "queued_Withdrawn": "Withdrawn",
+        "read_only": "This terminal is read-only. Request input before sending.",
         "scheduled_task": "Scheduled task",
+        "send_in_flight": "The previous message is still sending. Try again when it finishes.",
         "task": "Not started",
         "task_Completed": "Done",
         "task_InProgress": "In progress",
@@ -797,7 +821,8 @@
         "transcript_close": "Close transcript",
         "transcript_empty": "No transcript available yet.",
         "transcript_open": "Open transcript",
-        "transcript_title": "Agent transcript"
+        "transcript_title": "Agent transcript",
+        "waiting_for_input": "Waiting for terminal input. Try sending again when it’s ready."
       },
       "send": {
         "": {
@@ -939,6 +964,14 @@
         "word:scope-denied": {
           "kind": "said",
           "text": "This device can’t send messages to this runner."
+        },
+        "writer_busy": {
+          "kind": "said",
+          "text": "Another client is writing to this terminal."
+        },
+        "writer_taken_over": {
+          "kind": "said",
+          "text": "Another client took over this terminal."
         }
       },
       "send_now": {
@@ -1132,7 +1165,9 @@
         "queued_Sent": "Sent mid-turn",
         "queued_Waiting": "Message received and queued.",
         "queued_Withdrawn": "Withdrawn",
+        "read_only": "This terminal is read-only. Request input before sending.",
         "scheduled_task": "Scheduled task",
+        "send_in_flight": "The previous message is still sending. Try again when it finishes.",
         "task": "Not started",
         "task_Completed": "Done",
         "task_InProgress": "In progress",
@@ -1143,7 +1178,8 @@
         "transcript_close": "Close transcript",
         "transcript_empty": "No transcript available yet.",
         "transcript_open": "Open transcript",
-        "transcript_title": "Agent transcript"
+        "transcript_title": "Agent transcript",
+        "waiting_for_input": "Waiting for terminal input. Try sending again when it’s ready."
       },
       "send": {
         "": {
@@ -1285,6 +1321,14 @@
         "word:scope-denied": {
           "kind": "said",
           "text": "This device can’t send messages to this runner."
+        },
+        "writer_busy": {
+          "kind": "said",
+          "text": "Another client is writing to this terminal."
+        },
+        "writer_taken_over": {
+          "kind": "said",
+          "text": "Another client took over this terminal."
         }
       },
       "send_now": {

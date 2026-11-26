@@ -508,6 +508,12 @@ impl<R, W> Client<R, W> {
     /// order they arrived, so nothing is lost by having made a request at the
     /// wrong moment.
     pub async fn next_event(&mut self) -> Result<Event, ClientError> {
+        self.next_shared_event().await
+    }
+
+    /// Read events while other tasks make calls on the same client. A shared
+    /// client should still have only one event consumer.
+    pub async fn next_shared_event(&self) -> Result<Event, ClientError> {
         let shared = &self.shared;
         loop {
             {

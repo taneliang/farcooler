@@ -28,6 +28,7 @@ export interface WorkView {
   repositories: Choice[]
   worktrees: Choice[]
   workspace: string | null
+  orchestrator: string | null
   repository: string | null
   worktree: string | null
   terminal: string | null

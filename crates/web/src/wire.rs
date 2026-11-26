@@ -25,7 +25,7 @@ use std::sync::Arc;
 use farcooler_client::session::{Session, SessionError};
 use farcooler_client::ssh::SshError;
 use farcooler_protocol::{capability, link_ending};
-use farcooler_protocol::v1::{ErrorCode, TerminalResize, TerminalWrite, request, terminal_writer_request::Action};
+use farcooler_protocol::v1::{ErrorCode, TerminalResize, TerminalWrite, event::Payload, request, terminal_writer_request::Action};
 use tokio::io::AsyncReadExt;
 use uuid::Uuid;
 
@@ -76,9 +76,13 @@ impl From<SessionError> for WebError {
     }
 }
 
+type WriterListener = Rc<dyn Fn(Option<Uuid>)>;
+
 #[derive(Default)]
 struct WriterAccess {
     supported: Option<bool>,
+    watching: Option<bool>,
+    listener: Option<WriterListener>,
     generations: HashMap<Uuid, u64>,
 }
 
@@ -90,13 +94,14 @@ pub struct Runner {
     link: Option<Arc<Link>>,
     /// Dropped with the runner, which is what stops the watching task.
     _watching: Option<futures::channel::oneshot::Sender<()>>,
+    _writer_events: futures::channel::oneshot::Sender<()>,
 }
 
 impl Runner {
     /// Start the control session on an authenticated connection.
     pub async fn start(conn: Connection) -> Result<Runner, WebError> {
-        let session = Session::over_ssh(conn, CLIENT_NAME, None).await?;
-        Ok(Runner { session: Rc::new(session), writer_access: Default::default(), link: None, _watching: None })
+        let session = Rc::new(Session::over_ssh(conn, CLIENT_NAME, None).await?);
+        Ok(Self::with_session(session, None, None))
     }
 
     /// Start the control session and watch the connection (ov-772).
@@ -140,7 +145,42 @@ impl Runner {
                 on_lost();
             }
         });
-        Ok(Runner { session, writer_access: Default::default(), link: Some(link), _watching: Some(stop) })
+        Ok(Self::with_session(session, Some(link), Some(stop)))
+    }
+
+    fn with_session(
+        session: Rc<Session>,
+        link: Option<Arc<Link>>,
+        watching: Option<futures::channel::oneshot::Sender<()>>,
+    ) -> Self {
+        let writer_access = Rc::new(RefCell::new(WriterAccess::default()));
+        let (stop, stopped) = futures::channel::oneshot::channel();
+        let control = session.clone();
+        let access = writer_access.clone();
+        spawn(async move {
+            let listen = async {
+                while let Ok(event) = control.next_control_event().await {
+                    let terminal = match event.payload {
+                        Some(Payload::TerminalWriterChanged(changed)) => Uuid::from_slice(&changed.terminal_id).ok(),
+                        // A runner predating Watch still tells a displaced writer.
+                        Some(Payload::TerminalWriterLost(lost)) if access.borrow().watching != Some(true) =>
+                            Uuid::from_slice(&lost.terminal_id).ok(),
+                        Some(Payload::EventsMissed(_)) => None,
+                        _ => continue,
+                    };
+                    let listener = access.borrow().listener.clone();
+                    if let Some(listener) = listener {
+                        listener(terminal);
+                    }
+                }
+            };
+            futures::future::select(stopped, std::pin::pin!(listen)).await;
+        });
+        Self { session, writer_access, link, _watching: watching, _writer_events: stop }
+    }
+
+    pub(crate) fn on_terminal_writer_change(&self, listener: Option<WriterListener>) {
+        self.writer_access.borrow_mut().listener = listener;
     }
 
     /// Whether the connection answers, right now: the foreground probe
@@ -218,17 +258,34 @@ impl Runner {
     }
 
     pub fn terminal_writer_supported(&self) -> bool {
-        self.writer_access.borrow().supported != Some(false)
-            && matches!(self.session.granted_scope(), "control" | "host_admin")
+        matches!(self.session.granted_scope(), "control" | "host_admin")
     }
 
     pub async fn terminal_writer(&self, terminal: Uuid, action: Action) -> Result<serde_json::Value, WebError> {
+        if self.writer_access.borrow().supported == Some(false) {
+            return Ok(serde_json::Value::Null);
+        }
+        let probe_watch = action == Action::Watch && self.writer_access.borrow().watching != Some(false);
+        let action = if action == Action::Watch && !probe_watch { Action::Claim } else { action };
         let generation = if action == Action::Release {
             self.writer_access.borrow().generations.get(&terminal).copied()
         } else {
             None
         };
-        let state = match self.session.terminal_writer(terminal, action, generation).await {
+        let mut response = self.session.terminal_writer(terminal, action, generation).await;
+        if probe_watch {
+            match &response {
+                Ok(_) => self.writer_access.borrow_mut().watching = Some(true),
+                Err(SessionError::Refused { code, what, .. })
+                    if *code == ErrorCode::InvalidArgument as i32 && what == "action" =>
+                {
+                    self.writer_access.borrow_mut().watching = Some(false);
+                    response = self.session.terminal_writer(terminal, Action::Claim, None).await;
+                }
+                _ => {}
+            }
+        }
+        let state = match response {
             Ok(state) => state,
             Err(SessionError::Refused { code, .. }) if code == ErrorCode::CapabilityUnsupported as i32 => {
                 self.writer_access.borrow_mut().supported = Some(false);

@@ -12,12 +12,13 @@
 import type { WebRunner } from 'fc-web'
 
 import { admit, filesOf, IMAGE_TYPES, IMAGE_WORDS, parseLimits, type Picked, readImages } from './attachments'
-import { chatTrouble, isWorking, transcriptWords } from './chat-copy'
+import { blockedSend, chatTrouble, isWorking, transcriptWords } from './chat-copy'
 import { Outbox } from './chat-send'
 import { type Ask, Media } from './chat-files'
 import { closesWithLine, drawEnd, drawRow, type Memory, toolsGroup } from './chat-draw'
 import { bodyOf, type Delta, itemsOf, nodesOf, type Phase, RowFollower, RowLedger, type RowSource, type ViewNode } from './chat-rows'
 import type { Pane } from './panes'
+import type { WriterInput } from './terminal-writer'
 
 /// A runner's rows, through the wasm module's JSON.
 export function sourceOf(runner: WebRunner, terminal: string, agent?: string): RowSource {
@@ -63,7 +64,8 @@ export class ChatView implements Pane<WebRunner> {
   private readonly empty = el('p', 'chat-empty')
   private readonly latest = el('button', 'chat-latest', 'Latest')
   private readonly note = el('p', 'chat-note')
-  private writable = true
+  private input: WriterInput = 'writable'
+  private blockedSend = false
   private readonly working = el('div', 'chat-working')
   private readonly stop = el('button', 'quiet chat-stop', 'Stop')
   private readonly box = el('textarea', 'chat-input')
@@ -383,13 +385,18 @@ export class ChatView implements Pane<WebRunner> {
 
   /// Everything but the list: what the foot says, whether the box can send,
   /// the placeholder, and the empty state.
-  setWritable(writable: boolean): void {
-    if (this.writable === writable) return
-    this.writable = writable
-    this.box.readOnly = !writable
-    this.attachButton.disabled = !writable
-    this.stop.disabled = !writable
+  setInput(input: WriterInput): void {
+    if (this.input === input) return
+    this.input = input
+    if (this.blockedSend) this.say('')
+    this.box.readOnly = !this.writable
+    this.attachButton.disabled = !this.writable
+    this.stop.disabled = !this.writable
     this.paint()
+  }
+
+  private get writable(): boolean {
+    return this.input === 'writable'
   }
 
   private paint(): void {
@@ -427,7 +434,8 @@ export class ChatView implements Pane<WebRunner> {
     this.send.disabled = !this.writable || !!this.outbox?.busy || (this.box.value.trim() === '' && this.images.length === 0)
   }
 
-  private say(text: string): void {
+  private say(text: string, blocked = false): void {
+    this.blockedSend = blocked
     this.problem.textContent = text
     this.problem.hidden = text === ''
   }
@@ -503,11 +511,16 @@ export class ChatView implements Pane<WebRunner> {
   private async submit(): Promise<void> {
     const text = this.box.value
     const sent = this.images
-    if (!this.writable || !this.outbox) return
+    if (this.outbox?.busy) return this.say(blockedSend('send_in_flight'), true)
+    if (this.input === 'claiming') return this.say(blockedSend('waiting_for_input'), true)
+    if (!this.writable) return this.say(blockedSend('read_only'), true)
+    if (!this.outbox || !this.runner) return this.say(blockedSend('not_connected'), true)
+    if (!text.trim() && sent.length === 0) return
     this.say('')
     const sending = this.outbox.send(text, sent)
     this.paint()
     const done = await sending
+    if (this.blockedSend) this.say('')
     if (done.ok) {
       // The person's own words stay if they went on typing meanwhile.
       if (this.box.value === text) {

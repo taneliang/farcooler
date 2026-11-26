@@ -74,6 +74,7 @@ declare module 'fc-web' {
     /// Tell the runner this is a sign-out; how long nothing had arrived, ms.
     signing_out(): number
     terminal_writer_supported(): boolean
+    on_terminal_writer_change(listener: ((terminal: string | null) => void) | undefined): void
     terminal_writer(terminal: string, action: string): Promise<string>
     web_review(workspace: string, ticket: string, request: string): Promise<string>
     board(workspace: string, repository: string): Promise<string>

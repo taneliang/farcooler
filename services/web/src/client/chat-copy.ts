@@ -38,6 +38,8 @@ function phrase(name: string, fill: Record<string, string | number> = {}, by?: s
   return Object.entries(fill).reduce((line, [key, value]) => line.replaceAll(`{${key}}`, String(value)), words)
 }
 
+export const blockedSend = (reason: 'waiting_for_input' | 'read_only' | 'send_in_flight' | 'not_connected'): string => phrase(reason)
+
 export const transcriptWords = () => ({
   title: phrase('transcript_title'), open: phrase('transcript_open'),
   close: phrase('transcript_close'), empty: phrase('transcript_empty'),
@@ -229,7 +231,7 @@ export function sendFailure(word: string, runner: string, what: 'send' | 'stop',
     // The runner's own word for what it refused, in the apps' sentences
     // (AgentConversation.swift).
     if (what === 'send') {
-      if (['images_too_large', 'image_too_large', 'images', 'image'].includes(refusal)) return refused(refusal)
+      if (['images_too_large', 'image_too_large', 'images', 'image', 'writer_busy', 'writer_taken_over'].includes(refusal)) return refused(refusal)
     }
     return what === 'send'
       ? 'The agent didn’t take that message. It may be showing a dialog only the terminal can answer.'

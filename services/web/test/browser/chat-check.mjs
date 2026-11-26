@@ -154,6 +154,35 @@ if (args.includes('--measure')) {
   await page.press('.chat-input', 'Shift+Enter')
   check((await page.inputValue('.chat-input')).includes('\n') && (await page.evaluate(() => window.__chat.runner.composed.length)) === 1, 'Shift+Return is a new line, not a send')
 
+  // A split can return before its writer claim does.
+  const setWriter = state => page.evaluate(state => window.__chat.view.setInput(state), state)
+  const draft = 'Keep these words for me'
+  await page.fill('.chat-input', draft)
+  for (const [state, reason] of [['claiming', /waiting for terminal input/i], ['viewing', /read-only/i]]) {
+    await setWriter(state)
+    await page.press('.chat-input', 'Enter')
+    check(await page.locator('.chat-problem').isVisible() && reason.test(await page.textContent('.chat-problem')), `Return explains ${state}`)
+    check(await page.inputValue('.chat-input') === draft, `Return preserves the ${state} draft`)
+  }
+  check((await page.evaluate(() => window.__chat.runner.composed.length)) === 1, 'a pending claim and read-only Return never compose')
+  await setWriter('writable')
+
+  await page.evaluate(() => {
+    window.__chat.runner.composeGate = new Promise(resolve => { window.__finishCompose = resolve })
+  })
+  await page.press('.chat-input', 'Enter')
+  await page.fill('.chat-input', 'Next draft')
+  await page.press('.chat-input', 'Enter')
+  check(await page.locator('.chat-problem').isVisible() && /still sending/i.test(await page.textContent('.chat-problem')), 'Return explains a send in flight')
+  check(await page.inputValue('.chat-input') === 'Next draft', 'Return preserves the draft during a send')
+  await page.evaluate(() => {
+    window.__finishCompose()
+    window.__chat.runner.composeGate = null
+  })
+  await page.waitForFunction(() => window.__chat.runner.composed.length === 2)
+  check(await page.inputValue('.chat-input') === 'Next draft', 'finishing the first send leaves the next draft')
+  check(!await page.locator('.chat-problem').isVisible(), 'the send-in-flight notice clears when the send finishes')
+
   for (const replyFirst of [true, false]) {
     for (const state of ['Sent', 'Withdrawn']) {
       const order = replyFirst ? 'compose first' : 'rows first'

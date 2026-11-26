@@ -54,6 +54,7 @@ let dropStream: (() => void) | undefined
 const fake = {
   terminal_writer_supported: () => scope === 'control',
   terminal_writer: async (terminal: string, action: string) => {
+    calls.push({ action, terminal })
     const response = await fetch('/writer', { method: 'POST', body: JSON.stringify({ client, terminal, action }) })
     return response.text()
   },
@@ -128,7 +129,13 @@ const panes = new PaneSet<WebRunner>(id => {
   content.append(host)
   root.append(content)
   stage.append(root)
-  const pane = new PaneView(host, word => { throw new Error(word) })
+  const pane = new PaneView(host, word => {
+    void fakeFailure(new Error(word)).then(words => {
+      const note = document.getElementById('pane-note')!
+      note.textContent = words
+      note.hidden = false
+    })
+  })
   writers.set(id, {
     root,
     view: new TerminalWriter(root, id, input => pane.setInput(input), fakeFailure,
@@ -182,7 +189,9 @@ function reconnectWriter(): void {
     if (!root.hidden) view.show(writerRunner)
   }
 }
-Object.assign(window, { dropStream: () => dropStream?.(), chooseTerminal: screen.chooseTerminal, reconnectWriter })
+Object.assign(window, { dropStream: () => dropStream?.(), chooseTerminal: screen.chooseTerminal, reconnectWriter,
+  writerChanged: (terminal: string) => writers.get(terminal)?.view.refresh(),
+})
 void screen.refresh(true, 'replaceState')
 async function fakeFailure(error: Error & { code?: string }): Promise<string> {
   const reply = await fetch('/failure', { method: 'POST', body: JSON.stringify([error.message, error.code ?? '', '']) })

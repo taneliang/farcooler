@@ -1,0 +1,27 @@
+# ov-1499 · Web message feedback and idle requests
+
+Enter now explains a pending writer claim, a read-only terminal, or an earlier send still in flight. The composer keeps the draft and its attachments until the runner accepts them. The raw terminal replays buffered keys if the claim succeeds and reports that they were unsent if the claim is denied.
+
+The runner records one `terminal.compose` outcome with elapsed milliseconds and the client from its hello. The success words are `sent` and `queued`. Refusals use the runner’s reason or error code. The record omits the message and attachments.
+
+## Idle requests per minute
+
+This is the configured steady-state rate for one connected runner with the Terminals page visible, a selected workspace, and no changes. The plan fits one response. Counts exclude initial reads, event-triggered reads, transcript follow requests, and connection probes.
+
+| Runner RPCs | Before | After |
+| --- | ---: | ---: |
+| Needs You and work inventory | 60 | 60 |
+| `plan.get` for orchestrator discovery | 12 | 0 |
+| `terminal.writer` status, per visible pane | 60 | 0 |
+| **Total with one pane** | **132** | **60** |
+| **Total with two panes** | **192** | **60** |
+
+The before rates come from the five-second page refresh and the one-second delay after each lease response. Round-trip time can lower the actual lease rate. On a runner with workflow support, discovery also made at least one workflow read per plan refresh, adding another 12 requests per minute before. The page now gets the orchestrator from its existing work inventory. Chromium advanced an idle pane through 60 seconds and observed zero lease status calls. A lease event triggers a status read for the pane it names.
+
+Runners that predate lease notifications still accept explicit claims and takeovers. Those runners can notify a displaced writer, while a viewer sees other lease changes the next time they act or reopen the pane.
+
+## Regression evidence
+
+The three Enter feedback assertions failed against the original chat renderer. The raw-terminal browser test also failed against the original renderer when the request was held, Enter was typed, and the runner denied the claim. The updated browser suites exercise both outcomes for buffered keys, the three composer states, and takeover in two tabs. The Rust tests cover compose log fields and notifications on release, claim, takeover, and disconnect.
+
+Both Chromium suites passed, along with 89 affected web unit tests, the focused Rust tests for compose logging, lease changes, work projection, conversation copy, session closure, and transport events, and the TypeScript and WebAssembly checks. The existing live lease and compose integration tests reached fixture setup. macOS rejected the Unix socket paths under the configured scratch directory, and the compose fixtures that start a pane could not bring up tmux there.

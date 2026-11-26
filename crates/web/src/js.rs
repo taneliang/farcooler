@@ -336,6 +336,15 @@ impl WebRunner {
         self.0.terminal_writer_supported()
     }
 
+    pub fn on_terminal_writer_change(&self, listener: Option<Function>) {
+        self.0.on_terminal_writer_change(listener.map(|listener| {
+            std::rc::Rc::new(move |terminal: Option<Uuid>| {
+                let id = terminal.map_or(JsValue::NULL, |id| JsValue::from_str(&id.to_string()));
+                let _ = listener.call1(&JsValue::NULL, &id);
+            }) as std::rc::Rc<dyn Fn(Option<Uuid>)>
+        }));
+    }
+
     pub fn terminal_writer(&self, terminal: String, action: String) -> Promise {
         let runner = self.0.clone();
         wasm_bindgen_futures::future_to_promise(async move {
@@ -343,6 +352,7 @@ impl WebRunner {
             let id = Uuid::parse_str(&terminal).map_err(|_| failure("protocol", "invalid terminal id"))?;
             let action = match action.as_str() {
                 "status" => Action::Status,
+                "watch" => Action::Watch,
                 "claim" => Action::Claim,
                 "take-over" => Action::TakeOver,
                 "release" => Action::Release,

@@ -210,3 +210,50 @@ fn changes_status_scans_run_on_a_worker() {
         assert!(arm.contains("status_work::run"), "{method} can run git status on a cache miss");
     }
 }
+
+#[tokio::test]
+async fn ov_1499_compose_logs_client_outcome_and_milliseconds() {
+    use tracing::instrument::WithSubscriber;
+
+    #[derive(Clone, Default)]
+    struct Log(Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Log {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let svc = Arc::new(Service::open_in(dir.path().to_path_buf()).await.unwrap());
+    let watcher = crate::watch::Watcher::new(svc.clone());
+    let log = Log::default();
+    let subscriber = tracing_subscriber::fmt().with_ansi(false)
+        .with_writer({ let log = log.clone(); move || log.clone() }).finish();
+
+    async {
+        for scope in [Scope::Read, Scope::HostAdmin] {
+            let factory = RpcFactory::new(svc.clone(), watcher.clone(),
+                Arc::new(tokio::sync::Notify::new()), Peer { client_id: None, scope });
+            factory.client_hello(&farcooler_protocol::v1::ClientHello {
+                client_name: "test-browser".into(),
+                ..Default::default()
+            });
+            let answer = factory.handle(farcooler_transport::request("terminal.compose")).await;
+            assert!(matches!(answer.outcome, Some(response::Outcome::Error(_))));
+        }
+    }.with_subscriber(subscriber).await;
+
+    let logged = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
+    let rows: Vec<_> = logged.lines().filter(|line| line.contains("terminal.compose")).collect();
+    assert_eq!(rows.len(), 2, "{logged}");
+    for (row, outcome) in rows.into_iter().zip(["scope-denied", "payload"]) {
+        assert!(row.contains(&format!("outcome=\"{outcome}\"")), "{row}");
+        assert!(row.contains("client=\"test-browser\""), "{row}");
+        let elapsed = row.split("elapsed_ms=").nth(1).unwrap().split_whitespace().next().unwrap();
+        assert!(elapsed.parse::<u64>().is_ok(), "{row}");
+    }
+}

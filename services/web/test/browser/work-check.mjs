@@ -30,10 +30,14 @@ async function test(name, run, { query = '', width = 1280, sharedWriter = false 
       const key = sharedWriter ? terminal : `${client}:${terminal}`
       const owner = writers.get(key)
       if (action === 'write') return route.fulfill({ status: owner === client ? 200 : 409 })
-      if (action === 'take-over' || (action === 'claim' && !owner)) {
+      if (action === 'take-over' || (['claim', 'watch'].includes(action) && !owner)) {
         if (owner && owner !== client) displaced.set(key, owner)
         writers.set(key, client)
       } else if (action === 'release' && owner === client) writers.delete(key)
+      if (sharedWriter && owner !== writers.get(key)) {
+        await Promise.allSettled(context.pages().filter(page => page !== route.request().frame().page())
+          .map(page => page.evaluate(terminal => window.writerChanged?.(terminal), terminal)))
+      }
       const writable = writers.get(key) === client
       const occupied = writers.has(key)
       return route.fulfill({ json: {
@@ -208,7 +212,7 @@ try {
     const waiting = new Promise(resolve => { grant = resolve })
     try {
       await page.route('**/writer', async route => {
-        if (JSON.parse(route.request().postData()).action === 'claim') await waiting
+        if (['claim', 'watch'].includes(JSON.parse(route.request().postData()).action)) await waiting
         await route.fallback()
       })
       await page.goto(origin + '/')
@@ -222,6 +226,36 @@ try {
       grant()
       await page.close()
     }
+  })
+
+  await test('visibly refuse keystrokes if a pending claim is denied', async (first, context) => {
+    await first.getByText('Writer', { exact: true }).waitFor()
+    const page = await context.newPage()
+    let grant
+    const waiting = new Promise(resolve => { grant = resolve })
+    try {
+      await page.route('**/writer', async route => {
+        if (['claim', 'watch'].includes(JSON.parse(route.request().postData()).action)) await waiting
+        await route.fallback()
+      })
+      await page.goto(origin + '/')
+      await page.locator('[data-attached=true]:visible').waitFor()
+      await page.locator('.xterm-helper-textarea:visible').press('Enter')
+      grant()
+      await page.getByText('Viewer', { exact: true }).waitFor()
+      await page.getByText('Keys typed while waiting for terminal input were not sent.', { exact: true }).waitFor({ timeout: 1500 })
+      assert.equal(await rpc(page, 'write'), undefined)
+    } finally {
+      grant()
+      await page.close()
+    }
+  }, { sharedWriter: true })
+
+  await test('an idle pane makes no lease status requests in one minute', async page => {
+    await page.getByText('Writer', { exact: true }).waitFor()
+    await page.clock.install()
+    await page.clock.runFor(60_000)
+    assert.equal(await rpc(page, 'status'), undefined)
   })
 
   await test('read-only grant explains why terminal commands are unavailable', async page => {

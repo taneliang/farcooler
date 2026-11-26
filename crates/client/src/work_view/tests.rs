@@ -49,6 +49,7 @@ fn terminal_sidebar_uses_the_runner_seat_and_the_checkouts_workspace() {
         terminal("unclaimed", "missing", "running", false),
     ]);
     let main = view(&data, &Selection::default());
+    assert_eq!(main["orchestrator"], "seat");
     assert_eq!(main["workspaces"][0]["label"], "Main · Product");
     assert_eq!(main["workspaces"][2]["label"], "Main · Runner");
     let rows = main["terminals"].as_array().unwrap();
@@ -60,6 +61,7 @@ fn terminal_sidebar_uses_the_runner_seat_and_the_checkouts_workspace() {
     assert_eq!(rows[2]["live"], false);
 
     let other = view(&data, &Selection { workspace: Some("other".into()), ..Default::default() });
+    assert_eq!(other["orchestrator"], "other-seat");
     assert_eq!(other["terminals"][0]["id"], "other-seat");
     assert_eq!(other["terminals"][0]["live"], true);
     assert_eq!(other["terminals"][0]["sidebarBadge"], "Orchestrator");

@@ -348,7 +348,8 @@ impl FleetEvent {
             Payload::StackChanged(s) => {
                 Some(FleetEvent::Stack { repository: uuid_of(&s.repository_id) })
             }
-            Payload::TerminalFrame(_) | Payload::AgentEvents(_) | Payload::TerminalWriterLost(_) => None,
+            Payload::TerminalFrame(_) | Payload::AgentEvents(_) | Payload::TerminalWriterLost(_)
+            | Payload::TerminalWriterChanged(_) => None,
             // A task notice (ov-94): the phones hear it as a push from the
             // relay, which their notification code draws; nothing to re-read.
             Payload::Notice(_) => None,

@@ -19,6 +19,7 @@ export class WorkspacePanes {
   private content = ''
   private work = Promise.resolve()
   private stopped = false
+  private watching: WebRunner | null = null
 
   constructor(
     scope: string,
@@ -58,12 +59,12 @@ export class WorkspacePanes {
         position: () => readLocal(`${key}:chat-scroll`),
         savePosition: value => writeLocal(`${key}:chat-scroll`, value),
       }) : null
-      chat?.setWritable(false)
+      chat?.setInput(input)
       const pane = chat ? new AgentPane(chat, shell) : shell()
       const writer = new TerminalWriter(root, id, next => {
         input = next
         raw?.setInput(next)
-        chat?.setWritable(next === 'writable')
+        chat?.setInput(next)
       }, error => workFailure(error.message, (error as WorkError).code ?? '', (error as WorkError).what ?? ''),
       runner => this.runner() === runner)
       this.mounts.set(id, { root, pane, writer })
@@ -155,7 +156,7 @@ export class WorkspacePanes {
   }
 
   private failure(error: Pick<WorkError, 'message' | 'code' | 'what'>): string {
-    return error.code === 'scope-denied' || error.what?.startsWith('writer_')
+    return error.code === 'scope-denied' || error.what?.startsWith('writer_') || error.message === 'writer_keys_refused'
       ? workFailure(error.message, error.code ?? '', error.what ?? '')
       : connectFailure(error.message, this.label)
   }
@@ -179,6 +180,8 @@ export class WorkspacePanes {
 
   dispose(): void {
     this.stopped = true
+    if (this.watching && this.watching === this.runner()) this.watching.on_terminal_writer_change(undefined)
+    this.watching = null
     this.set.dispose()
     for (const mount of this.mounts.values()) {
       mount.writer.show(null)
@@ -188,6 +191,14 @@ export class WorkspacePanes {
   }
 
   private showWriters(ids: string[], runner: WebRunner | null): void {
+    if (this.watching !== runner) {
+      this.watching = runner
+      runner?.on_terminal_writer_change(terminal => {
+        if (this.stopped || runner !== this.runner()) return
+        if (terminal) this.mounts.get(terminal)?.writer.refresh()
+        else for (const { writer } of this.mounts.values()) writer.refresh()
+      })
+    }
     for (const [id, mount] of this.mounts) {
       const visible = ids.includes(id)
       mount.root.hidden = !visible

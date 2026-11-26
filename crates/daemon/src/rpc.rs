@@ -212,6 +212,7 @@ pub struct RpcFactory {
     /// Set once a caller naming a device is known for a person (ov-1288,
     /// `refuse_a_device_named_from_a_pane`); new with a new pid.
     device_vouched: Arc<std::sync::OnceLock<()>>,
+    client_name: Arc<std::sync::OnceLock<String>>,
 }
 
 impl RpcFactory {
@@ -268,6 +269,7 @@ impl RpcFactory {
             caller_pid: None,
             caller_pane: Arc::default(),
             device_vouched: Arc::default(),
+            client_name: Arc::default(),
         }
     }
 }
@@ -278,6 +280,7 @@ impl Handler for RpcFactory {
     }
 
     fn client_hello(&self, hello: &farcooler_protocol::v1::ClientHello) {
+        let _ = self.client_name.set(hello.client_name.chars().take(64).collect());
         if let Ok(instance) = Uuid::from_slice(&hello.writer_client_instance)
             && instance.get_version_num() == 4
         {
@@ -288,27 +291,46 @@ impl Handler for RpcFactory {
     fn handle(&self, req: Request) -> impl std::future::Future<Output = Response> + Send {
         let session = self.session.clone();
         async move {
-            let _request = crate::request_watchdog::Request::begin(&req.method);
-            let mut rpc = Rpc::new(self.service.clone(), self.watcher.clone(), crate::person_access::live_peer(&self.service.store, &self.peer), session.clone(), self.stop.clone(), self.push.clone(), self.attachment.clone());
-            rpc.workflow = self.workflow.clone();
-            rpc.caller_pid = self.caller_pid;
-            rpc.caller_pane = self.caller_pane.clone();
-            let vouched = self.device_vouched.clone();
-            // The one request a closed connection could still serve.
-            //
-            // `serve_connection` returns the moment a session is closed and
-            // dispatches nothing after that, so this only ever catches a
-            // request that was ALREADY in flight when the close landed —
-            // microseconds, and exactly the microseconds in which somebody is
-            // revoking a device they no longer trust. Answering it would be a
-            // call served by a device whose access had already been withdrawn.
-            if session.is_closed() {
-                return error_response(req.request_id, DomainError::AuthRequired);
+            let compose_started = (req.method == "terminal.compose").then(std::time::Instant::now);
+            let response = async {
+                let _request = crate::request_watchdog::Request::begin(&req.method);
+                let mut rpc = Rpc::new(self.service.clone(), self.watcher.clone(), crate::person_access::live_peer(&self.service.store, &self.peer), session.clone(), self.stop.clone(), self.push.clone(), self.attachment.clone());
+                rpc.workflow = self.workflow.clone();
+                rpc.caller_pid = self.caller_pid;
+                rpc.caller_pane = self.caller_pane.clone();
+                let vouched = self.device_vouched.clone();
+                // The one request a closed connection could still serve.
+                //
+                // `serve_connection` returns the moment a session is closed and
+                // dispatches nothing after that, so this only ever catches a
+                // request that was ALREADY in flight when the close landed —
+                // microseconds, and exactly the microseconds in which somebody is
+                // revoking a device they no longer trust. Answering it would be a
+                // call served by a device whose access had already been withdrawn.
+                if session.is_closed() {
+                    return error_response(req.request_id, DomainError::AuthRequired);
+                }
+                if let Err(err) = crate::person_access::refuse_a_device_named_from_a_pane(&rpc.service, &rpc.peer, rpc.caller_pid, &req.method, &vouched).await {
+                    return error_response(req.request_id, err);
+                }
+                rpc.handle(req).await
+            }.await;
+            if let Some(started) = compose_started {
+                let outcome = match &response.outcome {
+                    Some(response::Outcome::Result(value)) => match &value.value {
+                        Some(result::Value::TerminalTold(told)) if told.queued => "queued",
+                        Some(result::Value::TerminalTold(_)) => "sent",
+                        _ => "unexpected_result",
+                    },
+                    Some(response::Outcome::Error(error)) if !error.what.is_empty() => &error.what,
+                    Some(response::Outcome::Error(error)) => farcooler_core::error::word_for(error.code),
+                    None => "missing_response",
+                };
+                tracing::info!(outcome, elapsed_ms = started.elapsed().as_millis() as u64,
+                    client = ?self.client_name.get().map(String::as_str).unwrap_or("unknown"),
+                    device = self.peer.client_id.as_deref().unwrap_or("local"), "terminal.compose");
             }
-            if let Err(err) = crate::person_access::refuse_a_device_named_from_a_pane(&rpc.service, &rpc.peer, rpc.caller_pid, &req.method, &vouched).await {
-                return error_response(req.request_id, err);
-            }
-            rpc.handle(req).await
+            response
         }
     }
 
