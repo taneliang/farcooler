@@ -913,6 +913,7 @@ dependencies = [
  "clap",
  "farcooler-agent-core",
  "farcooler-agent-hooks",
+ "farcooler-ceremony",
  "farcooler-client",
  "farcooler-core",
  "farcooler-daemon",

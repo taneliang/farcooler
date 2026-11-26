@@ -97,6 +97,7 @@ impl Rig {
                 &line(BROWSER_KEY),
                 signer,
                 link,
+                None,
                 || {},
             )
             .await

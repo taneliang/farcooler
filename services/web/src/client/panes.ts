@@ -117,13 +117,17 @@ export class PaneSet<R> {
     this.display([])
   }
 
+  disconnect(): void {
+    for (const pane of this.panes.values()) pane.detach()
+  }
+
   /// A new connection: attach again every pane that was attached, the one in
   /// front first. A pane that can't be (its terminal ended) is left as it is;
   /// the one in front reports why.
   async resume(runner: R, ended: (id: string) => void, onFailure?: (id: string, error: unknown) => void): Promise<void> {
     const ids = [...this.visible, ...[...this.panes.keys()].filter(id =>
       !this.visible.includes(id) && !this.letGo.has(id) && this.panes.get(id)?.used)]
-    for (const pane of this.panes.values()) pane.detach()
+    this.disconnect()
     let failure: unknown
     for (const id of ids) {
       const pane = this.panes.get(id)

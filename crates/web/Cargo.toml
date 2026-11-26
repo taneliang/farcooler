@@ -44,7 +44,7 @@ thiserror = "2"
 sha2 = "0.11"
 base64ct = { version = "1.8", features = ["alloc"] }
 # `js` gives uuid's v7 ids (every request id) the page's RNG.
-uuid = { version = "1", features = ["v7", "js"] }
+uuid = { version = "1", features = ["v7", "v4", "js"] }
 
 # Natively (the tests), a pane's tasks run on tokio's LocalSet.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

@@ -149,8 +149,10 @@ impl Session {
     pub async fn over_ssh<H: russh::client::Handler + 'static>(
         connection: russh::client::Handle<H>,
         client_name: &'static str,
+        writer_instance: Option<uuid::Uuid>,
     ) -> Result<Self, SessionError> {
-        Self::over_link(Box::new(connection), client_name, bytes::Bytes::new()).await
+        let writer_instance = writer_instance.map(|id| bytes::Bytes::copy_from_slice(id.as_bytes())).unwrap_or_default();
+        Self::over_link(Box::new(connection), client_name, writer_instance).await
     }
 
     async fn over_link(

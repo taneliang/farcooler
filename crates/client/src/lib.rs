@@ -47,3 +47,5 @@ pub mod workflow_presentation;
 pub mod engine_view;
 
 pub mod recovery_view;
+
+pub mod workday;

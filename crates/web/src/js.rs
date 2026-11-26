@@ -179,6 +179,23 @@ pub fn open_reply(
     serde_json::to_string(&opened).map_err(|e| failure("malformed", &e.to_string()))
 }
 
+/// Open a reply transferred directly from the runner's CLI.
+#[wasm_bindgen(js_name = openCliReply)]
+pub fn open_cli_reply(sealed: &str, offer: &str, reply_secret: &str, shown_at_ms: f64) -> Result<String, JsValue> {
+    let offer = farcooler_ceremony::decode_offer(offer).map_err(|e| failure(e.code(), &e.to_string()))?;
+    let (manifest, code) = enroll::open(sealed.trim(), &offer, reply_secret, false, shown_at_ms, js_sys::Date::now())
+        .map_err(|e| failure(e.code(), &e.to_string()))?;
+    serde_json::to_string(&enroll::Opened { code, taken: enroll::taken(&manifest) })
+        .map_err(|e| failure("malformed", &e.to_string()))
+}
+
+#[wasm_bindgen(js_name = mergeRunnerGrants)]
+pub fn merge_runner_grants(known: &str, added: &str) -> Result<String, JsValue> {
+    let parse = |grants: &str| serde_json::from_str(grants).map_err(|e| failure("protocol", &e.to_string()));
+    serde_json::to_string(&enroll::merge_grants(parse(known)?, parse(added)?))
+        .map_err(|e| failure("protocol", &e.to_string()))
+}
+
 /// The bytes this browser's passkey signs a challenge of, to register `key_line`
 /// for `account` with the directory against the relay's `challenge`.
 #[wasm_bindgen(js_name = registrationData)]
@@ -248,6 +265,12 @@ pub struct WebRunner(std::rc::Rc<Runner>);
 #[wasm_bindgen]
 pub struct WebPane(std::rc::Rc<std::cell::RefCell<Pane>>);
 
+/// Keep the tab’s writer identity when its tunnel is replaced.
+#[wasm_bindgen(js_name = newWriterKey)]
+pub fn new_writer_key() -> String {
+    Uuid::new_v4().to_string()
+}
+
 /// SSH to a runner over a dialed tunnel connection, refusing any host key but
 /// `host_key`, signing in with the passkey `key_a` through `assert` (one
 /// touch), and start its control session.
@@ -264,12 +287,14 @@ pub async fn connect(
     key_a: String,
     assert: Function,
     on_lost: Function,
+    writer_key: Option<String>,
 ) -> Result<WebRunner, JsValue> {
     let clock: std::sync::Arc<dyn crate::liveness::Clock> = std::sync::Arc::new(PageClock);
     let link = Link::new(clock.clone(), Liveness::TUNNEL);
     let stream = link.tap(bridge(conn)?);
     let signer = PasskeySigner(JsAuthenticator(assert));
-    let runner = handshake::sign_in(clock, handshake::HANDSHAKE, stream, &host_key, &user, &key_a, signer, link, move || {
+    let writer_instance = writer_key.and_then(|key| Uuid::parse_str(&key).ok());
+    let runner = handshake::sign_in(clock, handshake::HANDSHAKE, stream, &host_key, &user, &key_a, signer, link, writer_instance, move || {
         let _ = on_lost.call0(&JsValue::NULL);
     })
     .await
@@ -382,6 +407,21 @@ impl WebRunner {
     pub async fn answer_decision(&self, task: String, body: String) -> Result<(), JsValue> {
         let id = Uuid::parse_str(&task).map_err(|e| failure("protocol", &e.to_string()))?;
         self.0.answer_decision(id, &body).await.map_err(web_failure)
+    }
+
+    pub async fn runtime_health(&self) -> Result<String, JsValue> {
+        let host = self.0.session.host().await.map_err(|e| web_failure(e.into()))?;
+        Ok(farcooler_client::workday::runtime_health(&host))
+    }
+
+    pub async fn review_files(&self, worktree: String) -> Result<String, JsValue> {
+        let id = Uuid::parse_str(&worktree).map_err(|e| failure("protocol", &e.to_string()))?;
+        Ok(self.0.review_files(id).await.map_err(web_failure)?.to_string())
+    }
+
+    pub async fn review_patch(&self, worktree: String, path: String) -> Result<String, JsValue> {
+        let id = Uuid::parse_str(&worktree).map_err(|e| failure("protocol", &e.to_string()))?;
+        self.0.review_patch(id, &path).await.map_err(web_failure)
     }
 
     /// A workspace's plan, as JSON in the phones' shape (`plan_json`).
@@ -572,4 +612,16 @@ pub fn review_failure(word: &str, code: &str, what: &str) -> String {
 #[wasm_bindgen(js_name = reviewApprovalResult)]
 pub fn review_approval_result(raw: &str) -> String {
     farcooler_client::web_review::approval_result(raw).into()
+}
+
+#[wasm_bindgen(js_name = runnerHealth)]
+pub fn runner_health(runner: &str, connection: &str) -> Result<String, JsValue> {
+    let connection = serde_json::from_str(connection).map_err(|e| failure("protocol", &e.to_string()))?;
+    serde_json::to_string(&farcooler_client::workday::health(runner, connection))
+        .map_err(|e| failure("protocol", &e.to_string()))
+}
+
+#[wasm_bindgen(js_name = needsAttention)]
+pub fn needs_attention(count: usize) -> Option<String> {
+    farcooler_client::workday::attention(count)
 }

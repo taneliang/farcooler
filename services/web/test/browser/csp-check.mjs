@@ -61,12 +61,14 @@
 // Chromium comes from playwright-core; set PLAYWRIGHT_BROWSERS_PATH to where
 // `npx playwright-core install chromium-headless-shell` put it.
 
-import { execFileSync, spawnSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
+import { once } from 'node:events'
+import { createInterface } from 'node:readline'
+import { createHash, randomUUID } from 'node:crypto'
+import { existsSync, readFileSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { createConnection, createServer } from 'node:net'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { brotliDecompressSync } from 'node:zlib'
 
@@ -80,6 +82,10 @@ const flag = name => {
 }
 const dist = resolve(flag('--dist') ?? 'dist')
 const fakeDaemon = flag('--fake-daemon') && resolve(flag('--fake-daemon'))
+// Use two actual Rust runner services and tmux, behind the same SSH splice.
+const workdayRunner = flag('--workday-runner') && resolve(flag('--workday-runner'))
+const workdayCli = flag('--workday-cli') && resolve(flag('--workday-cli'))
+if (workdayRunner && !workdayCli) throw new Error('--workday-runner requires --workday-cli')
 // For a person judging the screens: each one at a desktop and a phone width.
 const shots = flag('--screenshots')
 const workstationShots = flag('--workstation-screenshots')
@@ -121,6 +127,11 @@ const origin = `https://${HOST}`
 const SIBLING = HOST === 'app.farcooler.com' ? 'www.farcooler.com' : 'canary.farcooler.com'
 
 const scratch = mkdtempSync(join(tmpdir(), 'fc-csp-'))
+// Only the socket's spelling needs shortening on macOS. The runtime and its
+// output live in scratch; the short alias is removed with the test.
+const alias = workdayRunner && join(scratch, 'sshd-build-box/state/farcoolerd.sock').length > 103
+  ? join('/tmp', `fc-${randomUUID().slice(0, 8)}`) : null
+if (alias) symlinkSync(scratch, alias, 'dir')
 const bundled = join(scratch, 'shell-server.mjs')
 await build({ entryPoints: ['test/browser/shell-server.ts'], bundle: true, platform: 'node', format: 'esm', outfile: bundled, logLevel: 'error' })
 const { shellHandler } = await import(pathToFileURL(bundled).href)
@@ -179,8 +190,49 @@ async function startRunner(name) {
       probe.close(() => done(port))
     })
   })
-  const keys = join(dir, 'authorized_keys')
-  writeFileSync(keys, '')
+  const keys = workdayRunner ? join(dir, '.ssh', 'authorized_keys') : join(dir, 'authorized_keys')
+  const runtime = join(alias ?? scratch, name === 'studio' ? 'sshd' : `sshd-${name}`, 'state')
+  let core
+  if (workdayRunner) {
+    const helper = join(dir, 'tunnel-helper')
+    const token = name === 'studio' ? 'test' : 'test2'
+    writeFileSync(helper, `#!/bin/sh
+key=${'\${1#--key=}'}
+while IFS= read -r line; do
+  case "$line" in
+    identity) : > "$key"; chmod 600 "$key"; echo ok ;;
+    blob) echo "ok ${token}" ;;
+    *) echo ok ;;
+  esac
+done
+`, { mode: 0o700 })
+    const tmux = execFileSync('/bin/sh', ['-c', 'command -v tmux'], { encoding: 'utf8' }).trim()
+    const inventoryUnavailable = join(dir, 'tmux-inventory-unavailable')
+    // Fail only inventory reads on this disposable runner, leaving its panes
+    // and SSH connection in place so the same session can see both changes.
+    writeFileSync(join(dir, 'tmux'), `#!/bin/sh
+if [ "$5" = list-panes ] && [ -f "$WORKDAY_TMUX_INVENTORY_UNAVAILABLE" ]; then
+  echo "workday fixture: tmux inventory unavailable" >&2
+  exit 1
+fi
+exec "$WORKDAY_REAL_TMUX" "$@"
+`, { mode: 0o700 })
+    core = spawn(workdayRunner, [dir, runtime, keys], {
+      env: { ...process.env, FARCOOLER_TUNNEL_HELPER: helper, PATH: `${dir}:${process.env.PATH}`,
+        WORKDAY_REAL_TMUX: tmux, WORKDAY_TMUX_INVENTORY_UNAVAILABLE: inventoryUnavailable },
+      stdio: ['ignore', 'pipe', 'inherit'],
+    })
+    const stdout = createInterface({ input: core.stdout })
+    try {
+      const [line] = await Promise.race([
+        once(stdout, 'line'),
+        once(core, 'exit').then(([code]) => { throw new Error(`workday runner exited with ${code}`) }),
+      ])
+      if (line !== 'ready') throw new Error('workday runner did not become ready')
+    } finally {
+      stdout.close()
+    }
+  } else writeFileSync(keys, '')
   const config = join(dir, 'sshd_config')
   const pidFile = join(dir, 'sshd.pid')
   writeFileSync(
@@ -192,6 +244,7 @@ async function startRunner(name) {
       `AuthorizedKeysFile ${keys}`,
       `PidFile ${pidFile}`,
       'StrictModes no',
+      ...(workdayRunner ? [`ForceCommand env FARCOOLER_HOME='${runtime}' '${join(dirname(workdayCli), 'farcoolerd')}' --stdio --scope control`] : []),
       'UsePAM no',
       'PasswordAuthentication no',
       'KbdInteractiveAuthentication no',
@@ -204,25 +257,35 @@ async function startRunner(name) {
   )
   const log = join(dir, 'sshd.log')
   const started = spawnSync('/usr/sbin/sshd', ['-f', config, '-E', log])
-  if (started.status !== 0) throw new Error(`sshd did not start: ${started.stderr}`)
+  if (started.status !== 0) {
+    core?.kill('SIGINT')
+    throw new Error(`sshd did not start: ${started.stderr}`)
+  }
   let pid = 0
   for (let i = 0; i < 200 && !pid; i++) {
     pid = existsSync(pidFile) ? Number(readFileSync(pidFile, 'utf8').trim()) || 0 : 0
     if (!pid) await new Promise(r => setTimeout(r, 50))
   }
-  if (!pid) throw new Error(`sshd wrote no pid; see ${log}`)
+  if (!pid) {
+    core?.kill('SIGINT')
+    throw new Error(`sshd wrote no pid; see ${log}`)
+  }
   const typedLog = join(dir, 'typed')
+  const command = `cd '${dir}' && '${fakeDaemon}' typed ${name}`
   let enrolled = ''
   return {
     name,
     dir,
     pid,
     port,
+    core,
+    runtime,
+    sockets: new Set(),
     hostKey,
     log,
     /// The Key A line the phone's enrollment has the daemon write, in the
     /// fence's shape: restricted, with the daemon as its forced command.
-    enroll: keyA => (enrolled = keyA) && writeFileSync(keys, `restrict,command="cd '${dir}' && '${fakeDaemon}' typed ${name}" ${keyA}\n`),
+    enroll: keyA => (enrolled = keyA) && writeFileSync(keys, `restrict,command="${command}" ${keyA}\n`),
     typed: () =>
       (existsSync(typedLog) ? readFileSync(typedLog, 'utf8') : '')
         .split('\n')
@@ -234,7 +297,7 @@ async function startRunner(name) {
     answers: () => (existsSync(join(dir, 'answers')) ? readFileSync(join(dir, 'answers'), 'utf8').trim().split('\n') : []),
   }
 }
-let runner = fakeDaemon ? await startRunner('studio') : null
+let runner = null
 /// The second runner, started by the every-runner step.
 let second = null
 
@@ -287,8 +350,9 @@ async function launch(video, secret, { prf = false, dir = profile } = {}) {
       const token = new URL(ws.url()).pathname.split('/').pop()
       const target = token === 'test2' && second ? second : runner
       const tcp = createConnection({ host: '127.0.0.1', port: target.port })
+      target.sockets.add(tcp)
       tcp.on('data', data => later(() => ws.send(data)))
-      tcp.on('close', () => later(() => ws.close()))
+      tcp.on('close', () => { target.sockets.delete(tcp); later(() => ws.close()) })
       tcp.on('error', () => ws.close())
       ws.onMessage(data => later(() => tcp.write(typeof data === 'string' ? Buffer.from(data) : data)))
       ws.onClose(() => tcp.destroy())
@@ -315,7 +379,7 @@ async function launch(video, secret, { prf = false, dir = profile } = {}) {
 }
 
 function watch(page) {
-  page.on('pageerror', e => errors.push(`page error: ${e.message}`))
+  page.on('pageerror', e => errors.push(`page error: ${workdayRunner ? e.stack : e.message}`))
   page.on('console', m => {
     if (m.type() === 'error') errors.push(`console: ${m.text()}`)
   })
@@ -856,7 +920,7 @@ async function workspaceWalk(page) {
   await page.waitForFunction(() => document.querySelectorAll('#needs .need').length === 1, null, { timeout: 30_000 })
   if (!same(await rows(), ['Run the tests on studio?'])) failures.push(`Main's Needs You lists ${JSON.stringify(await rows())}`)
   if ((await page.textContent('#show-needs')) !== 'Needs You (1)') failures.push(`Main's Needs You button says ${await page.textContent('#show-needs')}`)
-  if ((await page.textContent('#bar-count')) !== '3 Waiting') failures.push(`the bar says ${await page.textContent('#bar-count')}, not everything waiting`)
+  if ((await page.textContent('#bar-count')) !== '3 items need your attention') failures.push(`the bar did not show the fleet count: ${await page.textContent('#bar-count')}`)
   await page.click('#show-plan')
   // Main's one initiative has nothing moving, so the column folds it into its quiet line.
   await page.waitForFunction(() => document.getElementById('plan')?.textContent?.includes('Nothing moving: Visual language'), null, { timeout: 30_000 })
@@ -1176,11 +1240,198 @@ async function waitForFile(path, text) {
   failures.push(`${path.split('/').pop()} never held ${JSON.stringify(text)}`)
 }
 
-let session = await launch()
+async function remoteWorkday({ context, page, passkeys }) {
+  const wait = { timeout: 30_000 }
+  const assert = (ok, message) => { if (!ok) throw new Error(message) }
+  async function approve(target) {
+    await enrolling(page)
+    if (!(await page.locator('#cli-offer').isVisible())) {
+      await page.getByText('Approve from the runner CLI', { exact: true }).click()
+    }
+    const offer = await page.locator('#cli-offer').inputValue()
+    const cli = spawnSync(workdayCli, ['enroll-browser', '--account', 'acct-test', '--label', target.name, '--user', me,
+      '--host-key', readFileSync(join(target.dir, 'host.pub'), 'utf8').trim()], {
+      input: `${offer}\nyes\n`,
+      encoding: 'utf8',
+      env: { ...process.env, FARCOOLER_HOME: target.runtime },
+      timeout: 30_000,
+    })
+    assert(cli.status === 0, `CLI enrollment failed: ${cli.stderr?.trim().replaceAll("\n", " ") || cli.error}`)
+    const code = cli.stderr.match(/compare this code: (\S+)/)?.[1]
+    assert(code, 'CLI printed the comparison code')
+    await page.locator('#cli-reply').fill(cli.stdout.trim())
+    await page.locator('#cli-compare').click()
+    await page.locator('#compare:not([hidden])').waitFor(wait)
+    assert((await page.textContent('#compare-code')).replace(/\s/g, '') === code, 'CLI comparison code')
+    await page.click('#compare-yes')
+  }
+  async function connectRunner(tab, label) {
+    await statusSays(tab, `Connect to ${label}`)
+    await tab.click('#status-action')
+    await tab.locator('#work:not([hidden])').waitFor(wait)
+    await tab.locator('#runner-health').filter({ hasText: /^Connected$/ }).waitFor(wait)
+    await tab.locator('#runtime-health').filter({ hasText: /^Runner healthy$/ }).waitFor(wait)
+  }
+
+  await page.goto(origin)
+  await makePasskey(page)
+  await approve(runner)
+  await connectRunner(page, 'studio')
+  console.log('workday: new browser accepted a directly transferred enrollment and opened a runner')
+
+  second = await startRunner('build-box')
+  await page.click('#add-runner')
+  await approve(second)
+  await connectRunner(page, 'studio')
+  await page.getByLabel('Switch Runner').selectOption({ label: 'build-box' })
+  await connectRunner(page, 'build-box')
+
+  const work = page.getByRole('dialog', { name: 'Start Work' })
+  async function chooseCheckout() {
+    await page.locator('#show-start-work').click()
+    await work.getByLabel('Repository').selectOption({ label: 'workday' })
+    const worktree = work.getByLabel('Worktree', { exact: true })
+    const checkout = await worktree.locator('option').filter({ hasText: 'Review checkout' }).getAttribute('value')
+    await worktree.selectOption(checkout)
+  }
+  await chooseCheckout()
+  await work.getByLabel('Terminal Type').selectOption('codex')
+  await work.getByRole('button', { name: 'Start Terminal' }).click()
+  await work.waitFor({ state: 'hidden', ...wait })
+  await page.locator('#terminal-name').filter({ hasText: /^Codex$/ }).waitFor(wait)
+  const started = new URL(page.url()).searchParams.get('terminal')
+  assert(started, 'the new agent was selected')
+
+  // Keep a live tmux pane so the runner has an inventory to read on each poll.
+  const inventoryUnavailable = join(second.dir, 'tmux-inventory-unavailable')
+  const healthTouches = touches
+  writeFileSync(inventoryUnavailable, '')
+  try {
+    await page.locator('#runtime-health').filter({ hasText: /^Runner degraded\. Check tmux on this runner\.$/ }).waitFor(wait)
+    await page.locator('#runner-health').filter({ hasText: /^Connected$/ }).waitFor(wait)
+  } finally {
+    unlinkSync(inventoryUnavailable)
+  }
+  await page.locator('#runtime-health').filter({ hasText: /^Runner healthy$/ }).waitFor(wait)
+  assert(touches === healthTouches, 'runner health changed without a new passkey sign-in')
+  console.log('workday: runner health showed tmux degradation and recovery on the same connection')
+
+  const lost = page.getByRole('link', { name: 'Lost workday agent', exact: true })
+  await lost.click()
+  await page.locator('#terminal-state').filter({ hasText: /^Lost$/ }).waitFor(wait)
+  await page.getByRole('button', { name: 'Recover Terminal' }).click()
+  await page.locator('#terminal-state').filter({ hasText: /^Running$/ }).waitFor(wait)
+  await page.locator('#terminal-name').filter({ hasText: /^Lost workday agent$/ }).waitFor(wait)
+  const terminalUrl = page.url()
+  assert(new URL(terminalUrl).searchParams.get('terminal') !== started, 'recovery selected the recovered agent')
+  await page.click('#view-conversation')
+  const writerChat = page.locator('.chat-host:not([hidden])[data-attached="true"]')
+  await writerChat.locator('.chat-input:not([readonly])').waitFor(wait)
+  console.log('workday: switched runner, selected a checkout, started Codex and recovered a lost terminal')
+
+  const notice = 'Another client is writing to this terminal.'
+  const writerStatus = tab => tab.locator('.terminal-writer:not([hidden])')
+  const [held] = await passkeys.held()
+  await passkeys.held(held.credentialId)
+  const viewer = await context.newPage()
+  try {
+    await authenticator(context, viewer)
+    await viewer.goto(terminalUrl)
+    await connectRunner(viewer, 'build-box')
+    await viewer.click('#view-conversation')
+    const chat = viewer.locator('.chat-host:not([hidden])[data-attached="true"]')
+    await writerStatus(viewer).getByText(notice, { exact: true }).waitFor(wait)
+    assert(await chat.locator('.chat-input').getAttribute('readonly') !== null, 'the competing composer was read-only')
+    for (const control of ['.chat-send', '.chat-stop', '.chat-attach']) {
+      assert(await chat.locator(control).isDisabled(), `the competing conversation disabled ${control}`)
+    }
+    await viewer.click('#view-terminal')
+    await viewer.waitForSelector(LIVE, wait)
+    await writerStatus(viewer).getByText(notice, { exact: true }).waitFor(wait)
+    await writerStatus(viewer).getByText('Viewer', { exact: true }).waitFor(wait)
+  } finally {
+    await viewer.close()
+  }
+
+  // Exercise the explicit takeover used by the Mac's persistent input pipe.
+  const terminal = new URL(terminalUrl).searchParams.get('terminal')
+  const nativeEnv = { ...process.env, FARCOOLER_HOME: second.runtime }
+  const native = spawn(workdayCli, ['terminal', 'input', terminal], {
+    env: nativeEnv, stdio: ['pipe', 'ignore', 'inherit'],
+  })
+  const nativeExited = once(native, 'exit')
+  try {
+    const marker = 'native-writer-check'
+    await writerChat.locator('.chat-input').fill('keep this draft')
+    native.stdin.write('take-over\n' + Buffer.from(marker).toString('hex') + '\n')
+    const deadline = Date.now() + wait.timeout
+    let screen = ''
+    while (!screen.includes(marker) && Date.now() < deadline) {
+      screen = execFileSync(workdayCli, ['terminal', 'screen', terminal], { env: nativeEnv, encoding: 'utf8' })
+      if (!screen.includes(marker)) await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    assert(screen.includes(marker), 'native input reached tmux while the browser held its lease')
+
+    const displaced = 'Another client took over this terminal.'
+    await writerStatus(page).getByText(displaced, { exact: true }).waitFor(wait)
+    await writerChat.locator('.chat-input[readonly]').waitFor(wait)
+    assert(await writerChat.locator('.chat-input').inputValue() === 'keep this draft', 'the takeover kept the browser draft')
+    await page.click('#view-terminal')
+    await page.waitForSelector(LIVE, wait)
+    await writerStatus(page).getByText(displaced, { exact: true }).waitFor(wait)
+  } finally {
+    native.stdin.end()
+    const [code] = await nativeExited
+    assert(code === 0, 'the native input channel closed cleanly')
+  }
+  console.log('workday: the native input pipe took over and the browser kept its draft read-only')
+
+  for (const socket of second.sockets) socket.destroy()
+  await page.locator('#runner-health').filter({ hasText: /^Disconnected$/ }).waitFor(wait)
+  await writerStatus(page).waitFor({ state: 'hidden', ...wait })
+  await page.locator(LIVE).waitFor({ state: 'detached', ...wait })
+  await page.locator('.chat-host[data-attached]').first().waitFor({ state: 'detached', ...wait })
+  await page.getByRole('button', { name: 'Reconnect', exact: true }).click()
+  await page.locator('#runner-health').filter({ hasText: /^Connected$/ }).waitFor(wait)
+  await page.waitForSelector(LIVE, wait)
+  assert(page.url() === terminalUrl, 'reconnect retained the selected terminal')
+  await writerStatus(page).getByText('Writer', { exact: true }).waitFor(wait)
+  console.log('workday: competing connection was read-only and the selected pane survived reconnect')
+
+  await page.locator('#bar-count').filter({ hasText: /need(s)? your attention/ }).waitFor(wait)
+  await page.locator('#bar-count').click()
+  const decision = page.locator('#needs .need').filter({ hasText: 'Run the deployment checks?' }).filter({ hasNot: page.locator('.need-runner', { hasText: 'studio' }) })
+  await decision.getByRole('button', { name: 'Run checks', exact: true }).click()
+  await decision.waitFor({ state: 'detached', ...wait })
+
+  await page.click('#show-terminals')
+  await chooseCheckout()
+  await work.getByRole('button', { name: 'Review Changes' }).click()
+  const changes = page.getByRole('dialog', { name: 'Review Changes' })
+  await changes.locator('pre').filter({ hasText: '+Verified deployment plan' }).waitFor(wait)
+  await changes.getByRole('button', { name: 'Done' }).click()
+  await work.getByRole('button', { name: 'Done' }).click()
+
+  await page.click('#show-plan')
+  writeFileSync(join(second.dir, 'open-landing'), '')
+  const landing = page.locator('#plan section').filter({ has: page.getByRole('heading', { name: /^Landing(?: 0)?$/ }) })
+  await landing.getByText('Checking Here', { exact: true }).waitFor(wait)
+  writeFileSync(join(second.dir, 'advance-landing'), '')
+  await landing.getByText(/^checking on ci$/i).waitFor(wait)
+  console.log('workday: answered Needs You, read the committed diff and followed the runner’s landing in Plan')
+}
+
+let session
 try {
+  if (fakeDaemon || workdayRunner) runner = await startRunner('studio')
+  session = await launch()
   // A step that times out stops the walk, and the violations it caused are
   // still reported: they are usually why it timed out.
   try {
+    if (workdayRunner) {
+      await remoteWorkday(session)
+      throw new WalkDone()
+    }
     let { page } = session
     // Boot, a button for the passkey (Safari prompts only from a click), and
     // the code.
@@ -1484,11 +1735,20 @@ try {
   for (const r of reports.csp) failures.push(`CSP report: ${r.slice(0, 300)}`)
   for (const e of errors) if (!/Failed to load resource/.test(e)) failures.push(e)
 } finally {
-  await session.context.close()
+  await session?.context.close()
   // By pid, never by pattern: this machine may run other sshds.
-  for (const r of [runner, second]) if (r) spawnSync('/bin/kill', [String(r.pid)])
+  for (const r of [runner, second]) {
+    if (!r) continue
+    spawnSync('/bin/kill', [String(r.pid)])
+    if (r.core && r.core.exitCode === null) {
+      const exited = once(r.core, 'exit')
+      r.core.kill('SIGINT')
+      await exited
+    }
+  }
   rmSync(scratch, { recursive: true, force: true })
   rmSync(profile, { recursive: true, force: true })
+  if (alias) unlinkSync(alias)
 }
 
 if (failures.length) {

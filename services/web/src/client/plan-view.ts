@@ -324,11 +324,19 @@ function rulingCard(r: Ruling, view: PlanBoardView, on: PlanHandlers): HTMLEleme
 function draw(plan: Plan, model: PlanViewModel, needs: NeedsRow[], view: PlanBoardView, now: number, on: PlanHandlers): HTMLElement[] {
   const out: HTMLElement[] = []
   const column = model.column
-  const empty = (model.landingGroups?.length ?? 0) === 0 && column.facts.length === 0 && column.pipeline.length === 0 && column.roster.length === 0 && column.initiativeCount === 0 && column.footer.length === 0 && plan.themes.length === 0 && plan.rulings.length === 0 && needs.length === 0
+  const empty = !(model.landings?.length || model.landingGroups?.length) && column.facts.length === 0 && column.pipeline.length === 0 && column.roster.length === 0 && column.initiativeCount === 0 && column.footer.length === 0 && plan.themes.length === 0 && plan.rulings.length === 0 && needs.length === 0
   if (empty) {
     const wrap = make('div', 'plan-none')
     wrap.append(make('h2', 'plan-clear', WORDS.nothingPlanned), make('p', 'plan-empty', WORDS.nothingPlannedDetail))
     return [wrap]
+  }
+  if (!model.landingGroups?.length) {
+    for (const landing of model.landings ?? []) {
+      const card = make('section', 'plan-section')
+      card.append(heading(landing.subtitle ?? landing.label), make('p', 'plan-line', landing.phaseWord), make('p', 'plan-line', landing.explanation))
+      if (landing.carries) card.append(make('p', 'plan-line', landing.carries))
+      out.push(card)
+    }
   }
   if (model.landingGroups?.length) {
     const section = make('section', 'plan-section')

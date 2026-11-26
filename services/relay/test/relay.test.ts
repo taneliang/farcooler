@@ -7586,3 +7586,56 @@ describe("the runner's and the card's shared contract fixtures", () => {
     expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM install_cards`).first()).toEqual({ n: 0 })
   })
 })
+
+describe('Web Push for Needs You', () => {
+  it('delivers an empty signed wake-up only to the opted-in account and stops on removal', async () => {
+    await pair('user_1', 'mine')
+    await pair('user_2', 'other')
+    const key = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
+    const bindings = {
+      ...env,
+      WEB_PUSH_PUBLIC_KEY: base64Url(new Uint8Array(await crypto.subtle.exportKey('raw', key.publicKey))),
+      WEB_PUSH_PRIVATE_JWK: JSON.stringify(await crypto.subtle.exportKey('jwk', key.privateKey)),
+    }
+    const endpoint = 'https://fcm.googleapis.com/fcm/send/browser_id:APA91-test_subscription'
+    const calls = watchFetch()
+    const mine = await sessionFor('user_1')
+    const other = await sessionFor('user_2')
+    const send = (path: string, body: unknown, bearer: string) => worker.fetch(new Request(`https://relay.test${path}`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${bearer}` },
+      body: JSON.stringify(body),
+    }), bindings as never)
+    const blocked = { title: 'private task title', subtitle: 'private question', status: 'blocked' }
+    const destinations = () => calls.filter(call => call.url.startsWith('https://fcm.googleapis.com/'))
+
+    expect((await send('/v1/notify', blocked, 'mine')).status).toBe(200)
+    expect(destinations()).toHaveLength(0)
+    expect((await send('/v1/account/web-push/add', { endpoint: 'https://fcm.googleapis.com.attacker.test/fcm/send/token' }, mine)).status).toBe(400)
+    expect((await send('/v1/account/web-push/add', { endpoint: `${endpoint}/extra` }, mine)).status).toBe(400)
+    expect((await send('/v1/account/web-push/add', { endpoint }, mine)).status).toBe(200)
+    expect((await send('/v1/account/web-push/add', { endpoint }, other)).status).toBe(409)
+    expect(await (await send('/v1/account/web-push/key', { endpoint }, mine)).json()).toEqual({
+      key: bindings.WEB_PUSH_PUBLIC_KEY, enrolled: true,
+    })
+    expect(await (await send('/v1/account/web-push/key', { endpoint }, other)).json()).toEqual({
+      key: bindings.WEB_PUSH_PUBLIC_KEY, enrolled: false,
+    })
+    expect((await send('/v1/account/web-push/remove', { endpoint }, other)).status).toBe(200)
+    await send('/v1/notify', blocked, 'other')
+    await send('/v1/notify', { ...blocked, status: 'working' }, 'mine')
+    await send('/v1/notify', { ...blocked, alert: false }, 'mine')
+    expect(destinations()).toHaveLength(0)
+
+    await send('/v1/notify', blocked, 'mine')
+    expect(destinations()).toHaveLength(1)
+    const sent = destinations()[0]
+    expect(sent.url).toBe(endpoint)
+    expect(sent.body).toBeNull()
+    expect(sent.headers.authorization).toMatch(/^vapid t=[\w.-]+, k=/)
+    expect(sent.headers.topic).toBe('needs-you')
+    await send('/v1/account/web-push/remove', { endpoint }, mine)
+    await send('/v1/notify', { kind: 'task', event: 'decision', title: 'private choice' }, 'mine')
+    expect(destinations()).toHaveLength(1)
+  })
+})

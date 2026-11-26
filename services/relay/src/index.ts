@@ -31,6 +31,7 @@ import { pruneSessionsSeen } from './session-prune'
 import { recordDailyActiveRunners } from './usage-counts'
 import { totalOf, type Machine } from './needs-total'
 import { requireAccount } from './session'
+import { configureWebPush, deliverWebPush } from './web-push'
 import { type PasskeyConfig } from './sshsig'
 import { endSessionOf, signOutEverywhere } from './signout'
 import {
@@ -93,6 +94,8 @@ export interface Env extends PasskeyConfig {
   /// deployment made before this check, which is only ever the stable one.
   CHANNEL?: string
   FCM_SERVICE_ACCOUNT: string
+  WEB_PUSH_PUBLIC_KEY?: string
+  WEB_PUSH_PRIVATE_JWK?: string
   /// `"1"` to give a team's admins each member's vouched-for Key A in
   /// `teams/members`, which turns on the teammate rule's key match (ov-549,
   /// ruling R-72). Off, unset, until later devices can be certified in person:
@@ -137,6 +140,10 @@ export default {
           return await registerActivity(request, env)
         case '/v1/account':
           return await listAccount(request, env)
+        case '/v1/account/web-push/key':
+        case '/v1/account/web-push/add':
+        case '/v1/account/web-push/remove':
+          return await configureWebPush(request, env, url.pathname.split('/').at(-1)!)
         case '/v1/account/signout-all':
           return await signOutEverywhere(request, env)
         case '/v1/devices/revoke':
@@ -146,7 +153,7 @@ export default {
         case '/v1/daemons/revoke':
           return await revokeOwned(request, env, 'daemons')
         case '/v1/notify':
-          return await notify(request, env)
+          return await notify(request, env, ctx)
         case '/v1/notify/member':
           return await notifyMember(request, env, ctx)
         case '/v1/notify/retire':
@@ -971,7 +978,7 @@ export async function requireDaemon(
   return daemon
 }
 
-async function notify(request: Request, env: Env): Promise<Response> {
+async function notify(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
   const daemon = await requireDaemon(request, env)
   if (daemon instanceof Response) return daemon
 
@@ -1092,6 +1099,14 @@ async function notify(request: Request, env: Env): Promise<Response> {
   // (ov-94): the card below still moves, nothing buzzes. A task notice of a
   // class this relay doesn't know buzzes nobody either.
   const quiet = body.alert === false || (taskLike && event === undefined)
+  const webAlert = !quiet && (kind === 'decision'
+    || (taskLike && (event === 'decision' || event === 'blocked' || event === 'review'))
+    || (kind === undefined && body.status === 'blocked'))
+  if (webAlert) {
+    const delivery = deliverWebPush(env, daemon.account_id).catch(() => {})
+    if (ctx) ctx.waitUntil(delivery)
+    else await delivery
+  }
   if (alerts && body.status !== 'working' && !quiet) {
     for (const device of devices.results ?? []) {
       // "When an agent finishes or fails", off. Per device inside the loop and
@@ -1174,6 +1189,11 @@ async function notify(request: Request, env: Env): Promise<Response> {
       // priority-10 push drawn from the budget the alerts depend on, and the
       // daemon stamps a count on every notice, told again or not.
       const changed = await rememberAsk(env, daemon, install, body)
+      if (changed !== null && body.ask && body.alert !== false) {
+        const delivery = deliverWebPush(env, daemon.account_id).catch(() => {})
+        if (ctx) ctx.waitUntil(delivery)
+        else await delivery
+      }
       const counted = (needsYou !== null && needsYou !== told) || reviewsMoved
       if (counted || changed !== null) {
         await refreshCard(env, daemon.account_id, headline =>

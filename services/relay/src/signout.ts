@@ -84,6 +84,7 @@ export async function signOutEverywhere(request: Request, env: Env): Promise<Res
     env.DB.prepare(`DELETE FROM devices WHERE account_id = ?`).bind(account),
     env.DB.prepare(`DELETE FROM live_activities WHERE account_id = ?`).bind(account),
     env.DB.prepare(`DELETE FROM install_cards WHERE account_id = ?`).bind(account),
+    env.DB.prepare(`DELETE FROM web_push WHERE account_id = ?`).bind(account),
   ])
   return json({ ok: true, complete: ended.complete, ended: ended.count, runners })
 }

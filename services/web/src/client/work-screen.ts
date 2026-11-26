@@ -40,6 +40,7 @@ export interface WorkView {
     close: string
     refresh: string
     emptyTree: string
+    review?: string | null
   }
   create: { open: string; submit: string; name: string; branch: string } | null
   start: { preset: string; submit: string; presets: Choice[] } | null
@@ -70,6 +71,7 @@ interface Options {
   current: () => WorkRunner | null
   project: (inventory: string, selection: string) => string | Promise<string>
   select: (view: WorkView, terminal: WorkTerminal | undefined, open: boolean, replace?: string, historyMode?: 'pushState' | 'replaceState') => void
+  review?: (worktree: string) => void
   started: () => void
   note: (words: string) => void
   prefer: () => string | null
@@ -231,6 +233,9 @@ export function mountWork(options: Options) {
     action(openWork, view.labels.open, () => {
       dialog.showModal()
       workNote.hidden = !workNote.textContent
+    })
+    action(get('work-review'), options.review ? view.labels.review ?? undefined : undefined, () => {
+      if (view.worktree) options.review?.(view.worktree)
     })
     action(get('work-done'), view.labels.close, () => dialog.close())
     action(refreshButton, view.labels.refresh, () => void refresh())

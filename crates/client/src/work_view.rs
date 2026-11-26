@@ -72,6 +72,12 @@ pub fn inventory(
     worktrees: Vec<wire::Worktree>,
     terminals: Vec<wire::Terminal>,
 ) -> Inventory {
+    // The runner reports Error for a checkout with an unresolved lost pane,
+    // even when the checkout itself is sound. Keep that checkout selectable.
+    let with_lost_pane: std::collections::HashSet<&[u8]> = terminals.iter()
+        .filter(|terminal| terminal.state == TerminalState::Lost as i32)
+        .map(|terminal| terminal.worktree_id.as_ref())
+        .collect();
     Inventory {
         scope: scope.into(),
         workspaces: workspaces.into_iter().filter_map(|w| Some(Workspace {
@@ -86,7 +92,11 @@ pub fn inventory(
             label: r.display_name,
         })).collect(),
         worktrees: worktrees.into_iter().filter(|w| {
-            matches!(WorktreeState::try_from(w.state), Ok(WorktreeState::Ready | WorktreeState::Active))
+            match WorktreeState::try_from(w.state) {
+                Ok(WorktreeState::Ready | WorktreeState::Active) => true,
+                Ok(WorktreeState::Error) => with_lost_pane.contains(w.id.as_ref()),
+                _ => false,
+            }
         }).filter_map(|w| Some(Worktree {
             id: id(&w.id)?,
             label: if w.branch.is_empty() || w.branch == w.task_name { w.task_name } else { format!("{} · {}", w.task_name, w.branch) },
@@ -292,7 +302,7 @@ pub fn view(inventory: &Inventory, selection: &Selection) -> Value {
         "missingTerminal": selected.is_none() && selection.terminal.is_some(),
         "labels": {
             "open": "Start Work", "link": "Workspace Link", "repository": "Repository", "worktree": "Worktree",
-            "close": "Done", "refresh": "Refresh", "emptyTree": "No worktrees available",
+            "close": "Done", "refresh": "Refresh", "review": (readable && chosen_tree.is_some()).then_some("Review Changes"), "emptyTree": "No worktrees available",
         },
         "create": (control && repository.is_some() && !missing_workspace).then_some(json!({
             "open": "New Worktree", "submit": "Create Worktree", "name": "Worktree Name", "branch": "Branch",

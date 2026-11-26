@@ -164,6 +164,7 @@ pub async fn sign_in<S, G>(
     public_key: &str,
     signer: G,
     link: Arc<Link>,
+    writer_instance: Option<uuid::Uuid>,
     on_lost: impl FnOnce() + 'static,
 ) -> Result<Runner, WebError>
 where
@@ -174,7 +175,7 @@ where
     let mut metered = Metered { signer, budget: budget.clone() };
     let work = async {
         let connection: Connection = ssh::connect(stream, host_key, user, public_key, &mut metered).await?;
-        Runner::start_watched(connection, link, on_lost).await
+        Runner::start_watched(connection, link, writer_instance, on_lost).await
     };
     budget.run(work).await.unwrap_or(Err(WebError::NoAnswer))
 }

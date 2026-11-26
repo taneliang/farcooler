@@ -23,9 +23,9 @@
 
 import { openWorkflow, installWorkflowPort } from './workflow-view'
 import { WorkflowSessionPort } from './workflow-session'
-import init, { connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, needsYouView, openReply, passkeyKeyLine, planView, recoveryView, registrationData, registrationProof, rpId, workFailure, workView, boardFailure, reviewFailure, reviewApprovalResult, ticketForm, workspaceLayout, workspaceOrchestrator, workspacePageAvailable, type WebRunner } from 'fc-web'
+import init, { connect, fingerprint, freshnessMs, makeOffer, mergeRunnerGrants, newReplySecret, newWriterKey, offerIsStale, needsAttention, needsYouView, runnerHealth, openReply, openCliReply, passkeyKeyLine, planView, recoveryView, registrationData, registrationProof, rpId, workFailure, workView, boardFailure, reviewFailure, reviewApprovalResult, ticketForm, workspaceLayout, workspaceOrchestrator, workspacePageAvailable, type WebRunner } from 'fc-web'
 
-import { compareWords, connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, needsYouFailure, registerFailure, restoreFailure, runnerDeferred, runnerStopped, saveFailure, sealedRefusal, unreachable } from './copy'
+import { compareWords, connectFailure, joinDetail, joinTitle, MISMATCH, needsYouFailure, registerFailure, restoreFailure, runnerDeferred, runnerStopped, saveFailure, sealedRefusal, unreachable } from './copy'
 import { askForCopy, assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
 import { Fleet, type RunnerDeps } from './fleet'
 import { type BoardView, buttonsFor, countLabel, countOf, isCounted, pageTitle } from './needs'
@@ -33,8 +33,9 @@ import { renderNeeds } from './needs-view'
 import { type PlanTab, startPlanTab } from './plan-tab'
 import { PlanList } from './plan-list'
 import { scopeBoard, type Space, waitingIn } from './scope'
-import { linkedRunner, mountWork, type WorkView } from './work-screen'
+import { destination, linkedRunner, mountWork, type WorkView } from './work-screen'
 import { mountBoard } from './board-screen'
+import { openChanges } from './changes-view'
 import { drawPicker, saveSpace, savedSpace } from './space-picker'
 import { DetailBoard, type Subject } from './detail'
 import { type Answer, DetailSheet } from './detail-view'
@@ -50,6 +51,7 @@ import { workspaceUrl, WorkspaceHistory, type Route } from './workspace-history'
 import { comparisonButtons, type Opened, registerDevice, waitForReply } from './sealed'
 import { type LinkView, Reconnector } from './reconnect'
 import { installSignOut } from './sign-out'
+import { mountWebPush, stopWebPush } from './web-push'
 import { relayCopy, relayRaw as requestRelay } from './relay-client'
 import { type RecoveryPresenter, type RecoveryView, SavedCopies } from './saved-copies'
 import { StartWatch } from './start'
@@ -371,6 +373,20 @@ async function enroll(session: Session, notice = ''): Promise<void> {
   const note = $('enroll-note')
   note.textContent = notice
   note.hidden = notice === ''
+  $('offer-account').textContent = device.account
+  $<HTMLTextAreaElement>('cli-offer').value = device.offer
+  const reply = $<HTMLTextAreaElement>('cli-reply')
+  reply.value = ''
+  $('cli-compare').onclick = () => {
+    try {
+      const opened = JSON.parse(openCliReply(reply.value, device.offer ?? '', loadSecret() ?? '', device.offerShownAt ?? 0))
+      reply.value = ''
+      compare(session, opened, [], true)
+    } catch (error) {
+      note.textContent = sealedRefusal((error as Error).message)
+      note.hidden = false
+    }
+  }
   show('enroll')
   // A reply to the retired code is refused by the same freshness window.
   retiring = window.setTimeout(() => {
@@ -379,6 +395,14 @@ async function enroll(session: Session, notice = ''): Promise<void> {
   }, Math.max(0, (device.offerShownAt ?? 0) + freshnessMs() - Date.now()) + 500)
 
   void waitForSealedReply(session, note)
+
+  const back = $<HTMLButtonElement>('enroll-back')
+  back.hidden = !device.runners?.length
+  back.onclick = () => {
+    stopPolling()
+    clearTimeout(retiring)
+    void work(session)
+  }
 
   $<HTMLButtonElement>('start-over').onclick = async () => {
     dropSecret()
@@ -425,10 +449,10 @@ function waitForSealedReply(session: Session, note: HTMLElement): void {
 }
 
 /// The reply's own code, to match against the phone's before it is kept.
-function compare(session: Session, opened: Opened, others: Opened[] = []): void {
+function compare(session: Session, opened: Opened, others: Opened[] = [], cli = false): void {
   stopPolling()
   clearTimeout(retiring)
-  const words = compareWords(opened.granted_by)
+  const words = compareWords(opened.granted_by, cli)
   $('compare-title').textContent = words.title
   $('compare-detail').textContent = words.detail
   $('compare-code').textContent = opened.code
@@ -474,10 +498,14 @@ async function finishTaken(session: Session, taken: { granted_by: string | null;
     confirmJoin(session, taken.granted_by, taken.runners)
     return
   }
-  device.runners = taken.runners
+  device.runners = mergeRunners(device.runners ?? [], taken.runners)
   await saveDevice(device)
   await keepCopy(session)
   void work(session)
+}
+
+function mergeRunners(known: Granted[], added: Granted[]): Granted[] {
+  return JSON.parse(mergeRunnerGrants(JSON.stringify(known), JSON.stringify(added)))
 }
 
 /// Another account's runners: asked about, never joined silently, as a phone
@@ -497,7 +525,7 @@ function confirmJoin(session: Session, from: string, runners: Granted[]): void {
   )
   show('join')
   $<HTMLButtonElement>('join-yes').onclick = async () => {
-    session.device.runners = runners
+    session.device.runners = mergeRunners(session.device.runners ?? [], runners)
     await saveDevice(session.device)
     await keepCopy(session)
     void work(session)
@@ -570,7 +598,8 @@ function drawNeeds(view: BoardView): void {
   $('show-needs').textContent = countLabel(countOf(scoped.items))
   const bar = $<HTMLButtonElement>('bar-count')
   bar.hidden = total === 0
-  bar.textContent = `${total} Waiting`
+  const attention = needsAttention(total) ?? ''
+  if (bar.textContent !== attention) bar.textContent = attention
   document.title = pageTitle(total)
   pickerDrawn = drawPicker($<HTMLSelectElement>('space-picker'), spaces, chosenSpace, waitingIn(view, spaces, frontRunner), pickerDrawn)
   drawn = renderNeeds(
@@ -650,7 +679,7 @@ function stopNeeds(): void {
   clearInterval(boardTimer)
   fleet?.stop()
   fleet = null
-  for (const rec of others) rec.current?.free()
+  for (const rec of others) rec.stop()
   others = []
   retries.clear()
   drawn = ''
@@ -732,14 +761,17 @@ let link: Reconnector<WebRunner, TunnelConn> | null = null
 function showLink(view: LinkView, label: string): void {
   // The first connection is still listing terminals; the screen is not up yet.
   if (view.kind !== 'up' || panes) show('work')
-  const notice = linkNotice(view, label)
-  $('link-note').hidden = !notice
-  if (!notice) return
-  $('link-title').textContent = notice.title
-  $('link-detail').textContent = notice.detail
+  const health: { state: string; title: string | null; detail: string | null; action: string | null } =
+    JSON.parse(runnerHealth(label, JSON.stringify(view)))
+  if (view.kind !== 'up') $('runtime-health').textContent = ''
+  if ($('runner-health').textContent !== health.state) $('runner-health').textContent = health.state
+  $('link-note').hidden = !health.title
+  if (!health.title) return
+  $('link-title').textContent = health.title
+  $('link-detail').textContent = view.kind === 'failed' ? connectFailure(view.word, label) : health.detail
   const action = $<HTMLButtonElement>('link-action')
-  action.hidden = !notice.action
-  if (notice.action) action.textContent = notice.action
+  action.hidden = !health.action
+  if (health.action) action.textContent = health.action
   action.onclick = () => void link?.reconnect()
 }
 
@@ -747,30 +779,48 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   status(`Connecting to ${target.label}…`)
   let screen: ReturnType<typeof mountWork> | undefined
   let mineFleet: Fleet | null = null
+  const writerKey = newWriterKey()
   const reconnector = new Reconnector<WebRunner, TunnelConn>({
     dial: () => session.tailcat.dial(target.token, session.device.nodePriv),
     discard: conn => conn.close(),
-    connect: (conn, onLost) => connect(conn, target.host_key, target.user, session.keyLine, signIn(session, target.label), onLost),
+    connect: (conn, onLost) => connect(conn, target.host_key, target.user, session.keyLine, signIn(session, target.label), onLost, writerKey),
     resume: async next => {
       await panes?.resume(next)
       await screen?.refresh()
     },
     show: view => {
+      if (view.kind === 'reconnecting' && view.tunnel === 'dialing') panes?.disconnect()
       showLink(view, target.label)
       workflowSheet?.connection(view.kind === 'up')
       // Its list is read as soon as the connection is up, and set aside while
       // it is not.
-      if (view.kind === 'up') mineFleet?.up(target.id)
-      else mineFleet?.unreachable(target.id, needsYouFailure('closed', target.label))
+      if (view.kind === 'up') {
+        mineFleet?.up(target.id)
+        void refreshRuntimeHealth()
+      } else mineFleet?.unreachable(target.id, needsYouFailure('closed', target.label))
     },
     now: () => Date.now(),
   })
+  const runtimeStatus = $('runtime-health')
+  let checkingHealth: WebRunner | null = null
+  async function refreshRuntimeHealth(): Promise<void> {
+    const runner = reconnector.current
+    if (!runner || checkingHealth === runner) return
+    checkingHealth = runner
+    try {
+      const health = await runner.runtime_health().catch(() => '')
+      if (reconnector.current === runner && runtimeStatus.textContent !== health) {
+        runtimeStatus.textContent = health
+      }
+    } finally {
+      if (checkingHealth === runner) checkingHealth = null
+    }
+  }
   /// A pane's stream ended: said so unless the whole connection did, which
   /// the notice above the terminal already says.
   const ended = (from: WebRunner, id: string) => {
     // Asked a moment later: the loss reaches the page as the pane's end and as
-    // `onLost`, in either order. The reconnector remembers it; the wasm object
-    // cannot be asked once it is freed.
+    // `onLost`, in either order. The reconnector remembers the loss.
     setTimeout(() => {
       if (!reconnector.hasLost(from) && reconnector.current === from) {
         screen?.streamEnded(id)
@@ -797,6 +847,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
       workspace: linkedSpace, terminal: linkedTerminal, worktree: linkedWorktree, preferredWorkspace: savedSpace(target.id),
     })))
   } catch (e) {
+    reconnector.stop()
     dialed?.close()
     const word = (e as Error).message
     const action =
@@ -808,6 +859,21 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   }
 
   $('runner-name').textContent = target.label
+  const picker = $<HTMLSelectElement>('runner-picker')
+  picker.replaceChildren(...(session.device.runners ?? []).map(r => {
+    const option = new Option(r.label, r.id, false, r.id === target.id)
+    option.disabled = Boolean(r.why)
+    return option
+  }))
+  picker.hidden = picker.options.length < 2
+  picker.onchange = () => location.assign(destination(picker.value, null))
+  $('add-runner').onclick = () => {
+    reconnector.stop()
+    panes?.dispose()
+    panes = null
+    stopNeeds()
+    void enroll(session)
+  }
   const list = $('terminal-list')
   show('work')
 
@@ -991,6 +1057,13 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     current: liveRunner,
     inventory,
     project: workView,
+    review: worktree => {
+      const runner = liveRunner()
+      if (runner) void openChanges(runner, worktree, $<HTMLDialogElement>('work-changes'), error => {
+        const { code, what } = error as Error & { code?: string; what?: string }
+        return workFailure(error.message, code ?? '', what ?? '')
+      })
+    },
     prefer: () => savedSpace(target.id),
     navigation: {
       workspace: space => navigation?.navigate({ space, page: 'terminals', tab: 'terminals' }),
@@ -1125,6 +1198,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   mine.up(target.id)
   boardTimer = window.setInterval(() => {
     if (document.visibilityState !== 'visible') return
+    void refreshRuntimeHealth()
     void mine.refresh()
     void discover()
     void screen?.refresh()
@@ -1216,6 +1290,7 @@ function recheckLink(): void {
 }
 
 async function addAgain(session: Session): Promise<void> {
+  link?.stop()
   link = null
   turn = Promise.resolve()
   stopNeeds()
@@ -1240,7 +1315,7 @@ function signOutForgets(session: () => Session | null): void {
   isSigningOut = installSignOut(form, $<HTMLDialogElement>('sign-out'), {
     session,
     call: relayCopy,
-    forget: forgetDevice,
+    forget: () => Promise.allSettled([forgetDevice(), stopWebPush()]),
     dropSecret,
   })
 }
@@ -1342,6 +1417,7 @@ async function start(watch: StartWatch): Promise<void> {
   const email = typeof me?.user?.email === 'string' ? (me.user.email as string) : ''
   const session: Session = { device, keyLine: device.passkey ? keyLineOf(device.passkey) : '', email, user: await userHandle(account), tailcat }
   signedIn = session
+  mountWebPush($<HTMLButtonElement>('web-push'), $('web-push-note'))
   // Nothing kept here, as after the browser cleared this site's storage: the
   // account's sealed copies, if it has any, bring it back with one touch.
   const vaults = device.passkey ? [] : await listCopies()

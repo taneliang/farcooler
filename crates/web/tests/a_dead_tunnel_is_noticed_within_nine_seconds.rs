@@ -122,7 +122,7 @@ impl Rig {
             .expect("connects");
         let lost = Arc::new(AtomicUsize::new(0));
         let counted = lost.clone();
-        let runner = Runner::start_watched(conn, link, move || {
+        let runner = Runner::start_watched(conn, link, None, move || {
             counted.fetch_add(1, Ordering::SeqCst);
         })
         .await

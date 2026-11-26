@@ -101,6 +101,19 @@ describe('sign out everywhere', () => {
     expect(calls.filter(c => c.url.includes('/users/bob'))).toEqual([])
   })
 
+  it('removes browser push subscriptions for the account signing out', async () => {
+    const alice = await sessionFor('alice')
+    await reads(alice)
+    await reads(await sessionFor('bob', 'sid_bob'))
+    await env.DB.prepare(`INSERT INTO web_push (endpoint, account_id) VALUES
+      ('https://fcm.googleapis.com/fcm/send/alice', 'alice'),
+      ('https://fcm.googleapis.com/fcm/send/bob', 'bob')`).run()
+
+    expect((await signOutAll(alice)).status).toBe(200)
+    const { results } = await env.DB.prepare('SELECT account_id FROM web_push').all()
+    expect(results).toEqual([{ account_id: 'bob' }])
+  })
+
   it('needs a session', async () => {
     expect((await signOutAll(null)).status).toBe(401)
     expect((await signOutAll('not.a.token')).status).toBe(401)

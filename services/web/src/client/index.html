@@ -11,7 +11,9 @@
 <body>
 <header class="bar">
   <span class="title">Far Cooler</span>
-  <button class="count" id="bar-count" type="button" hidden></button>
+  <button class="quiet" id="web-push" type="button" aria-pressed="false" hidden>Web Push</button>
+  <span id="web-push-note" role="status" hidden>Couldn’t change browser notifications. Check browser permissions and try again.</span>
+  <button class="count" id="bar-count" type="button" aria-live="polite" hidden></button>
   <span class="who" id="who"></span>
   <button class="quiet" id="show-saved-copies" type="button">Saved Copies</button>
   <form method="post" action="/sign-out"><button class="quiet" type="submit">Sign Out</button></form>
@@ -49,8 +51,19 @@
         <li>If the answer doesn’t arrive, make sure your phone is connected, then select Start Over.</li>
       </ol>
     </div>
+    <details>
+      <summary>Approve from the runner CLI</summary>
+      <p>On your trusted SSH connection to the runner, run <code>farcooler enroll-browser</code>
+        with the account below, the runner’s SSH host public key, SSH user and a label.
+        Paste the offer when the CLI asks, check the fingerprint, then paste the sealed reply here.</p>
+      <p>Account <code id="offer-account"></code></p>
+      <label>Browser offer <textarea id="cli-offer" readonly rows="3"></textarea></label>
+      <label>Sealed reply <textarea id="cli-reply" rows="3" autocomplete="off" spellcheck="false"></textarea></label>
+      <button id="cli-compare" type="button">Compare CLI Code</button>
+    </details>
     <p class="note" id="enroll-note" hidden></p>
     <div class="actions">
+      <button class="quiet" id="enroll-back" type="button" hidden>Back to Runners</button>
       <button class="quiet" id="start-over" type="button">Start Over</button>
     </div>
 
@@ -79,6 +92,10 @@
   <section class="work" id="work" hidden>
     <nav class="sidebar" aria-label="Runner">
       <span class="runner" id="runner-name"></span>
+      <select class="space" id="runner-picker" aria-label="Switch Runner" hidden></select>
+      <button class="quiet" id="add-runner" type="button">Add Runner</button>
+      <span class="runner" id="runner-health" role="status"></span>
+      <span class="runner" id="runtime-health"></span>
       <select class="space" id="space-picker" aria-label="Workspace" hidden></select>
       <div class="seg work-tabs" role="group" aria-label="Show">
         <button type="button" id="show-terminals" aria-pressed="true">Terminals</button>
@@ -176,6 +193,7 @@
 <dialog class="start-work" id="start-work" aria-labelledby="work-title">
   <header>
     <h2 id="work-title"></h2>
+    <button class="quiet" type="button" id="work-review" hidden></button>
     <button class="quiet" type="button" id="work-done"></button>
   </header>
   <p class="note" id="work-note" role="status" hidden></p>
@@ -214,5 +232,11 @@
   <div class="plan-sheet-body" id="plan-list-body"></div>
 </dialog>
 
+<dialog id="work-changes" aria-labelledby="work-changes-title">
+  <h2 id="work-changes-title"></h2>
+  <label hidden><span></span><select></select></label>
+  <pre></pre>
+  <form method="dialog"><button type="submit">Done</button></form>
+</dialog>
 </body>
 </html>

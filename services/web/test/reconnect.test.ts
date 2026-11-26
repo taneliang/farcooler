@@ -4,7 +4,6 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { linkNotice } from '../src/client/copy'
 import { type Deps, type LinkView, type Linked, PREDIAL_MAX_AGE_MS, Reconnector, Replacement, paneOutput } from '../src/client/reconnect'
 
 class Runner implements Linked {
@@ -64,18 +63,18 @@ function rig(options: { dialFails?: () => boolean; connectFails?: () => string |
 }
 
 describe('a connection that is lost', () => {
-  it('says Reconnecting at once, frees the old runner and dials ahead of the click', async () => {
+  it('says Reconnecting at once, closes the old tunnel and dials ahead of the click', async () => {
     const t = rig()
     const first = await t.link.open('tunnel 0')
     first.onLost()
     expect(t.last()).toEqual({ kind: 'reconnecting', tunnel: 'dialing' })
-    expect(first.freed).toBe(true)
+    expect(t.link.current).toBeNull()
+    expect(first.freed).toBe(false)
+    expect(t.log).toContain('discard tunnel 0')
     expect(t.log).toContain('dial 1')
     expect(t.log.some(l => l.startsWith('touch') && l !== 'touch over tunnel 0')).toBe(false)
     await t.settle()
     expect(t.last()).toEqual({ kind: 'reconnecting', tunnel: 'ready' })
-    expect(linkNotice(t.last(), 'studio')?.title).toBe('Reconnecting to studio…')
-    expect(linkNotice(t.last(), 'studio')?.action).toBe('Reconnect')
   })
 
   it('takes one touch on the tunnel it already has, then puts the pane back', async () => {
@@ -122,8 +121,6 @@ describe('a connection that is lost', () => {
     expect(t.last()).toEqual({ kind: 'reconnecting', tunnel: 'failed' })
     await t.link.reconnect()
     expect(t.last()).toEqual({ kind: 'failed', word: 'no_answer' })
-    expect(linkNotice(t.last(), 'studio')?.detail).toContain('didn’t answer')
-    expect(linkNotice(t.last(), 'studio')?.action).toBe('Reconnect')
     failing = false
     await t.link.reconnect()
     expect(t.last()).toEqual({ kind: 'up' })
@@ -168,12 +165,11 @@ describe('a connection that is lost', () => {
 })
 
 describe('what the page asks after a loss', () => {
-  it('remembers a lost runner without touching the freed object', async () => {
+  it('remembers a lost runner while views may hold it', async () => {
     const t = rig()
     const first = await t.link.open('tunnel 0')
     expect(t.link.hasLost(first)).toBe(false)
     first.onLost()
-    expect(first.freed).toBe(true)
     expect(t.link.hasLost(first)).toBe(true)
     await t.settle()
     await t.link.reconnect()
@@ -213,14 +209,6 @@ describe('a tab that comes back', () => {
     first.check = async () => ++asked > 0
     await t.link.recheck()
     expect(asked).toBe(0)
-  })
-})
-
-describe('the words', () => {
-  it('names a failure by the dial word the phones use', () => {
-    expect(linkNotice({ kind: 'failed', word: 'derp' }, 'studio')?.detail).toContain('rendezvous')
-    expect(linkNotice({ kind: 'up' }, 'studio')).toBeNull()
-    expect(linkNotice({ kind: 'connecting' }, 'studio')?.action).toBeNull()
   })
 })
 

@@ -104,36 +104,6 @@ export function joinDetail(from: string): string {
   return `This code says ${from} added this device to their runners. Work there runs on the Claude account signed in on each runner, so its usage and limits are shared. Join only if you were adding this device with them just now.`
 }
 
-/// What the page says about a connection that dropped (ov-772), by the
-/// reconnector's view. `title` names the state in a word; `detail` says what
-/// to do. `action` is the button, when there is one.
-export function linkNotice(
-  view: import('./reconnect').LinkView,
-  runner: string,
-): { title: string; detail: string; action: string | null } | null {
-  switch (view.kind) {
-    case 'up':
-      return null
-    case 'reconnecting':
-      return {
-        title: `Reconnecting to ${runner}…`,
-        detail:
-          view.tunnel === 'failed'
-            ? `Far Cooler couldn’t reach ${runner} yet. Select Reconnect to try again, then touch your passkey.`
-            : 'The connection dropped. Select Reconnect, then touch your passkey. The terminal comes back as you left it.',
-        action: 'Reconnect',
-      }
-    case 'connecting':
-      return { title: `Reconnecting to ${runner}…`, detail: 'Touch your passkey if your browser asks.', action: null }
-    case 'failed':
-      return {
-        title: `Couldn’t reconnect to ${runner}`,
-        detail: connectFailure(view.word, runner),
-        action: 'Reconnect',
-      }
-  }
-}
-
 /// Why Needs You can't be shown, by the failure word of the read. A runner too
 /// old to send the list is the phones' sentence (AgentKit's olderRunnerNote).
 export function needsYouFailure(word: string, runner: string): string {
@@ -216,11 +186,11 @@ export function sealedRefusal(word: string): string {
 /// account that posted it, ov-778 R-113) was sent from the teammate's phone,
 /// not this person's, so the screen names them and asks for the code to be
 /// read off their screen.
-export function compareWords(grantedBy: string | null): { title: string; detail: string } {
+export function compareWords(grantedBy: string | null, cli = false): { title: string; detail: string } {
   if (!grantedBy) {
     return {
       title: 'Does your phone show this code?', // platform copy: the browser enrollment check, not runner data
-      detail: 'Your phone sent its answer. Check that the code on its screen is the one below before you continue.', // platform copy: the browser enrollment check
+      detail: cli ? 'Check that this code matches the code printed by the runner CLI.' : 'Your phone sent its answer. Check that the code on its screen is the one below before you continue.', // platform copy: the browser enrollment check
     }
   }
   return {

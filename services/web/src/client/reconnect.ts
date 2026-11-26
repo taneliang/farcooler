@@ -43,7 +43,7 @@ export interface Linked {
 export interface Deps<R extends Linked, C> {
   /// Dial the tunnel. Rejects with an Error whose message is the dial word.
   dial(): Promise<C>
-  /// Close a dialed tunnel that was never used.
+  /// Close a dialed tunnel.
   discard(conn: C): void
   /// SSH in over `conn`, signing with the passkey (a touch). `onLost` is
   /// passed to the wasm client, which calls it once if this connection dies.
@@ -56,10 +56,11 @@ export interface Deps<R extends Linked, C> {
 
 export class Reconnector<R extends Linked, C> {
   private runner: R | null = null
+  private activeTunnel: C | null = null
   /// Each connection has a number; a stale one's news is ignored.
   private generation = 0
-  /// Runners the connection was lost under, kept here because a freed wasm
-  /// object cannot be asked: its `lost` getter throws once it is freed.
+  private stopped = false
+  /// Runners whose connection was lost.
   private readonly gone = new WeakSet<object>()
   private view: LinkView = { kind: 'up' }
   private ahead: { at: number; conn: Promise<C | null> } | null = null
@@ -68,6 +69,7 @@ export class Reconnector<R extends Linked, C> {
 
   /// Make the first connection (or a later one) and adopt it.
   async open(conn: C): Promise<R> {
+    if (this.stopped) throw new Error('closed')
     const generation = ++this.generation
     const runner = await this.deps.connect(conn, () => this.lost(generation))
     if (generation !== this.generation) {
@@ -75,8 +77,25 @@ export class Reconnector<R extends Linked, C> {
       throw new Error('closed')
     }
     this.runner = runner
+    this.activeTunnel = conn
     this.set({ kind: 'up' })
     return runner
+  }
+
+  stop(): void {
+    this.stopped = true
+    this.generation++
+    this.dropAhead()
+    this.release()
+  }
+
+  private release(): void {
+    const tunnel = this.activeTunnel
+    this.runner = null
+    this.activeTunnel = null
+    if (tunnel !== null) this.deps.discard(tunnel)
+    // Views and pending calls may still hold the WASM wrapper. Its finalizer
+    // frees it when those references go away.
   }
 
   get current(): R | null {
@@ -95,9 +114,9 @@ export class Reconnector<R extends Linked, C> {
 
   private lost(generation: number): void {
     if (generation !== this.generation) return
+    this.generation++
     if (this.runner) this.gone.add(this.runner)
-    this.runner?.free()
-    this.runner = null
+    this.release()
     this.dialAhead()
     this.set({ kind: 'reconnecting', tunnel: 'dialing' })
   }
@@ -105,17 +124,17 @@ export class Reconnector<R extends Linked, C> {
   private dialAhead(): void {
     this.dropAhead()
     const at = this.deps.now()
-    const conn = this.deps.dial().then(
+    const connPromise = this.deps.dial().then(
       conn => {
-        if (this.view.kind === 'reconnecting') this.set({ kind: 'reconnecting', tunnel: 'ready' })
+        if (!this.stopped && this.ahead?.conn === connPromise && this.view.kind === 'reconnecting') this.set({ kind: 'reconnecting', tunnel: 'ready' })
         return conn
       },
       () => {
-        if (this.view.kind === 'reconnecting') this.set({ kind: 'reconnecting', tunnel: 'failed' })
+        if (!this.stopped && this.ahead?.conn === connPromise && this.view.kind === 'reconnecting') this.set({ kind: 'reconnecting', tunnel: 'failed' })
         return null
       },
     )
-    this.ahead = { at, conn }
+    this.ahead = { at, conn: connPromise }
   }
 
   private dropAhead(): void {
@@ -135,7 +154,7 @@ export class Reconnector<R extends Linked, C> {
   /// The Reconnect button. Must be called from the click itself.
   async reconnect(): Promise<void> {
     // The view is the guard: a second click lands on `connecting`.
-    if (this.view.kind === 'up' || this.view.kind === 'connecting') return
+    if (this.stopped || this.view.kind === 'up' || this.view.kind === 'connecting') return
     this.set({ kind: 'connecting' })
     try {
       const conn = await this.tunnel()
@@ -149,7 +168,7 @@ export class Reconnector<R extends Linked, C> {
       }
       await this.deps.resume(runner)
     } catch (e) {
-      this.set({ kind: 'failed', word: (e as Error).message })
+      if (!this.stopped && !this.runner) this.set({ kind: 'failed', word: (e as Error).message })
     }
   }
 

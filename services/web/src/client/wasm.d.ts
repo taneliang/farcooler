@@ -6,6 +6,7 @@
 
 declare module 'fc-web' {
   export default function init(options: { module_or_path: string }): Promise<unknown>
+  export function newWriterKey(): string
   /// A new ceremony's reply key, as its secret half. Kept while the code on
   /// screen is up, and given to `makeOffer` and `openReply`.
   export function newReplySecret(): string
@@ -15,6 +16,8 @@ declare module 'fc-web' {
   /// Opens the EARLIEST reply in the relay's answer (`{replies:[…]}` as JSON)
   /// and answers `{code, granted_by, runners}` as JSON, or throws an Error
   /// whose message is the ceremony's word (`unopened`, `stale`, …).
+  export function mergeRunnerGrants(known: string, added: string): string
+  export function openCliReply(sealed: string, offer: string, replySecret: string, shownAtMs: number): string
   export function openReply(relayAnswer: string, offer: string, replySecret: string, alreadyTaken: boolean, shownAtMs: number): string
   /// What this browser's passkey signs to register `keyLine` for `account`.
   export function registrationData(account: string, challenge: string, keyLine: string): Uint8Array
@@ -45,6 +48,7 @@ declare module 'fc-web' {
     /// Called once if this connection goes silent for nine seconds or closes
     /// (crates/web/src/liveness.rs). Not called when the runner is freed.
     onLost: () => void,
+    writerKey?: string,
   ): Promise<WebRunner>
   export function build(): string
   /// The plan's view model (crates/client's `plan_view`): a request as JSON
@@ -55,6 +59,8 @@ declare module 'fc-web' {
   export function workspacePageAvailable(page: string, workspace: boolean, ticket: boolean): boolean
   export function workspaceLayout(request: string): string
   export function workspaceOrchestrator(plan: string): string | undefined
+  export function runnerHealth(runner: string, connection: string): string
+  export function needsAttention(count: number): string | undefined
   export function needsYouView(request: string): string
   export function workView(inventory: string, selection: string): string
   export function reviewFailure(word: string, code: string, what: string): string
@@ -69,6 +75,9 @@ declare module 'fc-web' {
     board(workspace: string, repository: string): Promise<string>
     board_ticket(workspace: string, task: string): Promise<string>
     board_intent(workspace: string, intent: string): Promise<string>
+    runtime_health(): Promise<string>
+    review_files(worktree: string): Promise<string>
+    review_patch(worktree: string, path: string): Promise<string>
     work_inventory(): Promise<string>
     work_intent(intent: string): Promise<string | undefined>
     workflow_call(method: string, args: string): Promise<string>

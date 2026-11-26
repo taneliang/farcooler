@@ -371,6 +371,8 @@ export class ChatView implements Pane<WebRunner> {
   setWritable(writable: boolean): void {
     if (this.writable === writable) return
     this.writable = writable
+    this.box.readOnly = !writable
+    this.attachButton.disabled = !writable
     this.stop.disabled = !writable
     this.paint()
   }
@@ -432,8 +434,7 @@ export class ChatView implements Pane<WebRunner> {
   /// Images chosen, pasted or dropped: the ones that fit wait beside the box,
   /// and the first reason one didn't is said.
   private async take(files: File[]): Promise<void> {
-    if (this.agentId) return
-    if (files.length === 0) return
+    if (this.agentId || !this.writable || files.length === 0) return
     const { picked, others, unreadable } = await readImages(files, () => this.nextImage++)
     // Asked each time: the runner on the connection may be a new one.
     let limits = null

@@ -37,7 +37,7 @@ import { withHeaders } from './headers'
 ///
 /// With WEB_CLIENT "everyone" a route here is reachable by every signed-in
 /// stranger, so any new route needs its own security review (ov-810).
-export const ROUTES = new Set(['directory/me', 'directory/devices/challenge', 'directory/devices/register', 'ceremony/reply', 'web/vault', 'web/vault/save', 'web/vault/delete'])
+export const ROUTES = new Set(['directory/me', 'directory/devices/challenge', 'directory/devices/register', 'ceremony/reply', 'web/vault', 'web/vault/save', 'web/vault/delete', 'account/web-push/key', 'account/web-push/add', 'account/web-push/remove'])
 
 /// A ceremony id as the relay mints it (`fresh_ceremony_id`): 128 bits as hex.
 const CEREMONY = /^[0-9a-f]{32}$/

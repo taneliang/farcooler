@@ -42,7 +42,7 @@ describe('/api/relay', () => {
   })
 
   it('forwards nothing off the allowlist, however the path is spelled', async () => {
-    expect([...ROUTES]).toEqual(['directory/me', 'directory/devices/challenge', 'directory/devices/register', 'ceremony/reply', 'web/vault', 'web/vault/save', 'web/vault/delete'])
+    expect([...ROUTES]).toEqual(['directory/me', 'directory/devices/challenge', 'directory/devices/register', 'ceremony/reply', 'web/vault', 'web/vault/save', 'web/vault/delete', 'account/web-push/key', 'account/web-push/add', 'account/web-push/remove'])
     for (const path of ['web/vault/', 'web/vault/../me', 'web', 'web/vault/remove', 'directory/teams/members', 'ceremony/reply/0123456789abcdef0123456789abcdef', 'ceremony', 'directory/devices/revoke', 'directory/devices/certify', 'account/signout-all', 'auth/token', 'directory/me/', 'directory/me/../teams', 'directory//me', '../v1/directory/me']) {
       const calls = relay()
       const res = await post(`/api/relay/${path}`, good)

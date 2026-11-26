@@ -95,7 +95,7 @@ pub struct Runner {
 impl Runner {
     /// Start the control session on an authenticated connection.
     pub async fn start(conn: Connection) -> Result<Runner, WebError> {
-        let session = Session::over_ssh(conn, CLIENT_NAME).await?;
+        let session = Session::over_ssh(conn, CLIENT_NAME, None).await?;
         Ok(Runner { session: Rc::new(session), writer_access: Default::default(), link: None, _watching: None })
     }
 
@@ -110,9 +110,10 @@ impl Runner {
     pub async fn start_watched(
         conn: Connection,
         link: Arc<Link>,
+        writer_instance: Option<Uuid>,
         on_lost: impl FnOnce() + 'static,
     ) -> Result<Runner, WebError> {
-        let session = Rc::new(Session::over_ssh(conn, CLIENT_NAME).await?);
+        let session = Rc::new(Session::over_ssh(conn, CLIENT_NAME, writer_instance).await?);
         let (stop, stopped) = futures::channel::oneshot::channel::<()>();
         let (watched, watching) = (session.clone(), link.clone());
         spawn(async move {
@@ -272,6 +273,16 @@ impl Runner {
     /// Keep every open ruling on a board (`ruling.keep_all`); how many it kept.
     pub async fn keep_all_rulings(&self, workspace: Uuid) -> Result<usize, WebError> {
         Ok(self.session.keep_all_rulings(workspace).await?)
+    }
+
+    pub async fn review_files(&self, worktree: Uuid) -> Result<serde_json::Value, WebError> {
+        let changes = self.session.change_set(worktree, true).await?;
+        Ok(farcooler_client::workday::review_files(&changes))
+    }
+
+    pub async fn review_patch(&self, worktree: Uuid, path: &str) -> Result<String, WebError> {
+        let diff = self.session.file_diff(worktree, path, "branch", 0).await?;
+        Ok(farcooler_client::workday::review_patch(&diff))
     }
 
     /// Attach a pane: a second channel carrying the terminal's bytes.

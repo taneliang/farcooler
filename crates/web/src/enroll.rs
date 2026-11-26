@@ -218,7 +218,7 @@ pub fn taken(manifest: &Manifest) -> Taken {
 }
 
 /// One granted runner, as the page keeps it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Granted {
     pub id: String,
     pub label: String,
@@ -235,7 +235,20 @@ pub struct Granted {
     /// Why `pending`, when the phone said (ov-828): one of [`CAUSES`], or
     /// empty. A word the page has no sentence for is empty here, so the page
     /// says the general thing rather than a reply's own text.
+    #[serde(default)]
     pub cause: String,
+}
+
+/// Add grants without discarding runners already paired with this browser.
+pub fn merge_grants(mut known: Vec<Granted>, added: Vec<Granted>) -> Vec<Granted> {
+    for grant in added {
+        if let Some(existing) = known.iter_mut().find(|entry| entry.id == grant.id) {
+            *existing = grant;
+        } else {
+            known.push(grant);
+        }
+    }
+    known
 }
 
 /// The reasons a phone gives for a runner it couldn't add this browser to

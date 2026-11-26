@@ -16,6 +16,7 @@ import { sameOrigin } from '../../common/origin'
 import { Caller, configured, exchange, visitorOf, withinLimit, type Configured } from '../../common/relay'
 import { clearSession, clearSignIn, cookie, newCsrf, newSignIn, readSession, readSignIn, SESSION_COOKIE, sessionCookie, sessionId, signInCookie } from '../../common/session'
 import { api } from './api'
+import { pushWorker } from './web-push-worker'
 import { asset, isAsset, version } from './assets'
 import { cspReport } from './csp-report'
 import type { WebEnv } from './env'
@@ -54,6 +55,11 @@ async function route(request: Request, url: URL, env: WebEnv): Promise<Response>
     if (path.startsWith('/api/')) return withHeaders(null, 404)
     return page(notAvailablePage(false), path === '/' ? 200 : 404)
   }
+  if (path === '/web-push-worker.js' && method === 'GET') return withHeaders(pushWorker, 200, {
+    'cache-control': 'no-cache',
+    'content-type': 'text/javascript; charset=utf-8',
+    'content-security-policy': "default-src 'none'",
+  })
   if (path.startsWith('/api/relay/')) return await api(request, url, env)
   if (method !== 'GET' && method !== 'HEAD') return withHeaders(null, 405, { allow: 'GET, HEAD' })
   if (path === '/sign-in') return await startSignIn(url, env)

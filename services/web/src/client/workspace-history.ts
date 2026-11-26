@@ -91,6 +91,7 @@ export class WorkspaceHistory {
   private linked(): Route {
     const params = new URLSearchParams(location.search)
     const space = params.get('workspace') ?? this.fallback.space
+    if (params.get('view') === 'needs') return { space, page: 'needs', tab: 'needs' }
     if (params.get('view') === 'board') {
       const boardTask = params.get('ticket') ?? undefined
       const view = params.get('review')

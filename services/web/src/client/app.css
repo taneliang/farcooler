@@ -421,3 +421,12 @@ button.danger { color: var(--danger); }
   .review-columns { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .review-columns .review-files { max-height: 220px; overflow: auto; }
 }
+
+#work-changes {
+  max-width: min(60rem, 94vw);
+}
+#work-changes pre {
+  overflow: auto;
+  max-height: 65vh;
+  white-space: pre;
+}

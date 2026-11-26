@@ -167,6 +167,11 @@ export class WorkspacePanes {
     }))
   }
 
+  disconnect(): void {
+    for (const mount of this.mounts.values()) mount.writer.show(null)
+    this.set.disconnect()
+  }
+
   problem(text: string, id?: string): void {
     const slot = !id ? this.view?.focus : this.view?.main.terminal === id ? 'main' : this.view?.side?.terminal === id ? 'side' : undefined
     if (slot) this.note(slot, text)
