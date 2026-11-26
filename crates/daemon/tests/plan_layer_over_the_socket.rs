@@ -153,8 +153,13 @@ async fn a_board_reorder_is_visible_to_a_second_client() {
     let repo = a_repository(&h);
     let [first, second] = ["Mac: first", "Mac: second"]
         .map(|title| h.service.store.create_task(repo.workspace, title, Actor::User).unwrap());
+    for task in [&first, &second] {
+        h.service.store.put_on_line(task.id, &NewTicketLine::default(), Actor::Manager).unwrap();
+    }
+    h.service.store.set_line_order(repo.workspace, &[first.id, second.id], Actor::Manager).unwrap();
     let mut writer = connect(&h).await;
     let mut reader = connect(&h).await;
+    assert_eq!(board_order(&mut reader, repo.id, repo.workspace).await, [id(first.id), id(second.id)]);
     let mut reorder = request("task.reorder");
     reorder.required_capabilities.push(farcooler_protocol::capability::BOARD_ORDER.into());
     reorder.payload = Some(payload::Payload::TaskReorder(pb::TaskReorder {
@@ -172,6 +177,9 @@ async fn a_board_reorder_is_visible_to_a_second_client() {
     assert_eq!(tasks[0].workspace_id, Some(id(repo.workspace)));
 
     assert_eq!(board_order(&mut reader, repo.id, repo.workspace).await, [id(second.id), id(first.id)]);
+    let read = plan(&mut reader, repo.workspace).await;
+    let ranked: Vec<_> = read.lines.into_iter().map(|line| (line.task_id, line.plan_rank)).collect();
+    assert_eq!(ranked, [(id(second.id), Some(1)), (id(first.id), Some(2))]);
 }
 
 /// Theme and line writes announce plan changes. Changing the order also
