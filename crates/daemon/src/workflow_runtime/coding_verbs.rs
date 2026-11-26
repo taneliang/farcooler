@@ -59,6 +59,8 @@ const COMMIT_IDENTITY: [&str; 8] = ["-c", "user.name=Far Cooler", "-c", "user.em
     "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"];
 const SWIFT_FLOORS: [&str; 2] = ["apps/macos/test-floor.txt", "apps/shared/AgentKit/test-floor.txt"];
 
+enum FloorPick { Applied, Skipped }
+
 #[derive(Serialize)]
 pub(super) struct PickConflict {
     member: String,
@@ -688,41 +690,57 @@ impl Exec {
         self.reconcile_verb(binding, &StageKind::Fold).await
     }
 
-    /// Apply one pinned member; an empty pick is already on the base. Abort a conflict before
+    /// Apply one pinned member, skipping changes already on the base. Abort a conflict before
     /// returning so diagnosis and the next member always start from a settled tree.
     pub(super) async fn pick_member(&self, binding: Option<&Binding>, tree: &Path,
         member: &farcooler_workflow::Member) -> Result<Option<PickConflict>>
     {
-        // `git cherry` lists what the member holds that the tree (the base plus every member folded so
-        // far) lacks, oldest first, marking with `-` a commit whose patch is already there under another
-        // sha. A ticket stacked on another's commits, or on copies already on the base, skips those.
+        // Git omits commits already in HEAD's ancestry and marks equivalent patches with `-`.
+        // Independent floor increases can have identical patches. Use the source SHA recorded by
+        // cherry-pick -x to recognize shared floor commits, even after adjusting their delta.
         let listed = self.pick_read(binding, tree, &["cherry", "HEAD", &member.candidate]).await?;
-        for commit in listed.lines().filter_map(|l| l.strip_prefix("+ ")).filter(|c| !c.is_empty()) {
+        for (sign, commit) in listed.lines().filter_map(|line| line.split_once(' ')) {
+            if !matches!(sign, "+" | "-") || !sha(commit) { continue; }
+            let mut args = vec!["diff-tree", "-r", "--no-commit-id", "--name-only", "--diff-filter=M", commit, "--"];
+            args.extend(SWIFT_FLOORS);
+            let changed = self.pick_read(binding, tree, &args).await?;
+            let floors: Vec<_> = changed.lines().collect();
+            if !floors.is_empty() {
+                let origin = format!("--grep=^(cherry picked from commit {commit})$");
+                if !self.pick_read(binding, tree, &["log", "-1", "--format=%H", "--basic-regexp", &origin, "HEAD"]).await?.is_empty() {
+                    continue;
+                }
+            }
+            if sign == "-" {
+                self.restore_collapsed_floors(binding, tree, commit, &floors, FloorPick::Skipped).await?;
+                continue;
+            }
             let pick = |extra: &[&'static str]| -> Vec<&'static str> {
                 COMMIT_IDENTITY.iter().copied().chain(extra.iter().copied()).collect()
             };
             let mut args = pick(&["cherry-pick", "-x"]); args.push(commit);
             if self.pick_git(binding, tree, &args).await?.0 {
-                self.restore_collapsed_floors(binding, tree, commit).await?;
+                self.restore_collapsed_floors(binding, tree, commit, &floors, FloorPick::Applied).await?;
                 continue;
             }
             let unmerged = self.pick_read(binding, tree, &["diff", "--name-only", "--diff-filter=U"]).await?;
             let clean = self.pick_git(binding, tree, &["diff", "--cached", "--quiet"]).await?.0
                 && self.pick_git(binding, tree, &["diff", "--quiet"]).await?.0;
             if unmerged.is_empty() && clean && self.pick_git(binding, tree, &pick(&["cherry-pick", "--skip"])).await?.0 {
+                self.restore_collapsed_floors(binding, tree, commit, &floors, FloorPick::Skipped).await?;
                 continue;
             }
             // Only confirmed unmerged paths diagnose a member; infrastructure failures retry the fold.
             if unmerged.is_empty() { return Err(Error::Refused("fold cherry-pick failed without conflicts")); }
             let files: Vec<_> = unmerged.lines().collect();
-            if self.resolve_baselines(binding, tree, &files, None).await? {
-                let finish = if self.pick_git(binding, tree, &["diff", "--cached", "--quiet"]).await?.0 {
-                    "--skip"
+            if self.resolve_baselines(binding, tree, &files, &[]).await? {
+                let (finish, floor_pick) = if self.pick_git(binding, tree, &["diff", "--cached", "--quiet"]).await?.0 {
+                    ("--skip", FloorPick::Skipped)
                 } else {
-                    "--continue"
+                    ("--continue", FloorPick::Applied)
                 };
                 self.pick_read(binding, tree, &pick(&["cherry-pick", finish])).await?;
-                if finish == "--continue" { self.restore_collapsed_floors(binding, tree, commit).await?; }
+                self.restore_collapsed_floors(binding, tree, commit, &floors, floor_pick).await?;
                 continue;
             }
             self.pick_read(binding, tree, &pick(&["cherry-pick", "--abort"])).await?;
@@ -735,23 +753,30 @@ impl Exec {
         Ok(None)
     }
 
-    /// Git cleanly merges identical edits. For floors, each independent pick still owes its increase.
-    async fn restore_collapsed_floors(&self, binding: Option<&Binding>, tree: &Path, commit: &str) -> Result<()> {
-        let mut args = vec!["diff-tree", "-r", "--no-commit-id", "--name-only", "--diff-filter=M", commit, "--"];
-        args.extend(SWIFT_FLOORS);
-        let changed = self.pick_read(binding, tree, &args).await?;
-        let paths: Vec<_> = changed.lines().collect();
-        if !paths.is_empty() && self.resolve_baselines(binding, tree, &paths, Some(commit)).await? {
-            let mut amend = COMMIT_IDENTITY.to_vec();
-            amend.extend(["commit", "--amend", "--no-edit"]);
-            self.pick_read(binding, tree, &amend).await?;
+    /// Each independent pick owes its increase, even when Git produced no commit.
+    async fn restore_collapsed_floors(&self, binding: Option<&Binding>, tree: &Path, commit: &str,
+        paths: &[&str], pick: FloorPick) -> Result<()>
+    {
+        if paths.is_empty() { return Ok(()); }
+        let flag = match pick {
+            FloorPick::Applied => "--after-pick",
+            FloorPick::Skipped => "--skipped-pick",
+        };
+        if self.resolve_baselines(binding, tree, paths, &[flag, commit]).await? {
+            let mut args = COMMIT_IDENTITY.to_vec();
+            let origin = format!("(cherry picked from commit {commit})");
+            match pick {
+                FloorPick::Applied => args.extend(["commit", "--amend", "--no-edit"]),
+                FloorPick::Skipped => args.extend(["commit", "-m", "Preserve Swift test floor increase", "-m", &origin]),
+            }
+            self.pick_read(binding, tree, &args).await?;
         }
         Ok(())
     }
 
-    /// Resolve only known, regular baseline files using bundled source. An after-pick repair may
+    /// Resolve only known, regular baseline files using bundled source. A floor repair may
     /// replace a subset of the requested floors. A conflict must be resolved in full.
-    async fn resolve_baselines(&self, binding: Option<&Binding>, tree: &Path, paths: &[&str], after_pick: Option<&str>) -> Result<bool> {
+    async fn resolve_baselines(&self, binding: Option<&Binding>, tree: &Path, paths: &[&str], repair: &[&str]) -> Result<bool> {
         if !paths.iter().all(|path| SWIFT_FLOORS.contains(path)
             || matches!(*path, "scripts/daemon-layers.json" | "scripts/daemon-layers-counts.txt")) {
             return Ok(false);
@@ -766,8 +791,7 @@ impl Exec {
         crate::git_guard::apply(&mut command, &crate::git_guard::fixed());
         command.args(["-I", "-c", include_str!("../../../../scripts/fold-baselines.py"),
             include_str!("../../../../scripts/daemon-layers.py")]);
-        if let Some(commit) = after_pick { command.args(["--after-pick", commit]); }
-        command.args(paths).current_dir(&root).env("PATH", "/usr/bin:/bin").env("GIT_OPTIONAL_LOCKS", "0");
+        command.args(repair).args(paths).current_dir(&root).env("PATH", "/usr/bin:/bin").env("GIT_OPTIONAL_LOCKS", "0");
         let mut command = tokio::process::Command::from(command);
         command.kill_on_drop(true);
         let output = tokio::time::timeout(std::time::Duration::from_secs(30), command.output()).await
@@ -778,7 +802,7 @@ impl Exec {
         }
         let replacements: BTreeMap<String, String> = serde_json::from_slice(&output.stdout)?;
         if replacements.is_empty() { return Ok(false); }
-        if (after_pick.is_none() && replacements.len() != paths.len())
+        if (repair.is_empty() && replacements.len() != paths.len())
             || replacements.keys().any(|path| !paths.contains(&path.as_str())) {
             return Err(Error::Refused("unexpected baseline resolutions"));
         }

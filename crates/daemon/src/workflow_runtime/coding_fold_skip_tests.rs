@@ -104,15 +104,56 @@ async fn a_commit_that_truly_conflicts_still_fails_the_fold_naming_the_file() {
 /// their combined floor, without routing either member back through build.
 #[tokio::test]
 async fn a_shared_floor_conflict_reaches_the_group_gate_without_rebuilds() {
-    shared_floor_reaches_the_group_gate(10).await;
+    shared_floor_reaches_the_group_gate(10, false).await;
 }
 
 #[tokio::test]
 async fn identical_floor_bumps_reach_the_group_gate_without_losing_either_increase() {
-    shared_floor_reaches_the_group_gate(1).await;
+    shared_floor_reaches_the_group_gate(1, false).await;
 }
 
-async fn shared_floor_reaches_the_group_gate(second_count: u32) {
+#[tokio::test]
+async fn independent_floor_only_commits_keep_both_increases_at_the_group_gate() {
+    shared_floor_reaches_the_group_gate(1, true).await;
+}
+
+#[tokio::test]
+async fn an_empty_floor_pick_is_restored_once_when_a_stacked_ticket_carries_it() {
+    let (_dir, runtime, binding) = binding().await;
+    let repo = tempfile::tempdir().unwrap();
+    let g = stacked_repository(repo.path());
+    let floor = repo.path().join("apps/macos/test-floor.txt");
+    std::fs::create_dir_all(floor.parent().unwrap()).unwrap();
+    std::fs::write(&floor, "100\n").unwrap();
+    g(&["add", "."]);
+    g(&["commit", "-qm", "set initial floor"]);
+
+    g(&["checkout", "-qb", "combined"]);
+    edit(repo.path(), "two", "two-combined");
+    std::fs::write(&floor, "101\n").unwrap();
+    g(&["commit", "-qam", "add a test and bump floor"]);
+    let combined = g(&["rev-parse", "HEAD"]);
+
+    g(&["checkout", "-qb", "separate", "main"]);
+    std::fs::write(&floor, "101\n").unwrap();
+    g(&["commit", "-qam", "bump floor alone"]);
+    let separate = g(&["rev-parse", "HEAD"]);
+    g(&["checkout", "-qb", "stacked"]);
+    edit(repo.path(), "six", "six-stacked");
+    g(&["commit", "-qam", "stacked change"]);
+    let stacked = g(&["rev-parse", "HEAD"]);
+
+    g(&["checkout", "-q", "--detach", "main"]);
+    assert!(runtime.pick_member(Some(&binding), repo.path(), &member("combined", &combined)).await.unwrap().is_none());
+    assert_eq!(g(&["cherry", "HEAD", &separate]), format!("+ {separate}"), "Git will attempt the empty pick");
+    assert!(runtime.pick_member(Some(&binding), repo.path(), &member("separate", &separate)).await.unwrap().is_none());
+    assert_eq!(std::fs::read_to_string(&floor).unwrap(), "102\n");
+    assert!(runtime.pick_member(Some(&binding), repo.path(), &member("stacked", &stacked)).await.unwrap().is_none());
+    assert_eq!(std::fs::read_to_string(&floor).unwrap(), "102\n", "the shared source commit counts once");
+    assert_eq!(g(&["show", "HEAD:shared.txt"]), "one\ntwo-combined\nthree\nfour\nfive\nsix-stacked\nseven");
+}
+
+async fn shared_floor_reaches_the_group_gate(second_count: u32, floor_only_commits: bool) {
     let (dir, mut runtime) = lander("floor-conflict").await;
     let definition = batched_push(&runtime, "any", 5000);
     at_join(&mut runtime, "ahead", &definition).await;
@@ -127,18 +168,21 @@ async fn shared_floor_reaches_the_group_gate(second_count: u32) {
         declaration = (f'@Test func {item}() {{}}\n' if count == 1 else
                        f'@Test(arguments: 0..<{count}) func second(_ value: Int) {{}}\n')
         tests.write_text(declaration)
-        if item == 'second':
+        if item == 'second' or FLOOR_ONLY_COMMITS:
             subprocess.check_call(['/usr/bin/git', 'add', '--', str(tests)])
             subprocess.check_call(['/usr/bin/git', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'add tests before bumping floor'])
         (suite / 'test-floor.txt').write_text(str(100 + count) + '\n')
-        subprocess.check_call(['/usr/bin/git', 'add', '--', str(suite)])"#;
+        subprocess.check_call(['/usr/bin/git', 'add', '--', str(suite)])
+        if FLOOR_ONLY_COMMITS:
+            subprocess.check_call(['/usr/bin/git', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'bump floor'])"#;
     let gate = r#"elif stage == 'gate':
     suite = pathlib.Path('apps/macos')
     if (suite / 'firstTests.swift').exists():
         assert (suite / 'secondTests.swift').exists()
         assert (suite / 'test-floor.txt').read_text() == 'EXPECTED_FLOOR\n'
         pathlib.Path(os.environ['MARKER']).touch()"#;
-    let edits = edits.replace("SECOND_COUNT", &second_count.to_string());
+    let edits = edits.replace("SECOND_COUNT", &second_count.to_string())
+        .replace("FLOOR_ONLY_COMMITS", if floor_only_commits { "True" } else { "False" });
     let gate = gate.replace("EXPECTED_FLOOR", &(101 + second_count).to_string());
     std::fs::write(&script, text.replace("if stage == 'build':", &edits).replace("elif stage == 'gate':", &gate)).unwrap();
     for item in ["first", "second"] { at_join(&mut runtime, item, &definition).await; }

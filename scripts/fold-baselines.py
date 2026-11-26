@@ -110,24 +110,24 @@ def regular_blob(revision, path):
     return None
 
 
-def restore_floor_increases(commit, paths):
+def restore_floor_increases(commit, paths, skipped):
     result = {}
     for path in FLOORS.intersection(paths):
         base = regular_blob(f"{commit}^", path)
-        ours = regular_blob("HEAD^", path)
+        ours = regular_blob("HEAD" if skipped else "HEAD^", path)
         theirs = regular_blob(commit, path)
-        if base is None or ours is None or base == ours or ours != theirs:
+        if None in (base, ours, theirs) or base == theirs:
             continue
-        # Git kept a single copy of the identical edit. Verify the picked
-        # tree still has that blob before restoring the incoming increase.
-        if regular_blob("HEAD", path) != ours:
+        # An applied commit needs repair only if Git collapsed the floor edit.
+        # A skipped commit left HEAD untouched.
+        if not skipped and (ours != theirs or regular_blob("HEAD", path) != ours):
             continue
         try:
-            before, after = (git("cat-file", "blob", blob) for blob in (base, ours))
-            replacement = floor([before, after, after])
+            before, current, incoming = (git("cat-file", "blob", blob) for blob in (base, ours, theirs))
+            replacement = floor((before, current, incoming))
         except ValueError:
             continue
-        if int(replacement) > int(after):
+        if int(replacement) > int(current):
             result[path] = replacement
     return result
 
@@ -179,9 +179,9 @@ def main(scanner_source, paths):
 
 if __name__ == "__main__":
     scanner_source, *args = sys.argv[1:]
-    if args[:1] == ["--after-pick"]:
-        _, commit, *paths = args
-        replacements = restore_floor_increases(commit, paths)
+    if args and args[0] in ("--after-pick", "--skipped-pick"):
+        mode, commit, *paths = args
+        replacements = restore_floor_increases(commit, paths, skipped=mode == "--skipped-pick")
     else:
         replacements = main(scanner_source, args)
     print(json.dumps(replacements))

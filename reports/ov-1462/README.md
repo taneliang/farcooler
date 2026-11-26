@@ -25,10 +25,12 @@ floor appears in gate failure output during the window.
 
 - Both Swift floors retain their numeric format. The fold adds the incoming
   commit's floor increase to the current floor when Git reports a conflict
-  or merges identical increases into one. The picked commit's parent gives
-  the starting floor for that increase. This preserves the reviewed number
-  of cases for parameterized tests and works when the ticket adds its tests
-  in an earlier commit. A side below the conflict base requires manual
+  or collapses identical increases, including patch-equivalent and empty
+  picks. The source commit's parent gives the starting floor for that
+  increase. This preserves the reviewed number of cases for parameterized
+  tests and works when a ticket commits its floor increase separately.
+  Ancestry and the source SHA recorded on replay identify shared commits
+  across stacked tickets. A side below the conflict base requires manual
   resolution. The landing check rejects any floor below the pinned fold
   base, and the Swift test runs enforce the floor.
 - The daemon layer table retains its JSON format. The resolver reconstructs
@@ -99,3 +101,17 @@ For the equal-increment follow-up, workspace Clippy, all 28 landing-gate
 Python tests, and the floor and budget checks passed. The daemon run passed
 3,408 of 3,410 selected tests. Both tmux fixtures that failed in that run
 passed on isolated retries. Eighteen tests were skipped by the harness.
+
+The floor-only regression gave each ticket one test and a separate commit
+raising the floor from 100 to 101. Before the skip repair, the combined group
+failed to reach the gate with the expected floor. It now reaches the gate
+with both tests and a floor of 102, with one build per ticket. A second
+regression forces an empty cherry-pick and folds a stacked ticket carrying
+the same source commit. The floor remains 102 when that shared commit is
+encountered again.
+
+Workspace Clippy with warnings denied, all 28 landing-gate Python tests,
+the Swift floor check, and the layer and file-size budget checks passed.
+The daemon unit run passed 3,420 of 3,423 selected tests across three
+binaries. The tmux fixture and two script-hook fixtures that failed in the
+full run passed when retried individually. The harness skipped 18 tests.
