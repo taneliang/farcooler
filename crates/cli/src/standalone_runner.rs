@@ -441,23 +441,30 @@ impl LaunchAgent {
 }
 
 fn owns_plist(install: &Install, label: &str, path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
-    let output = Command::new("/usr/bin/plutil").args(["-convert", "json", "-o", "-", "--"])
-        .arg(path).output()?;
-    if !output.status.success() {
-        return Ok(false);
-    }
-    let plist: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-    if plist["Label"].as_str() != Some(label) {
-        return Ok(false);
-    }
-    let args = &plist["ProgramArguments"];
-    let program = match plist.get("Program").unwrap_or(&args[0]).as_str() {
-        Some(program) => Path::new(program),
-        None => return Ok(false),
+    // Read the identity fields alone. Other keys can use plist types (such
+    // as dates and data) that plutil cannot convert to JSON.
+    let extract = |key, format, kind| -> std::io::Result<Option<Vec<u8>>> {
+        let output = Command::new("/usr/bin/plutil")
+            .args(["-extract", key, format, "-expect", kind, "-n", "-o", "-", "--"])
+            .arg(path).output()?;
+        Ok(output.status.success().then_some(output.stdout))
     };
+    if extract("Label", "raw", "string")?.as_deref() != Some(label.as_bytes()) {
+        return Ok(false);
+    }
+    let program_key = if Command::new("/usr/bin/plutil").args(["-type", "Program", "--"])
+        .arg(path).output()?.status.success()
+    {
+        "Program"
+    } else {
+        "ProgramArguments.0"
+    };
+    let Some(program) = extract(program_key, "raw", "string")? else { return Ok(false) };
+    let program = Path::new(std::str::from_utf8(&program)?);
     if label == LOGIN_LABEL && program == Path::new("/bin/launchctl") {
         // The original login helper calls launchctl directly.
-        return Ok(*args == serde_json::json!([
+        let Some(args) = extract("ProgramArguments", "json", "array")? else { return Ok(false) };
+        return Ok(serde_json::from_slice::<serde_json::Value>(&args)? == serde_json::json!([
             "/bin/launchctl", "bootstrap", install.domain, install.plist_path(),
         ]));
     }

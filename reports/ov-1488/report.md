@@ -38,6 +38,17 @@ publication rules.
   installed CLI. It refused while the landing lock was held. With
   `--wait`, it waited for that lock, started a different launchd PID,
   and preserved the original pane and enrollment.
+- The rework fixture repeated installation and migration on macOS 27.2.1.
+  It loaded an older binary plist with an extra environment variable,
+  then verified the signed update removed the variable both on disk and
+  in launchd. A subsequent signed payload with an immediately exiting
+  daemon failed startup. The updater restored the previous release
+  pointer, the previous plist and its live launchd configuration, and the
+  same workspace, worktree, pane PID and enrollment.
+- All seven focused standalone Rust tests passed, including older plist
+  replacement and refusal of foreign plists. The package verifier,
+  canary planner and wire gate self-tests passed. A build-wrapper smoke
+  test checked the release Cargo arguments and Tailcat archive path.
 - The focused Rust run passed 33 tests across standalone activation, local
   daemon connections, and SSH stdio transport. The canary planner, wire gate
   self-test, and workflow lint passed locally.

@@ -98,7 +98,8 @@ fn standalone_update_replaces_owned_older_plists_and_can_restore_them() {
         (LABEL, install.domain.clone(), install.plist_path(), install.plist()),
         (LOGIN_LABEL, install.gui_domain(), install.login_plist_path(), install.login_plist()),
     ] {
-        let older = desired.replace("<key>RunAtLoad</key><true/>", "<key>RunAtLoad</key><false/>");
+        let older = desired.replace("<key>RunAtLoad</key><true/>", "<key>RunAtLoad</key><false/>")
+            .replace("</dict>\n</plist>", "<key>TemplateData</key><data>YWJj</data>\n</dict>\n</plist>");
         assert_ne!(older, desired);
         write_plist(&path, older.as_bytes(), false).unwrap();
         // Binary plists also have a valid ownership record.
