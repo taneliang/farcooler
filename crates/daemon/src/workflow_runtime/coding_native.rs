@@ -457,7 +457,8 @@ impl Exec {
         }
     }
     pub(super) async fn run_native(&self, binding: &Binding, command: &CodingCommand,
-        cancel: tokio::sync::watch::Receiver<bool>) -> Result<Option<i32>> {
+        cancel: tokio::sync::watch::Receiver<bool>) -> Result<crate::effect_runner::ProcessExit> {
+        use super::native_control::Turn;
         self.native_hooks(binding)?;
         let socket = self.native_socket(binding);
         // No unlink-before-bind: a surviving owner is evidence, never a restart.
@@ -495,7 +496,7 @@ impl Exec {
                 std::fs::write(self.process_log(binding), why)?;
                 drop(listener);
                 std::fs::remove_file(socket)?;
-                return Ok(None);
+                return Ok(crate::effect_runner::ProcessExit { code: None, cancelled: false });
             }
         };
         let panes = tmux.list_tagged_panes().await.map_err(|_| Error::Refused("native PTY inventory unavailable"))?;
@@ -531,24 +532,15 @@ impl Exec {
         // Its quiet periods, like its time limit, leave out time a landing gate held it stopped (ov-1301).
         let clock = super::native_control::ActiveClock::held_by(_builder.as_ref());
         let turn = self.native_turn(&listener, binding, &heard_from, &clock);
-        let cancelled = cancel.clone();
         let mut stop_reply = None;
         let mut frozen = None;
         let hold = self.native_hold_socket(binding);
         let controlled = super::native_control::controlled(turn, tmux, &window.pane_id, &hold, id,
             &clock, Duration::from_millis(command.timeout_ms), orders, cancel, &mut frozen, _builder.as_ref(), &mut stop_reply);
         let _ = super::execution::ACTIVITY.try_with(|a| a.session.store(true, std::sync::atomic::Ordering::SeqCst));
-        let mut ended_by = None;
-        let result = tokio::select! {
+        let turn = tokio::select! {
             never = stuck => match never {},
-            result = controlled => match result {
-                Ok(turn) => turn,
-                Err(error) => {
-                    tracing::warn!(effect = %binding.effect.id, %error, "the native turn could not be read");
-                    ended_by = Some(error);
-                    None
-                }
-            },
+            result = controlled => result,
         };
         let _ = super::execution::ACTIVITY.try_with(|a| {
             a.settle();
@@ -561,16 +553,16 @@ impl Exec {
             Ok(result) => result.map_err(|_| Error::Refused("native output capture failed"))??,
             Err(_) => { output.abort(); return Err(Error::Refused("native output did not drain")); }
         }
-        let result_none = result.is_none();
-        let (mut completed, hooks, mut failure) = result.map_or((None, Vec::new(), None),
-            |(passed, hooks, failure)| (Some(passed), hooks, failure));
-        // A turn the runner stopped reading fails its step with why, on the item, never silently (ov-1301).
-        if let Some(error) = ended_by { completed = Some(false); failure = Some(turn_ended_reason(&error)); }
-        // So does one that ran out of time: neither a Stop nor a cancel ended it, so its time limit did.
-        else if result_none && stop_reply.is_none() && !*cancelled.borrow() {
-            completed = Some(false);
-            failure = Some(out_of_time_reason(Duration::from_millis(command.timeout_ms)));
-        }
+        let cancelled = matches!(turn, Ok(Turn::Cancelled));
+        let (mut completed, hooks, mut failure) = match turn {
+            Ok(Turn::Completed((passed, hooks, failure))) => (Some(passed), hooks, failure),
+            Ok(Turn::TimedOut) => (Some(false), Vec::new(), Some(out_of_time_reason(Duration::from_millis(command.timeout_ms)))),
+            Ok(Turn::Cancelled | Turn::Stopped) => (None, Vec::new(), None),
+            Err(error) => {
+                tracing::warn!(effect = %binding.effect.id, %error, "the native turn could not be read");
+                (Some(false), Vec::new(), Some(turn_ended_reason(&error)))
+            }
+        };
         // A recorded verdict is the review however the turn ended: cut short by a daemon stopping for an install, out
         // of time, or failing after it (ov-1082). Read after the reviewer is ended, so it is the last verdict given.
         if self.recorded_verdict(binding) { completed = Some(true); failure = None; }
@@ -578,7 +570,7 @@ impl Exec {
         drop(listener);
         std::fs::remove_file(socket)?;
         if let Some(reply) = stop_reply { let _ = reply.send(Ok(())); }
-        Ok(completed.map(|passed| if passed { 0 } else { 1 }))
+        Ok(crate::effect_runner::ProcessExit { code: completed.map(|passed| if passed { 0 } else { 1 }), cancelled })
     }
     /// End an interrupted native owner after a Stop, recorded verdict, or recovery of a pending turn.
     /// Recovery never launches or sends input to the agent. `completed` is what
@@ -729,20 +721,7 @@ impl Exec {
         let table = snapshot().await?;
         Ok((!owner.processes(&table)?.is_empty()).then_some("processes are still running on its agent's terminal"))
     }
-    /// Whether a native agent the runner no longer runs has provably ended (ov-1301): its pane is gone or dead and
-    /// nothing is left on its tty. Then its turn is settled as failed with `why`, for the step to say, and true is
-    /// returned; the caller writes the process fact. False, and nothing written, when it may still run, has no owner
-    /// record, or is already settled. Nothing is killed: only a Stop may end a live agent.
-    pub(super) async fn settle_ended_native(&self, binding: &Binding, why: &str) -> Result<bool> {
-        let settled = self.native_path(binding, "settled");
-        let owner = self.native_path(binding, "owner");
-        if settled.try_exists()? || !owner.try_exists()? || self.native_ended(binding).await?.is_some() { return Ok(false); }
-        let owner: NativeOwner = serde_json::from_slice(&self.bytes(&owner)?)?;
-        if !self.process_log(binding).try_exists()? { durable(&self.process_log(binding), b"")?; }
-        durable(&settled, &serde_json::to_vec(&NativeSettlement::Launched { owner, hooks: Vec::new(), completed: Some(false),
-            failure: Some(why.to_string()) })?)?;
-        Ok(true)
-    }
+
 }
 
 /// The last thing Cursor said in its latest turn, from the tail of its transcript. A transcript that is missing,
@@ -1090,7 +1069,7 @@ os.execv('/usr/bin/python3', ['/usr/bin/python3', str(pathlib.Path(__file__).wit
         let activity = runtime.activities.lock().unwrap().get(&("w".into(), binding.effect.id.clone())).unwrap().clone();
         // Run just the native turn, pausing the adapter before its ProcessFact and candidate checks.
         super::super::execution::ACTIVITY.scope(activity, async {
-            assert_eq!(runtime.run_native(binding, &command, running[0].cancel.subscribe()).await.unwrap(), Some(0));
+            assert_eq!(runtime.run_native(binding, &command, running[0].cancel.subscribe()).await.unwrap().code, Some(0));
             assert_eq!(runtime.execution_state("w").unwrap().unwrap().items["one"].phase, Phase::Running);
         }).await;
         drop(futures);

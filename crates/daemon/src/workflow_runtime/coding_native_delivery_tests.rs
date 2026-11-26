@@ -107,7 +107,7 @@ async fn accepted_native_claude_delivers_message_and_acceptance_before_turn_ends
         result = &mut run => panic!("native turn ended before both deliveries: {result:?}"),
         _ = delivery => {}
     }
-    assert_eq!(run.await.unwrap(), Some(0));
+    assert_eq!(run.await.unwrap().code, Some(0));
     let settled: NativeSettlement = serde_json::from_slice(&std::fs::read(runtime.exec.native_path(&binding, "settled")).unwrap()).unwrap();
     let NativeSettlement::Launched { hooks, .. } = settled else { panic!("never launched") };
     assert!(hooks.iter().any(|h| h.event == "PreToolUse" && h.takes.iter().any(|t| t == "additional_context")));

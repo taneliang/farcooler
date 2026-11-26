@@ -36,7 +36,7 @@ fn admit_item(store: &Store, state: &State, key: &str) {
 }
 
 #[test]
-fn a_rejected_review_records_a_finding_for_the_lead_and_its_followers() {
+fn a_restarted_then_rejected_review_records_notes_for_the_lead_and_its_followers() {
     use crate::models::{Actor, NoteKind};
 
     let store = Store::open_in_memory().unwrap();
@@ -76,10 +76,28 @@ fn a_rejected_review_records_a_finding_for_the_lead_and_its_followers() {
         assert!(receipt.result.is_ok(), "{receipt:?}");
     }
     let reviewing = current();
-    let run = &reviewing.items[&lead.key].run;
+    let before = &reviewing.items[&lead.key];
+    let run = &before.run;
     admit_item(&store, &reviewing, &lead.key);
+    let interrupted = observe_item(&reviewing, &lead.key, Outcome::Interrupted);
+    let receipt = store.workflow_apply(&interrupted).unwrap();
+    assert!(receipt.result.is_ok(), "{receipt:?}");
+    assert_eq!(store.workflow_apply(&interrupted).unwrap(), receipt);
+    let resumed = current();
+    let after = &resumed.items[&lead.key];
+    assert_eq!((&after.phase, &after.run, after.attempt), (&Phase::Running, run, before.attempt));
+    assert_ne!(after.pending, before.pending);
+    let reason = after.reason.as_deref().unwrap();
+    assert!(reason.contains("interrupted by an app update") && reason.contains("resumed"));
+    for ticket in [&lead, &first, &second] {
+        let notes = store.notes_for(ticket.id, Some(NoteKind::Progress)).unwrap();
+        assert_eq!(notes.len(), 1, "{}: {notes:?}", ticket.title);
+        assert_eq!(notes[0].body, reason);
+    }
+    assert!(store.notes_for(unrelated.id, Some(NoteKind::Progress)).unwrap().is_empty());
+    admit_item(&store, &resumed, &lead.key);
     let finding = "Cover the caller's cancellation path.";
-    let verdict = observe_item(&reviewing, &lead.key, Outcome::ReviewRejected {
+    let verdict = observe_item(&resumed, &lead.key, Outcome::ReviewRejected {
         evidence: evidence("review.json"), summary: finding.into(), receipt: "review.json".into(),
     });
     let receipt = store.workflow_apply(&verdict).unwrap();

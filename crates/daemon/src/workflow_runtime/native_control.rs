@@ -55,6 +55,8 @@ impl ActiveClock {
     }
 }
 
+pub(super) enum Turn<T> { Completed(T), TimedOut, Cancelled, Stopped }
+
 /// The turn and its deadline are polled only while active. A pause therefore suspends the step's
 /// timeout as well as its processes; Stop still works while paused and settles through the engine. Time a landing
 /// gate held the builder stopped is given back to the deadline too (ov-1301): the Canary failed six builds, with no
@@ -62,7 +64,7 @@ impl ActiveClock {
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn controlled<T>(turn: impl std::future::Future<Output = Result<T>>, tmux: &TmuxServer,
     pane: &str, hold: &Path, id: Uuid, clock: &ActiveClock, timeout: Duration, mut orders: mpsc::Receiver<Order>,
-    mut cancel: tokio::sync::watch::Receiver<bool>, frozen: &mut Option<Frozen>, yielded: Option<&crate::yielding::BuilderGuard>, stop_reply: &mut Option<oneshot::Sender<farcooler_core::Result<()>>>) -> Result<Option<T>> {
+    mut cancel: tokio::sync::watch::Receiver<bool>, frozen: &mut Option<Frozen>, yielded: Option<&crate::yielding::BuilderGuard>, stop_reply: &mut Option<oneshot::Sender<farcooler_core::Result<()>>>) -> Result<Turn<T>> {
     tokio::pin!(turn);
     let deadline = tokio::time::sleep(timeout);
     tokio::pin!(deadline);
@@ -71,18 +73,18 @@ pub(super) async fn controlled<T>(turn: impl std::future::Future<Output = Result
     let mut credited = Duration::ZERO;
     loop {
         tokio::select! {
-            result = &mut turn, if frozen.is_none() => return result.map(Some),
+            result = &mut turn, if frozen.is_none() => return result.map(Turn::Completed),
             _ = &mut deadline, if frozen.is_none() => {
                 let (held, holding) = yielded.map_or((Duration::ZERO, false), crate::yielding::BuilderGuard::held);
                 let owed = held.saturating_sub(credited);
-                if owed.is_zero() && !holding { return Ok(None); }
+                if owed.is_zero() && !holding { return Ok(Turn::TimedOut); }
                 // What is left is what the gate took, counted from now, so a later hand pause reckons from it.
                 credited = held;
                 active_since = tokio::time::Instant::now();
                 remaining = owed.max(Duration::from_secs(1));
                 deadline.as_mut().reset(active_since + remaining);
             }
-            _ = async { while !*cancel.borrow_and_update() { if cancel.changed().await.is_err() { break; } } } => return Ok(None),
+            _ = async { while !*cancel.borrow_and_update() { if cancel.changed().await.is_err() { break; } } } => return Ok(Turn::Cancelled),
             Some((op, mut reply)) = orders.recv() => {
                 let result = match op {
                     Control::Pause if frozen.is_none() => {
@@ -142,7 +144,7 @@ pub(super) async fn controlled<T>(turn: impl std::future::Future<Output = Result
                         deadline.as_mut().reset(active_since + remaining);
                         engine_steering::paused(id, false); Ok(())
                     },
-                    Control::Stop => { *stop_reply = Some(reply); return Ok(None); },
+                    Control::Stop => { *stop_reply = Some(reply); return Ok(Turn::Stopped); },
                     Control::Pause | Control::Resume => Ok(()),
                 };
                 let _ = reply.send(result);
@@ -194,7 +196,7 @@ mod tests {
         };
         let (outcome, ()) = tokio::join!(turn, steer);
         farcooler_tmux::reap_server(tmux.socket());
-        assert!(outcome.unwrap().is_none(), "only active time expires the step");
+        assert!(matches!(outcome.unwrap(), Turn::TimedOut), "only active time expires the step");
     }
 
     #[tokio::test]
@@ -252,10 +254,10 @@ mod tests {
             }
         };
         let (outcome, active) = run(false).await;
-        assert!(outcome.is_none(), "with no gate, the limit ends it");
+        assert!(matches!(outcome, Turn::TimedOut), "with no gate, the limit ends it");
         assert!(active >= Duration::from_millis(200), "{active:?}");
         let (outcome, active) = run(true).await;
-        assert!(outcome.is_some(), "a gate's hold is not the agent's time");
+        assert!(matches!(outcome, Turn::Completed(())), "a gate's hold is not the agent's time");
         assert!(active < Duration::from_millis(250), "quiet periods leave the gate's hold out: {active:?}");
     }
 }

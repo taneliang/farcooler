@@ -42,7 +42,7 @@ pub(super) async fn configured(review: bool, mode: &str) -> (tempfile::TempDir, 
     let base = adapters::git(&repo, &["rev-parse", "HEAD"]).await.unwrap();
     adapters::git(&repo, &["update-ref", "refs/heads/workflow-target", &base]).await.unwrap();
     let script = dir.path().join("adapter.py");
-    std::fs::write(&script, r#"import json, os, pathlib, subprocess, sys
+    std::fs::write(&script, r#"import json, os, pathlib, subprocess, sys, time
 stage = sys.argv[1]
 mode = os.environ['MODE']
 candidate = os.environ['FARCOOLER_CANDIDATE']
@@ -50,6 +50,11 @@ iteration = os.environ['FARCOOLER_ITERATION']
 binding = os.environ['FARCOOLER_OPERATION_BINDING']
 receipt = pathlib.Path(os.environ['FARCOOLER_RECEIPT'])
 if stage == 'build':
+    if mode == 'build-restart' and pathlib.Path(os.environ['STARTED']).exists():
+        assert pathlib.Path('result.txt').read_text().startswith('candidate')
+        sys.exit(0)
+    if mode == 'build-timeout':
+        time.sleep(30)
     pathlib.Path('result.txt').write_text('candidate iteration ' + iteration + ' run ' + os.environ['FARCOOLER_WORKFLOW_RUN'])
     if mode == 'cancel':
         pathlib.Path(os.environ['STARTED']).write_text(str(os.getpid()))
@@ -62,6 +67,9 @@ if stage == 'build':
         pathlib.Path('crates/daemon/src/workflow_runtime.rs').write_text('fn bad() { crate::rpc::serve(); }\n' if iteration == '0' else '')
         subprocess.check_call(['/usr/bin/git', 'add', '--', 'crates/daemon/src/workflow_runtime.rs'])
     subprocess.check_call(['/usr/bin/git', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'build '+iteration])
+    if mode == 'build-restart':
+        pathlib.Path(os.environ['STARTED']).touch()
+        time.sleep(30)
 elif stage == 'check':
     if mode == 'check-fail':
         print('gate stdout', flush=True)
@@ -73,6 +81,13 @@ elif stage == 'check':
         sys.exit(0)
     assert pathlib.Path('result.txt').read_text().startswith('candidate')
 elif stage == 'review':
+    if mode == 'review-restart':
+        started = pathlib.Path(os.environ['STARTED'])
+        if not started.exists():
+            started.touch()
+            time.sleep(30)
+        receipt.write_text(json.dumps(dict(binding=binding, identity='reviewer', candidate=candidate, passed=True)))
+        sys.exit(0)
     if mode == 'review-fifo':
         os.mkfifo(receipt)
         sys.exit(0)
@@ -95,10 +110,15 @@ elif stage == 'ci':
             .into_iter().map(|(k,v)| (k.into(), v.into())).collect(), timeout_ms: 5000 };
     let mut build = command("build");
     build.environment.insert("STARTED".into(), dir.path().join("started").to_string_lossy().into_owned());
+    if mode == "build-timeout" { build.timeout_ms = 150; }
+    let mut reviewer = command("review");
+    if mode == "review-restart" {
+        reviewer.environment.insert("STARTED".into(), dir.path().join("review-started").to_string_lossy().into_owned());
+    }
     let config = CodingConfig { security_reviews: vec![], repository: repo.canonicalize().unwrap(), base,
         landing_ref: "refs/heads/workflow-target".into(), landing: None, pull_request: None, harness: CodingHarness::Command(build),
         checks: fast_checks.unwrap_or_else(|| vec![command("check"), command("check")]),
-        reviewer: review.then(|| CodingReviewer { identity: "reviewer".into(), command: command("review") }),
+        reviewer: review.then(|| CodingReviewer { identity: "reviewer".into(), command: reviewer }),
         ci: CodingCi { repository: "offline/repository".into(), workflow: "configured-check".into(),
             event: "push".into(), command: command("ci"), unrun: None } };
     let runtime = Runtime::create_configured(&dir.path().join("runtime"), config).await.unwrap();
@@ -1162,13 +1182,13 @@ async fn workflow_native_claude_requires_an_active_steering_hook() {
 }
 
 #[tokio::test]
-async fn ov1427_command_build_shutdown_preserves_last_attempt() {
-    let (dir, mut runtime) = configured(false, "cancel").await;
-    let mut definition = runtime.configured_definition().unwrap();
-    for stage in &mut definition.stages { stage.max_attempts = 1; }
+async fn command_build_resumes_after_shutdown_on_its_last_attempt() {
+    let (dir, mut runtime) = configured(false, "build-restart").await;
+    let definition = runtime.configured_definition().unwrap();
     enqueue(&mut runtime, "w", "one", definition);
     runtime.pump(2).await.unwrap();
     let before = runtime.state("w").unwrap().unwrap().items["one"].clone();
+    assert_eq!(before.definition.stages[before.stage].max_attempts, before.attempt);
     let (stop, signal) = tokio::sync::watch::channel(false);
     let shutdown = async {
         assert!(super::wait_until(tokio::time::Instant::now() + Duration::from_secs(30),
@@ -1178,7 +1198,68 @@ async fn ov1427_command_build_shutdown_preserves_last_attempt() {
     let (result, ()) = tokio::join!(runtime.run(signal), shutdown);
     result.unwrap();
     let item = &runtime.state("w").unwrap().unwrap().items["one"];
-    assert_ne!(item.phase, Phase::Failed);
+    assert_eq!(item.phase, Phase::Running);
     assert_eq!((item.stage, item.attempt, &item.run), (before.stage, before.attempt, &before.run));
-    assert!(item.failure.as_deref().is_some_and(|s| s.contains("interrupted") && s.contains("resumed")));
+    assert!(runtime.read_get("w").unwrap()["state"]["items"]["one"]["reason"].as_str()
+        .is_some_and(|s| s.contains("interrupted by an app update") && s.contains("resumed")));
+
+    let root = runtime.root.clone();
+    drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    runtime.pump(100).await.unwrap();
+    let item = &runtime.state("w").unwrap().unwrap().items["one"];
+    assert_eq!(item.phase, Phase::Running);
+    assert_eq!(item.stage, before.stage + 1, "the resumed build handed on its existing commit");
+}
+
+#[tokio::test]
+async fn command_review_resumes_after_restart_on_its_last_attempt() {
+    let (dir, mut runtime) = configured(true, "review-restart").await;
+    let definition = runtime.configured_definition().unwrap();
+    enqueue(&mut runtime, "w", "one", definition);
+    for time in 2..=5 { runtime.pump(time).await.unwrap(); }
+    let before = runtime.state("w").unwrap().unwrap().items["one"].clone();
+    let stage = &before.definition.stages[before.stage];
+    assert_eq!(stage.kind, StageKind::Review(Reviewer::Dispatch));
+    assert_eq!(stage.max_attempts, before.attempt);
+    let binding = admitted(&runtime).await;
+    let (_cancel, cancelled) = tokio::sync::watch::channel(false);
+    let mut run = Box::pin(runtime.execute_coding("w", &binding, cancelled));
+    tokio::select! {
+        result = run.as_mut() => panic!("review ended before restart: {result:?}"),
+        started = super::wait_until(tokio::time::Instant::now() + Duration::from_secs(10),
+            Duration::from_millis(10), || dir.path().join("review-started").exists()) => assert!(started),
+    }
+    assert!(runtime.owner_path(&binding).exists());
+    drop(run);
+    let root = runtime.root.clone();
+    drop(runtime);
+
+    let mut runtime = Runtime::open(&root).unwrap();
+    runtime.pump(100).await.unwrap();
+    let item = &runtime.state("w").unwrap().unwrap().items["one"];
+    assert_eq!(item.phase, Phase::Running);
+    assert_eq!((item.stage, item.attempt, &item.run, &item.candidate),
+        (before.stage, before.attempt, &before.run, &before.candidate));
+    assert_ne!(item.pending, before.pending);
+    assert!(item.reason.as_deref().is_some_and(|s| s.contains("review step was interrupted") && s.contains("resumed")));
+
+    runtime.pump(101).await.unwrap();
+    let item = &runtime.state("w").unwrap().unwrap().items["one"];
+    assert_eq!((item.stage, &item.phase), (before.stage + 1, &Phase::Running));
+}
+
+#[tokio::test]
+async fn command_build_timeout_on_its_last_attempt_fails_without_shutdown() {
+    let (_dir, mut runtime) = configured(false, "build-timeout").await;
+    let definition = runtime.configured_definition().unwrap();
+    assert_eq!(definition.stages[1].max_attempts, 1);
+    enqueue(&mut runtime, "w", "one", definition);
+    runtime.pump(2).await.unwrap();
+    runtime.pump(3).await.unwrap();
+    let item = &runtime.state("w").unwrap().unwrap().items["one"];
+    assert_eq!((item.stage, item.attempt, &item.phase), (1, 1, &Phase::Failed));
+    assert!(runtime.store.workflow_outbox("w").unwrap().iter()
+        .filter(|s| matches!(s.effect.kind, EffectKind::Execute(StageKind::Build)))
+        .map(|s| s.dispatch_state.as_str()).eq(["settled"]));
 }

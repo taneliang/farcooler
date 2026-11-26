@@ -99,12 +99,13 @@ async fn cancelling_a_native_build_whose_pane_and_log_are_gone_reaches_cancelled
 }
 
 #[tokio::test]
-async fn a_native_build_whose_pane_went_with_the_daemon_settles_once_with_why() {
+async fn a_native_build_whose_pane_went_with_the_daemon_resumes_with_why() {
     let (_dir, mut runtime, _fake) = vanished_native_build().await;
     runtime.pump(1_200).await.unwrap();
     let item = &runtime.state("w").unwrap().unwrap().items["one"];
-    assert_ne!(item.phase, Phase::Uncertain, "nothing of it runs, so it is settled, not held");
-    assert!(item.failure.as_deref().is_some_and(|f| f.contains("daemon stopped or restarted")), "{item:?}");
+    assert_eq!(item.phase, Phase::Running, "{item:?}");
+    assert_eq!(item.attempt, 1);
+    assert!(item.reason.as_deref().is_some_and(|f| f.contains("interrupted") && f.contains("resumed")), "{item:?}");
 }
 
 #[tokio::test]

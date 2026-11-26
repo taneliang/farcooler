@@ -255,6 +255,8 @@ pub struct Exec {
     /// When this copy was started, by the sweep's clock and by the monotonic one, so a wait measures
     /// its patience on the same clock its effect was created on.
     launched: Option<(i64, std::time::Instant)>,
+    /// This sweep is draining its effects, either for shutdown or after a runner error.
+    runner_interrupted: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Cleanup takes exclusive access to a tree. Dispatch only tries the lock, so other trees can proceed.
     tree_locks: build_cleanup::TreeLocks,
     disk_usage: disk_usage::DiskUsage,
@@ -450,7 +452,7 @@ impl Runtime {
         let (send, inbox) = mpsc::channel(32);
         let runtime = Self { inbox, send, next_lease: None, next_cleanup: None, orphan_cleanup_retries: BTreeMap::new(), next_process_log_prune: None, continuous: false,
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
-            exec: Exec { yielding: crate::yielding::Yielding::at(&root), activities: Default::default(), places: std::sync::Arc::new(std::sync::Mutex::new(Places::load(&root)?)), root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, host: None,
+            exec: Exec { yielding: crate::yielding::Yielding::at(&root), activities: Default::default(), places: std::sync::Arc::new(std::sync::Mutex::new(Places::load(&root)?)), root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, runner_interrupted: Default::default(), host: None,
                 seeding: Default::default(), tree_locks: Default::default(), disk_usage: Default::default(), #[cfg(test)] user_home: None, #[cfg(test)] build_free_bytes: Some(u64::MAX), #[cfg(test)] cleanup_check: None, #[cfg(test)] cleanup_test_probe: None, open_file_checks: None },
             notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None, trees_recovered: false, next_join_refresh: None, cleanup_started: None, cancel_refused: Default::default(), recovery: Default::default(), restart_pacing: Default::default(), scheduling: Default::default(),
             _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
@@ -574,12 +576,14 @@ impl Runtime {
         result
     }
     async fn sweep(&mut self, now_ms: i64, inbox: &mut mpsc::Receiver<Inbox>) -> Result<usize> {
+        self.runner_interrupted.store(false, std::sync::atomic::Ordering::SeqCst);
         let mut running: Vec<Running> = Vec::new();
         let mut futures: Vec<Slot> = Vec::new();
         let result = self.sweep_loop(now_ms, inbox, &mut running, &mut futures).await;
         if result.is_err() {
             // One failed write must not kill its siblings mid-effect: stop them, wait for
             // each to end, and keep what each one learned so recovery can read it.
+            self.runner_interrupted.store(true, std::sync::atomic::Ordering::SeqCst);
             for job in &running { job.cancel.send_replace(true); }
             while !running.is_empty() {
                 let (index, outcome) = next_finished(&mut futures).await;
@@ -772,6 +776,7 @@ impl Runtime {
                 Event::Shutdown => {
                     stopping = true;
                     scan = false;
+                    self.runner_interrupted.store(true, std::sync::atomic::Ordering::SeqCst);
                     for job in running.iter() { job.cancel.send_replace(true); }
                 }
                 Event::Message(message) => {
@@ -1011,7 +1016,7 @@ impl Runtime {
                     // Internal adapters own an async session; native agents and configured commands
                     // publish presence only after the real PTY or child exists.
                     let process = exec.coding.is_some() && matches!(run_binding.effect.kind,
-                        EffectKind::Execute(StageKind::Build | StageKind::Check | StageKind::Run | StageKind::Review(Reviewer::Agent)));
+                        EffectKind::Execute(StageKind::Build | StageKind::Check | StageKind::Run | StageKind::Review(Reviewer::Agent | Reviewer::Dispatch)));
                     if !process { activity.session.store(true, std::sync::atomic::Ordering::SeqCst); }
                     if matches!(run_binding.effect.kind, EffectKind::Decide { .. }) { exec.execute_hook(&run_binding, Some(cancelled)).await }
                     else if exec.coding.is_some() { exec.execute_coding(&run_workspace, &run_binding, cancelled).await }

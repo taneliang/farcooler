@@ -105,7 +105,7 @@ impl Runtime {
             .map_err(|_| Error::Refused("workflow service already owned"))?;
         store.workflow_upgrade_sol_62()?;
         let (send,inbox) = mpsc::channel(32);
-        Ok(Self { exec:Exec { yielding:crate::yielding::Yielding::at(&root), activities: Default::default(), places: std::sync::Arc::new(std::sync::Mutex::new(Places::load(&root)?)), root,store,service_mode:true,resource:String::new(),base:"0".repeat(40),coding:None,launched:None,host:None,seeding:Default::default(),tree_locks:Default::default(),
+        Ok(Self { exec:Exec { yielding:crate::yielding::Yielding::at(&root), activities: Default::default(), places: std::sync::Arc::new(std::sync::Mutex::new(Places::load(&root)?)), root,store,service_mode:true,resource:String::new(),base:"0".repeat(40),coding:None,launched:None,runner_interrupted:Default::default(),host:None,seeding:Default::default(),tree_locks:Default::default(),
             disk_usage:Default::default(), #[cfg(test)] user_home:None, #[cfg(test)] build_free_bytes:Some(u64::MAX), #[cfg(test)] cleanup_check:None, #[cfg(test)] cleanup_test_probe:None, open_file_checks:None },
             notice_wake:None,configuration_locks:Default::default(),shutdown:None,
             instance:Uuid::now_v7(),

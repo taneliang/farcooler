@@ -80,7 +80,7 @@ async fn supervised(tree: &Path, script: &str, log: &Path, limit: Duration,
     if let Some(environment) = environment {
         command.env_clear().env("PATH", "/usr/bin:/bin").envs(environment.iter().copied());
     }
-    supervise(command, tree, log, limit, None, None, None).await.map(|status| status == Some(0)).map_err(|failure| failure.error)
+    supervise(command, tree, log, limit, None, None, None).await.map(|exit| exit.code == Some(0)).map_err(|failure| failure.error)
 }
 
 /// Only a failure before spawn, or after proven group disappearance, permits a retry.
@@ -111,14 +111,20 @@ pub(crate) async fn configured(tree: &Path, argv: &[String], environment: &std::
 pub(crate) async fn owned(tree: &Path, argv: &[String], environment: &std::collections::BTreeMap<String, String>,
     log: &Path, limit: Duration, cancel: tokio::sync::watch::Receiver<bool>, owner: Option<&Path>) -> Result<Option<i32>, ProcessFailure>
 {
-    owned_yielding(tree, argv, environment, log, limit, cancel, owner, None).await
+    owned_yielding(tree, argv, environment, log, limit, cancel, owner, None).await.map(|exit| exit.code)
+}
+
+#[derive(Debug)]
+pub(crate) struct ProcessExit {
+    pub code: Option<i32>,
+    pub cancelled: bool,
 }
 
 /// Like `owned`, and a builder's group pauses while a landing gate runs (ov-1214).
 #[allow(clippy::too_many_arguments)] // Keep the ownership boundary's inputs explicit, including yielding.
 pub(crate) async fn owned_yielding(tree: &Path, argv: &[String], environment: &std::collections::BTreeMap<String, String>,
     log: &Path, limit: Duration, cancel: tokio::sync::watch::Receiver<bool>, owner: Option<&Path>,
-    builder: Option<&crate::yielding::Yielding>) -> Result<Option<i32>, ProcessFailure>
+    builder: Option<&crate::yielding::Yielding>) -> Result<ProcessExit, ProcessFailure>
 {
     let program = argv.first().ok_or_else(|| ProcessFailure::retry_safe(std::io::Error::other("empty argv")))?;
     let mut command = Command::new(program);
@@ -266,7 +272,7 @@ async fn held_timeout<F: std::future::Future>(limit: Duration, work: F, builder:
 }
 async fn supervise(mut command: Command, tree: &Path, log: &Path, limit: Duration,
     mut cancel: Option<tokio::sync::watch::Receiver<bool>>, owner: Option<&Path>,
-    builder: Option<&crate::yielding::Yielding>) -> Result<Option<i32>, ProcessFailure>
+    builder: Option<&crate::yielding::Yielding>) -> Result<ProcessExit, ProcessFailure>
 {
     save_tail(log, b"").map_err(ProcessFailure::retry_safe)?;
     let (reader, writer) = std::os::unix::net::UnixStream::pair().map_err(ProcessFailure::retry_safe)?;
@@ -344,7 +350,7 @@ async fn supervise(mut command: Command, tree: &Path, log: &Path, limit: Duratio
         if matches!(Group::gone(pid), Ok(true)) {
             if let Some(Ok(Err(error))) = result { return Err(ProcessFailure::retry_safe(error)); }
             return if timed_out { Err(ProcessFailure::retry_safe(std::io::Error::new(std::io::ErrorKind::TimedOut, "process deadline exceeded"))) }
-                else { Ok(if observed { status.code() } else { None }) };
+                else { Ok(ProcessExit { code: if observed { status.code() } else { None }, cancelled: result.is_none() }) };
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }

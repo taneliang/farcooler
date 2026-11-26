@@ -2,7 +2,7 @@
 use super::*;
 use super::super::{coding_tests::{configured, admitted}, tests::{enqueue, finish}};
 #[tokio::test]
-async fn workflow_coding_native_reopen_stop_owns_original_pty_without_relaunch() {
+async fn workflow_coding_native_reopen_ends_original_pty_before_resuming() {
     let (dir, mut runtime) = configured(false, "pass").await;
     let settings = dir.path().join("settings.json");
     std::fs::write(&settings, serde_json::to_vec(&crate::hook_install::claude_settings(&runtime.root.join("h.sock"))).unwrap()).unwrap();
@@ -32,10 +32,9 @@ async fn workflow_coding_native_reopen_stop_owns_original_pty_without_relaunch()
     runtime.pump(200).await.unwrap();
     let state = runtime.state("w").unwrap().unwrap();
     let item = &state.items["one"];
-    assert_ne!(item.phase, Phase::Uncertain);
-    assert_ne!(item.phase, Phase::Failed);
+    assert_eq!(item.phase, Phase::Running);
     assert_eq!(item.attempt, 1);
-    assert!(item.failure.as_deref().is_some_and(|s| s.contains("interrupted") && s.contains("resumed")));
+    assert!(item.reason.as_deref().is_some_and(|s| s.contains("interrupted") && s.contains("resumed")));
     assert_ne!(host.0.pane_life(&owner.pane, id).await.unwrap(), farcooler_tmux::PaneLife::Live);
     assert_eq!(runtime.reconcile_coding(&binding).await.unwrap(), Outcome::SafeFailure);
 }

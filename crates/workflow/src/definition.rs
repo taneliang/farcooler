@@ -53,6 +53,12 @@ pub enum StageKind {
     /// on it while the gate does. A CI wait after it judges that exact commit before the push moves the target.
     PushCandidate,
 }
+impl StageKind {
+    /// An interrupted builder or dispatched reviewer resumes the same attempt.
+    pub fn resumes_after_runner_restart(&self) -> bool {
+        matches!(self, Self::Build | Self::Review(Reviewer::Agent | Reviewer::Dispatch))
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OperationSpec {
     pub adapter_version: String,

@@ -345,7 +345,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     }
                     // Whatever the answer, the wait's first deadline is spent unless a restart cut it short.
                     let wait_since = item.wait_since.take();
-                    // Each answer replaces the last attempt's reason; only a failure that says why sets one.
+                    // A new answer replaces the last attempt's status.
                     item.failure = None;
                     item.reason = None;
                     // A rerun is an outside side effect. Its success resumes the CI look; anything
@@ -581,17 +581,17 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                             enter(&mut item, id, input, &mut effects)?;
                         }
                         Outcome::Interrupted => {
-                            // Interrupted waits and proven pre-send pushes resume for free;
-                            // patience starts at real stage entry and survives downtime.
                             if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
-                            if !is_wait(&item.definition.stages[item.stage].kind)
-                                && item.definition.stages[item.stage].kind != StageKind::Push {
+                            let stage = &item.definition.stages[item.stage];
+                            if stage.kind.resumes_after_runner_restart() {
+                                item.reason = Some(format!("The {} step was interrupted by an app update or runner restart and resumed.", stage.id));
+                            } else if !is_wait(&stage.kind) && stage.kind != StageKind::Push {
                                 return Err(Refusal::Phase);
                             }
                             item.pending = None;
                             item.wait_since = wait_since;
                             item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
-                            // Keep the read's identity so its recorded base SHA survives the restart.
+                            // Keep the run identity and its attempt, including any recorded base and worktree.
                             launch(&mut item, id, input, &mut effects)?;
                         }
                     }

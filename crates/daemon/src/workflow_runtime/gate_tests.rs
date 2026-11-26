@@ -718,7 +718,7 @@ async fn parallel_review_resumes_after_its_check_is_interrupted_on_the_last_atte
 }
 
 #[tokio::test]
-async fn ov1427_shutdown_after_review_pass_preserves_last_attempt() {
+async fn shutdown_after_review_pass_preserves_last_attempt() {
     let (dir, mut runtime, _fake, d) = parallel_fixture(false, true).await;
     let script = dir.path().join("parallel.py");
     let text = std::fs::read_to_string(&script).unwrap().replace("sys.exit(int(sys.argv[2]))", "time.sleep(60)");
@@ -743,7 +743,7 @@ async fn ov1427_shutdown_after_review_pass_preserves_last_attempt() {
     let (result, ()) = tokio::join!(runtime.run(signal), shutdown);
     result.unwrap();
     let item = &runtime.state("w").unwrap().unwrap().items["one"];
-    assert_ne!(item.phase, Phase::Failed);
+    assert_eq!(item.phase, Phase::Running);
     assert_eq!((item.stage, item.attempt, &item.run), (before.stage, before.attempt, &before.run));
-    assert!(item.failure.as_deref().is_some_and(|s| s.contains("interrupted") && s.contains("resumed")));
+    assert!(item.reason.as_deref().is_some_and(|s| s.contains("interrupted") && s.contains("resumed")));
 }

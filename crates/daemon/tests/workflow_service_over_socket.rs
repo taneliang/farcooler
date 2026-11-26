@@ -30,7 +30,7 @@ binding = os.environ['FARCOOLER_OPERATION_BINDING']
 receipt = pathlib.Path(os.environ['FARCOOLER_RECEIPT'])
 if stage == 'build':
     pathlib.Path('result.txt').write_text('candidate iteration ' + iteration + ' run ' + os.environ['FARCOOLER_WORKFLOW_RUN'])
-    if mode == 'cancel':
+    if mode == 'cancel' and not pathlib.Path(os.environ['STARTED']).exists():
         pathlib.Path(os.environ['STARTED']).write_text(str(os.getpid()))
         subprocess.run(['/bin/sleep', '30'])
     if mode == 'prose':
@@ -228,8 +228,8 @@ async fn workflow_service_no_git_bootstrap_shutdown_and_recovery() {
     drop(link);host.close().await;
 }
 #[tokio::test]
-async fn workflow_service_shutdown_reaps_active_command_and_restart_does_not_relaunch() {
-    if person_terminal("workflow_service_shutdown_reaps_active_command_and_restart_does_not_relaunch").await { return; }
+async fn workflow_service_shutdown_reaps_active_command_and_resumes_it_after_restart() {
+    if person_terminal("workflow_service_shutdown_reaps_active_command_and_resumes_it_after_restart").await { return; }
     let (dir,config)=configured(false,"cancel").await;
     let host=Host::open(dir.path()).await;let workspace=host.workspace;let mut link=host.connect().await;
     let definition=config.definition().unwrap();let adapter=Some(AdapterConfiguration::Coding(config));
@@ -241,15 +241,18 @@ async fn workflow_service_shutdown_reaps_active_command_and_restart_does_not_rel
         std::time::Duration::from_millis(10), async ||
         std::fs::read_to_string(&started).is_ok_and(|t| !t.is_empty())).await, "command never started");
     let pid:i32=std::fs::read_to_string(&started).unwrap().parse().unwrap();
-    let modified=std::fs::metadata(&started).unwrap().modified().unwrap();
+    let before=get(&mut link,workspace).await["state"]["items"]["active"].clone();
     drop(link);host.close().await;
     assert_ne!(unsafe {libc::kill(pid,0)},0,"shutdown left command alive");
     let host=Host::open(dir.path()).await;let mut link=host.connect().await;
-    let snapshot=get(&mut link,workspace).await;
-    assert_eq!(snapshot["state"]["items"]["active"]["phase"],"Failed");
-    assert_eq!(std::fs::metadata(&started).unwrap().modified().unwrap(),modified);
+    assert!(common::wait_until(tokio::time::Instant::now() + std::time::Duration::from_secs(60),
+        std::time::Duration::from_millis(10), async ||
+        get(&mut link,workspace).await["state"]["items"]["active"]["phase"]=="Done").await);
     let effects=host.service.store.workflow_outbox(&workspace.to_string()).unwrap();
-    assert_eq!(effects.iter().filter(|e| matches!(e.effect.kind,farcooler_workflow::EffectKind::Execute(farcooler_workflow::StageKind::Build))).count(),1);
+    let builds: Vec<_> = effects.iter()
+        .filter(|e| matches!(e.effect.kind,farcooler_workflow::EffectKind::Execute(farcooler_workflow::StageKind::Build))).collect();
+    assert_eq!(builds.len(), 2);
+    assert!(builds.iter().all(|build| build.effect.run == before["run"].as_str().unwrap() && build.dispatch_state == "settled"));
     drop(link);host.close().await;
 }
 
@@ -305,7 +308,8 @@ async fn a_legacy_runner_joins_a_non_landing_build_while_landing_admissions_are_
     // By default the workflow service child uses the ordinary owner and
     // advertises the pre-interlock handshake. A historical binary can run
     // the same test, including its original daemon main and shutdown.
-    let (mut child, mut link, workspace) = if let Some(binary) = std::env::var_os("FARCOOLER_TEST_LEGACY_RUNNER") {
+    let legacy_binary = std::env::var_os("FARCOOLER_TEST_LEGACY_RUNNER");
+    let (mut child, mut link, workspace) = if let Some(binary) = &legacy_binary {
         Host::open(root).await.close().await;
         let mut command = tokio::process::Command::new(binary);
         command.env("FARCOOLER_HOME", &home).env("FARCOOLER_CONFIG", home.join("config.toml"));
@@ -338,7 +342,10 @@ async fn a_legacy_runner_joins_a_non_landing_build_while_landing_admissions_are_
         "landing admission fence was never installed");
     end_process(&mut child, &mut link).await;
     assert_eq!(build_state(), "settled");
-    assert_eq!(store.workflow_state(&workspace.to_string()).unwrap().unwrap().items["active"].phase, Phase::Failed);
+    let state = store.workflow_state(&workspace.to_string()).unwrap().unwrap();
+    let active = &state.items["active"];
+    assert_eq!(active.phase, if legacy_binary.is_some() { Phase::Failed } else { Phase::Running });
+    assert_eq!(active.attempt, 1);
 
     // If ensure exits after requesting shutdown, the next owner can clear
     // the persisted fence at bootstrap.
