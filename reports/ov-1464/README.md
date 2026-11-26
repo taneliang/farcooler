@@ -29,6 +29,7 @@ and worktree configuration register Codex `PreToolUse` with `--gating` and
 a 70-second Codex command timeout. The CLI makes `Stop` wait on the private
 socket. A routine lifecycle hook cannot reach the steering write.
 [Steering reply](../../crates/daemon/src/workflow_runtime/native_messages.rs#L59) ·
+[Socket write](../../crates/daemon/src/workflow_runtime/native_messages.rs#L14) ·
 [Hook registration](../../crates/daemon/src/hook_install/native_host.rs#L35) ·
 [Stop gating](../../crates/cli/src/hook.rs#L117)
 
@@ -36,9 +37,9 @@ socket. A routine lifecycle hook cannot reach the steering write.
 | --- | --- |
 | A waiting hook times out after sending the frame | [hook.rs:61](../../crates/cli/src/hook.rs#L61) sets the 400 ms deadline. [hook.rs:275](../../crates/cli/src/hook.rs#L275) drops the first contact if its deadline expires while the first reply is pending. The runner can read the complete frame after the CLI closes. A hold timeout requires an initial reply, which this path never sends. |
 | The hook process is terminated after sending the frame | A signal or a harness timeout can close the process's socket while it waits in [hook.rs:329](../../crates/cli/src/hook.rs#L329). The retained records have no matching hook exit. |
-| A non-gating `PreToolUse` exits immediately | [hook.rs:224](../../crates/cli/src/hook.rs#L224) advertises updated input even without gating, and [hook.rs:325](../../crates/cli/src/hook.rs#L325) closes without waiting. The installed wf1 hook used gating. The failed frame does not survive to establish which hook registration sent it. |
+| A non-gating `PreToolUse` exits immediately | [hook.rs:226](../../crates/cli/src/hook.rs#L226) advertises updated input even without gating, and [hook.rs:325](../../crates/cli/src/hook.rs#L325) closes without waiting. The installed wf1 hook used gating. The failed frame does not survive to establish which hook registration sent it. |
 | Codex sends a duplicate `Stop` and that peer disconnects | Base `coding_native.rs:420–421` replayed the previous continuation with fatal writes. The [replay branch](../../crates/daemon/src/workflow_runtime/coding_native.rs#L420) bypasses wake completion, so it cannot explain the failed-delivery note in wf1. |
-| An empty or informational reply goes to a closed peer | The [empty reply](../../crates/daemon/src/workflow_runtime/coding_native.rs#L437) ignores the write error. The [informational context reply](../../crates/daemon/src/watch/answer_wake/engine.rs#L69) handles it locally. Neither ends a turn through this error. |
+| An empty or informational reply goes to a closed peer | The [empty reply](../../crates/daemon/src/workflow_runtime/coding_native.rs#L436) ignores the write error. The [informational context reply](../../crates/daemon/src/watch/answer_wake/engine.rs#L69) handles it locally. Neither ends a turn through this error. |
 
 The retained wf1 records establish the disconnect before the reply. The
 actual close reason remains unverified.
@@ -101,14 +102,26 @@ case requires the same admitted build to commit and pass.
 
 All four cases settled with `SafeFailureBecause` and
 `Broken pipe (os error 32)` on base `2ed5cee1b` with only the regressions
-and their fixture added. All four passed with the production fix.
+and their fixture added. All four passed with the production fix. The
+landing base `ebc4b7867` has identical pre-fix native reply and CLI hook code.
+All four passed again after the rebase using four niced test workers.
 
-The daemon library and binary unit run used four niced workers and reported
-3,422 passes, one failure, and 18 skips. The sole failure,
+Before the rebase, the daemon library and binary unit run used four niced
+workers and reported 3,422 passes, one failure, and 18 skips. The sole failure,
 `workflow_execution_phases_follow_claims_and_slots`, reported uncertain
-worktree provisioning and passed in a serial rerun.
+worktree provisioning and passed in a serial rerun. On the landing base, the
+killed-hook fixture uses the system Python interpreter, as the fake native
+agent already does. This avoids selecting an x86-only interpreter from PATH
+on an Arm runner.
+
 `cargo clippy --locked --offline --workspace --all-targets -- -D warnings`
-passed with six build jobs.
+passed on both bases with six build jobs.
+
+After the rebase, the complete daemon library and binary unit run reported
+3,415 passes, eight failures, and 18 skips. All eight passed in a serial
+rerun. Four fixtures had selected the x86-only Python from PATH. The
+builder-versus-gate test needed headroom below the niceness ceiling to
+measure a difference. The other three passed in isolation.
 
 ## Recovery after a genuine interruption
 
@@ -124,5 +137,5 @@ interruptions retain the existing settlement and retry rules, which preserve
 the worktree. The runner quiesces the terminal before writing its settlement.
 Reconciliation reads that settlement for the original binding and can account
 for an interrupted owner under the existing receipt rules.
-[Quiescence and settlement](../../crates/daemon/src/workflow_runtime/coding_native.rs#L554) ·
-[Interrupted owner reconciliation](../../crates/daemon/src/workflow_runtime/coding_native.rs#L584)
+[Quiescence and settlement](../../crates/daemon/src/workflow_runtime/coding_native.rs#L557) ·
+[Interrupted owner reconciliation](../../crates/daemon/src/workflow_runtime/coding_native.rs#L587)

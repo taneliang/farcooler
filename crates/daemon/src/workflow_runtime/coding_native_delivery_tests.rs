@@ -233,7 +233,8 @@ async fn close_steering_hook(exit: HookExit, socket: &Path, payload: serde_json:
         }
         HookExit::Killed => {
             let line = serde_json::json!({"agent": "codex", "event": "Stop", "takes": ["followup"], "payload": payload});
-            let mut hook = tokio::process::Command::new("python3").arg("-c").arg(r#"
+            // Use the same system interpreter as the native agent fixture.
+            let mut hook = tokio::process::Command::new("/usr/bin/python3").arg("-c").arg(r#"
 import socket, sys
 with socket.socket(socket.AF_UNIX) as sock:
     sock.connect(sys.argv[1])
