@@ -18,6 +18,7 @@ import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.DragAndDropTransferData
 import androidx.compose.ui.draganddrop.toAndroidDragEvent
 import androidx.compose.ui.unit.dp
+import com.farcooler.model.TaskBoardPresenter
 import com.farcooler.model.TaskRow
 
 internal data class BoardDrag(val board: String, val task: String)
@@ -71,6 +72,6 @@ internal fun BoardDragHandle(drag: BoardDrag) {
         ),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(Icons.Outlined.DragHandle, contentDescription = "Drag to reorder")
+        Icon(Icons.Outlined.DragHandle, contentDescription = TaskBoardPresenter.reorderDragTitle)
     }
 }

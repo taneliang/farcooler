@@ -27,6 +27,7 @@ import kotlin.math.roundToLong
 /** Calls the shared task board view through the client-core presenter bridge. */
 internal object TaskBoardPresenter {
     val json = Json { ignoreUnknownKeys = true; classDiscriminator = "kind" }
+    val reorderDragTitle: String by lazy { ask("reorder_drag_title") }
 
     @Serializable
     data class Settings(

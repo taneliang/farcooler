@@ -12,9 +12,12 @@ extension Connection {
     }
 
     func reorderTask(_ task: TaskRow, relativeTo anchor: TaskRow, after: Bool, on board: WorkspaceSummary) async -> Bool {
-        guard mayReorderTasks,
-            (try? await rpc("task.reorder", ["task": task.id, "anchor": anchor.id, "after": after])) != nil
-        else { return false }
+        guard mayReorderTasks else { return false }
+        do {
+            _ = try await rpc("task.reorder", ["task": task.id, "anchor": anchor.id, "after": after])
+        } catch {
+            return false
+        }
         _ = await readBoard(board)
         return true
     }

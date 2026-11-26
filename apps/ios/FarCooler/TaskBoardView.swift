@@ -14,7 +14,7 @@ extension View {
                     .foregroundStyle(.secondary)
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
-                    .accessibilityLabel("Drag to reorder")
+                    .accessibilityLabel(TaskBoardModel.reorderDragTitle)
                     .draggable(row.id)
             }
             .dropDestination(for: String.self) { ids, _ in

@@ -14,6 +14,7 @@ const DAY: f64 = 86_400.0;
 const DONE_FLOOR: usize = 3;
 const SECTION_LIMIT: usize = 10;
 const LIVE_STATES: [&str; 3] = ["running", "starting", "unknown"];
+const REORDER_DRAG_TITLE: &str = "Drag to reorder";
 const REORDER_FAILED: &str = "Couldn’t reorder this ticket.";
 
 #[derive(Clone, Copy)]
@@ -128,7 +129,7 @@ pub(crate) fn order_view(tasks: &[farcooler_protocol::v1::Task], may_reorder: bo
             .collect();
         json!({"title": status.apple, "rows": rows, "draggable": may_reorder && rows.len() > 1})
     }).collect::<Vec<_>>();
-    json!({"sections": sections, "dragTitle": "Drag to reorder", "failure": REORDER_FAILED})
+    json!({"sections": sections, "dragTitle": REORDER_DRAG_TITLE, "failure": REORDER_FAILED})
 }
 
 #[derive(serde::Deserialize, Serialize)]
@@ -787,6 +788,7 @@ fn present(asked: &Value) -> Option<Value> {
         }),
         "statuses" => json!(STATUSES.map(|status| status.view(asked["android"] == true))),
         "board" => json!(board(asked["tasks"].as_array()?, asked["android"] == true)?),
+        "reorder_drag_title" => json!(REORDER_DRAG_TITLE),
         "reorder_failed" => json!(REORDER_FAILED),
         "clock" => {
             let status = STATUSES.iter().find(|status| asked["status"] == status.wire)?;
@@ -1189,6 +1191,10 @@ mod tests {
         assert_eq!(view["sections"][1]["rows"][1]["key"], "ov-1");
         assert_eq!(view["sections"][1]["draggable"], true);
         assert_eq!(order_view(&tasks, false)["sections"][1]["draggable"], false);
+        for android in [false, true] {
+            let request = json!({"schema": 1, "task_board": {"op": "reorder_drag_title", "android": android}});
+            assert_eq!(project(&request), Some(view["dragTitle"].clone()));
+        }
         assert_eq!(project(&json!({"schema": 1, "task_board": {"op": "reorder_failed"}})), Some(view["failure"].clone()));
     }
 
