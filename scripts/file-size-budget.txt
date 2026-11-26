@@ -19,7 +19,7 @@
 2281 apps/android/app/src/main/java/com/farcooler/net/Connection.kt
 2251 apps/ios/FarCooler/TerminalSession.swift
 2115 apps/android/app/src/main/java/com/farcooler/ui/ChangesScreen.kt
-2086 crates/client/src/session.rs
+1962 crates/client/src/session.rs
 1957 crates/core/src/feed.rs
 1856 apps/shared/AgentKit/Sources/AgentKit/FleetSnapshot.swift
 1837 crates/fence/src/lib.rs
