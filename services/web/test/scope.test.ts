@@ -12,8 +12,8 @@ import { optionLabel, ownerOf, scopeBoard, waitingIn } from '../src/client/scope
 const BILLING = '01000000-0000-7000-8000-000000000001'
 const MAIN = '01000000-0000-7000-8000-000000000014'
 const spaces = [
-  { id: MAIN, name: 'Main', isMain: true },
-  { id: BILLING, name: 'Billing', isMain: false },
+  { id: MAIN, name: 'Main', isMain: true, label: 'Main · Studio' },
+  { id: BILLING, name: 'Billing', isMain: false, label: 'Billing · Studio' },
 ]
 
 const settle = () => new Promise(r => setTimeout(r, 0))
@@ -80,7 +80,7 @@ describe('Needs You for one workspace', () => {
     const counts = waitingIn(view, spaces, 'r1')
     expect(counts.get(BILLING)).toBe(countOf(parseList(list('studio')).filter(i => i.workspaceId === BILLING)))
     expect(counts.get(MAIN)).toBe(1)
-    expect(optionLabel(spaces[1], counts.get(BILLING)!)).toBe(`Billing (${counts.get(BILLING)})`)
-    expect(optionLabel(spaces[0], 0)).toBe('Main')
+    expect(optionLabel(spaces[1], counts.get(BILLING)!)).toBe(`Billing · Studio (${counts.get(BILLING)})`)
+    expect(optionLabel(spaces[0], 0)).toBe('Main · Studio')
   })
 })

@@ -71,8 +71,30 @@ const work = async page => {
   return page.getByRole('dialog', { name: 'Start Work' })
 }
 const rpc = async (page, action) => page.evaluate(a => window.calls.filter(c => c.action === a).at(-1), action)
+const showUnavailable = page => page.getByText('Unavailable Terminals', { exact: true }).click()
 
 try {
+  for (const width of [320, 1280]) await test(`workspace terminal sidebar at ${width}px`, async page => {
+    const picker = page.getByLabel('Workspace', { exact: true })
+    const list = page.locator('#terminal-list')
+    const visibleIds = () => list.locator('a:visible').evaluateAll(links => links.map(link => link.dataset.terminal))
+    await list.locator('a[data-terminal=seat]').waitFor()
+    await page.getByText('Writer', { exact: true }).waitFor()
+    if (out) await page.screenshot({ path: join(out, `sidebar-${width}.png`) })
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), width)
+    assert.deepEqual(await visibleIds(), ['seat', 'shell'])
+    assert.equal(await list.locator('a[data-terminal=seat]').innerText(), 'Orchestrator')
+    assert.deepEqual(await picker.locator('option').allTextContents(), ['Main · overnight', 'Main · Verdela'])
+    await list.getByText('Unavailable Terminals', { exact: true }).click()
+    assert.deepEqual(await visibleIds(), ['seat', 'shell', 'lost-seat', 'exited-seat'])
+    await list.getByRole('link', { name: 'Lost orchestrator', exact: true }).click()
+    await page.getByRole('button', { name: 'Recover Terminal' }).waitFor()
+    await picker.selectOption('next')
+    await list.locator('a[data-terminal=other-seat]').waitFor()
+    assert.deepEqual(await visibleIds(), ['other-seat'])
+    assert.equal(await list.locator('a[data-terminal=other-seat]').innerText(), 'Orchestrator')
+  }, { width, query: '?sidebar' })
+
   await test('pick workspace and repository, then create and start a shell', async page => {
     await page.getByLabel('Workspace', { exact: true }).selectOption('next')
     await page.waitForURL('**workspace=next')
@@ -116,6 +138,7 @@ try {
   })
 
   await test('recover a lost agent using the returned terminal identity', async page => {
+    await showUnavailable(page)
     await page.getByRole('link', { name: /Bring back the observability/ }).click()
     await page.getByRole('button', { name: 'Recover Terminal' }).click()
     await page.waitForURL('**terminal=recovered')
@@ -189,6 +212,7 @@ try {
   }, { query: '?refuse' })
 
   await test('terminal and workspace links survive reload, new tab and Back', async (page, context) => {
+    await showUnavailable(page)
     const terminal = page.getByRole('link', { name: /Bring back the observability/ })
     await terminal.waitFor()
     const href = await terminal.getAttribute('href')

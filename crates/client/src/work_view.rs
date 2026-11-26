@@ -21,6 +21,8 @@ pub struct Workspace {
     pub name: String,
     pub is_main: bool,
     pub repository: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orchestrator: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -44,6 +46,8 @@ pub struct Terminal {
     pub worktree: String,
     pub workspace: Option<String>,
     pub agent: bool,
+    #[serde(default)]
+    pub orchestrator: bool,
     pub state: String,
     pub columns: u32,
     pub rows: u32,
@@ -75,6 +79,7 @@ pub fn inventory(
             name: w.name,
             is_main: w.is_main,
             repository: id(&w.repository_id)?,
+            orchestrator: w.orchestrator_terminal_id.as_deref().and_then(id),
         })).collect(),
         repositories: repositories.into_iter().filter_map(|r| Some(Choice {
             id: id(&r.id)?,
@@ -97,6 +102,7 @@ fn id(bytes: &[u8]) -> Option<String> {
 }
 
 pub fn terminal(t: wire::Terminal) -> Option<Terminal> {
+    let orchestrator = t.role == TerminalRole::Orchestrator as i32;
     let agent = matches!(TerminalRole::try_from(t.role), Ok(TerminalRole::Agent | TerminalRole::Orchestrator))
         || !matches!(AgentActivity::try_from(t.activity), Ok(AgentActivity::None | AgentActivity::Unspecified) | Err(_));
     Some(Terminal {
@@ -108,6 +114,7 @@ pub fn terminal(t: wire::Terminal) -> Option<Terminal> {
         columns: t.columns,
         rows: t.rows,
         agent,
+        orchestrator,
     })
 }
 
@@ -177,13 +184,10 @@ pub fn view(inventory: &Inventory, selection: &Selection) -> Value {
     };
     let tree_for = |terminal: &Terminal| worktrees.iter().find(|w| w.id == terminal.worktree);
     let by_id = |id: &str| workspaces.iter().find(|w| w.id == id);
-    let owner = |t: &Terminal| {
-        t.workspace.as_deref().and_then(by_id)
-            .or_else(|| main(tree_for(t).map(|w| w.repository.as_str())))
-    };
     let tree_owner = |tree: &Worktree| {
         tree.workspace.as_deref().and_then(by_id).or_else(|| main(Some(&tree.repository)))
     };
+    let owner = |t: &Terminal| t.workspace.as_deref().and_then(by_id).or_else(|| tree_for(t).and_then(tree_owner));
     let requested_tree = selection.worktree.as_deref().and_then(|id| worktrees.iter().find(|tree| tree.id == id));
     let linked_workspace = requested.and_then(owner).or_else(|| requested_tree.and_then(tree_owner));
     let requested_workspace = selection.workspace.as_deref().and_then(|id| workspaces.iter().find(|w| w.id == id));
@@ -201,10 +205,10 @@ pub fn view(inventory: &Inventory, selection: &Selection) -> Value {
         !missing_workspace && Some(w.repository.as_str()) == repository
             && owner.map(|w| &w.id) == workspace.map(|w| &w.id)
     }).collect();
-    let visible: Vec<_> = terminals.iter().filter(|t| {
-        !missing_workspace && (workspaces.is_empty() || owner(t).map(|w| &w.id) == workspace.map(|w| &w.id))
+    let mut visible: Vec<_> = terminals.iter().filter(|t| {
+        !missing_workspace && (workspaces.is_empty() || workspace.is_some_and(|w| owner(t).is_some_and(|o| o.id == w.id)))
     }).collect();
-    let selected = requested.or_else(|| {
+    let selected = requested.filter(|t| visible.iter().any(|row| row.id == t.id)).or_else(|| {
         if selection.terminal.is_some() { return None; }
         visible.iter().copied().find(|t| t.state == "running").or_else(|| visible.first().copied())
     });
@@ -215,8 +219,18 @@ pub fn view(inventory: &Inventory, selection: &Selection) -> Value {
             .or_else(|| owned_trees.first().copied())
     };
 
+    let live = |t: &Terminal| matches!(t.state.as_str(), "running" | "starting");
+    // The runner's seat wins. Older runners can identify it by role alone.
+    let seat = workspace.and_then(|w| {
+        visible.iter().copied().filter(|t| live(t)).find(|t| match &w.orchestrator {
+            Some(id) => t.id == *id,
+            None => t.orchestrator,
+        })
+    });
+    visible.sort_by_key(|t| !seat.is_some_and(|s| s.id == t.id));
     let terminal_rows: Vec<_> = visible.into_iter().map(|t| {
         let running = t.state == "running";
+        let is_seat = seat.is_some_and(|s| s.id == t.id);
         let recover = if t.state == "lost" && control {
             json!({"action": "restart", "label": "Recover Terminal"})
         } else if running && readable && selected.is_some_and(|s| s.id == t.id) && selection.stream_ended {
@@ -230,7 +244,10 @@ pub fn view(inventory: &Inventory, selection: &Selection) -> Value {
         };
         let close = control && matches!(t.state.as_str(), "running" | "starting" | "exited" | "error" | "lost");
         json!({
-            "id": t.id, "title": t.title, "agent": t.agent, "state": state, "running": running,
+            "id": t.id, "title": t.title, "agent": t.agent || is_seat, "state": state, "running": running,
+            "live": live(t),
+            "sidebarTitle": if is_seat && t.title.eq_ignore_ascii_case("orchestrator") { "" } else { &t.title },
+            "sidebarBadge": if is_seat { Some("Orchestrator") } else if !running { Some(state) } else { None },
             "attach": readable && running,
             "attachNote": if !readable { READ_ONLY } else if t.state == "lost" {
                 "This terminal’s process was lost. Recover it to continue."
@@ -262,8 +279,13 @@ pub fn view(inventory: &Inventory, selection: &Selection) -> Value {
     } else {
         ""
     };
+    let workspace_rows: Vec<_> = workspaces.iter().map(|w| {
+        let label = repositories.iter().find(|r| r.id == w.repository && !r.label.is_empty())
+            .map_or_else(|| w.name.clone(), |r| format!("{} · {}", w.name, r.label));
+        json!({"id": w.id, "name": w.name, "isMain": w.is_main, "repository": w.repository, "label": label})
+    }).collect();
     json!({
-        "workspaces": workspaces, "repositories": repositories, "worktrees": owned_trees,
+        "workspaces": workspace_rows, "repositories": repositories, "worktrees": owned_trees,
         "workspace": workspace.map(|w| &w.id), "repository": repository,
         "worktree": chosen_tree.map(|w| &w.id), "terminal": selected.map(|t| &t.id), "terminals": terminal_rows,
         "notice": notice,

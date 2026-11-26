@@ -8,7 +8,7 @@ import { optionLabel, type Space } from './scope'
 /// it would look the same: a poll that found nothing new must not close the
 /// list a person has open. Returns what was drawn, to hand back as `last`.
 export function drawPicker(select: HTMLSelectElement, spaces: Space[], chosen: string | null, waiting: Map<string, number>, last = ''): string {
-  const signature = JSON.stringify([spaces.map(s => [s.id, s.name]), chosen, [...waiting]])
+  const signature = JSON.stringify([spaces.map(s => [s.id, s.label]), chosen, [...waiting]])
   if (signature === last) return last
   select.hidden = spaces.length === 0
   select.replaceChildren(
@@ -20,6 +20,7 @@ export function drawPicker(select: HTMLSelectElement, spaces: Space[], chosen: s
     }),
   )
   select.value = chosen ?? ''
+  select.title = select.selectedOptions[0]?.textContent ?? ''
   return signature
 }
 

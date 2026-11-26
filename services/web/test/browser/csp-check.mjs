@@ -835,12 +835,12 @@ async function workspaceWalk(page) {
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 
   // Main is showing: its twelve shells, and nothing of Billing's.
-  await page.waitForFunction(() => document.querySelector('#space-picker')?.textContent?.includes('Billing (2)'), null, { timeout: 60_000 })
-  if (!same(await picker(), ['Main (1)', 'Billing (2)', 'Sandbox'])) failures.push(`the picker says ${JSON.stringify(await picker())}`)
+  await page.waitForFunction(() => document.querySelector('#space-picker')?.textContent?.includes('Billing · Studio (2)'), null, { timeout: 60_000 })
+  if (!same(await picker(), ['Main · Studio (1)', 'Billing · Studio (2)', 'Sandbox · Studio'])) failures.push(`the picker says ${JSON.stringify(await picker())}`)
   const main = await titles()
   if (main.length !== 12 || main.some(t => /billing/.test(t))) failures.push(`Main lists ${JSON.stringify(main)}`)
 
-  await page.selectOption('#space-picker', { label: 'Sandbox' })
+  await page.selectOption('#space-picker', { label: 'Sandbox · Studio' })
   await page.waitForSelector('#pane-note:not([hidden])')
   const notice = await page.textContent('#pane-note')
   if (notice !== 'Sandbox has no terminals yet. Use Start Work to open one.' || (await titles()).length) {
@@ -851,7 +851,7 @@ async function workspaceWalk(page) {
   await page.locator('#start-work[open]').getByRole('button', { name: 'New Worktree' }).waitFor()
   await page.click('#work-done')
 
-  await page.selectOption('#space-picker', { label: 'Main (1)' })
+  await page.selectOption('#space-picker', { label: 'Main · Studio (1)' })
   await page.click('#show-needs')
   await page.waitForFunction(() => document.querySelectorAll('#needs .need').length === 1, null, { timeout: 30_000 })
   if (!same(await rows(), ['Run the tests on studio?'])) failures.push(`Main's Needs You lists ${JSON.stringify(await rows())}`)
@@ -865,7 +865,7 @@ async function workspaceWalk(page) {
   await shoot(page, 'workspace-main')
 
   // Billing: its own terminals, Needs You and plan.
-  await page.selectOption('#space-picker', { label: 'Billing (2)' })
+  await page.selectOption('#space-picker', { label: 'Billing · Studio (2)' })
   await page.waitForFunction(() => document.querySelector('#plan')?.textContent?.includes('PDF export'), null, { timeout: 30_000 })
   const plan = await page.textContent('#plan')
   if (plan.includes('Visual language') || !plan.includes('Invoice export') || (await page.$('.plan-board'))) failures.push(`Billing's plan reads ${JSON.stringify(plan.slice(0, 200))}`)

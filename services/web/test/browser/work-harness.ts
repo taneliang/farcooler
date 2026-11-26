@@ -11,24 +11,39 @@ const shellTree = 'release'
 const lost = 'lost-agent'
 const title = 'Bring back the observability and deployment compatibility agent'
 const branch = 'ov-1444-web-start-recover-work'
-const roots = [
+const params = new URLSearchParams(location.search)
+const sidebar = params.has('sidebar')
+const roots = sidebar ? [
+  { id: repository, label: 'overnight' },
+  { id: 'client', label: 'Verdela' },
+] : [
   { id: repository, label: 'Platform Infrastructure and Deployment Automation' },
   { id: 'client', label: 'Cross-platform Far Cooler Client Applications' },
 ]
-const workspaces = [
+const workspaces = sidebar ? [
+  { id: workspace, name: 'Main', repository, isMain: true, orchestrator: 'seat' },
+  { id: 'next', name: 'Main', repository: 'client', isMain: true, orchestrator: 'other-seat' },
+] : [
   { id: workspace, name: 'Deployment Safety and Release Engineering', repository, isMain: true },
   { id: 'next', name: 'Cross-platform application delivery and release coordination', repository: 'client', isMain: true },
 ]
-type Term = { id: string; title: string; worktree: string; workspace: string; agent: boolean; state: string; columns: number; rows: number }
+type Term = { id: string; title: string; worktree: string; workspace: string; agent: boolean; state: string; columns: number; rows: number; orchestrator?: boolean }
 type Tree = { id: string; label: string; repository: string; workspace: string }
 const tree: Tree = { id: shellTree, label: 'Web: start and recover work on a paired runner · ' + branch, repository, workspace }
 const terminal: Term = { id: lost, title, worktree: shellTree, workspace, agent: true, state: 'lost', columns: 80, rows: 24 }
-const seed = { worktrees: [tree], terminals: [
-  { ...terminal, id: 'shell', title: 'Check the release logs and reconcile the deployment manifests', agent: false, state: 'running' },
+const shell: Term = { ...terminal, id: 'shell', title: 'Check the release logs and reconcile the deployment manifests', agent: false, state: 'running' }
+const orchestrator: Term = { ...terminal, title: 'orchestrator', orchestrator: true }
+const seed = sidebar ? { worktrees: [tree], terminals: [
+  { ...shell, title: 'Web: permanent orchestrator and workstation navigation' },
+  { ...orchestrator, id: 'lost-seat' },
+  { ...orchestrator, id: 'exited-seat', state: 'exited' },
+  { ...orchestrator, id: 'seat', state: 'running' },
+  { ...orchestrator, id: 'other-seat', workspace: 'next', state: 'running' },
+]} : { worktrees: [tree], terminals: [
+  shell,
   terminal,
 ] }
 let data: typeof seed = JSON.parse(localStorage.getItem('test-work') ?? JSON.stringify(seed))
-const params = new URLSearchParams(location.search)
 const scope = params.has('read') ? 'read' : 'control'
 const calls: unknown[] = []
 const client = crypto.randomUUID()
@@ -123,6 +138,9 @@ const panes = new PaneSet<WebRunner>(id => {
 document.getElementById('status')!.hidden = true
 document.getElementById('work')!.hidden = false
 document.getElementById('runner-name')!.textContent = 'Production macOS runner for Continuous Delivery and release verification'
+document.getElementById('show-board')!.textContent = 'Board'
+document.getElementById('show-orchestrator')!.textContent = 'Orchestrator'
+document.getElementById('show-commands')!.textContent = 'Commands'
 const screen = mountWork({
   runner,
   current: () => fake,

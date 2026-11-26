@@ -1,11 +1,16 @@
 /// Browser navigation and rendering for the shared Rust work view.
+import { type Space } from './scope'
+import { drawPicker } from './space-picker'
+
 interface Choice { id: string; label: string }
-interface Workspace { id: string; name: string; isMain: boolean }
 interface Prompt { label: string; prompt: string }
 
 export interface WorkTerminal {
   id: string
   title: string
+  sidebarTitle: string
+  sidebarBadge: string | null
+  live: boolean
   agent: boolean
   state: string
   access: string
@@ -17,7 +22,7 @@ export interface WorkTerminal {
 }
 
 export interface WorkView {
-  workspaces: Workspace[]
+  workspaces: Space[]
   repositories: Choice[]
   worktrees: Choice[]
   workspace: string | null
@@ -122,6 +127,9 @@ function action(button: HTMLButtonElement, label?: string, run?: () => void): vo
 export function mountWork(options: Options) {
   const picker = get<HTMLSelectElement>('space-picker')
   const list = get('terminal-list')
+  const liveList = get('live-terminals')
+  const unavailable = get<HTMLDetailsElement>('unavailable-terminals')
+  const unavailableList = get('unavailable-terminal-list')
   const dialog = get<HTMLDialogElement>('start-work')
   const form = get<HTMLFormElement>('work-create')
   const repo = get<HTMLSelectElement>('work-repository')
@@ -148,6 +156,9 @@ export function mountWork(options: Options) {
   let navigationId = 0
   let busy = false
   let disposed = false
+  let pickerDrawn = ''
+  let drawnWorkspace: string | null | undefined
+  let drawnTerminal: string | null = null
   let replaced: string | undefined
   const ended = new Set<string>()
 
@@ -203,8 +214,7 @@ export function mountWork(options: Options) {
 
   function draw(view: WorkView, terminal: WorkTerminal | undefined): void {
     if (!options.navigation) {
-      choices(picker, view.workspaces.map(w => ({ id: w.id, label: w.name })), view.workspace)
-      picker.hidden = view.workspaces.length === 0
+      pickerDrawn = drawPicker(picker, view.workspaces, view.workspace, new Map(), pickerDrawn)
     }
     workspaceLink.hidden = !view.workspace
     workspaceLink.textContent = view.labels.link
@@ -243,11 +253,23 @@ export function mountWork(options: Options) {
       })
     }
     const focused = list.contains(document.activeElement) ? (document.activeElement as HTMLAnchorElement).href : null
-    list.replaceChildren(...view.terminals.map(t => {
+    const liveLinks: HTMLAnchorElement[] = []
+    const unavailableLinks: HTMLAnchorElement[] = []
+    for (const t of view.terminals) {
       const link = document.createElement('a')
       link.className = 'terminal-choice'
-      link.textContent = t.title
-      link.title = t.state
+      link.title = `${t.title} · ${t.state}`
+      if (t.sidebarBadge) {
+        const badge = document.createElement('span')
+        badge.className = 'terminal-badge'
+        badge.textContent = t.sidebarBadge
+        link.append(badge)
+      }
+      if (t.sidebarTitle) {
+        const name = document.createElement('span')
+        name.textContent = t.sidebarTitle
+        link.append(name)
+      }
       link.href = destination(options.runner, view.workspace, t.id).href
       link.dataset.terminal = t.id
       if (t.agent) link.dataset.agent = 'true'
@@ -257,8 +279,19 @@ export function mountWork(options: Options) {
         if (options.navigation) options.navigation.terminal(t.id)
         else void chooseTerminal(t.id)
       })
-      return link
-    }))
+      if (t.live) liveLinks.push(link)
+      else unavailableLinks.push(link)
+    }
+    liveList.replaceChildren(...liveLinks)
+    liveList.hidden = liveLinks.length === 0
+    unavailableList.replaceChildren(...unavailableLinks)
+    unavailable.hidden = unavailableLinks.length === 0
+    if (drawnWorkspace !== view.workspace || unavailable.hidden) unavailable.open = false
+    if (terminal && !terminal.live && (drawnWorkspace !== view.workspace || drawnTerminal !== terminal.id)) {
+      unavailable.open = true
+    }
+    drawnWorkspace = view.workspace
+    drawnTerminal = view.terminal
     if (focused) [...list.querySelectorAll('a')].find(link => link.href === focused)?.focus()
     manage.hidden = !terminal
     get('terminal-name').textContent = terminal?.title ?? ''
@@ -395,7 +428,10 @@ export function mountWork(options: Options) {
       disposed = true
       window.removeEventListener('popstate', pop)
       if (dialog.open) dialog.close()
-      list.replaceChildren()
+      liveList.replaceChildren()
+      unavailableList.replaceChildren()
+      unavailable.hidden = true
+      unavailable.open = false
       workspaceLink.hidden = true
       openWork.hidden = true
       manage.hidden = true

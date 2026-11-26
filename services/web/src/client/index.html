@@ -95,7 +95,13 @@
         <button type="button" id="show-start-work" aria-haspopup="dialog" hidden></button>
         <a id="workspace-link" hidden></a>
       </div>
-      <div class="terminal-list" id="terminal-list"></div>
+      <div class="terminal-sidebar" id="terminal-list">
+        <div class="terminal-list" id="live-terminals"></div>
+        <details class="unavailable-terminals" id="unavailable-terminals" hidden>
+          <summary>Unavailable Terminals</summary>
+          <div class="terminal-list" id="unavailable-terminal-list"></div>
+        </details>
+      </div>
     </nav>
     <div class="workspace-main-area">
       <div class="note link-note" id="link-note" role="status" hidden>

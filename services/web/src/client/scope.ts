@@ -14,6 +14,7 @@ export interface Space {
   id: string
   name: string
   isMain: boolean
+  label: string
 }
 
 /// The workspace a Needs You item with `workspace` belongs to: its own, and
@@ -60,5 +61,5 @@ export function waitingIn(view: BoardView, spaces: Space[], front: string): Map<
 
 /// A workspace's line in the picker: its name, and how many wait in it.
 export function optionLabel(space: Space, waiting: number): string {
-  return waiting > 0 ? `${space.name} (${waiting})` : space.name
+  return waiting > 0 ? `${space.label} (${waiting})` : space.label
 }

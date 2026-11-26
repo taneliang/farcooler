@@ -35,6 +35,37 @@ fn repository_and_workspace_choose_their_own_worktrees() {
 }
 
 #[test]
+fn terminal_sidebar_uses_the_runner_seat_and_the_checkouts_workspace() {
+    let mut data = inventory("control");
+    let terminal = |id: &str, tree: &str, state: &str, orchestrator| Terminal {
+        id: id.into(), title: id.into(), worktree: tree.into(), workspace: None,
+        state: state.into(), orchestrator, agent: orchestrator, columns: 80, rows: 24,
+    };
+    data.workspaces[0].orchestrator = Some("seat".into());
+    data.terminals.extend([
+        terminal("old", "a", "lost", true),
+        terminal("seat", "a", "running", false),
+        terminal("other-seat", "b", "starting", true),
+        terminal("unclaimed", "missing", "running", false),
+    ]);
+    let main = view(&data, &Selection::default());
+    assert_eq!(main["workspaces"][0]["label"], "Main · Product");
+    assert_eq!(main["workspaces"][2]["label"], "Main · Runner");
+    let rows = main["terminals"].as_array().unwrap();
+    assert_eq!(rows.iter().map(|t| t["id"].as_str().unwrap()).collect::<Vec<_>>(), ["seat", "live", "old"]);
+    assert_eq!(rows[0]["sidebarBadge"], "Orchestrator");
+    assert_eq!(rows[0]["sidebarTitle"], "seat");
+    assert_eq!(rows[0]["agent"], true);
+    assert_eq!(rows[2]["sidebarBadge"], "Lost");
+    assert_eq!(rows[2]["live"], false);
+
+    let other = view(&data, &Selection { workspace: Some("other".into()), ..Default::default() });
+    assert_eq!(other["terminals"][0]["id"], "other-seat");
+    assert_eq!(other["terminals"][0]["live"], true);
+    assert_eq!(other["terminals"][0]["sidebarBadge"], "Orchestrator");
+}
+
+#[test]
 fn deep_links_select_lost_terminal_and_do_not_fall_through_if_gone() {
     let data = inventory("host_admin");
     let selected = view(&data, &Selection { terminal: Some("lost".into()), ..Default::default() });

@@ -809,7 +809,6 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
 
   $('runner-name').textContent = target.label
   const list = $('terminal-list')
-  list.replaceChildren()
   show('work')
 
   stopNeeds()

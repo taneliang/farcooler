@@ -45,6 +45,7 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .runner { display: block; font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-2); margin: 2px 4px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .space { display: block; width: 100%; margin: 0 0 10px; padding: 6px 10px; font: inherit; color: var(--text); background: var(--card); border: 0; border-radius: 10px; text-overflow: ellipsis; }
 .space:focus-visible { outline: 2px solid var(--button-bg); outline-offset: 2px; }
+.terminal-sidebar { min-height: 0; overflow: auto; }
 .terminal-list { display: flex; flex-direction: column; gap: 2px; }
 .terminal-choice { display: block; width: 100%; text-align: left; border-radius: 8px; padding: 6px 10px; background: none; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .terminal-choice:hover:not([aria-current="true"]) { background: color-mix(in srgb, var(--selected) 55%, transparent); filter: none; }
@@ -295,6 +296,11 @@ button.danger { color: var(--danger); }
 .work-launch a { color: var(--text-2); font-size: 13px; }
 .terminal-choice { box-sizing: border-box; font-size: 13px; text-decoration: none; }
 .terminal-choice:focus-visible { outline: 2px solid var(--button-bg); outline-offset: -2px; }
+.terminal-sidebar .terminal-choice { display: flex; align-items: center; gap: 6px; }
+.terminal-choice span { overflow: hidden; text-overflow: ellipsis; }
+.terminal-choice .terminal-badge { flex: none; font-size: 11px; padding: 1px 6px; border: 1px solid var(--rule); border-radius: 8px; color: var(--text-2); }
+.unavailable-terminals { margin-top: 4px; font-size: 13px; color: var(--text-2); }
+.unavailable-terminals summary { cursor: pointer; padding: 6px 10px; }
 .terminal-manage { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 8px 12px; border-bottom: 1px solid var(--rule); background: var(--bg-alt); }
 .terminal-identity { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 13px; color: var(--text-2); }
 .terminal-identity strong { color: var(--text); overflow-wrap: anywhere; }
@@ -343,11 +349,12 @@ button.danger { color: var(--danger); }
 .terminal-writer button { padding: 3px 9px; font-size: inherit; }
 .terminal, .needs, .plan, .detail-scroll, .plan-sheet-body { min-height: 0; }
 .sidebar { display: flex; flex-direction: column; overflow: hidden; }
-.sidebar > :not(.terminal-list) { flex-shrink: 0; }
+.sidebar > :not(.terminal-list, .terminal-sidebar) { flex-shrink: 0; }
 .terminal-list { overflow: auto; }
 .terminal-choice { flex: none; }
 @media (max-width: 640px) {
   .terminal-list { min-height: 32px; }
+  .terminal-sidebar { max-height: 38dvh; }
 }
 
 .work-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-radius: 16px; }
