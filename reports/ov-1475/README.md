@@ -31,3 +31,7 @@ When the responsibility call returns the queried PID, the hold can still retain 
 ## Landing verification
 
 On landing base `fef14a07a`, Nextest ran 750 affected daemon and CLI tests. The legacy queue test passed on rerun with an ARM-native Python after the first interpreter failed to launch. The macOS responsibility test also passed on rerun after the detached fixture closed its inherited output streams. The macOS test-selection check passed.
+
+The landing follow-up moved background task polling and the native test module into sibling files. The file-size check passed with 1,426 lines in `workflow_runtime.rs` and 787 in `coding_native.rs`. The daemon layer, plan layer, doc comment and macOS test-selection checks also passed.
+
+On the follow-up, 672 of 676 selected daemon and CLI tests passed on the first run with a short scratch-home path. All five ov-1475 regressions passed in that run. The remaining four tests passed on serial retries. An earlier, broader run used a scratch-home path beyond the macOS Unix socket limit and was stopped after the corrected run covered the affected tests.
