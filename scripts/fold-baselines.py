@@ -1,8 +1,8 @@
-"""Resolve supported baseline conflicts from the pending cherry-pick.
+"""Resolve supported baseline conflicts and identical Swift floor bumps.
 
 The daemon runs this bundled source with isolated Python and a private fold
-worktree. Output is a JSON object of replacement texts. An empty object leaves
-the conflict to Git's normal send-back route.
+worktree. Output is a JSON object of replacement texts. An empty object
+means there are no automatic replacements.
 """
 import json
 import pathlib
@@ -103,6 +103,35 @@ def floor(versions):
     return f"{ours + (theirs - base)}\n"
 
 
+def regular_blob(revision, path):
+    entry = git("ls-tree", revision, "--", path).partition("\t")[0].split()
+    if len(entry) == 3 and entry[:2] == ["100644", "blob"]:
+        return entry[2]
+    return None
+
+
+def restore_floor_increases(commit, paths):
+    result = {}
+    for path in FLOORS.intersection(paths):
+        base = regular_blob(f"{commit}^", path)
+        ours = regular_blob("HEAD^", path)
+        theirs = regular_blob(commit, path)
+        if base is None or ours is None or base == ours or ours != theirs:
+            continue
+        # Git kept a single copy of the identical edit. Verify the picked
+        # tree still has that blob before restoring the incoming increase.
+        if regular_blob("HEAD", path) != ours:
+            continue
+        try:
+            before, after = (git("cat-file", "blob", blob) for blob in (base, ours))
+            replacement = floor([before, after, after])
+        except ValueError:
+            continue
+        if int(replacement) > int(after):
+            result[path] = replacement
+    return result
+
+
 def resolve(paths, scanner):
     versions = {path: stages(path) for path in paths}
     result = {}
@@ -149,4 +178,10 @@ def main(scanner_source, paths):
 
 
 if __name__ == "__main__":
-    print(json.dumps(main(sys.argv[1], sys.argv[2:])))
+    scanner_source, *args = sys.argv[1:]
+    if args[:1] == ["--after-pick"]:
+        _, commit, *paths = args
+        replacements = restore_floor_increases(commit, paths)
+    else:
+        replacements = main(scanner_source, args)
+    print(json.dumps(replacements))

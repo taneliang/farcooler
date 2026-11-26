@@ -104,6 +104,15 @@ async fn a_commit_that_truly_conflicts_still_fails_the_fold_naming_the_file() {
 /// their combined floor, without routing either member back through build.
 #[tokio::test]
 async fn a_shared_floor_conflict_reaches_the_group_gate_without_rebuilds() {
+    shared_floor_reaches_the_group_gate(10).await;
+}
+
+#[tokio::test]
+async fn identical_floor_bumps_reach_the_group_gate_without_losing_either_increase() {
+    shared_floor_reaches_the_group_gate(1).await;
+}
+
+async fn shared_floor_reaches_the_group_gate(second_count: u32) {
     let (dir, mut runtime) = lander("floor-conflict").await;
     let definition = batched_push(&runtime, "any", 5000);
     at_join(&mut runtime, "ahead", &definition).await;
@@ -112,11 +121,11 @@ async fn a_shared_floor_conflict_reaches_the_group_gate_without_rebuilds() {
     let edits = r#"if stage == 'build':
     item = os.environ['FARCOOLER_WORKFLOW_ITEM']
     if item in ('first', 'second'):
-        count = 1 if item == 'first' else 10
+        count = 1 if item == 'first' else SECOND_COUNT
         suite = pathlib.Path('apps/macos')
         tests = suite / (item + 'Tests.swift')
-        declaration = ('@Test func first() {}\n' if item == 'first' else
-                       '@Test(arguments: 0..<10) func second(_ value: Int) {}\n')
+        declaration = (f'@Test func {item}() {{}}\n' if count == 1 else
+                       f'@Test(arguments: 0..<{count}) func second(_ value: Int) {{}}\n')
         tests.write_text(declaration)
         if item == 'second':
             subprocess.check_call(['/usr/bin/git', 'add', '--', str(tests)])
@@ -127,9 +136,11 @@ async fn a_shared_floor_conflict_reaches_the_group_gate_without_rebuilds() {
     suite = pathlib.Path('apps/macos')
     if (suite / 'firstTests.swift').exists():
         assert (suite / 'secondTests.swift').exists()
-        assert (suite / 'test-floor.txt').read_text() == '111\n'
+        assert (suite / 'test-floor.txt').read_text() == 'EXPECTED_FLOOR\n'
         pathlib.Path(os.environ['MARKER']).touch()"#;
-    std::fs::write(&script, text.replace("if stage == 'build':", edits).replace("elif stage == 'gate':", gate)).unwrap();
+    let edits = edits.replace("SECOND_COUNT", &second_count.to_string());
+    let gate = gate.replace("EXPECTED_FLOOR", &(101 + second_count).to_string());
+    std::fs::write(&script, text.replace("if stage == 'build':", &edits).replace("elif stage == 'gate':", &gate)).unwrap();
     for item in ["first", "second"] { at_join(&mut runtime, item, &definition).await; }
     for item in ["ahead", "first", "second"] {
         assert!(command(&runtime, Command::Queue { item: item.into() }).result.is_ok());

@@ -23,13 +23,14 @@ floor appears in gate failure output during the window.
 
 ## Resolution
 
-- Both Swift floors retain their numeric format. When a pick conflicts, the
-  resolver adds the incoming commit's floor increase to the current floor.
-  Git supplies the picked commit's parent as the base for that increase.
-  This preserves the reviewed number of cases for parameterized tests and
-  works when the ticket adds its tests in an earlier commit. A side below
-  the conflict base requires manual resolution. The landing check rejects any
-  floor below the pinned fold base, and the Swift test runs enforce the floor.
+- Both Swift floors retain their numeric format. The fold adds the incoming
+  commit's floor increase to the current floor when Git reports a conflict
+  or merges identical increases into one. The picked commit's parent gives
+  the starting floor for that increase. This preserves the reviewed number
+  of cases for parameterized tests and works when the ticket adds its tests
+  in an earlier commit. A side below the conflict base requires manual
+  resolution. The landing check rejects any floor below the pinned fold
+  base, and the Swift test runs enforce the floor.
 - The daemon layer table retains its JSON format. The resolver reconstructs
   the table from Git's three versions, combining independent module ownership
   and policy entries. Two different assignments for the same module, two
@@ -53,6 +54,11 @@ one parameterized test. The floor regression reproduced the old resolver's
 result of 102 when the parameterized test was picked second. The recorded
 ov-1424 layer conflict also reconstructs the table with both `landing_update`
 and `native_hold` assigned to the engine layer.
+
+The equal-increment regression failed before the repair. Git applied both
+test additions cleanly and left the floor at 101. The group gate now sees
+both test files and a floor of 102, with one build per ticket. The queue
+preflight and group-fold tests for real code conflicts also passed.
 
 Workspace Clippy passed with warnings denied. All 3,409 selected daemon unit
 tests passed across the full run and focused retries with the daemon and hook
@@ -88,3 +94,8 @@ Python tests passed. The daemon run passed 3,404 of 3,409 selected tests.
 The remaining five passed with native Python and the engine's inherited
 niceness of 10. The focused rerun also passed the shared-floor group gate
 and the code-conflict send-back.
+
+For the equal-increment follow-up, workspace Clippy, all 28 landing-gate
+Python tests, and the floor and budget checks passed. The daemon run passed
+3,408 of 3,410 selected tests. Both tmux fixtures that failed in that run
+passed on isolated retries. Eighteen tests were skipped by the harness.

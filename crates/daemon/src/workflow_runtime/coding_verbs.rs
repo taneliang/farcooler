@@ -57,6 +57,7 @@ pub(super) fn is_verb(kind: &StageKind) -> bool {
 }
 const COMMIT_IDENTITY: [&str; 8] = ["-c", "user.name=Far Cooler", "-c", "user.email=landing@farcooler.invalid",
     "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"];
+const SWIFT_FLOORS: [&str; 2] = ["apps/macos/test-floor.txt", "apps/shared/AgentKit/test-floor.txt"];
 
 #[derive(Serialize)]
 pub(super) struct PickConflict {
@@ -701,7 +702,10 @@ impl Exec {
                 COMMIT_IDENTITY.iter().copied().chain(extra.iter().copied()).collect()
             };
             let mut args = pick(&["cherry-pick", "-x"]); args.push(commit);
-            if self.pick_git(binding, tree, &args).await?.0 { continue; }
+            if self.pick_git(binding, tree, &args).await?.0 {
+                self.restore_collapsed_floors(binding, tree, commit).await?;
+                continue;
+            }
             let unmerged = self.pick_read(binding, tree, &["diff", "--name-only", "--diff-filter=U"]).await?;
             let clean = self.pick_git(binding, tree, &["diff", "--cached", "--quiet"]).await?.0
                 && self.pick_git(binding, tree, &["diff", "--quiet"]).await?.0;
@@ -711,13 +715,14 @@ impl Exec {
             // Only confirmed unmerged paths diagnose a member; infrastructure failures retry the fold.
             if unmerged.is_empty() { return Err(Error::Refused("fold cherry-pick failed without conflicts")); }
             let files: Vec<_> = unmerged.lines().collect();
-            if self.resolve_baseline_conflicts(binding, tree, &files).await? {
+            if self.resolve_baselines(binding, tree, &files, None).await? {
                 let finish = if self.pick_git(binding, tree, &["diff", "--cached", "--quiet"]).await?.0 {
                     "--skip"
                 } else {
                     "--continue"
                 };
                 self.pick_read(binding, tree, &pick(&["cherry-pick", finish])).await?;
+                if finish == "--continue" { self.restore_collapsed_floors(binding, tree, commit).await?; }
                 continue;
             }
             self.pick_read(binding, tree, &pick(&["cherry-pick", "--abort"])).await?;
@@ -730,11 +735,25 @@ impl Exec {
         Ok(None)
     }
 
-    /// Resolve only the repository's known, regular baseline files. Use bundled source so the
-    /// fold never runs a script from a candidate before the configured landing gate starts.
-    async fn resolve_baseline_conflicts(&self, binding: Option<&Binding>, tree: &Path, paths: &[&str]) -> Result<bool> {
-        if !paths.iter().all(|path| matches!(*path, "apps/macos/test-floor.txt" | "apps/shared/AgentKit/test-floor.txt"
-            | "scripts/daemon-layers.json" | "scripts/daemon-layers-counts.txt")) {
+    /// Git cleanly merges identical edits. For floors, each independent pick still owes its increase.
+    async fn restore_collapsed_floors(&self, binding: Option<&Binding>, tree: &Path, commit: &str) -> Result<()> {
+        let mut args = vec!["diff-tree", "-r", "--no-commit-id", "--name-only", "--diff-filter=M", commit, "--"];
+        args.extend(SWIFT_FLOORS);
+        let changed = self.pick_read(binding, tree, &args).await?;
+        let paths: Vec<_> = changed.lines().collect();
+        if !paths.is_empty() && self.resolve_baselines(binding, tree, &paths, Some(commit)).await? {
+            let mut amend = COMMIT_IDENTITY.to_vec();
+            amend.extend(["commit", "--amend", "--no-edit"]);
+            self.pick_read(binding, tree, &amend).await?;
+        }
+        Ok(())
+    }
+
+    /// Resolve only known, regular baseline files using bundled source. An after-pick repair may
+    /// replace a subset of the requested floors. A conflict must be resolved in full.
+    async fn resolve_baselines(&self, binding: Option<&Binding>, tree: &Path, paths: &[&str], after_pick: Option<&str>) -> Result<bool> {
+        if !paths.iter().all(|path| SWIFT_FLOORS.contains(path)
+            || matches!(*path, "scripts/daemon-layers.json" | "scripts/daemon-layers-counts.txt")) {
             return Ok(false);
         }
         let root = tree.canonicalize()?;
@@ -746,8 +765,9 @@ impl Exec {
         command.env_clear();
         crate::git_guard::apply(&mut command, &crate::git_guard::fixed());
         command.args(["-I", "-c", include_str!("../../../../scripts/fold-baselines.py"),
-            include_str!("../../../../scripts/daemon-layers.py")])
-            .args(paths).current_dir(&root).env("PATH", "/usr/bin:/bin").env("GIT_OPTIONAL_LOCKS", "0");
+            include_str!("../../../../scripts/daemon-layers.py")]);
+        if let Some(commit) = after_pick { command.args(["--after-pick", commit]); }
+        command.args(paths).current_dir(&root).env("PATH", "/usr/bin:/bin").env("GIT_OPTIONAL_LOCKS", "0");
         let mut command = tokio::process::Command::from(command);
         command.kill_on_drop(true);
         let output = tokio::time::timeout(std::time::Duration::from_secs(30), command.output()).await
@@ -758,8 +778,11 @@ impl Exec {
         }
         let replacements: BTreeMap<String, String> = serde_json::from_slice(&output.stdout)?;
         if replacements.is_empty() { return Ok(false); }
-        for path in paths {
-            let text = replacements.get(*path).ok_or(Error::Refused("missing baseline resolution"))?;
+        if (after_pick.is_none() && replacements.len() != paths.len())
+            || replacements.keys().any(|path| !paths.contains(&path.as_str())) {
+            return Err(Error::Refused("unexpected baseline resolutions"));
+        }
+        for (path, text) in &replacements {
             let destination = root.join(path);
             let parent = destination.parent().ok_or(Error::Refused("baseline file has no parent"))?;
             let mut file = tempfile::NamedTempFile::new_in(parent)?;
@@ -767,7 +790,7 @@ impl Exec {
             file.persist(destination).map_err(|error| error.error)?;
         }
         let mut add = vec!["add", "--"];
-        add.extend_from_slice(paths);
+        add.extend(replacements.keys().map(String::as_str));
         self.pick_read(binding, tree, &add).await?;
         Ok(true)
     }
