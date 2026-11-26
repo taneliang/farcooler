@@ -33,27 +33,29 @@ async fn list_and_show_distinguish_engine_groups() {
     state.revision = 3;
     let archived = store.create_task(repo.workspace, "Archived landing", Actor::Manager).unwrap();
     let live = store.create_task(repo.workspace, "Live landing", Actor::Manager).unwrap();
-    state.archive.insert("group-00000000000000000001-landing".into(), Archived {
+    let landed = |key: &str, sha: &str| Archived {
         phase: Phase::Done,
-        candidate: Some("abcdef1".into()),
+        candidate: Some(sha.into()),
         group: Some(ArchivedGroup {
             name: "landing".into(),
-            tickets: vec![archived.key.clone()],
-            pushed: Some("abcdef1".into()),
+            tickets: vec![key.into()],
+            pushed: Some(sha.into()),
             since_ms: now_millis(),
         }),
         start_load: None,
         last_run: None,
         history: Vec::new(),
         closed: None,
-    });
+    };
+    state.archive.insert("group-00000000000000000001-landing".into(), landed(&archived.key, "abcdef1"));
     let mut definition = Definition::tracker("orchestrator");
     definition.schema = 2;
     definition.source = "group/landing".into();
     definition.stages[0].kind = StageKind::AwaitBase;
     definition.stages[0].progression = Progression::Automatic;
     definition.validate_group().unwrap();
-    state.items.insert("group-00000000000000000002-landing".into(), serde_json::from_value(json!({
+    let live_group = "group-00000000000000000002-landing";
+    state.items.insert(live_group.into(), serde_json::from_value(json!({
         "pin": definition.pin(),
         "definition": definition,
         "policy_pin": "fixture",
@@ -85,12 +87,13 @@ async fn list_and_show_distinguish_engine_groups() {
     let list = landing(&h, &repo, &["list"]).await;
     let [first, second] = list["landings"].as_array().unwrap().as_slice() else { panic!("{list}") };
     assert_ne!(first["id"], second["id"]);
+    let listed_for = |key: &str| [first, second].into_iter().find(|l| l["tickets"][0]["key"] == key).unwrap();
     let text = run_landing(&h, &repo, &["list"]).await;
     assert!(text.status.success(), "{}", String::from_utf8_lossy(&text.stderr));
     let text = String::from_utf8(text.stdout).unwrap();
     assert!(!text.contains("Landing 0"), "{text}");
     for (key, pushed_sha) in [(&archived.key, json!("abcdef1")), (&live.key, Value::Null)] {
-        let listed = [first, second].into_iter().find(|l| l["tickets"][0]["key"] == *key).unwrap();
+        let listed = listed_for(key);
         assert_eq!(listed["number"], 0);
         assert_eq!(listed["pushed_sha"], pushed_sha);
         let id = listed["id"].as_str().unwrap();
@@ -109,6 +112,21 @@ async fn list_and_show_distinguish_engine_groups() {
     let ambiguous = run_landing(&h, &repo, &["show", "0"]).await;
     assert!(!ambiguous.status.success());
     assert!(String::from_utf8_lossy(&ambiguous.stderr).contains("More than one engine landing"));
+
+    let live_id = listed_for(&live.key)["id"].as_str().unwrap();
+    state.items.remove(live_group).unwrap();
+    state.archive.insert(live_group.into(), landed(&live.key, "abcdef2"));
+    state.revision += 1;
+    let json = serde_json::to_string(&state).unwrap().replace('\'', "''");
+    exec_for_tests(store, &format!(
+        "UPDATE workflow_states SET revision = {}, state = '{json}' WHERE workspace = '{}'",
+        state.revision, repo.workspace,
+    ));
+    let shown = landing(&h, &repo, &["show", live_id]).await;
+    assert_eq!(shown["id"], live_id);
+    assert_eq!(shown["tickets"][0]["key"], live.key);
+    assert_eq!(shown["pushed_sha"], "abcdef2");
+    assert_eq!(shown["phase"], "landed");
 }
 
 #[tokio::test]

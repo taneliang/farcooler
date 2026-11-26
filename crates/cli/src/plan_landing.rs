@@ -7,6 +7,7 @@
 //!
 //! ```text
 //! farcooler landing list
+//! farcooler landing show <group-uuid>
 //! farcooler landing show 12
 //! ```
 //!
