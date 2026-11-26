@@ -1,4 +1,4 @@
-//! Locks for Git processes launched by a workflow Provision effect.
+//! Inherited writer locks for workflow Git operations.
 
 use std::fs::{File, OpenOptions};
 use std::os::fd::AsRawFd;
@@ -18,11 +18,11 @@ tokio::task_local! {
 
 /// Take a fresh lock on the effect's existing receipt. Another open of the
 /// file conflicts while a Git process (or an inheriting helper) still holds it.
-pub(crate) fn try_provision_lock(path: &Path) -> std::io::Result<File> {
+pub(crate) fn try_process_lock(path: &Path) -> std::io::Result<File> {
     let file = OpenOptions::new().read(true).write(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(path)?;
     if !file.metadata()?.is_file() {
-        return Err(std::io::Error::other("invalid provisioning lock file"));
+        return Err(std::io::Error::other("invalid Git process lock file"));
     }
     rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive)?;
     Ok(file)
@@ -33,7 +33,7 @@ pub(crate) fn try_provision_lock(path: &Path) -> std::io::Result<File> {
 pub(crate) async fn wait_provision_lock(path: &Path, deadline: Instant) -> std::io::Result<File> {
     let deadline = deadline.min(Instant::now() + LOCK_WAIT);
     loop {
-        match try_provision_lock(path) {
+        match try_process_lock(path) {
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < deadline => {
                 tokio::time::sleep_until(deadline.min(Instant::now() + Duration::from_millis(10))).await;
             }
@@ -45,7 +45,7 @@ pub(crate) async fn wait_provision_lock(path: &Path, deadline: Instant) -> std::
 /// Keep the lock across exec by clearing close-on-exec in the child alone.
 /// Closing the daemon's copy, including on abrupt death, cannot unlock a
 /// surviving Git command's copy. Never explicitly unlock this file.
-fn inherit_provision_lock(cmd: &mut std::process::Command, file: &File) {
+pub(crate) fn inherit_process_lock(cmd: &mut std::process::Command, file: &File) {
     let fd = file.as_raw_fd();
     // SAFETY: The caller keeps the file open through spawn. The child only
     // calls the async-signal-safe fcntl on its own descriptor table.
@@ -65,7 +65,7 @@ pub(super) async fn track(cmd: &mut std::process::Command, args: &[&str], deadli
         tracing::warn!(%error, ?args, "could not take the provisioning Git lock");
         DomainError::OperationFailed
     })?;
-    inherit_provision_lock(cmd, &writer);
+    inherit_process_lock(cmd, &writer);
     Ok(Some(writer))
 }
 
@@ -76,7 +76,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn provisioning_waits_for_a_briefly_retained_lock() {
         let receipt = tempfile::NamedTempFile::new().unwrap();
-        let writer = try_provision_lock(receipt.path()).unwrap();
+        let writer = try_process_lock(receipt.path()).unwrap();
         let deadline = Instant::now() + Duration::from_millis(100);
         let still_held = wait_provision_lock(receipt.path(), Instant::now()).await.unwrap_err();
         assert_eq!(still_held.kind(), std::io::ErrorKind::WouldBlock);

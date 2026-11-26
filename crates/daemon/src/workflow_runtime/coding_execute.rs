@@ -141,7 +141,7 @@ impl Exec {
     }
 
     pub(super) fn lock_provision(&self, binding: &Binding) -> std::io::Result<File> {
-        crate::git::try_provision_lock(&self.provision_lock_path(&binding.effect))
+        crate::git::try_process_lock(&self.provision_lock_path(&binding.effect))
     }
 
     fn fact_path(&self, binding: &Binding) -> PathBuf { self.effect_fact_path(&binding.effect) }

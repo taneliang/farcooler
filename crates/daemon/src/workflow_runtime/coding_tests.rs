@@ -223,6 +223,7 @@ pub(super) async fn admitted_in(runtime: &Runtime, workspace: &str) -> Binding {
     let claim = runtime.store.workflow_claim_effect(workspace, &stored.effect.id, "crash-test", state.revision, state.epoch, 10, 100).unwrap().unwrap();
     let base = runtime.pin_base(workspace, &stored.effect).await.unwrap();
     runtime.prepare_provision_lock(&stored.effect).unwrap();
+    runtime.prepare_push_lock(&stored.effect).unwrap();
     assert!(runtime.store.workflow_admit_effect(&claim, 10).unwrap());
     Binding::new(workspace, &stored.effect, claim.resource_generation, state.items[&stored.effect.item].iteration, &base)
 }

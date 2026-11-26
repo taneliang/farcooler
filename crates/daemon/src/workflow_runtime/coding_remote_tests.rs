@@ -787,3 +787,25 @@ async fn workflow_start_reuses_a_failed_tickets_branch_with_a_new_model() {
     assert!(runtime.wire_command(&board, "owner", Action::Get).unwrap()["state"]["items"][key]["send_back_refused"].is_null());
     assert_eq!(runtime.store.workflow_item_task(&board, key).unwrap(), Some(task.id));
 }
+
+#[tokio::test]
+async fn an_absent_candidate_does_not_settle_an_unacknowledged_network_send() {
+    let mut r = remote("pass").await;
+    let definition = batched_push(&r.runtime, "any", 5000);
+    at_join(&mut r.runtime, "one", &definition).await;
+    command(&r.runtime, Command::Queue { item: "one".into() });
+    for time in 2..5 { r.runtime.pump(time).await.unwrap(); }
+    let binding = admitted(&r.runtime).await;
+    // Simulate a crash after send intent with no response from receive-pack. The
+    // client is gone, but that says nothing about the receiver on the other host.
+    let intent = r.runtime.root.join("receipts").join(format!("{}.push-send.json", digest(&binding.effect)));
+    durable(&intent, &serde_json::to_vec(&binding).unwrap()).unwrap();
+    r.runtime.pump(50).await.unwrap();
+    r.runtime.pump(50 + super::recovery_backoff::FIRST_MS + 1_000).await.unwrap();
+    let state = r.runtime.state("w").unwrap().unwrap();
+    let group = &state.items[&binding.effect.item];
+    assert_eq!(group.phase, Phase::Uncertain);
+    assert!(group.failure.as_deref().unwrap().contains("the remote may still be processing"));
+    assert_eq!(outbox(&r.runtime, StageKind::Push), 1);
+    assert!(!calls(&r).contains("git-receive-pack"), "recovery only reads the target");
+}

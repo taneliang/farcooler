@@ -172,7 +172,17 @@ impl Exec {
         let candidate = binding.effect.candidate.as_deref().filter(|c| sha(c)).ok_or(Error::Refused("missing push candidate"))?;
         let identity = self.landing()?;
         let log = self.root.join("receipts").join(format!("{}.settle.fetch.output", digest(&binding.effect)));
+        // Take the lock before measuring absence. Even without the lock, a positive target
+        // read can settle the push. A person's settlement may supply external quiescence evidence.
+        let quiescent = expected.is_none().then(|| self.lock_push(binding));
         let landed = self.on_target(identity, candidate, &log).await?;
+        if !landed && let Some(quiescent) = quiescent {
+            let _held = quiescent?;
+            if super::coding::landing_url(identity).is_some() && self.push_send_recorded(binding)? {
+                return Err(Error::Refused("the candidate is absent, but the remote may still be processing the previous push"));
+            }
+            return self.settle_push_fact(binding, false, "runner");
+        }
         if expected.is_some_and(|claimed| claimed != landed) {
             return Err(Error::Refused("the remote disagrees"));
         }

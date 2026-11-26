@@ -75,10 +75,31 @@ impl Exec {
     fn push_phase_path(&self, binding: &Binding, phase: &str) -> PathBuf {
         self.root.join("receipts").join(format!("{}.push-{phase}.json", digest(&binding.effect)))
     }
+    fn push_lock_path(&self, effect: &Effect) -> PathBuf {
+        self.root.join("receipts").join(format!("{}.push.lock", digest(effect)))
+    }
+    /// Older admitted pushes lack the lock and may have started an untracked writer.
+    pub(super) fn prepare_push_lock(&self, effect: &Effect) -> Result<()> {
+        if effect.kind != EffectKind::Execute(StageKind::Push) { return Ok(()); }
+        match durable(&self.push_lock_path(effect), b"") {
+            Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+            result => result,
+        }
+    }
+    pub(super) fn lock_push(&self, binding: &Binding) -> Result<File> {
+        crate::git::try_process_lock(&self.push_lock_path(&binding.effect)).map_err(|error| match error.kind() {
+            std::io::ErrorKind::NotFound => Error::Refused("no push process lock was recorded, so the send may still be running"),
+            std::io::ErrorKind::WouldBlock => Error::Refused("the previous push may still be running"),
+            _ => error.into(),
+        })
+    }
+    pub(super) fn push_send_recorded(&self, binding: &Binding) -> Result<bool> {
+        Ok(self.push_phase_path(binding, "send").try_exists()?)
+    }
     /// Only an authenticated pre-send record without send intent proves that replay is safe.
     /// Missing legacy records, unreadable records and any send intent retain push uncertainty.
     fn reconcile_unsent_push(&self, binding: &Binding) -> Result<Outcome> {
-        if self.push_phase_path(binding, "send").try_exists()? {
+        if self.push_send_recorded(binding)? {
             return Err(Error::Refused("push send was admitted; whether it landed is unknown"));
         }
         let raw = self.bytes(&self.push_phase_path(binding, "waiting"))?;
@@ -941,6 +962,9 @@ impl Exec {
             }
         }
         if *cancel.borrow() { return Ok(Outcome::Interrupted); }
+        // Hold the writer lock before publishing send intent. A local receive-pack keeps it even
+        // when the runner or push process dies. A network receiver cannot inherit a local lock.
+        let writer = self.lock_push(binding)?;
         // Fsync intent before invoking either transport. A crash from here on can never retry the send.
         durable(&self.push_phase_path(binding, "send"), &serde_json::to_vec(binding)?)?;
         let log = self.remote_log(binding);
@@ -952,7 +976,8 @@ impl Exec {
                 "--no-follow-tags".into(), "--recurse-submodules=no".into(), "--signed=false".into(),
                 identity.repository.to_string_lossy().into_owned(), super::coding_landing::push_target(&candidate, &identity.target)];
             durable(&log, b"")?;
-            let exit = crate::effect_runner::configured(&self.repository(), &argv, &environment, &log, Duration::from_secs(60), cancel).await?;
+            let exit = crate::effect_runner::configured_with_git_lock(&self.repository(), &argv, &environment, &log,
+                Duration::from_secs(60), cancel, &writer).await?;
             (argv, environment, exit)
         };
         let output = self.bytes(&log)?;

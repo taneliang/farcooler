@@ -19,7 +19,7 @@ use farcooler_core::{DomainError, Result};
 use tokio::process::Command;
 
 mod provision_lock;
-pub(crate) use provision_lock::{PROVISION_WRITERS, try_provision_lock, wait_provision_lock};
+pub(crate) use provision_lock::{PROVISION_WRITERS, inherit_process_lock, try_process_lock, wait_provision_lock};
 
 /// How long any single git invocation may take before it is killed.
 ///

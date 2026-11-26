@@ -1046,7 +1046,10 @@ impl Runtime {
                     }
                     self.validate_item_launch(workspace, item)?;
                     let base = self.pin_base(workspace, &effect).await?;
-                    if self.coding.is_some() { self.prepare_provision_lock(&effect)?; }
+                    if self.coding.is_some() {
+                        self.prepare_provision_lock(&effect)?;
+                        self.prepare_push_lock(&effect)?;
+                    }
                     Ok(base)
                 }.await;
                 let base = match prepared {

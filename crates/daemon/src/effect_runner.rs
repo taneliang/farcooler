@@ -105,6 +105,17 @@ pub(crate) async fn configured(tree: &Path, argv: &[String], environment: &std::
     owned(tree, argv, environment, log, limit, cancel, None).await.map_err(|failure| failure.error)
 }
 
+/// For a trusted-local Git push, its receive-pack inherits the sender's lock.
+pub(crate) async fn configured_with_git_lock(tree: &Path, argv: &[String], environment: &std::collections::BTreeMap<String, String>,
+    log: &Path, limit: Duration, cancel: tokio::sync::watch::Receiver<bool>, lock: &std::fs::File) -> std::io::Result<Option<i32>>
+{
+    let program = argv.first().ok_or_else(|| std::io::Error::other("empty argv"))?;
+    let mut command = Command::new(program);
+    command.args(&argv[1..]).env_clear().envs(environment);
+    crate::git::inherit_process_lock(command.as_std_mut(), lock);
+    supervise(command, tree, log, limit, Some(cancel), None, None).await.map_err(|failure| failure.error)
+}
+
 /// Like `configured`, but records who the process is in `owner` as soon as it exists, so that a
 /// later run that finds the process still going (the daemon died and left it) can end it. The
 /// record is a pid and the process's start time; see `Owner::reap`.
