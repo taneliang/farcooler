@@ -86,6 +86,8 @@ async fn list_and_show_distinguish_engine_groups() {
 
     let list = landing(&h, &repo, &["list"]).await;
     let [first, second] = list["landings"].as_array().unwrap().as_slice() else { panic!("{list}") };
+    assert_eq!(first["title"], "Landing");
+    assert_eq!(second["title"], first["title"]);
     assert_ne!(first["id"], second["id"]);
     let listed_for = |key: &str| [first, second].into_iter().find(|l| l["tickets"][0]["key"] == key).unwrap();
     let text = run_landing(&h, &repo, &["list"]).await;
@@ -113,7 +115,6 @@ async fn list_and_show_distinguish_engine_groups() {
     assert!(!ambiguous.status.success());
     assert!(String::from_utf8_lossy(&ambiguous.stderr).contains("More than one engine landing"));
 
-    let live_id = listed_for(&live.key)["id"].as_str().unwrap();
     state.items.remove(live_group).unwrap();
     state.archive.insert(live_group.into(), landed(&live.key, "abcdef2"));
     state.revision += 1;
@@ -122,11 +123,19 @@ async fn list_and_show_distinguish_engine_groups() {
         "UPDATE workflow_states SET revision = {}, state = '{json}' WHERE workspace = '{}'",
         state.revision, repo.workspace,
     ));
-    let shown = landing(&h, &repo, &["show", live_id]).await;
-    assert_eq!(shown["id"], live_id);
-    assert_eq!(shown["tickets"][0]["key"], live.key);
-    assert_eq!(shown["pushed_sha"], "abcdef2");
-    assert_eq!(shown["phase"], "landed");
+    let archived_list = landing(&h, &repo, &["list"]).await;
+    let archived_groups = archived_list["landings"].as_array().unwrap();
+    assert_eq!(archived_groups.len(), 2);
+    for (key, pushed_sha) in [(&archived.key, "abcdef1"), (&live.key, "abcdef2")] {
+        let id = listed_for(key)["id"].as_str().unwrap();
+        let listed = archived_groups.iter().find(|l| l["id"] == id).unwrap();
+        let mut shown = landing(&h, &repo, &["show", id]).await;
+        assert_eq!(shown.as_object_mut().unwrap().remove("events"), Some(json!([])));
+        assert_eq!(&shown, listed);
+        assert_eq!(shown["tickets"][0]["key"], *key);
+        assert_eq!(shown["pushed_sha"], pushed_sha);
+        assert_eq!(shown["phase"], "landed");
+    }
 }
 
 #[tokio::test]
