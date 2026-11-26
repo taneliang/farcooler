@@ -100,6 +100,7 @@
    "step_up",
    "step_up_rpc",
    "teammate_bind",
+   "terminal_writers",
    "tunnel_gate",
    "writer_gate",
    "writer_join"

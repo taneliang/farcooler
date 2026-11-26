@@ -22,7 +22,7 @@ pub(crate) fn writer_instance() -> bytes::Bytes {
 }
 
 pub(crate) fn decode_hex(hex: &str) -> Result<Vec<u8>, &'static str> {
-    if !hex.is_ascii() || !hex.len().is_multiple_of(2) {
+    if !hex.is_ascii() || hex.len() % 2 != 0 {
         return Err("Expected pairs of hex digits.");
     }
     (0..hex.len())

@@ -189,3 +189,20 @@ browser fixture returns the same unsupported response as an older runner.
 | --- | --- | --- |
 | `restore a writer after its runner connection is freed` | Chrome threw `null pointer passed to rust` in `TerminalWriter.show` when it queried the previous runner. | The writer badge returned on the fresh connection and typing reached the terminal. |
 | `hold keystrokes while the initial writer claim is pending` | The writer badge appeared after the delayed grant, but the key pressed during the delay never reached the runner. | The key stayed local before the grant and reached the runner after approval. |
+
+## Landing-gate repair
+
+| Check | Observed before the repair | Result after the repair |
+| --- | --- | --- |
+| Daemon layers | The scanner reported `terminal_writers.rs` as unclaimed. | The module belongs to the access layer alongside `sessions`. The self-test, tree scan and no-growth comparison passed with 645 recorded edges across 55 layer pairs. |
+| Visual tokens | The scanner reported one raw material in the Mac takeover banner. | The banner uses the shared content surface. The self-test and tree scan passed. |
+| Clippy | The Mac input CLI used `is_multiple_of`, which Clippy rejected against the workspace's Rust 1.85 minimum. | The hex decoder uses a parity check compatible with Rust 1.85. Clippy passed with warnings denied for all targets in the CLI, client, daemon, protocol and transport crates. |
+
+The foreground landing quick gate passed. All 90 live-socket tests and 13 stdio
+tests passed. Both TypeScript checks and all 16 Chromium work checks passed,
+including explicit takeover and previous-writer feedback at 320 px and 1280 px.
+The CLI unit suite passed 639 tests with one ignored. The Mac app and test
+targets built, and all 24 tiling and render-wiring tests passed on this host.
+The full landing gate includes Wrangler build destinations under `/tmp`, so
+this run used its quick phase and ran the affected builds and suites directly
+in ticket scratch.

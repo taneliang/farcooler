@@ -1,3 +1,4 @@
+import AgentKit
 import AppKit
 import SwiftUI
 
@@ -48,7 +49,7 @@ struct TerminalSurface: View {
                     Button(action) { writer.input?.takeOver() }
                 }
                 .padding(8)
-                .background(.regularMaterial)
+                .surface(.content, in: Rectangle())
             }
         }
     }
