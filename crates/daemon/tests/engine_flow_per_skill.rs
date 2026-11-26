@@ -13,7 +13,7 @@ use farcooler_daemon::{rpc::RpcFactory, service::Service, watch::Watcher,
     workflow_runtime::{CodingCi, CodingLanding, CodingCommand, CodingConfig, CodingHarness}};
 use farcooler_protocol::{v1::{self as pb, request, result}, workflow_commands::{Action, Mutation}};
 use farcooler_store::models::{NoteKind, TaskStatus};
-use farcooler_transport::{Client, HandshakeConfig, UnixListenerServer};
+use farcooler_transport::{Client, ClientError, HandshakeConfig, UnixListenerServer};
 mod common;
 use uuid::Uuid;
 
@@ -83,15 +83,27 @@ impl Host {
         tokio::time::timeout(std::time::Duration::from_secs(15), self.service.stop_workflows()).await.unwrap().unwrap();
     }
 }
-async fn try_call(link: &mut Link, workspace: Uuid, action: &Action) -> Result<serde_json::Value, String> {
+async fn try_call(link: &mut Link, workspace: Uuid, action: &Action) -> Result<serde_json::Value, ClientError> {
     let mut req = farcooler_transport::request(action.method());
     req.target_resource_id = Some(bytes::Bytes::copy_from_slice(workspace.as_bytes()));
     req.payload = Some(request::Payload::WorkflowCommand(pb::WorkflowCommand { schema: 1, json: serde_json::to_string(action).unwrap() }));
-    let result::Value::WorkflowReply(reply) = link.call(req).await.map_err(|e| e.to_string())?.value.unwrap() else { panic!("wrong result") };
+    let result::Value::WorkflowReply(reply) = link.call(req).await?.value.unwrap() else { panic!("wrong result") };
     Ok(serde_json::from_str(&reply.json).unwrap())
 }
 async fn call(link: &mut Link, workspace: Uuid, action: Action) -> serde_json::Value {
-    try_call(link, workspace, &action).await.unwrap()
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        match try_call(link, workspace, &action).await {
+            Ok(reply) => return reply,
+            // A polling read may lose the live process proof between admission and reply.
+            Err(ClientError::Daemon { code, .. }) if matches!(action, Action::Get)
+                && code == pb::ErrorCode::AuthRequired as i32 && tokio::time::Instant::now() < deadline =>
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            Err(error) => panic!("{}: {error}", action.method()),
+        }
+    }
 }
 /// A note on the card, as `actor` says it.
 async fn say(link: &mut Link, card: Uuid, kind: pb::TaskNoteKind, actor: &str, body: &str) {
@@ -207,7 +219,7 @@ async fn the_orchestrator_pane_runs_the_skills_commands() {
     for _ in 0..1200 {
         match try_call(&mut link, ws, &Action::Get).await {
             Ok(_) => { known = true; break; }
-            Err(e) if e.contains("known caller") => tokio::time::sleep(std::time::Duration::from_millis(50)).await,
+            Err(e) if e.to_string().contains("known caller") => tokio::time::sleep(std::time::Duration::from_millis(50)).await,
             Err(e) => panic!("the pane's first read failed: {e}"),
         }
     }
@@ -316,7 +328,17 @@ async fn a_ticket_goes_from_draft_to_landed_on_the_commands_the_skill_teaches() 
     let mut start = farcooler_transport::request("workspace.start_orchestrator");
     start.target_resource_id = Some(bytes::Bytes::copy_from_slice(ws.as_bytes()));
     start.payload = Some(request::Payload::WorkspaceStartOrchestrator(pb::WorkspaceStartOrchestrator { harness: "claude".into(), replace: false, handoff_task: String::new() }));
-    link.call(start).await.expect("the orchestrator pane starts");
+    let started = link.call(start).await.expect("the orchestrator pane starts");
+    let Some(result::Value::Terminal(pane)) = started.value else { panic!("expected orchestrator terminal") };
+
+    // The owner's connection holds the pane's input lease while the orchestrator drives the workflow.
+    let mut claim = farcooler_transport::request("terminal.writer");
+    claim.target_resource_id = Some(pane.id);
+    claim.payload = Some(request::Payload::TerminalWriter(pb::TerminalWriterRequest {
+        action: pb::terminal_writer_request::Action::Claim as i32,
+    }));
+    let Some(result::Value::TerminalWriter(writer)) = link.call(claim).await.unwrap().value else { panic!("expected writer lease") };
+    assert!(writer.generation.is_some(), "the owner holds the only writer lease");
 
     // The person's part: the draft's card asks, and the owner answers with the words that approve it.
     let said = |what: &str| std::fs::read_to_string(&out).unwrap_or_default().lines().any(|l| l == what);
