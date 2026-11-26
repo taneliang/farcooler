@@ -112,10 +112,12 @@ async fn a_shared_floor_conflict_reaches_the_group_gate_without_rebuilds() {
     let edits = r#"if stage == 'build':
     item = os.environ['FARCOOLER_WORKFLOW_ITEM']
     if item in ('first', 'second'):
-        count = 1 if item == 'first' else 2
+        count = 1 if item == 'first' else 10
         suite = pathlib.Path('apps/macos')
         tests = suite / (item + 'Tests.swift')
-        tests.write_text('@Test func added() {}\n' * count)
+        declaration = ('@Test func first() {}\n' if item == 'first' else
+                       '@Test(arguments: 0..<10) func second(_ value: Int) {}\n')
+        tests.write_text(declaration)
         if item == 'second':
             subprocess.check_call(['/usr/bin/git', 'add', '--', str(tests)])
             subprocess.check_call(['/usr/bin/git', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'add tests before bumping floor'])
@@ -125,7 +127,7 @@ async fn a_shared_floor_conflict_reaches_the_group_gate_without_rebuilds() {
     suite = pathlib.Path('apps/macos')
     if (suite / 'firstTests.swift').exists():
         assert (suite / 'secondTests.swift').exists()
-        assert (suite / 'test-floor.txt').read_text() == '103\n'
+        assert (suite / 'test-floor.txt').read_text() == '111\n'
         pathlib.Path(os.environ['MARKER']).touch()"#;
     std::fs::write(&script, text.replace("if stage == 'build':", edits).replace("elif stage == 'gate':", gate)).unwrap();
     for item in ["first", "second"] { at_join(&mut runtime, item, &definition).await; }

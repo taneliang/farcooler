@@ -19,9 +19,9 @@ class UnsupportedConflict(ValueError):
     """The conflict needs a person to settle it."""
 
 
-def git(*args, accepted=(0,)):
+def git(*args):
     result = subprocess.run(["git", "--no-pager", *args], capture_output=True, text=True, timeout=5)
-    if result.returncode not in accepted:
+    if result.returncode != 0:
         raise RuntimeError(f"git {args[0]} failed: {result.stderr.strip()}")
     return result.stdout
 
@@ -92,22 +92,18 @@ def merge_layers(versions):
             "allowed": allowed, "composition": composition, "modules": modules}
 
 
-def floor(path, versions, declaration_pattern):
+def floor(versions):
     if not all(re.fullmatch("[0-9]+", value.strip()) for value in versions):
         raise UnsupportedConflict("test floor is not a number")
-    suite = str(pathlib.PurePosixPath(path).parent)
-    # Use the commit that set the current floor as the calibration point.
-    # Earlier commits in this pick sequence may already have added tests.
-    anchor = git("log", "-1", "--format=%H", "HEAD", "--", path).strip()
-    if not anchor:
-        raise UnsupportedConflict("no committed floor to calibrate")
-    grep = ["-h", "-E", declaration_pattern]
-    before = git("grep", *grep, anchor, "--", suite, accepted=(0, 1))
-    after = git("grep", "--cached", *grep, "--", suite, accepted=(0, 1))
-    return f"{max(0, int(versions[1]) + len(after.splitlines()) - len(before.splitlines()))}\n"
+    base, ours, theirs = map(int, versions)
+    if min(ours, theirs) < base:
+        raise UnsupportedConflict("conflicting test floor decrease")
+    # A cherry-pick's base is the picked commit's parent. Add the incoming
+    # reviewed increase to the current floor, preserving parameterized cases.
+    return f"{ours + (theirs - base)}\n"
 
 
-def resolve(paths, scanner, declaration_pattern):
+def resolve(paths, scanner):
     versions = {path: stages(path) for path in paths}
     result = {}
     config = None
@@ -137,22 +133,20 @@ def resolve(paths, scanner, declaration_pattern):
             for pair, limit in ours.items()
         })
     for path in FLOORS.intersection(paths):
-        result[path] = floor(path, versions[path], declaration_pattern)
+        result[path] = floor(versions[path])
     return result
 
 
-def main(scanner_source, floor_source, paths):
+def main(scanner_source, paths):
     if not set(paths) <= FLOORS | {LAYERS, COUNTS}:
         return {}
     scanner = {"__file__": "scripts/daemon-layers.py", "__name__": "daemon_layers"}
-    floor_check = {"__file__": "scripts/test-floor-check.py", "__name__": "test_floor_check"}
     exec(scanner_source, scanner)
-    exec(floor_source, floor_check)
     try:
-        return resolve(paths, scanner, floor_check["DECL"])
+        return resolve(paths, scanner)
     except (ValueError, KeyError, TypeError):
         return {}
 
 
 if __name__ == "__main__":
-    print(json.dumps(main(sys.argv[1], sys.argv[2], sys.argv[3:])))
+    print(json.dumps(main(sys.argv[1], sys.argv[2:])))

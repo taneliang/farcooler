@@ -746,7 +746,7 @@ impl Exec {
         command.env_clear();
         crate::git_guard::apply(&mut command, &crate::git_guard::fixed());
         command.args(["-I", "-c", include_str!("../../../../scripts/fold-baselines.py"),
-            include_str!("../../../../scripts/daemon-layers.py"), include_str!("../../../../scripts/test-floor-check.py")])
+            include_str!("../../../../scripts/daemon-layers.py")])
             .args(paths).current_dir(&root).env("PATH", "/usr/bin:/bin").env("GIT_OPTIONAL_LOCKS", "0");
         let mut command = tokio::process::Command::from(command);
         command.kill_on_drop(true);

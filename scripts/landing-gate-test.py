@@ -34,6 +34,22 @@ cache = load("gate_sccache")
 
 
 class FoldBaselineTests(unittest.TestCase):
+    def test_floor_conflict_preserves_parameterized_cases(self):
+        resolver = load("fold-baselines")
+        path = "apps/macos/test-floor.txt"
+        for ours, theirs in [("101\n", "110\n"), ("110\n", "101\n")]:
+            with self.subTest(ours=ours, theirs=theirs), \
+                 patch.object(resolver, "stages", return_value=["100\n", ours, theirs]):
+                self.assertEqual(resolver.main("", [path]), {path: "111\n"})
+
+    def test_floor_conflict_refuses_decreases(self):
+        resolver = load("fold-baselines")
+        path = "apps/shared/AgentKit/test-floor.txt"
+        for ours, theirs in [("99\n", "110\n"), ("110\n", "99\n")]:
+            with self.subTest(ours=ours, theirs=theirs), \
+                 patch.object(resolver, "stages", return_value=["100\n", ours, theirs]):
+                self.assertEqual(resolver.main("", [path]), {})
+
     def layer_config(self, modules):
         return json.dumps({"about": "fixture", "allowed": {"engine": [], "service": []},
                            "composition": [], "modules": modules})
@@ -62,7 +78,7 @@ class FoldBaselineTests(unittest.TestCase):
              patch.object(resolver, "git", return_value=config), \
              patch.object(scanner, "scan", return_value=({"one": ("engine", "service", "one", "dependency"),
                                                           "two": ("engine", "service", "two", "dependency")}, [], {})):
-            result = resolver.resolve([resolver.COUNTS], vars(scanner), "")
+            result = resolver.resolve([resolver.COUNTS], vars(scanner))
         counts, faults = scanner.read_counts(result[resolver.COUNTS])
         self.assertFalse(faults)
         self.assertEqual(counts, {("engine", "service"): 1})

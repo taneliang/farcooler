@@ -24,11 +24,12 @@ floor appears in gate failure output during the window.
 ## Resolution
 
 - Both Swift floors retain their numeric format. When a pick conflicts, the
-  resolver adjusts the current floor by the change in test declarations
-  between the commit that set the current floor and the pending index.
-  This preserves the floor's calibration and includes tests applied by an
-  earlier commit in the same ticket. The landing check rejects any floor below the
-  pinned fold base, and the Swift test runs still enforce the floor.
+  resolver adds the incoming commit's floor increase to the current floor.
+  Git supplies the picked commit's parent as the base for that increase.
+  This preserves the reviewed number of cases for parameterized tests and
+  works when the ticket adds its tests in an earlier commit. A side below
+  the conflict base requires manual resolution. The landing check rejects any
+  floor below the pinned fold base, and the Swift test runs enforce the floor.
 - The daemon layer table retains its JSON format. The resolver reconstructs
   the table from Git's three versions, combining independent module ownership
   and policy entries. Two different assignments for the same module, two
@@ -46,10 +47,12 @@ floor appears in gate failure output during the window.
 ## Verification
 
 The original two-ticket floor test failed before the fix because the second
-ticket went back to build. The gate fixture checks for both tickets' test
-files and the combined floor of 103. The recorded ov-1424 layer conflict also
-reconstructs the table with both `landing_update` and `native_hold` assigned
-to the engine layer.
+ticket went back to build. The gate fixture now checks for both tickets' test
+files and the combined floor of 111, with one ordinary test and ten cases from
+one parameterized test. The floor regression reproduced the old resolver's
+result of 102 when the parameterized test was picked second. The recorded
+ov-1424 layer conflict also reconstructs the table with both `landing_update`
+and `native_hold` assigned to the engine layer.
 
 Workspace Clippy passed with warnings denied. All 3,409 selected daemon unit
 tests passed across the full run and focused retries with the daemon and hook
@@ -79,3 +82,9 @@ and the code-conflict send-back. Eight tests failed on the first run and
 passed in isolated retries. The builder-priority retry used the shell's
 inherited niceness of 10 so the builder could lower its priority further.
 Eighteen tests were ignored by the harness.
+
+For the parameterized-test follow-up, workspace Clippy and all 28 landing-gate
+Python tests passed. The daemon run passed 3,404 of 3,409 selected tests.
+The remaining five passed with native Python and the engine's inherited
+niceness of 10. The focused rerun also passed the shared-floor group gate
+and the code-conflict send-back.
