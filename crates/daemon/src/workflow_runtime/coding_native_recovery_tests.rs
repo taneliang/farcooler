@@ -3,6 +3,16 @@ use super::*;
 use super::super::{coding_tests::{configured, admitted}, tests::{enqueue, finish}};
 #[tokio::test]
 async fn workflow_coding_native_reopen_ends_original_pty_before_resuming() {
+    assert_native_reopen(None).await;
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn workflow_coding_native_reopen_retains_a_quarantine_refusal() {
+    assert_native_reopen(Some("/fixture/quarantined-agent")).await;
+}
+
+async fn assert_native_reopen(quarantined: Option<&str>) {
     let (dir, mut runtime) = configured(false, "pass").await;
     let settings = dir.path().join("settings.json");
     std::fs::write(&settings, serde_json::to_vec(&crate::hook_install::claude_settings(&runtime.root.join("h.sock"))).unwrap()).unwrap();
@@ -27,16 +37,31 @@ async fn workflow_coding_native_reopen_ends_original_pty_before_resuming() {
     let mut foreign = owner.clone(); foreign.tty = "/dev/foreign".into();
     assert!(runtime.quiesce_native(&foreign).await.is_err());
     assert_eq!(host.0.pane_life(&owner.pane, id).await.unwrap(), farcooler_tmux::PaneLife::Live);
+    if let Some(executable) = quarantined {
+        // The launch check left its refusal on disk just before the runner went away.
+        durable(&runtime.quarantine_receipt(&binding), executable.as_bytes()).unwrap();
+    }
     drop(runtime);
     let mut runtime = Runtime::open(&root).unwrap();
     runtime.pump(200).await.unwrap();
     let state = runtime.state("w").unwrap().unwrap();
     let item = &state.items["one"];
-    assert_eq!(item.phase, Phase::Running);
     assert_eq!(item.attempt, 1);
-    assert!(item.reason.as_deref().is_some_and(|s| s.contains("interrupted") && s.contains("resumed")));
     assert_ne!(host.0.pane_life(&owner.pane, id).await.unwrap(), farcooler_tmux::PaneLife::Live);
-    assert_eq!(runtime.reconcile_coding(&binding).await.unwrap(), Outcome::SafeFailure);
+    let outcome = runtime.reconcile_coding(&binding).await.unwrap();
+    if let Some(executable) = quarantined {
+        assert_eq!(item.phase, Phase::Failed);
+        let reason = item.failure.as_deref().unwrap();
+        assert!(reason.contains("com.apple.quarantine") && reason.contains(executable), "{reason}");
+        assert_eq!(outcome, Outcome::SafeFailureBecause(reason.into()));
+        let mut needs_you = Vec::new();
+        crate::engine_stuck::include_refusals(&runtime.store, &mut needs_you);
+        assert!(needs_you.iter().any(|entry| entry.item == "one" && entry.question == reason));
+    } else {
+        assert_eq!(item.phase, Phase::Running);
+        assert!(item.reason.as_deref().is_some_and(|s| s.contains("interrupted") && s.contains("resumed")));
+        assert_eq!(outcome, Outcome::SafeFailure);
+    }
 }
 #[tokio::test]
 async fn workflow_service_native_stop_ignores_launch_drift_with_original_owner() {
