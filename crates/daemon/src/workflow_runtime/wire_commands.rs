@@ -1,5 +1,7 @@
 //! Only the RPC admission seam supplies principal; the wire vocabulary has none.
 use super::*;
+use super::process_logs::LOG_PREVIEW_BYTES;
+use super::wire_history::{ListOrder::{NewestFirst, OldestFirst}, WorkflowRead, archived_value, preview, recent};
 use farcooler_protocol::workflow_commands::{Action, MAX_BYTES};
 use farcooler_store::{workflow::{Receipt, WorkflowActor}, workflow_publication::Write};
 
@@ -91,116 +93,6 @@ fn retain_plan_items(state: &mut State) {
     }
 }
 
-/// Released Plan reads one unmarked workflow snapshot. Keep the complete reply
-/// when it fits, then shed history before limiting live runs to one frame.
-pub(crate) fn encode_legacy_get(mut value: serde_json::Value) -> String {
-    let json = value.to_string();
-    if json.len() <= PLAN_WORKFLOW_BYTES {
-        return json;
-    }
-    if let Some(archive) = value.pointer_mut("/state/archive").and_then(|v| v.as_object_mut())
-        && !archive.is_empty()
-    {
-        let omitted = archive.len();
-        archive.clear();
-        value["archive_omitted"] = omitted.into();
-        let json = value.to_string();
-        if json.len() <= PLAN_WORKFLOW_BYTES {
-            return json;
-        }
-    }
-
-    // Release history can outgrow the frame even with very few live items.
-    // Plan can render from the state, authenticated context and stop records.
-    let fields = value.as_object_mut().expect("workflow reply object");
-    for key in ["publication_history", "notices", "notice_deliveries",
-        "build_cleanup", "build_cleanup_omitted", "process_logs", "process_logs_omitted"]
-    {
-        fields.remove(key);
-    }
-    let json = value.to_string();
-    if json.len() <= PLAN_WORKFLOW_BYTES {
-        return json;
-    }
-
-    // Released action clients use this caller's sequence to prepare mutations.
-    let source = value.pointer("/context/capabilities/decision_principal")
-        .and_then(|v| v.as_str()).map(|principal| format!("wire:{principal}"));
-    if let Some(seen) = value.pointer_mut("/state/seen").and_then(|v| v.as_array_mut()) {
-        seen.clear();
-    }
-    if let Some(sequences) = value.pointer_mut("/state/source_sequences").and_then(|v| v.as_object_mut()) {
-        sequences.retain(|key, _| Some(key.as_str()) == source.as_deref());
-    }
-    // Keep the current run visible even if its previous runs fill the frame.
-    if let Some(items) = value.pointer_mut("/state/items").and_then(|v| v.as_object_mut()) {
-        for item in items.values_mut().filter_map(|v| v.as_object_mut()) {
-            item.remove("history");
-        }
-    }
-    let json = value.to_string();
-    if json.len() <= PLAN_WORKFLOW_BYTES {
-        return json;
-    }
-
-    fit_legacy_workflow(value)
-}
-
-fn fit_legacy_workflow(mut value: serde_json::Value) -> String {
-    let fields = value.as_object_mut().expect("workflow reply object");
-    let configuration = fields.remove("configuration");
-    let places = fields.remove("places");
-    fields.retain(|key, _| matches!(key.as_str(), "schema" | "context" | "state" | "stops" | "archive_omitted"));
-
-    // The base reply now contains just authenticated context, State's required
-    // identity and observation fields, and empty or single-entry collections.
-    let mut items = Vec::new();
-    if let Some(state) = value["state"].as_object_mut() {
-        state.retain(|key, _| matches!(key.as_str(),
-            "schema" | "workspace" | "revision" | "epoch" | "items" | "seen" | "source_sequences"));
-        let rows = state["items"].as_object_mut().expect("workflow state items");
-        items.extend(std::mem::take(rows));
-    }
-    let stops = std::mem::take(value["stops"].as_object_mut().expect("workflow stops"));
-    let count = items.len();
-    value["items_omitted"] = count.into();
-    let mut remaining = PLAN_WORKFLOW_BYTES - value.to_string().len();
-
-    // Plan already shows tracker-only tickets as board cards. Fit whole runs
-    // with their pinned definitions, preferring active and more recent runs.
-    items.retain(|(_, item)| item["definition"]["source"] != farcooler_workflow::TICKET_SOURCE);
-    items.sort_by_key(|(_, item)| {
-        let terminal = matches!(item["phase"].as_str(), Some("Done" | "Cancelled"));
-        (terminal, std::cmp::Reverse(item["since_ms"].as_i64().unwrap_or_default()))
-    });
-    let mut retained = 0;
-    for (id, item) in items {
-        if let Some(next) = remaining.checked_sub(workflow_field_bytes(&id, &item)) {
-            remaining = next;
-            value["state"]["items"][id] = item;
-            retained += 1;
-        }
-    }
-    value["items_omitted"] = (count - retained).into();
-    for (id, stop) in stops {
-        if value["state"]["items"].get(&id).is_some()
-            && let Some(next) = remaining.checked_sub(workflow_field_bytes(&id, &stop))
-        {
-            remaining = next;
-            value["stops"][id] = stop;
-        }
-    }
-    for (key, field) in [("configuration", configuration), ("places", places)] {
-        if let Some(field) = field
-            && let Some(next) = remaining.checked_sub(workflow_field_bytes(key, &field))
-        {
-            remaining = next;
-            value[key] = field;
-        }
-    }
-    value.to_string()
-}
-
 pub(crate) fn encode_plan_get(mut value: serde_json::Value, cursor: Option<&str>)
     -> std::result::Result<String, farcooler_core::error::DomainError>
 {
@@ -250,19 +142,6 @@ fn workflow_field_bytes(key: &str, value: &serde_json::Value) -> usize {
     serde_json::to_string(key).expect("JSON key").len() + value.to_string().len() + 2
 }
 
-/// The newest this many `build_cleanup` records and process logs ride in a `workflow.get` reply (ov-1373). Both lists
-/// grow for as long as a workspace runs (766 records was 509 KB), and the daemon refuses any reply over 1 MiB. 50 keeps
-/// each list to roughly 35 KB at that record size, and a person reading a plan wants the latest, not the history.
-const RECENT_LIST: usize = 50;
-
-/// Keep the newest `RECENT_LIST` of `list`, and say how many older entries were left out as `<name>_omitted`.
-pub(super) fn bound_recent<T>(reply: &mut serde_json::Map<String, serde_json::Value>, name: &str, mut list: Vec<T>) where T: serde::Serialize {
-    let omitted = list.len().saturating_sub(RECENT_LIST);
-    list.drain(..omitted);
-    reply.insert(name.into(), serde_json::json!(list));
-    reply.insert(format!("{name}_omitted"), omitted.into());
-}
-
 impl Exec {
     fn plan_stops(&self, workspace: &str, state: Option<&State>) -> serde_json::Map<String, serde_json::Value> {
         // Why a run's named tree stopped it, for the run it stopped (ov-979).
@@ -280,6 +159,7 @@ impl Exec {
         let mut state = self.execution_state(workspace)?;
         if let Some(state) = &mut state {
             retain_plan_items(state);
+            preview(state)?;
             for item in state.items.values_mut() {
                 if let Some(reason) = item.failed_reason() {
                     item.reason = Some(reason);
@@ -292,13 +172,17 @@ impl Exec {
 
     /// Reads committed records, local stop receipts and the latest disk sample without driving effects.
     pub(super) fn read_get(&self, workspace:&str) -> Result<serde_json::Value> {
-        let deliveries=self.store.workflow_notice_deliveries(workspace)?;
-        let notices:Vec<_>=deliveries.iter().map(|d|farcooler_store::workflow::WorkflowNotice {
-            id:d.notice.id.clone(),revision:d.notice.revision,body:format!("{}:{:?}",d.notice.item,d.notice.point)
-        }).collect();
-        let (state, waiting) = match self.execution_snapshot(workspace)? {
+        Ok(self.read_preview(workspace)?.value)
+    }
+    fn read_preview(&self, workspace:&str) -> Result<WorkflowRead> {
+        let deliveries = self.store.workflow_notice_deliveries(workspace)?;
+        let (mut state, waiting) = match self.execution_snapshot(workspace)? {
             Some((state, waiting)) => (Some(state), waiting),
             None => (None, Vec::new()),
+        };
+        let preview = match &mut state {
+            Some(state) => preview(state)?,
+            None => Default::default(),
         };
         let stops = self.plan_stops(workspace, state.as_ref());
         let budgets: std::collections::BTreeMap<_, _> = state.iter().flat_map(|s| &s.items)
@@ -312,29 +196,32 @@ impl Exec {
                 view["items"][id]["send_back_refused"] = reason.into();
             }
             for (id, item) in &state.archive {
-                if item.can_start() {
-                    let (run, pin) = item.start_identity(id);
-                    view["archive"][id]["run"] = run.into();
-                    view["archive"][id]["pin"] = pin.into();
-                }
+                view["archive"][id] = archived_value(id, item)?;
             }
         }
         let mut reply = serde_json::json!({"schema":1,"configuration": self.store.workflow_configuration(workspace)?,
-            "publication_history":self.store.workflow_publication_history(workspace)?,
             "orchestrator_publishes_workflow":self.store.orchestrator_publishes_workflow(workspace)?,
-            "back_edge_budgets":budgets, "places":self.places().view_with_waiting(workspace, &waiting), "state":view, "notices":notices,"notice_deliveries":deliveries, "stops":stops});
+            "back_edge_budgets":budgets, "places":self.places().view_with_waiting(workspace, &waiting), "state":view, "stops":stops,
+            "landing_groups_omitted":preview.groups_omitted, "archive_omitted":preview.archive_omitted, "runs_omitted":preview.runs_omitted,
+            "source_sequences_omitted":0});
         let fields = reply.as_object_mut().expect("a JSON object");
         fields.insert("disk_usage".into(), self.disk_usage_reply(workspace));
-        bound_recent(fields, "build_cleanup", self.store.workflow_cleanups(workspace)?);
-        bound_recent(fields, "process_logs", self.failed_process_logs(workspace, state.as_ref())?);
-        Ok(reply)
+        recent(fields, "build_cleanup", self.store.workflow_cleanups(workspace)?, OldestFirst, 96 * 1024)?;
+        recent(fields, "process_logs", self.failed_process_logs(workspace, state.as_ref())?, OldestFirst, LOG_PREVIEW_BYTES)?;
+        recent(fields, "publication_history", self.store.workflow_publication_history(workspace)?, NewestFirst, 32 * 1024)?;
+        let notices: Vec<_> = deliveries.iter().map(|d| farcooler_store::workflow::WorkflowNotice {
+            id: d.notice.id.clone(), revision: d.notice.revision, body: format!("{}:{:?}", d.notice.item, d.notice.point)
+        }).collect();
+        recent(fields, "notices", notices, NewestFirst, 16 * 1024)?;
+        recent(fields, "notice_deliveries", deliveries, NewestFirst, 32 * 1024)?;
+        Ok(WorkflowRead { value: reply, preview })
     }
 }
 impl CommandHandle {
     /// A read has no receipt or reducer input, so it need not join the single writer's inbox.
     /// SQLite, file reads and JSON construction run on a blocking worker; authority is rechecked
     /// after the wait before any reply (including owner-only configuration values) is released.
-    pub(crate) async fn read_get(&self, admission:Admission, view:GetView) -> Result<serde_json::Value> {
+    pub(crate) async fn read_get(&self, admission:Admission, view:GetView) -> Result<WorkflowRead> {
         if self.is_closed() { return Err(Error::Refused("runtime inbox closed")); }
         admission.recheck().and_then(|()| admission.permits(&Action::Get)).map_err(Error::Domain)?;
         let reader = self.reader.clone();
@@ -344,19 +231,24 @@ impl CommandHandle {
             // finish in the background, with the previous sample still available.
             let _ = tokio::time::timeout(Duration::from_millis(200), sample).await;
         }
-        let mut value = tokio::task::spawn_blocking(move || {
-            match view {
-                GetView::Plan => reader.read_plan_get(&workspace),
-                GetView::Full => reader.read_get(&workspace),
-                GetView::Summary => reader.read_get(&workspace).map(summarize),
+        let mut read = tokio::task::spawn_blocking(move || {
+            if matches!(view, GetView::Plan) {
+                return Ok::<_, Error>(WorkflowRead {
+                    value: reader.read_plan_get(&workspace)?,
+                    preview: Default::default(),
+                });
             }
+            let mut read = reader.read_preview(&workspace)?;
+            if matches!(view, GetView::Summary) { read.value = summarize(read.value); }
+            Ok(read)
         }).await.map_err(|_| Error::Refused("workflow read worker failed"))??;
         admission.recheck().and_then(|()| admission.permits(&Action::Get)).map_err(Error::Domain)?;
         if self.is_closed() { return Err(Error::Refused("runtime inbox closed")); }
+        let value = &mut read.value;
         let epoch = value.pointer("/state/epoch").and_then(|v| v.as_u64()).unwrap_or(1);
         value["context"] = admission.context(epoch);
-        if !admission.is_owner() { hide_environment(&mut value); }
-        Ok(value)
+        if !admission.is_owner() { hide_environment(value); }
+        Ok(read)
     }
     /// Read one selected bundle without loading execution state, history, or runner suggestions.
     pub(crate) async fn read_bundle(&self, admission: Admission) -> Result<String> {
@@ -434,7 +326,7 @@ impl Runtime {
             | Action::ResolveCancellation { mutation, .. } | Action::Queue { mutation, .. } | Action::Leave { mutation, .. } | Action::Settle { mutation, .. } | Action::Resolve { mutation, .. }
             | Action::Track { mutation, .. } | Action::Move { mutation, .. } | Action::Start { mutation, .. }
             | Action::SendBack { mutation, .. } | Action::Close { mutation, .. } | Action::Reopen { mutation, .. } | Action::Landed { mutation, .. } => mutation,
-            Action::Get | Action::Logs { .. } | Action::Propose { .. } | Action::Drafts { .. } | Action::PreviewPublication { .. } => unreachable!(),
+            Action::Get | Action::GetPage { .. } | Action::Logs { .. } | Action::History { .. } | Action::ArchiveItem { .. } | Action::Propose { .. } | Action::Drafts { .. } | Action::PreviewPublication { .. } => unreachable!(),
         };
         if !valid_id(&mutation.id) || mutation.id.len() > 100 { return Err(Error::Refused("invalid command id")); }
         let id = format!("wire:{principal}:{}", mutation.id);
@@ -660,7 +552,7 @@ impl Runtime {
                     let input = input(Command::Reopen { item:item.clone(),definition,policy_pin,resource:Exec::item_resource(workspace, item) },Grant::Controller);
                     self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
                 }
-                Action::Get | Action::Logs { .. } | Action::Propose { .. } | Action::Drafts { .. } | Action::PreviewPublication { .. } => unreachable!(),
+                Action::Get | Action::GetPage { .. } | Action::Logs { .. } | Action::History { .. } | Action::ArchiveItem { .. } | Action::Propose { .. } | Action::Drafts { .. } | Action::PreviewPublication { .. } => unreachable!(),
             }
         };
         // A board tracks its cards once it has a published workflow, so the cards already on it come under the engine now (ov-962).
@@ -693,7 +585,8 @@ mod tests {
             "context": {"capabilities": {"decision_principal": "owner"}},
             "publication_history": [{"body": "x".repeat(PLAN_WORKFLOW_BYTES)}]
         });
-        let encoded = encode_legacy_get(reply);
+        let encoded = WorkflowRead { value: reply, preview: Default::default() }
+            .into_json(false).unwrap();
         assert!(encoded.len() <= PLAN_WORKFLOW_BYTES);
         let decoded: serde_json::Value = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded["state"], state);
@@ -710,7 +603,8 @@ mod tests {
                 }}},
             "places": {"waiting": [{"item": "waiting", "position": 2}]}
         });
-        let encoded = encode_legacy_get(reply);
+        let encoded = WorkflowRead { value: reply, preview: Default::default() }
+            .into_json(false).unwrap();
         assert!(encoded.len() <= PLAN_WORKFLOW_BYTES);
         let decoded: serde_json::Value = serde_json::from_str(&encoded).unwrap();
         let item = &decoded["state"]["items"]["waiting"];

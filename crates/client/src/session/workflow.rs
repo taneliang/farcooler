@@ -151,10 +151,21 @@ impl Session {
             vec![capability::WORKFLOW_COMMANDS.into()]).await?;
         crate::plan_json::workflow_reply(value)
     }
+    pub(super) async fn read_workflow(&self, workspace: Uuid) -> Result<serde_json::Value, SessionError> {
+        use std::ops::ControlFlow;
+        let (mut pages, mut request) = crate::plan_json::WorkflowPages::start(workspace);
+        loop {
+            let reply = self.start_request(request)?.value().await?;
+            match pages.receive(reply)? {
+                ControlFlow::Break(snapshot) => return Ok(snapshot),
+                ControlFlow::Continue(next) => request = next,
+            }
+        }
+    }
+
     /// Fetch authenticated state, admission context and schema2 cards.
     pub async fn workflow_snapshot(&self, workspace: Uuid, style: Style) -> Result<WorkflowSnapshot, SessionError> {
-        let reply = self.start_request(crate::plan_json::workflow_request(workspace))?.value().await?;
-        let raw = crate::plan_json::workflow_reply(reply)?;
+        let raw = self.read_workflow(workspace).await?;
         let (state, context, presentation) = decode_presentation(workspace, &raw, style)?;
         let host = self.host().await?;
         let host = Uuid::from_slice(&host.id).map_err(|_| invalid("invalid workflow host identity"))?.to_string();

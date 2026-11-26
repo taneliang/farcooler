@@ -39,6 +39,7 @@ data class WorkflowView(
     val retained: List<RetainedWorkflow> = emptyList(),
     val presentation: WorkflowPresentation? = null, val ready: Boolean = false,
     val busy: Boolean = false, val notice: String = "", val inspection: String = "",
+    val readFailed: Boolean = false,
 )
 // Main-thread display controller. Owns no engine, event ACK or durable receipt.
 class WorkflowRunsModel(val host: String, val workspace: String) {
@@ -49,7 +50,7 @@ class WorkflowRunsModel(val host: String, val workspace: String) {
     fun clearInspection() { selection++; mutable.value = mutable.value.copy(inspection = "") }
     fun disconnect() {
         generation++
-        mutable.value = mutable.value.copy(ready = false, busy = false, inspection = "", notice = "Reconnect to refresh workflow runs.")
+        mutable.value = mutable.value.copy(ready = false, busy = false, inspection = "", readFailed = false, notice = "Reconnect to refresh workflow runs.")
     }
     // Recheck this completion ticket after the caller resumes from suspension.
     suspend fun refresh(port: WorkflowPort?): Long? {
@@ -57,7 +58,7 @@ class WorkflowRunsModel(val host: String, val workspace: String) {
         val ticket = ++generation
         mutable.value = mutable.value.copy(ready = false)
         if (port == null) {
-            mutable.value = mutable.value.copy(notice = "Workflow runs are not connected on this runner yet.")
+            mutable.value = mutable.value.copy(readFailed = false, notice = "Workflow runs are not connected on this runner yet.")
             return null
         }
         try {
@@ -67,11 +68,11 @@ class WorkflowRunsModel(val host: String, val workspace: String) {
                 if (mutable.value.presentation?.runs?.any { old ->
                     presentation.runs.none { it.item == old.item && it.run == old.run }
                 } == true) clearInspection()
-                mutable.value = mutable.value.copy(presentation = presentation, retained = retained, ready = true, notice = "")
+                mutable.value = mutable.value.copy(presentation = presentation, retained = retained, ready = true, readFailed = false, notice = "")
             }
         } catch (cancel: CancellationException) { throw cancel }
         catch (_: Exception) {
-            if (ticket == generation) mutable.value = mutable.value.copy(notice = "Couldn’t refresh workflow runs. Reconnect, then refresh again.")
+            if (ticket == generation) mutable.value = mutable.value.copy(readFailed = true, notice = "Far Cooler couldn’t read the workflow runs.")
         }
         return if (ticket == generation) ticket else null
     }

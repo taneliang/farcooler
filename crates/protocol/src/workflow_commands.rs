@@ -17,10 +17,16 @@ pub struct Mutation {
 #[serde(tag = "action", deny_unknown_fields)]
 pub enum Action {
     Get,
-    /// Every retained process log of one item, failed or not, in every run, live, archived or removed (ov-1298).
-    /// `Get` carries tails only for live items' last effect per stage, so a long history still loads; this reads the
-    /// rest. A read under `workflow.get`'s authority: an older runner refuses it as an unknown action.
+    /// Continue an opted-in workflow read. A changed snapshot restarts at offset zero.
+    GetPage { offset: u64, digest: String },
+    /// Recent retained process logs of one item, including archived or removed items.
+    /// Full retained log history is available through `History`.
     Logs { item: String },
+    /// A byte page of retained workflow records, under the same authority as Get.
+    History { section: HistorySection, offset: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")] item: Option<String> },
+    /// The exact archived ticket's phase and restart identity, even outside Get's preview.
+    ArchiveItem { item: String },
     /// Owner in person grants or revokes this workspace orchestrator's publication authority.
     PublicationGrant { mutation: Mutation, enabled: bool },
     /// Restore the last publication's previous immutable bundle. Owner in person only.
@@ -81,6 +87,10 @@ pub enum Action {
     /// out), under its own name, so its history stays in one place (ov-968).
     Reopen { mutation: Mutation, item: String, #[serde(default, skip_serializing_if = "Option::is_none")] column: Option<String> },
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HistorySection { Items, Groups, Archive, Cleanup, Publications, Notices, Logs, Runs, SourceSequences }
+
 /// A worktree the orchestrator names for a run: what the app calls it, and its new branch (ov-967).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -92,7 +102,7 @@ fn is_false(b: &bool) -> bool { !*b }
 impl Action {
     pub fn method(&self) -> &'static str {
         match self {
-            Self::Get | Self::Logs { .. } => "workflow.get",
+            Self::Get | Self::GetPage { .. } | Self::Logs { .. } | Self::History { .. } | Self::ArchiveItem { .. } => "workflow.get",
             Self::PublicationGrant { .. } | Self::Rollback { .. } | Self::Publish { .. } | Self::PreviewPublication { .. } => "workspace.set_workflow",
             Self::Enqueue { .. } => "workflow.enqueue",
             Self::Approve { .. } => "workflow.approve",

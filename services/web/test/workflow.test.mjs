@@ -157,7 +157,7 @@ await test('disconnect fences delayed action result through reconnect without re
 await test('stable focus survives run entry, busy completion, copy changes, failed read and action removal', async () => {
   let p = clone(fixtures[0].response.card); p.runs[0].actions[0].label = 'Refresh'
   const root = new Element('div'); const reply = deferred(); let failRead = false
-  const port = { read: async () => { if (failRead) throw Error('offline'); return p }, dispatch: () => reply.promise }
+  const port = { read: async () => { if (failRead) throw Error('code: operation-failed what: response_too_large'); return p }, dispatch: () => reply.promise }
   const board = new WorkflowBoard(p.workspace, () => port, v => renderWorkflow(root, v, board))
   const controls = () => root.querySelectorAll('button')
   const activeKey = () => document.activeElement?.getAttribute('data-workflow-control')
@@ -170,7 +170,11 @@ await test('stable focus survives run entry, busy completion, copy changes, fail
   reply.resolve('evidence'); await sending; assert.equal(activeKey(), key)
   p = clone(p); p.runs[0].actions[0].label = 'New shared copy'; await board.refresh(); assert.equal(activeKey(), key)
   failRead = true; await board.refresh(); assert.equal(activeKey(), 'all-runs')
-  failRead = false; await board.refresh(); assert.equal(activeKey(), key)
+  assert.equal(controls()[0].textContent, 'Try Again')
+  assert(allText(root).includes('couldn’t read the workflow runs'))
+  assert(!/code:|what:|response_too_large/.test(allText(root)))
+  failRead = false; controls()[0].onclick(); await Promise.resolve(); await Promise.resolve()
+  assert.equal(controls()[0].textContent, 'Refresh'); assert.equal(activeKey(), key)
   p = clone(p); p.runs[0].actions = []; await board.refresh(); assert.equal(activeKey(), 'all-runs')
   assert(root.contains(document.activeElement)); assert(!document.activeElement.disabled)
 })

@@ -29,3 +29,13 @@ export function corePhrases(ask: PlanPresenter): CorePhrases {
   }
   return words
 }
+
+export function planRetryLabel(ask: PlanPresenter): string | undefined {
+  try {
+    const answer = JSON.parse(ask(JSON.stringify({ schema: 1, engine_words: { style: 'apple' } })))
+    const label = answer?.words?.tryAgain
+    return typeof label === 'string' ? label : undefined
+  } catch {
+    return undefined
+  }
+}

@@ -131,7 +131,12 @@ struct PhonePlanColumn<Top: View>: View {
                     .accessibilityIdentifier("plan-landing")
             }
         }
-        if plan.isEmpty && !plan.hasColumnAgents && items.isEmpty && asks.isEmpty && groups.isEmpty {
+        if view == nil {
+            Section {
+                PlanNotice(title: PlanWords.couldntRead, detail: nil).accessibilityIdentifier("plan-unreadable")
+                Button(PlanWords.tryAgain) { Task { await read() } }.accessibilityIdentifier("plan-retry")
+            }
+        } else if plan.isEmpty && !plan.hasColumnAgents && items.isEmpty && asks.isEmpty && groups.isEmpty {
             // Rulings alone plan nothing, but they are something to show.
             if !(connection.keepsRulings && !plan.rulings.isEmpty) {
                 Section {

@@ -1,7 +1,7 @@
 //! Explicit workflow commands over the ordinary authenticated daemon link.
 use std::io::Read;
 use clap::{Args, Subcommand};
-use farcooler_protocol::{capability, workflow_commands::{Action, Mutation, MAX_BYTES}, v1::{self as pb, request, result}};
+use farcooler_protocol::{capability, workflow_commands::{Action, HistorySection, Mutation, MAX_BYTES}, v1::{self as pb, request, result}};
 use uuid::Uuid;
 use crate::{Fallible, req_for, with, expect_value};
 
@@ -60,16 +60,24 @@ impl Publication {
 }
 #[derive(Subcommand, Clone)]
 pub enum WorkflowCmd {
-    /// Read current state; --full includes definitions and notification history.
+    /// Read current state and history previews. --full includes definitions and recent notices.
     ///
     /// Pipe --json stdout directly to a parser. If you store it in a shell variable,
     /// use printf '%s\n' "$value" to pass it on. Shell echo can interpret JSON escapes.
     Get { workspace: Uuid, #[arg(long)] full: bool },
     /// Export the published definition and adapter as JSON for workspace workflow-draft --file.
     Bundle { workspace: Uuid },
-    /// Read one ticket's process logs, from every run, failed or not: the tails `get` leaves out for archived
-    /// and removed tickets and for a live ticket's earlier steps. Each names its whole log file too.
+    /// Read one ticket's recent process logs across runs. Use `history logs --item` for all retained entries.
     Logs { workspace: Uuid, item: String },
+    /// Read a page of retained history. Concatenate chunk strings using next_offset, then parse the JSON.
+    History {
+        workspace: Uuid,
+        #[arg(value_parser = ["items", "groups", "archive", "cleanup", "publications", "notices", "logs", "runs", "source_sequences"])]
+        section: String,
+        #[arg(long, default_value_t = 0)] offset: u64,
+        /// Filter items, groups, archive, logs or runs to this item.
+        #[arg(long)] item: Option<String>,
+    },
     /// Restore the previous workflow bundle, retaining a new audit entry. Owner in person only.
     Rollback { workspace: Uuid, #[arg(long, default_value="Restore previous workflow")] reason:String },
     /// Admit against the exact configuration pin selected from get.
@@ -169,6 +177,8 @@ impl WorkflowCmd {
             Self::Rollback { .. } => return Err("rollback is prepared from current state".into()),
             Self::Get { workspace, .. } | Self::Bundle { workspace } => (workspace, Action::Get),
             Self::Logs { workspace, item } => (workspace,Action::Logs { item }),
+            Self::History { workspace, section, offset, item } =>
+                (workspace, Action::History { section: serde_json::from_value(section.into())?, offset, item }),
             Self::Enqueue { workspace,item,pin,identity } => (workspace,Action::Enqueue { mutation:identity.mutation(),item,pin }),
             Self::Approve { workspace,item,run,pin,candidate,identity } => (workspace,Action::Approve { mutation:identity.mutation(),item,run,pin,candidate }),
             Self::Review { workspace,item,run,pin,evidence,passed,identity } => {
@@ -241,8 +251,13 @@ impl WorkflowCmd {
         let state = &snapshot["state"];
         let revision = if state.is_null() { 0 } else { state["revision"].as_u64().ok_or("missing workflow revision")? };
         let epoch = if state.is_null() { 1 } else { state["epoch"].as_u64().ok_or("missing workflow epoch")? };
-        let sequence = state["source_sequences"].as_object().map(|m| m.values().filter_map(|v|v.as_u64()).max().unwrap_or(0)).unwrap_or(0)
-            .checked_add(1).ok_or("workflow sequence exhausted")?;
+        let sequences = &state["source_sequences"];
+        let last_sequence = if let Some(principal) = snapshot.pointer("/context/capabilities/decision_principal").and_then(serde_json::Value::as_str) {
+            sequences[format!("wire:{principal}")].as_u64()
+        } else {
+            sequences.as_object().and_then(|map| map.values().filter_map(serde_json::Value::as_u64).max())
+        };
+        let sequence = last_sequence.unwrap_or_default().checked_add(1).ok_or("workflow sequence exhausted")?;
         if let Some((run,pin)) = bindings {
             let current = state["items"].get(item)
                 .or_else(|| start_pin.as_ref().and_then(|_| state["archive"].get(item))
@@ -256,21 +271,70 @@ impl WorkflowCmd {
         Ok(())
     }
 }
+#[derive(Clone, Copy)]
+enum RoutineTarget<'a> {
+    Archive(&'a str),
+    Group(&'a str),
+}
+
 trait RoutineTransport {
-    async fn read(&mut self, workspace:Uuid) -> Result<serde_json::Value, Box<dyn std::error::Error>>;
+    async fn read(&mut self, workspace:Uuid, target:Option<RoutineTarget<'_>>) -> Result<serde_json::Value, Box<dyn std::error::Error>>;
     async fn write(&mut self, workspace:Uuid, action:&Action) -> Result<serde_json::Value, Box<dyn std::error::Error>>;
 }
 impl RoutineTransport for crate::Link {
-    async fn read(&mut self, workspace:Uuid) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-        read_deadline(ask(self, workspace, &Action::Get)).await?
+    async fn read(&mut self, workspace:Uuid, target:Option<RoutineTarget<'_>>) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+        let mut snapshot = read_snapshot(self, workspace, false).await?;
+        if let Some(RoutineTarget::Archive(key)) = target
+            && snapshot["archive_omitted"].as_u64().is_some_and(|count| count > 0)
+            && snapshot["state"]["items"].get(key).is_none()
+            && snapshot["state"]["archive"].get(key).is_none()
+        {
+            let archive = read_deadline(ask(self, workspace, &Action::ArchiveItem { item: key.into() })).await??;
+            if archive["revision"] != snapshot["state"]["revision"] || archive["epoch"] != snapshot["state"]["epoch"] {
+                return Err("The workflow changed while reading the ticket. Try again.".into());
+            }
+            if archive["item"]["key"] == key { snapshot["state"]["archive"][key] = archive["item"].clone(); }
+        }
+        if let Some(RoutineTarget::Group(key)) = target
+            && snapshot["landing_groups_omitted"].as_u64().is_some_and(|count| count > 0)
+            && snapshot["state"]["items"].get(key).is_none()
+        {
+            // The mutation still checks the snapshot revision and the looked-up run and pin.
+            let groups = read_deadline(group_history(self, workspace, key)).await??;
+            if let Some(group) = groups.get(key) { snapshot["state"]["items"][key] = group.clone(); }
+        }
+        Ok(snapshot)
     }
     async fn write(&mut self, workspace:Uuid, action:&Action) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
         ask(self, workspace, action).await
     }
 }
+async fn group_history(link:&mut crate::Link, workspace:Uuid, key:&str) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let mut offset = 0;
+    let mut digest = None;
+    let mut encoded = String::new();
+    loop {
+        let page = ask(link, workspace, &Action::History {
+            section: HistorySection::Groups, offset, item: Some(key.into()),
+        }).await?;
+        let page_digest = page["digest"].as_str().ok_or("missing history digest")?;
+        if page["offset"].as_u64() != Some(offset) || digest.get_or_insert_with(|| page_digest.to_owned()) != page_digest {
+            return Err("The workflow changed while reading the landing group. Try again.".into());
+        }
+        encoded.push_str(page["chunk"].as_str().ok_or("missing history chunk")?);
+        if page["next_offset"].is_null() { return Ok(serde_json::from_str(&encoded)?); }
+        offset = page["next_offset"].as_u64().filter(|&next| next > offset).ok_or("invalid history offset")?;
+    }
+}
+
 async fn run_routine(transport:&mut impl RoutineTransport, workspace:Uuid, cmd:&WorkflowCmd) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let target = match cmd {
+        WorkflowCmd::Start { item, .. } => Some(RoutineTarget::Archive(item)),
+        WorkflowCmd::Cancel { item, .. } => Some(RoutineTarget::Group(item)),
+        _ => None,
+    };
     for attempt in 0..=3 {
-        let snapshot = transport.read(workspace).await?;
+        let snapshot = transport.read(workspace, target).await?;
         let mut prepared = cmd.clone();
         prepared.prepare_routine(&snapshot)?;
         let (_, action) = prepared.action()?;
@@ -319,11 +383,15 @@ async fn read_deadline<T>(future:impl std::future::Future<Output=T>) -> Result<T
 }
 pub async fn send(link:&mut crate::Link, workspace:Uuid, action:Action, json:bool) -> Fallible {
     if !link.daemon_capabilities().iter().any(|c| c == capability::WORKFLOW_COMMANDS) { return Err("runner lacks workflow commands".into()); }
-    let call = link.call(request(workspace,&action)?);
-    let reply = if matches!(action, Action::Get | Action::Logs { .. }) { read_deadline(call).await?? } else { call.await? };
-    let result::Value::WorkflowReply(reply) = expect_value(reply.value)? else { return Err("unexpected workflow reply".into()) };
-    if reply.schema != 1 { return Err("unsupported workflow reply schema".into()); }
-    let value:serde_json::Value = serde_json::from_str(&reply.json)?;
+    let value = if matches!(action, Action::Get) {
+        read_snapshot(link, workspace, false).await?
+    } else {
+        let call = link.call(request(workspace,&action)?);
+        let reply = if matches!(action, Action::Logs { .. } | Action::History { .. } | Action::ArchiveItem { .. }) { read_deadline(call).await?? } else { call.await? };
+        let result::Value::WorkflowReply(reply) = expect_value(reply.value)? else { return Err("unexpected workflow reply".into()) };
+        if reply.schema != 1 { return Err("unsupported workflow reply schema".into()); }
+        serde_json::from_str(&reply.json)?
+    };
     if json { println!("{}",value); } else { println!("{}",serde_json::to_string_pretty(&value)?); }
     if value.pointer("/receipt/result/Err").is_some() { return Err("workflow command refused; receipt shown above".into()); }
     Ok(())
@@ -341,16 +409,31 @@ pub(crate) async fn publication_restart_count(link: &mut crate::Link, workspace:
 /// Any workflow command's reply, unprinted.
 pub async fn ask(link:&mut crate::Link, workspace:Uuid, action:&Action) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     if !link.daemon_capabilities().iter().any(|c| c == capability::WORKFLOW_COMMANDS) { return Err("runner lacks workflow commands".into()); }
+    if matches!(action, Action::Get) { return read_snapshot(link, workspace, false).await; }
     let reply = link.call(request(workspace,action)?).await?;
     let result::Value::WorkflowReply(reply) = expect_value(reply.value)? else { return Err("unexpected workflow reply".into()) };
     Ok(serde_json::from_str(&reply.json)?)
 }
-/// The runner's full workflow reply, unprinted.
+/// Read the snapshot for either CLI projection, with one deadline across all pages.
+pub(crate) async fn read_snapshot(link: &mut impl crate::tasks::DispatchLink, workspace: Uuid, full: bool)
+    -> Result<serde_json::Value, Box<dyn std::error::Error>>
+{
+    use farcooler_client::session::SessionError;
+    let view = if full { "workflow_full_v1" } else { "workflow_summary_v1" };
+    let snapshot = read_deadline(farcooler_client::plan_json::read_workflow_view(workspace, Some(view), async |request| {
+        let answer = link.call(request).await?;
+        answer.value.ok_or_else(|| SessionError::Protocol(crate::daemon_link::UNREADABLE.into()))
+    })).await??;
+    if snapshot["source_sequences_omitted"].as_u64().unwrap_or_default() > 0 {
+        return Err("The runner returned an incomplete workflow sequence map.".into());
+    }
+    Ok(snapshot)
+}
+
+/// The full `workflow get` reply, unprinted, for the commands that draft from it.
 pub async fn get(link:&mut crate::Link, workspace:Uuid) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     if !link.daemon_capabilities().iter().any(|c| c == capability::WORKFLOW_COMMANDS) { return Err("runner lacks workflow commands".into()); }
-    let reply = read_deadline(link.call(full_request(workspace)?)).await??;
-    let result::Value::WorkflowReply(reply) = expect_value(reply.value)? else { return Err("unexpected workflow reply".into()) };
-    Ok(serde_json::from_str(&reply.json)?)
+    read_snapshot(link, workspace, true).await
 }
 
 /// Draft commands can wait for the runner's background starter settings.
@@ -491,6 +574,24 @@ mod tests {
         assert!(result.is_ok(), "a read must have its own deadline");
         assert!(result.unwrap().unwrap_err().to_string().contains("timed out after 10 seconds"));
     }
+    #[test]
+    fn workflow_history_selects_a_section_and_offset() {
+        for (name, section, item) in [
+            ("archive", HistorySection::Archive, Some("ov-9")),
+            ("source_sequences", HistorySection::SourceSequences, None),
+        ] {
+            let mut args = vec!["farcooler", "workflow", "history",
+                "00000000-0000-0000-0000-000000000000", name, "--offset", "12", "--json"];
+            if let Some(item) = item { args.extend(["--item", item]); }
+            let cli = crate::Cli::try_parse_from(args).unwrap();
+            let crate::Command::Workflow(command) = cli.command else { panic!("expected workflow command") };
+            let (workspace, action) = command.action().unwrap();
+            assert_eq!(workspace, Uuid::nil());
+            assert_eq!(action, Action::History { section, offset: 12, item: item.map(String::from) });
+            assert_eq!(request(workspace, &action).unwrap().method, "workflow.get");
+        }
+    }
+
     #[test]
     fn workflow_get_accepts_full() {
         let args = ["farcooler", "workflow", "get", "00000000-0000-0000-0000-000000000000", "--full", "--json"];
@@ -826,8 +927,13 @@ mod routine_tests {
     #[derive(Default)]
     struct Racing { actions: Vec<Action>, stale: usize }
     impl RoutineTransport for Racing {
-        async fn read(&mut self, _:Uuid) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-            Ok(serde_json::json!({"state":{"revision":self.actions.len(),"epoch":1,"source_sequences":{"wire:owner":4},"items":{"ov-1":{"run":"r","pin":"p"}}},"configuration":{"pin":"current"}}))
+        async fn read(&mut self, _:Uuid, _:Option<RoutineTarget<'_>>) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+            Ok(serde_json::json!({
+                "state":{"revision":self.actions.len(),"epoch":1,"source_sequences":{"wire:owner":4,"wire:member:alice":u64::MAX},
+                    "items":{"ov-1":{"run":"r","pin":"p"}}},
+                "context":{"capabilities":{"decision_principal":"owner"}},
+                "configuration":{"pin":"current"}
+            }))
         }
         async fn write(&mut self, _:Uuid, action:&Action) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
             self.actions.push(action.clone());

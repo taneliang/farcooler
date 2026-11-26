@@ -271,6 +271,16 @@ fn needs_the_line(capabilities: &[String]) -> Result<(), Failed> {
 
 type Failed = Box<dyn std::error::Error>;
 
+async fn read_workflow(link: &mut impl DispatchLink, workspace: uuid::Uuid)
+    -> Result<serde_json::Value, farcooler_client::session::SessionError>
+{
+    use farcooler_client::session::SessionError;
+    farcooler_client::plan_json::read_workflow(workspace, async |request| {
+        let answer = link.call(request).await?;
+        answer.value.ok_or_else(|| SessionError::Protocol("workflow.get returned nothing".into()))
+    }).await
+}
+
 /// One `plan` command on `board`, answering what to print.
 async fn run_on<L: DispatchLink>(
     link: &mut L,
@@ -290,13 +300,7 @@ async fn run_on<L: DispatchLink>(
     match cmd {
         Some(PlanCmd::Engine) => {
             let workspace = crate::uuid_of(&ws);
-            let request = farcooler_client::plan_json::workflow_request(workspace);
-            let reply = link.call(request).await?;
-            let result::Value::WorkflowReply(reply) = expect_value(reply.value)? else {
-                return Err("Invalid workflow reply".into());
-            };
-            if reply.schema != 1 { return Err("Invalid workflow reply schema".into()); }
-            let raw = serde_json::from_str(&reply.json)?;
+            let raw = read_workflow(link, workspace).await?;
             // A slow or unavailable Plan read should only cost titles and CI enrichment.
             let plan = tokio::time::timeout(std::time::Duration::from_secs(2), get_plan(link, &ws, false))
                 .await.ok().and_then(Result::ok);

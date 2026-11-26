@@ -181,7 +181,7 @@ struct PlanBoardSections: View {
     @ViewBuilder
     private func sections(_ plan: PlanModel) -> some View {
         let view = PlanViewBridge.view(plan: plan, facts: hook.facts, statuses: hook.statuses)
-        if plan.isEmpty && (view?.landingGroups ?? []).isEmpty {
+        if let view, plan.isEmpty && (view.landingGroups ?? []).isEmpty {
             // Rulings alone plan nothing (review 1005a F1), but they're
             // something to show, so the notice stands down for them.
             if !(hook.keepsRulings && !plan.rulings.isEmpty) {
@@ -192,8 +192,7 @@ struct PlanBoardSections: View {
             }
             PlanRulingsSection(plan: plan, keeps: hook.keepsRulings, actions: hook.rulingActions, pastOpen: $pastRulingsOpen)
         } else {
-            // The Rust core's view decides the sections and their words
-            // (ov-1016); a plan the runner sent always has one.
+            // The Rust core's view decides the sections and their words (ov-1016).
             if let view {
                 if hook.showsBand {
                     Section {
@@ -203,8 +202,11 @@ struct PlanBoardSections: View {
                 }
                 PlanSectionsList(view: view, plan: plan, hook: hook)
             } else {
-                // The core couldn't read the plan: say so, as Android and the web do.
-                Section { PlanNotice(title: PlanWords.couldntRead, detail: nil).accessibilityIdentifier("plan-unreadable") }
+                Section {
+                    PlanNotice(title: PlanWords.couldntRead, detail: nil).accessibilityIdentifier("plan-unreadable")
+                    Button(PlanWords.tryAgain) { Task { await hook.read() } }
+                        .accessibilityIdentifier("plan-retry")
+                }
             }
             // Behind `board_cost`: a runner without it sends no cost (ov-307).
             if let cost = plan.cost, cost.isWorthShowing {

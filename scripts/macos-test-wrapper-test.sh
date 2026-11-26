@@ -15,7 +15,7 @@ cd "$(dirname "$0")/.."
 real="$PWD/apps/macos/test.sh"
 native_real="$PWD/apps/macos/build-test-native.sh"
 
-scratch="$(mktemp -d)"
+scratch="$(mktemp -d "${TMPDIR:-/tmp}/farcooler-macos-test-wrapper.XXXXXX")"
 trap 'rm -rf "$scratch"' EXIT
 mkdir -p "$scratch/apps/macos" "$scratch/apps/shared/AgentKit" "$scratch/bin" "$scratch/scripts"
 mkdir -p "$scratch/home/.cargo/bin"
@@ -135,24 +135,31 @@ echo "ok: the guarded Swift suites share one native build and propagate failures
 
 # Exercise the real native helper after the wrapper's stand-in cases.
 cp "$native_real" "$scratch/apps/macos/build-test-native.sh"
-mkdir -p "$scratch/crates/vt/include" "$scratch/apps/macos/Sources/CFarCoolerVT" "$scratch/target/release"
+mkdir -p "$scratch/crates/vt/include" "$scratch/apps/macos/Sources/CFarCoolerVT"
 printf '%s\n' current-header >"$scratch/crates/vt/include/farcooler_vt.h"
 touch -t 200001010000 "$scratch/crates/vt/include/farcooler_vt.h"
 cat >"$scratch/home/.cargo/bin/cargo" <<'STUB'
 #!/bin/bash
 [ "$*" = 'build --config profile.dev.opt-level=1 --config profile.dev.package.farcooler-cli.opt-level=0 --config profile.dev.package.farcooler-daemon.opt-level=0 --lib --bins -p farcooler-vt -p farcooler-client -p farcooler-cli -p farcooler-daemon' ] || exit 91
 [ "${NATIVE_FAILS:-}" = 1 ] && exit 1
-mkdir -p target/debug
-for name in farcooler_vt farcooler_client; do echo fresh-library >"target/debug/lib$name.a"; done
-for name in farcooler farcoolerd farcooler-lfs-filter; do echo fresh-binary >"target/debug/$name"; done
+target_dir="${CARGO_TARGET_DIR:-target}"
+mkdir -p "$target_dir/debug"
+for name in farcooler_vt farcooler_client; do echo fresh-library >"$target_dir/debug/lib$name.a"; done
+for name in farcooler farcoolerd farcooler-lfs-filter; do echo fresh-binary >"$target_dir/debug/$name"; done
 STUB
-printf '%s\n' stale-library >"$scratch/target/release/libfarcooler_client.a"
-"$scratch/apps/macos/build-test-native.sh"
-for name in farcooler_vt farcooler_client; do
-  [ "$(cat "$scratch/target/release/lib$name.a")" = fresh-library ] || fail "native helper staged a stale library"
-done
-for name in farcooler farcoolerd farcooler-lfs-filter; do
-  [ "$(cat "$scratch/target/debug/$name")" = fresh-binary ] || fail "native helper dropped a real-CLI target"
+for target_dir in "$scratch/target" "$scratch/native-target"; do
+  native_env=(env -u CARGO_TARGET_DIR)
+  if [ "$target_dir" = "$scratch/native-target" ]; then native_env+=("CARGO_TARGET_DIR=$target_dir"); fi
+  mkdir -p "$target_dir/release"
+  printf '%s\n' stale-library >"$target_dir/release/libfarcooler_client.a"
+  "${native_env[@]}" "$scratch/apps/macos/build-test-native.sh"
+  for name in farcooler_vt farcooler_client; do
+    [ "$(cat "$target_dir/release/lib$name.a")" = fresh-library ] || fail "native helper staged a stale library"
+  done
+  for name in farcooler farcoolerd farcooler-lfs-filter; do
+    [ "$(cat "$target_dir/debug/$name")" = fresh-binary ] || fail "native helper dropped a real-CLI target"
+  done
+  if "${native_env[@]}" NATIVE_FAILS=1 "$scratch/apps/macos/build-test-native.sh"; then fail "native helper swallowed Cargo failure"; fi
 done
 cmp "$scratch/crates/vt/include/farcooler_vt.h" "$scratch/apps/macos/Sources/CFarCoolerVT/farcooler_vt.h" || fail "staged header differs"
 python3 - "$scratch" <<'CHECK'
@@ -160,5 +167,4 @@ import pathlib, sys
 root = pathlib.Path(sys.argv[1])
 assert (root / "crates/vt/include/farcooler_vt.h").stat().st_mtime_ns == (root / "apps/macos/Sources/CFarCoolerVT/farcooler_vt.h").stat().st_mtime_ns
 CHECK
-if NATIVE_FAILS=1 "$scratch/apps/macos/build-test-native.sh"; then fail "native helper swallowed Cargo failure"; fi
-echo "ok: one dev target graph builds every native product and stages fresh libraries/header with build failures propagated"
+echo "ok: native products and headers are staged with default and custom Cargo targets, and build failures propagate"

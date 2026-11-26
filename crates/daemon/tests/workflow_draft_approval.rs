@@ -591,15 +591,20 @@ async fn ov1456_bundle_exports_live_settings_and_can_draft_a_change() {
     assert!(tracked.pointer("/receipt/result/Ok").is_some(), "{tracked}");
     let mut state = host.service.store.workflow_state(&ws.to_string()).unwrap().unwrap();
     state.seen.extend((0..4000).map(|n| format!("{n}-{}", "history".repeat(42))));
+    let frame_cap = farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES;
+    assert!(serde_json::to_vec(&state).unwrap().len() > frame_cap);
     host.service.store.workflow_state_for_tests(&state).unwrap();
 
     let mut req = farcooler_transport::request("workflow.get");
     req.target_resource_id = Some(bytes::Bytes::copy_from_slice(ws.as_bytes()));
     req.payload = Some(request::Payload::WorkflowCommand(pb::WorkflowCommand { schema: 1, json: r#"{"action":"Get"}"#.into() }));
-    let mut full_req = req.clone();
-    full_req.accepts.push(farcooler_protocol::accepts::WORKFLOW_FULL.into());
-    let full = link.call(full_req).await.unwrap_err();
-    assert!(matches!(&full, farcooler_transport::ClientError::Daemon { what, .. } if what == "response_too_large"), "{full:?}");
+    // The legacy read now bounds retained history too. Bundle export still
+    // returns the exact published definition and adapter on their own.
+    let result::Value::WorkflowReply(full) = link.call(req.clone()).await.unwrap().value.unwrap() else { panic!("wrong result") };
+    assert!(full.json.len() < frame_cap);
+    let full: serde_json::Value = serde_json::from_str(&full.json).unwrap();
+    assert_eq!(full["state"]["revision"], state.revision);
+    assert_eq!(full["configuration"]["pin"].as_str(), published.as_deref());
     req.accepts.push(farcooler_protocol::workflow_commands::BUNDLE_VIEW.into());
     let result::Value::WorkflowReply(reply) = link.call(req).await.unwrap().value.unwrap() else { panic!("wrong result") };
     assert!(reply.json.len() < 60 * 1024);

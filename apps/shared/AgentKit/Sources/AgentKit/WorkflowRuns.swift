@@ -59,6 +59,7 @@ public final class WorkflowRunsModel: ObservableObject {
     @Published public private(set) var retained: [RetainedWorkflow] = []
     @Published public private(set) var ready = false
     @Published public private(set) var busy = false
+    @Published public private(set) var readFailed = false
     @Published public private(set) var notice = ""
     @Published public private(set) var inspection = ""
     private var generation: UInt64 = 0
@@ -67,6 +68,7 @@ public final class WorkflowRunsModel: ObservableObject {
     public func clearInspection() { selection &+= 1; inspection = "" }
     public func disconnect() {
         generation &+= 1; ready = false; busy = false; inspection = ""
+        readFailed = false
         notice = "Reconnect to refresh workflow runs."
     }
     // A completion ticket must still match after the caller resumes from await.
@@ -76,7 +78,11 @@ public final class WorkflowRunsModel: ObservableObject {
         generation &+= 1
         let ticket = generation
         ready = false
-        guard let port else { notice = "Workflow runs are not connected on this runner yet."; return nil }
+        guard let port else {
+            readFailed = false
+            notice = "Workflow runs are not connected on this runner yet."
+            return nil
+        }
         do {
             let json = try await port.read(host, workspace)
             let pending = try await port.pending(host, workspace)
@@ -87,10 +93,11 @@ public final class WorkflowRunsModel: ObservableObject {
             }) == true { clearInspection() }
             retained = pending
             presentation = next
-            ready = true; notice = ""
+            ready = true; readFailed = false; notice = ""
         } catch {
             guard ticket == generation else { return nil }
-            notice = "Couldn’t refresh workflow runs. Reconnect or try Refresh."
+            readFailed = true
+            notice = "Far Cooler couldn’t read the workflow runs."
         }
         return ticket == generation ? ticket : nil
     }

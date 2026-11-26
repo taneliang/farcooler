@@ -11,6 +11,7 @@
 /// string sink).
 
 import { planFailure } from './copy'
+import { planRetryLabel } from './core-phrases'
 import { age } from './needs'
 import { type CountKind, type NeedsItem, type NeedsRow, needsRows } from './plan-column'
 import { type ColumnAgent, type ColumnTicket, type Column, type Count, type Fact, type Initiative, type PlanPresenter, presentPlan, type PlanViewModel, type Role } from './plan-present'
@@ -33,6 +34,7 @@ export interface PlanHandlers {
   cancel(): void
   keep(ruling: string): void
   keepAll(): void
+  retry(): void
 }
 
 const make = <K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = ''): HTMLElementTagNameMap[K] => {
@@ -65,6 +67,16 @@ function notice(text: string | undefined): HTMLElement | null {
 
 const BANNER = 'note plan-banner'
 const SVG = 'http://www.w3.org/2000/svg'
+
+function readBanner(message: string, present: PlanPresenter, retry?: () => void): HTMLElement {
+  const banner = make('p', BANNER, message)
+  banner.setAttribute('role', 'status')
+  if (retry) {
+    const label = planRetryLabel(present)
+    if (label) banner.append(' ', button(label, 'quiet', retry))
+  }
+  return banner
+}
 
 /// The glyphs of the roles, as the Mac's SF Symbols: a hammer, an eye, an
 /// arrow onto a line, and a sparkle.
@@ -399,9 +411,7 @@ export function renderPlan(root: HTMLElement, view: PlanBoardView, now: number, 
   const typing = view.editing !== null
   const children: HTMLElement[] = []
   if (view.banner) {
-    const banner = make('p', BANNER, view.banner)
-    banner.setAttribute('role', 'status')
-    children.push(banner)
+    children.push(readBanner(view.banner, present, view.state === 'old' ? undefined : on.retry))
   }
   if (on.order) {
     const openOrder = button(on.order.label, 'plan-count-link', on.order.open)
@@ -417,7 +427,7 @@ export function renderPlan(root: HTMLElement, view: PlanBoardView, now: number, 
     let needs = needsRows(model, view.plan, items)
     if (model && needs.length !== items.length) model = presentPlan(present, view.raw, { needsYou: needs.length })
     if (model) children.push(...draw(view.plan, model, needs, view, now, on))
-    else children.push(make('p', BANNER, planFailure('protocol', view.runner)))
+    else children.push(readBanner(planFailure('protocol', view.runner), present, on.retry))
   } else if (view.state === 'ready') children.push(make('h2', 'plan-clear', WORDS.nothingPlanned))
   root.replaceChildren(...children)
   if (open) root.querySelector('details.plan-fold')?.setAttribute('open', '')

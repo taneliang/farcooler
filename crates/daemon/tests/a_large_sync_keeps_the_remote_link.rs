@@ -29,7 +29,7 @@ async fn released_app_plan_loads_when_workflow_metadata_exceeds_the_frame() {
 }
 
 #[tokio::test]
-async fn engine_refuses_an_oversized_snapshot_and_plan_reads_every_live_run() {
+async fn engine_and_plan_read_every_live_run_when_the_snapshot_exceeds_the_frame() {
     let dir = tempfile::Builder::new().prefix("fc1417").tempdir_in("/tmp").unwrap();
     let service = Service::open_in(dir.path().to_path_buf()).await.unwrap();
     let root = service.store.create_repository_root(service.host_id, "/fixture", 0).unwrap();
@@ -52,10 +52,10 @@ async fn engine_refuses_an_oversized_snapshot_and_plan_reads_every_live_run() {
     let plan = session.plan_with_workflow(workspace).await.unwrap();
     let runs = plan["workflow"]["runs"].as_array().unwrap();
     let actual: std::collections::BTreeSet<_> = runs.iter().map(|run| run["item"].as_str().unwrap()).collect();
-    let refused = matches!(engine, Err(farcooler_client::session::SessionError::Refused { what, .. })
-        if what == "response_too_large");
-    assert_eq!((refused, runs.len(), actual.len()), (true, state.items.len(), state.items.len()),
-        "Engine must explicitly refuse and Plan must show every live run once");
+    let engine = engine.expect("Engine should assemble the paged snapshot");
+    assert_eq!(engine.state.items, state.items);
+    assert_eq!((runs.len(), actual.len()), (state.items.len(), state.items.len()),
+        "Plan must show every live run once");
     assert!(state.items.keys().all(|item| actual.contains(item.as_str())));
     let last = runs.iter().find(|run| run["item"].as_str() == Some(last_item)).unwrap();
     assert_eq!(last["page"]["reason"], "The tree changed.");
@@ -196,7 +196,6 @@ async fn exercise(item_bytes: usize, metadata_bytes: usize) {
             assert_eq!(view.revision, state.revision);
             assert!(view.archive.is_empty());
             assert_eq!(view.source_sequences.get("wire:owner"), Some(&42));
-            assert!(view.items.values().all(|item| !item.definition.is_ticket()));
             let omitted = value["items_omitted"].as_u64().unwrap_or_default() as usize;
             assert_eq!(view.items.len() + omitted, state.items.len());
             if metadata_bytes > cap {
@@ -207,7 +206,10 @@ async fn exercise(item_bytes: usize, metadata_bytes: usize) {
                 assert!(view.items.len() < state.items.len());
             }
         } else {
-            assert_eq!(value["state"], serde_json::to_value(&state).unwrap(), "complete workflow state");
+            let view: State = serde_json::from_value(value["state"].clone()).unwrap();
+            assert_eq!(view.items, state.items, "complete live workflow state");
+            assert_eq!(view.source_sequences, state.source_sequences);
+            assert_eq!(view.archive.len() + value["archive_omitted"].as_u64().unwrap() as usize, state.archive.len());
             assert!(value["publication_history"].is_array());
         }
         Ok(reply)

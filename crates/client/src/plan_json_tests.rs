@@ -408,24 +408,65 @@ fn suggested_reviewers_appear_only_when_sent() {
 #[tokio::test]
 async fn workflow_enrichment_keeps_compatibility_without_hiding_read_failures() {
     use crate::session::SessionError;
-    use farcooler_protocol::v1::{ErrorCode, result};
-    type Answer = Result<result::Value, SessionError>;
+    use farcooler_protocol::v1::ErrorCode;
+    type Answer = Result<serde_json::Value, SessionError>;
     let plan = the_plan();
     let workspace = uuid::Uuid::from_u128(7);
     let bare = plan_json(&plan);
     let missing = None::<std::future::Ready<Answer>>;
-    assert_eq!(with_workflow(&plan, workspace, missing).await.unwrap(), bare);
+    assert_eq!(with_workflow_state(&plan, workspace, missing).await.unwrap(), bare);
     for code in [ErrorCode::ScopeDenied, ErrorCode::CapabilityUnsupported] {
         let denied = std::future::ready(Err(SessionError::Refused {
             code: code as i32, retryable: false, message: "denied".into(), what: "workflow".into(),
         }));
-        assert_eq!(with_workflow(&plan, workspace, Some(denied)).await.unwrap(), bare);
+        assert_eq!(with_workflow_state(&plan, workspace, Some(denied)).await.unwrap(), bare);
     }
     let broken = std::future::ready(Err(SessionError::Protocol("broken read".into())));
-    assert!(matches!(with_workflow(&plan, workspace, Some(broken)).await,
+    assert!(matches!(with_workflow_state(&plan, workspace, Some(broken)).await,
         Err(SessionError::Protocol(message)) if message == "broken read"));
-    let malformed = std::future::ready(Ok(result::Value::Plan(Default::default())));
-    assert!(matches!(with_workflow(&plan, workspace, Some(malformed)).await, Err(SessionError::Protocol(_))));
+    let malformed = std::future::ready(Ok(serde_json::Value::Null));
+    assert!(matches!(with_workflow_state(&plan, workspace, Some(malformed)).await, Err(SessionError::Protocol(_))));
+}
+
+#[tokio::test]
+async fn paging_restarts_on_a_changed_workflow_snapshot() {
+    let workspace = uuid::Uuid::from_u128(7);
+    let old = r#"{"revision":42,"item":"old"}"#;
+    let new = r#"{"revision":43,"item":"new"}"#;
+    let old_digest = farcooler_workflow::digest(&old);
+    let new_digest = farcooler_workflow::digest(&new);
+    let split = 13;
+    let page = |offset, next, digest: &str, chunk: &str| pb::result::Value::WorkflowReply(pb::WorkflowReply {
+        schema: 1,
+        json: json!({"schema": 1, "workflow_page": {
+            "offset": offset, "next_offset": next, "digest": digest, "chunk": chunk,
+        }}).to_string(),
+    });
+    let mut calls = 0;
+    let snapshot = read_workflow(workspace, async |request| {
+        let Some(pb::request::Payload::WorkflowCommand(command)) = request.payload else { panic!("missing workflow command") };
+        let action = farcooler_protocol::workflow_commands::parse(&command.json).unwrap();
+        let reply = match calls {
+            0 => {
+                assert_eq!(action, Action::Get);
+                assert!(request.accepts.iter().any(|v| v == farcooler_protocol::accepts::WORKFLOW_PAGES));
+                page(0, Some(split), &old_digest, &old[..split])
+            }
+            1 => {
+                assert_eq!(action, Action::GetPage { offset: split as u64, digest: old_digest.clone() });
+                page(0, Some(split), &new_digest, &new[..split])
+            }
+            2 => {
+                assert_eq!(action, Action::GetPage { offset: split as u64, digest: new_digest.clone() });
+                page(split, None, &new_digest, &new[split..])
+            }
+            _ => panic!("unexpected page"),
+        };
+        calls += 1;
+        Ok(reply)
+    }).await.unwrap();
+    assert_eq!(calls, 3);
+    assert_eq!(snapshot, serde_json::from_str::<Value>(new).unwrap());
 }
 
 /// A ticket's engine run (ov-1040) reaches the JSON the plan view reads, and is left out when the runner said nothing.

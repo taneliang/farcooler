@@ -17,6 +17,20 @@ const html = readFileSync('src/client/index.html', 'utf8')
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH })
 const failures = []
 try {
+  const retryPage = await browser.newPage()
+  await retryPage.setContent(html.replace('<head>', '<head><script>window.failWorkflowRead=true</script>'))
+  const banner = retryPage.locator('#plan .plan-banner')
+  const retry = banner.getByRole('button', { name: 'Try Again', exact: true })
+  await retry.waitFor()
+  const message = await banner.textContent()
+  if (!message.includes('couldn’t read the plan') || /code:|what:|operation-failed|response_too_large/.test(message)) {
+    failures.push(`workflow read failure exposes unexpected copy: ${message}`)
+  }
+  await retry.click()
+  await retryPage.locator('#plan .plan-landing-group').first().waitFor()
+  await banner.waitFor({ state: 'detached' })
+  await retryPage.close()
+
   for (const focused of [false, true]) for (const width of [360, 1440]) {
     const page = await browser.newPage({ viewport: { width, height: 1100 } })
     await page.setContent(html.replace('<head>', `<head><script>window.focused=${focused}</script>`))

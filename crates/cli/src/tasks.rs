@@ -2435,12 +2435,9 @@ fn task_get_request(task: Uuid) -> pb::Request {
 /// Whether `task`'s workspace has a published workflow. A runner that can't say is asked nothing more here: it
 /// refuses the pane itself.
 async fn runs_a_workflow<L: DispatchLink>(link: &mut L, task: &pb::Task) -> bool {
-    use farcooler_protocol::workflow_commands::Action;
     if !link.capabilities().iter().any(|c| c == farcooler_protocol::capability::WORKFLOW_COMMANDS) { return false; }
     let Ok(workspace) = Uuid::from_slice(&task.workspace_id) else { return false };
-    let Ok(request) = crate::workflow::request(workspace, &Action::Get) else { return false };
-    let Ok(pb::Result { value: Some(result::Value::WorkflowReply(reply)), .. }) = link.call(request).await else { return false };
-    serde_json::from_str::<serde_json::Value>(&reply.json).ok().and_then(|v| v.get("configuration").cloned()).is_some_and(|c| !c.is_null())
+    crate::workflow::read_snapshot(link, workspace, false).await.is_ok_and(|value| !value["configuration"].is_null())
 }
 
 /// `task dispatch`, in order: everything that can refuse, then the lane,

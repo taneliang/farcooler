@@ -14,6 +14,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ButtonDefaults
 import com.farcooler.core.wire.ActionWeight
+import com.farcooler.model.PlanWords
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -89,7 +90,9 @@ fun WorkflowRunsView(host: String, workspace: String, close: () -> Unit) {
         }
         Text("Workflow runs", style = MaterialTheme.typography.headlineSmall)
         TextButton(onClick = close) { Text("Close") }
-        Button(onClick = { scope.launch { model.refresh(port) } }, enabled = !view.busy) { Text("Refresh") }
+        Button(onClick = { scope.launch { model.refresh(port) } }, enabled = !view.busy) {
+            Text(if (view.readFailed) PlanWords.TRY_AGAIN else "Refresh")
+        }
         if (view.notice.isNotEmpty()) Text(view.notice)
         if (selected != null) TextButton(onClick = { select(null) }) { Text("All runs") }
         val run = view.presentation?.runs?.firstOrNull { it.item == selected }

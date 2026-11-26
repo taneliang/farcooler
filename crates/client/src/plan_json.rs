@@ -10,26 +10,24 @@
 //! (`crates/cli/src/plan.rs`). Both are held to the one fixture by a test, so
 //! a key renamed on either side fails there instead of on a phone.
 
-use farcooler_protocol::v1 as pb;
+use farcooler_protocol::{v1 as pb, workflow_commands::Action};
 use serde_json::{Value, json};
 
 use crate::session::{SessionError, short, uuid_of};
 
-/// The authenticated workflow snapshot request used by Engine.
+/// The original single-response request, also understood by older runners.
 pub fn workflow_request(workspace: uuid::Uuid) -> pb::Request {
-    let mut request = workflow_get_request(workspace);
-    request.accepts.push(farcooler_protocol::accepts::WORKFLOW_FULL.into());
-    request
+    workflow_request_for(workspace, &Action::Get)
 }
 
-fn workflow_get_request(workspace: uuid::Uuid) -> pb::Request {
+fn workflow_request_for(workspace: uuid::Uuid, action: &Action) -> pb::Request {
     use farcooler_protocol::capability;
-    let mut request = farcooler_transport::request("workflow.get");
+    let mut request = farcooler_transport::request(action.method());
     request.target_resource_id = Some(bytes::Bytes::copy_from_slice(workspace.as_bytes()));
     request.required_capabilities = vec![capability::WORKFLOW_COMMANDS.into()];
     request.payload = Some(pb::request::Payload::WorkflowCommand(pb::WorkflowCommand {
         schema: 1,
-        json: serde_json::to_string(&farcooler_protocol::workflow_commands::Action::Get).expect("closed action"),
+        json: serde_json::to_string(action).expect("closed action"),
     }));
     request
 }
@@ -47,7 +45,7 @@ impl WorkflowPlanPages {
     }
 
     pub fn request(&self) -> pb::Request {
-        let mut request = workflow_get_request(self.workspace);
+        let mut request = workflow_request(self.workspace);
         request.accepts.push(farcooler_protocol::accepts::WORKFLOW_PLAN.into());
         request.accepts.extend(self.next.iter().cloned());
         request
@@ -94,6 +92,106 @@ pub(crate) fn workflow_reply(reply: pb::result::Value) -> Result<Value, SessionE
             serde_json::from_str(&reply.json).map_err(|e| SessionError::Protocol(e.to_string())),
         _ => Err(SessionError::Protocol("invalid workflow reply".into())),
     }
+}
+
+#[derive(serde::Deserialize)]
+struct WorkflowPage {
+    offset: usize,
+    next_offset: Option<usize>,
+    digest: String,
+    chunk: String,
+}
+
+/// Assemble one authorized workflow snapshot before projecting any cards or actions.
+pub async fn read_workflow(
+    workspace: uuid::Uuid,
+    call: impl AsyncFnMut(pb::Request) -> Result<pb::result::Value, SessionError>,
+) -> Result<Value, SessionError> {
+    read_workflow_view(workspace, None, call).await
+}
+
+/// Assemble a workflow snapshot using the requested projection on every page.
+pub async fn read_workflow_view(
+    workspace: uuid::Uuid,
+    view: Option<&str>,
+    mut call: impl AsyncFnMut(pb::Request) -> Result<pb::result::Value, SessionError>,
+) -> Result<Value, SessionError> {
+    use std::ops::ControlFlow;
+    let (mut pages, mut request) = WorkflowPages::start_with_view(workspace, view);
+    loop {
+        match pages.receive(call(request).await?)? {
+            ControlFlow::Break(snapshot) => return Ok(snapshot),
+            ControlFlow::Continue(next) => request = next,
+        }
+    }
+}
+
+pub(crate) struct WorkflowPages {
+    workspace: uuid::Uuid,
+    view: Option<String>,
+    snapshot: String,
+    digest: String,
+    restarted: bool,
+}
+
+impl WorkflowPages {
+    pub(crate) fn start(workspace: uuid::Uuid) -> (Self, pb::Request) {
+        Self::start_with_view(workspace, None)
+    }
+
+    fn start_with_view(workspace: uuid::Uuid, view: Option<&str>) -> (Self, pb::Request) {
+        let pages = Self { workspace, view: view.map(String::from), snapshot: String::new(), digest: String::new(), restarted: false };
+        let request = pages.request(&Action::Get);
+        (pages, request)
+    }
+
+    fn request(&self, action: &Action) -> pb::Request {
+        let mut request = workflow_request_for(self.workspace, action);
+        request.accepts.push(farcooler_protocol::accepts::WORKFLOW_PAGES.into());
+        request.accepts.extend(self.view.iter().cloned());
+        request
+    }
+
+    pub(crate) fn receive(&mut self, reply: pb::result::Value)
+        -> Result<std::ops::ControlFlow<Value, pb::Request>, SessionError>
+    {
+        use std::ops::ControlFlow;
+        let invalid = || SessionError::Protocol("Invalid workflow snapshot".into());
+        let pb::result::Value::WorkflowReply(reply) = reply else { return Err(invalid()); };
+        if reply.schema != 1 { return Err(invalid()); }
+        let mut raw: Value = serde_json::from_str(&reply.json).map_err(|_| invalid())?;
+        let Some(page) = raw.as_object_mut().and_then(|fields| fields.remove("workflow_page")) else {
+            return complete_workflow(raw).map(ControlFlow::Break);
+        };
+        let page: WorkflowPage = serde_json::from_value(page).map_err(|_| invalid())?;
+        if page.offset == 0 {
+            if !self.snapshot.is_empty() {
+                if self.restarted || page.digest == self.digest { return Err(invalid()); }
+                self.restarted = true;
+                self.snapshot.clear();
+            }
+            self.digest = page.digest.clone();
+        }
+        if page.offset != self.snapshot.len() || page.digest != self.digest || page.chunk.is_empty() {
+            return Err(invalid());
+        }
+        self.snapshot.push_str(&page.chunk);
+        let Some(offset) = page.next_offset else {
+            if farcooler_workflow::digest(&self.snapshot) != self.digest { return Err(invalid()); }
+            let raw = serde_json::from_str(&self.snapshot).map_err(|_| invalid())?;
+            return complete_workflow(raw).map(ControlFlow::Break);
+        };
+        if offset != self.snapshot.len() { return Err(invalid()); }
+        let action = Action::GetPage { offset: offset as u64, digest: self.digest.clone() };
+        Ok(ControlFlow::Continue(self.request(&action)))
+    }
+}
+
+fn complete_workflow(raw: Value) -> Result<Value, SessionError> {
+    if raw["items_omitted"].as_u64().unwrap_or_default() > 0 {
+        return Err(SessionError::Protocol("The workflow snapshot is incomplete".into()));
+    }
+    Ok(raw)
 }
 
 /// The single enrichment and compatibility policy for CLI, native and web Plan reads.

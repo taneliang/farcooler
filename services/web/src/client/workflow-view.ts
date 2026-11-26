@@ -19,7 +19,7 @@ export function renderWorkflow(root: HTMLElement, view: WorkflowView, board: Wor
   const remembered = focusMemory.get(root)
   const focused = key && key === remembered?.fallback ? remembered.intended : key
   const content = el('div'); content.className = 'workflow-runs'
-  content.append(keyed(button('Refresh', () => void board.refresh(), view.busy), 'refresh'))
+  content.append(keyed(button(view.readFailed ? 'Try Again' : 'Refresh', () => void board.refresh(), view.busy), 'refresh'))
   if (view.notice) { const note = el('p', view.notice); note.setAttribute('role', 'status'); content.append(note) }
   for (const retained of view.retained ?? []) content.append(keyed(button(
     `${retained.reinspect ? 'Reinspect Unsubmitted Action' : 'Retry Retained Action'} · ${retained.item} · ${retained.label}`, () => void board.retry(retained), view.busy || !view.ready), `retry:${retained.id}`))

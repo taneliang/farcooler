@@ -44,6 +44,7 @@ struct Snapshot {
     items: Value,
     /// Items that finished and left `items` (a closed ticket is here from the step after it closes).
     archive: Value,
+    archive_omitted: bool,
     /// The published workflow's build steps that list models, each with its list, the first being the default (ov-966).
     models: Vec<(String, Vec<String>)>,
 }
@@ -57,18 +58,15 @@ enum Seen {
 }
 
 async fn snapshot<L: DispatchLink>(link: &mut L, workspace: Uuid) -> Seen {
-    let Ok(request) = crate::workflow::full_request(workspace) else { return Seen::Unanswered };
-    let Ok(reply) = link.call(request).await else { return Seen::Unanswered };
-    match read(reply) {
+    let Ok(raw) = crate::workflow::read_snapshot(link, workspace, true).await else { return Seen::Unanswered };
+    match read(raw) {
         Some(seen) => seen.map_or(Seen::Nothing, Seen::Held),
         None => Seen::Unanswered,
     }
 }
 
 /// `None` when the reply isn't one; `Some(None)` when the board holds nothing.
-fn read(reply: pb::Result) -> Option<Option<Snapshot>> {
-    let Some(result::Value::WorkflowReply(reply)) = reply.value else { return None };
-    let value: Value = serde_json::from_str(&reply.json).ok()?;
+fn read(value: Value) -> Option<Option<Snapshot>> {
     let Some(state) = value.get("state").filter(|s| !s.is_null()) else { return Some(None) };
     Some(Some(Snapshot {
         revision: state.get("revision")?.as_u64()?,
@@ -76,6 +74,7 @@ fn read(reply: pb::Result) -> Option<Option<Snapshot>> {
         published: value.pointer("/configuration/pin").and_then(Value::as_str).map(String::from),
         items: state.get("items").cloned().unwrap_or(Value::Null),
         archive: state.get("archive").cloned().unwrap_or(Value::Null),
+        archive_omitted: value["archive_omitted"].as_u64().is_some_and(|count| count > 0),
         models: value.pointer("/configuration/definition/models").and_then(Value::as_object).map(|m| m.iter().map(|(step, list)| {
             (step.clone(), list.as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect())
         }).collect()).unwrap_or_default(),
@@ -83,6 +82,19 @@ fn read(reply: pb::Result) -> Option<Option<Snapshot>> {
 }
 
 impl Snapshot {
+    async fn hold_for<L: DispatchLink>(&self, link: &mut L, workspace: Uuid, key: &str) -> Result<Hold, Failed> {
+        let hold = self.hold(key);
+        if hold != Hold::None || !self.archive_omitted { return Ok(hold); }
+        let request = crate::workflow::request(workspace, &Action::ArchiveItem { item: key.into() })?;
+        let reply = link.call(request).await?;
+        let Some(result::Value::WorkflowReply(reply)) = reply.value else { return Err(unreadable()); };
+        let value: Value = serde_json::from_str(&reply.json)?;
+        if value["revision"].as_u64() != Some(self.revision) || value["epoch"].as_u64() != Some(self.epoch) {
+            return Err("The workflow changed while reading the ticket. Try again.".into());
+        }
+        Ok(if value["item"].is_null() { Hold::None } else { Hold::Taken(CLOSED) })
+    }
+
     fn hold(&self, key: &str) -> Hold {
         let Some(item) = self.items.as_object().and_then(|m| m.iter().find(|(k, _)| k.eq_ignore_ascii_case(key))).map(|(_, v)| v) else {
             // A ticket that closed has left `items` by the next step, but the engine still owns its name.
@@ -214,7 +226,8 @@ pub(super) async fn through_engine<L: DispatchLink>(
         Seen::Nothing => return pane(false),
         Seen::Unanswered => return pane(true),
     };
-    let held: Vec<Hold> = tickets.iter().map(|t| seen.hold(&t.key)).collect();
+    let mut held = Vec::with_capacity(tickets.len());
+    for ticket in tickets { held.push(seen.hold_for(link, workspace, &ticket.key).await?); }
     if held.iter().all(|h| *h == Hold::None) { return pane(false); }
     if let Some((t, Hold::Follows(lead))) = tickets.iter().zip(&held).find(|(_, h)| matches!(h, Hold::Follows(_))) {
         return Err(format!("{t} follows {lead}'s run, so it can't be dispatched. Its card goes where that run goes. If it needs more \
@@ -297,11 +310,16 @@ pub(super) async fn through_engine<L: DispatchLink>(
 pub(crate) async fn refuse_tracked<L: DispatchLink>(link: &mut L, ticket: &pb::Task, makes_worktree: bool) -> Result<(), Failed> {
     if !link.capabilities().iter().any(|c| c == capability::WORKFLOW_COMMANDS) { return Ok(()); }
     let Some(workspace) = Uuid::from_slice(&ticket.workspace_id).ok() else { return Ok(()) };
-    match snapshot(link, workspace).await {
-        Seen::Held(seen) if seen.hold(&ticket.key) != Hold::None => Err(format!(
+    let hold = match snapshot(link, workspace).await {
+        Seen::Held(seen) => seen.hold_for(link, workspace, &ticket.key).await.ok(),
+        Seen::Nothing => Some(Hold::None),
+        Seen::Unanswered => None,
+    };
+    match hold {
+        Some(hold) if hold != Hold::None => Err(format!(
             "{} is tracked by the engine, which refuses a pane. Start it with `farcooler agent dispatch --role builder --ticket {}`.",
             ticket.key, ticket.key).into()),
-        Seen::Unanswered if makes_worktree => Err(format!(
+        None if makes_worktree => Err(format!(
             "Couldn't ask the engine whether {} is tracked, so no worktree was made. Dispatch into one that exists with --worktree, or ask the workspace owner's orchestrator.",
             ticket.key).into()),
         _ => Ok(()),

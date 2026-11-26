@@ -17,7 +17,7 @@ export interface WorkflowPort {
 }
 export interface WorkflowView {
   retained?: RetainedWorkflow[]; presentation: WorkflowPresentation | null; selected: string | null
-  ready: boolean; busy: boolean; notice: string; inspection: string
+  ready: boolean; busy: boolean; readFailed: boolean; notice: string; inspection: string
 }
 export const WORKFLOW_PENDING = 'Workflow runs are not connected on this runner yet.'
 
@@ -25,7 +25,7 @@ export const WORKFLOW_PENDING = 'Workflow runs are not connected on this runner 
 export class WorkflowBoard {
   private generation = 0
   private selection = 0
-  private view: WorkflowView = { presentation: null, selected: null, ready: false, busy: false, notice: '', inspection: '' }
+  private view: WorkflowView = { presentation: null, selected: null, ready: false, busy: false, readFailed: false, notice: '', inspection: '' }
   constructor(readonly workspace: string, private port: () => WorkflowPort | null,
     private show: (view: WorkflowView) => void, private keep: (item: string | null) => void = () => {}) {}
   select(item: string | null): void {
@@ -35,7 +35,7 @@ export class WorkflowBoard {
   }
   disconnect(): void {
     ++this.generation
-    this.view = { ...this.view, ready: false, busy: false, inspection: '', notice: 'Reconnect to refresh workflow runs.' }; this.draw()
+    this.view = { ...this.view, ready: false, busy: false, readFailed: false, inspection: '', notice: 'Reconnect to refresh workflow runs.' }; this.draw()
   }
   // Return the read ticket so a caller can recheck it after its own await.
   async refresh(): Promise<number | null> {
@@ -43,7 +43,7 @@ export class WorkflowBoard {
     const generation = ++this.generation
     this.view = { ...this.view, ready: false }; this.draw()
     const port = this.port()
-    if (!port) { this.view = { ...this.view, notice: WORKFLOW_PENDING }; this.draw(); return null }
+    if (!port) { this.view = { ...this.view, readFailed: false, notice: WORKFLOW_PENDING }; this.draw(); return null }
     try {
       const presentation = await port.read(this.workspace)
       const retained = await port.pending?.(this.workspace) ?? []
@@ -54,10 +54,10 @@ export class WorkflowBoard {
         ++this.selection
         this.view = { ...this.view, inspection: '' }
       }
-      this.view = { ...this.view, presentation, retained, ready: true, notice: '' }
+      this.view = { ...this.view, presentation, retained, ready: true, readFailed: false, notice: '' }
     } catch {
       if (generation !== this.generation) return null
-      this.view = { ...this.view, ready: false, notice: 'Couldn’t refresh workflow runs. Reconnect or try Refresh.' }
+      this.view = { ...this.view, ready: false, readFailed: true, notice: 'Far Cooler couldn’t read the workflow runs.' }
     }
     this.draw()
     return generation === this.generation ? generation : null

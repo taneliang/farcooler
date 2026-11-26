@@ -45,6 +45,26 @@ async fn snapshot_preserves_ticket_hold_and_models_through_rpc() {
     assert!(summary.pointer("/configuration/definition").is_none());
     assert!(summary["state"]["items"][key].get("definition").is_none());
     let Seen::Held(seen) = snapshot(&mut link, workspace).await else { panic!("held snapshot") };
+
+    // Run both CLI projections through the same reader used by workflow get.
+    let mut state = service.store.workflow_state(&workspace.to_string()).unwrap().unwrap();
+    state.source_sequences.extend((0u64..30_000)
+        .map(|n| (format!("wire:member:former-member-{n:018}"), n + 1)));
+    assert!(serde_json::to_vec(&state.source_sequences).unwrap().len()
+        > farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES);
+    service.store.workflow_state_for_tests(&state).unwrap();
+    for full in [false, true] {
+        let reply = crate::workflow::read_snapshot(&mut link, workspace, full).await.unwrap();
+        let wire = &reply["state"];
+        assert_eq!(wire["source_sequences"], json!(state.source_sequences));
+        assert_eq!(wire["revision"], state.revision);
+        assert_eq!(wire["epoch"], state.epoch);
+        for field in ["run", "pin", "phase"] {
+            assert_eq!(wire["items"][key][field], summary["state"]["items"][key][field]);
+        }
+        assert_eq!(wire["items"][key].get("definition").is_some(), full);
+    }
+
     service.stop_workflows().await.unwrap();
     assert_eq!(summary["state"]["items"][key]["phase"], "WaitingApproval");
     assert_eq!(seen.hold(&key.to_uppercase()), Hold::AtRest {

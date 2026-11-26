@@ -235,8 +235,10 @@ pub mod accepts {
     pub const WORKFLOW_PLAN: &str = "workflow_plan_v1";
     /// A Plan continuation returned in `plan_next` and echoed in `Request.accepts`.
     pub const WORKFLOW_PLAN_PAGE: &str = "workflow_plan_page_v1:";
-    /// The complete Engine read. An oversized response is refused by the transport.
+    /// Request the full workflow projection, including pinned definitions.
     pub const WORKFLOW_FULL: &str = "workflow_full_v1";
+    /// Workflow Get may return a page instead of a complete legacy snapshot.
+    pub const WORKFLOW_PAGES: &str = "workflow_pages_v1";
 }
 
 /// `link.ending` (ov-1513): the one thing a client says as it gives up on a

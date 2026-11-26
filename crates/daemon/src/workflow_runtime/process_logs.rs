@@ -6,6 +6,7 @@ const TAIL_LINES: usize = 40;
 // Count JSON escaping too: control bytes can grow sixfold on the wire. Leave room for
 // state and log paths in the 1 MiB control envelope, while retaining the newest evidence.
 const REPLY_TAIL_BYTES: usize = 256 * 1024;
+pub(super) const LOG_PREVIEW_BYTES: usize = 288 * 1024;
 
 impl Exec {
     pub(super) fn effect_log(&self, effect: &Effect) -> Option<PathBuf> {
@@ -38,18 +39,34 @@ impl Exec {
         Ok(logs)
     }
 
-    /// Every retained process log of one item, in every run, failed or not, live, archived or removed:
-    /// what `workflow.get`'s reply leaves out, read on request (ov-1298). Budgeted like the reply.
+    /// Recent retained logs of one item, across runs, including archived or removed items.
+    /// Use the paged logs history for the rest.
     pub(super) fn item_process_logs(&self, workspace: &str, item: &str) -> Result<serde_json::Value> {
         let state = self.state(workspace)?;
-        let mut logs = Vec::new();
-        for stored in self.store.workflow_item_effects(workspace, [item])?.iter() {
-            if let Some(log) = self.process_log_entry(state.as_ref(), &stored.effect, true)? { logs.push(log); }
-        }
+        let mut logs = self.retained_process_logs(workspace, state.as_ref(), Some(item))?;
         budget_tails(&mut logs)?;
         let live = state.as_ref().is_some_and(|s| s.items.contains_key(item));
         let archived = state.as_ref().is_some_and(|s| s.archive.contains_key(item));
-        Ok(serde_json::json!({"schema":1, "item":item, "live":live, "archived":archived, "process_logs":logs}))
+        let mut reply = serde_json::json!({"schema":1, "item":item, "live":live, "archived":archived});
+        super::wire_history::recent(reply.as_object_mut().expect("a JSON object"),
+            "process_logs", logs, super::wire_history::ListOrder::OldestFirst, LOG_PREVIEW_BYTES)?;
+        Ok(reply)
+    }
+
+    pub(super) fn retained_process_logs(&self, workspace: &str, state: Option<&State>, item: Option<&str>)
+        -> Result<Vec<serde_json::Value>>
+    {
+        let mut logs = Vec::new();
+        let effects = match item {
+            Some(item) => self.store.workflow_item_effects(workspace, [item])?,
+            None => self.store.workflow_outbox(workspace)?,
+        };
+        for stored in effects {
+            if let Some(log) = self.process_log_entry(state, &stored.effect, true)? {
+                logs.push(log);
+            }
+        }
+        Ok(logs)
     }
 
     /// One effect's log entry: `None` without a log, or, unless `all`, when the effect did not fail.
@@ -213,15 +230,20 @@ mod tests {
 
     fn frame_len(reply: &serde_json::Value) -> usize {
         use farcooler_protocol::v1 as pb;
+        response_frame_len(pb::Response {
+            request_id: farcooler_protocol::ids::new_id(),
+            outcome: Some(pb::response::Outcome::Result(pb::Result {
+                value: Some(pb::result::Value::WorkflowReply(pb::WorkflowReply { schema: 1, json: reply.to_string() })),
+            })),
+        })
+    }
+
+    fn response_frame_len(response: farcooler_protocol::v1::Response) -> usize {
+        use farcooler_protocol::v1 as pb;
         let envelope = pb::WireEnvelope {
             protocol_version: farcooler_protocol::PROTOCOL_VERSION,
             message_id: farcooler_protocol::ids::new_id(),
-            body: Some(pb::wire_envelope::Body::Response(pb::Response {
-                request_id: farcooler_protocol::ids::new_id(),
-                outcome: Some(pb::response::Outcome::Result(pb::Result {
-                    value: Some(pb::result::Value::WorkflowReply(pb::WorkflowReply { schema: 1, json: reply.to_string() })),
-                })),
-            })),
+            body: Some(pb::wire_envelope::Body::Response(response)),
         };
         farcooler_protocol::framing::encode(&envelope).expect("the reply must fit the protocol cap").len()
     }
@@ -244,6 +266,547 @@ mod tests {
             assert!(tail.lines().last().unwrap().starts_with("failure evidence line 399 "), "the newest line stays");
             assert!(tail.len() > 7 * 1024, "a live tail is whole, {} bytes", tail.len());
         }
+    }
+
+    #[tokio::test]
+    async fn engine_reads_a_large_board_with_the_shipped_request() {
+        use super::super::admission_tests::{factory, held, receipt, request};
+        use farcooler_protocol::{v1::{Plan, Scope}, workflow_commands::{Action, HistorySection, Mutation}};
+        use farcooler_transport::{Handler, Peer};
+
+        let (_service_dir, svc, repo) = crate::test_support::fixture().await;
+        let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
+        let workspace_key = workspace.to_string();
+        let output = "x".repeat(TAIL_BYTES);
+        let (_runtime_dir, mut runtime) = failed_logs_in(&workspace_key, 88, &output).await;
+        let mut state = runtime.state(&workspace_key).unwrap().unwrap();
+        let tracker = Definition::ticket_at("todo").unwrap();
+        let mut ticket = state.items.values().next().unwrap().clone();
+        ticket.definition = tracker.clone();
+        ticket.pin = tracker.pin();
+        ticket.phase = Phase::WaitingApproval;
+        ticket.pending = None;
+        let mut group = ticket.clone();
+        let definition = Definition::coding();
+        definition.validate_group().unwrap();
+        group.pin = definition.pin();
+        group.definition = definition;
+        group.phase = Phase::Failed;
+        group.group_of = Some(GroupOf { name: "landing".into(), pin: group.pin.clone() });
+        group.brief = Some("a failed landing's brief ".repeat(160));
+        group.handed = vec!["item-000".into()];
+        let rpc = factory(&svc, &runtime, Peer { client_id: None, scope: Scope::Control }, None);
+        let last_run = RunRecord { phase: Phase::Done, run: "earlier-run".into(), stop_run: None,
+            pin: "earlier-pin".into(), fence: 1, candidate: Some("a".repeat(40)), tree: None,
+            models: Default::default(), reason: Some("Prior result. ".repeat(30)), rework_history: Vec::new(),
+            sent_back: Vec::new(), back_edges: Default::default() };
+
+        for (groups, tickets) in [(114, 58), (350, 200)] {
+            for n in 0..groups {
+                group.since_ms = 2 * n;
+                let id = format!("group-{n}-failed");
+                group.run = digest(&(&workspace_key, &id));
+                group.resource = Exec::item_resource(&workspace_key, &id);
+                state.items.insert(id, group.clone());
+                state.archive.insert(format!("group-{n}-landed"), Archived {
+                    phase: Phase::Done,
+                    group: Some(farcooler_workflow::ArchivedGroup {
+                        name: "landing".into(), tickets: vec!["item-000".into()],
+                        pushed: last_run.candidate.clone(), since_ms: 2 * n + 1,
+                    }),
+                    candidate: last_run.candidate.clone(), start_load: None, closed: None,
+                    last_run: Some(last_run.clone()), history: Vec::new(),
+                });
+                state.archive.insert(format!("closed-{n:04}"), Archived {
+                    phase: if n == 0 { Phase::Cancelled } else { Phase::Done },
+                    group: None, candidate: None, start_load: None, closed: None,
+                    last_run: Some(last_run.clone()), history: Vec::new(),
+                });
+            }
+            for n in 0..tickets {
+                state.items.insert(format!("ticket-{n:03}"), ticket.clone());
+            }
+            assert!(serde_json::to_vec(&state).unwrap().len() + 88 * output.len()
+                > farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES,
+                "the unbounded board and process log tails must exceed the control frame");
+            runtime.store.workflow_state_for_tests(&state).unwrap();
+            let legacy = farcooler_client::plan_json::workflow_request(workspace);
+            for flag in [None, Some("workflow_full_v1"), Some("workflow_summary_v1")] {
+                let mut read = legacy.clone();
+                read.accepts.extend(flag.map(String::from));
+                let response = rpc.handle(read).await;
+                let raw = receipt(&response);
+                let bytes = response_frame_len(response);
+                eprintln!("{groups} finished and {groups} failed groups, {tickets} tickets at rest, {flag:?}: {bytes} bytes");
+                assert_eq!(raw["landing_groups_omitted"], 2 * groups - 12);
+                assert_eq!(raw["state"]["revision"], state.revision);
+                assert_eq!(raw["state"]["epoch"], state.epoch);
+                assert_eq!(raw["state"]["source_sequences"], serde_json::json!(state.source_sequences));
+                assert_eq!(raw["state"]["items"]["ticket-057"]["pin"], ticket.pin);
+                assert_eq!(raw["state"]["items"]["ticket-057"]["run"], ticket.run);
+                assert_eq!(raw["state"]["items"]["ticket-057"]["phase"], "WaitingApproval");
+                assert!(raw["process_logs_omitted"].as_u64().unwrap() > 0);
+                assert!(raw["archive_omitted"].as_u64().unwrap() > 0);
+                assert!(raw["state"]["archive"].get("closed-0000").is_none());
+                assert!(raw["state"]["archive"].get("group-0-landed").is_none());
+                if flag.is_some() {
+                    let newest = format!("group-{}-failed", groups - 1);
+                    let row = &raw["state"]["items"][&newest];
+                    assert_eq!(row["run"], state.items[&newest].run);
+                    assert_eq!(row["pin"], state.items[&newest].pin);
+                    assert_eq!(row["phase"], "Failed");
+                    assert!(raw["state"]["items"].get("group-0-failed").is_none());
+                } else {
+                    let view = farcooler_client::engine_view::from_workflow_reply(
+                        workspace, &raw, None, farcooler_client::workflow_presentation::Style::Apple).unwrap();
+                    let view = serde_json::to_value(view).unwrap();
+                    assert_eq!(view["landings"].as_array().unwrap().len(), 12);
+                    let landed = format!("group-{}-landed", groups - 1);
+                    let failed = format!("group-{}-failed", groups - 1);
+                    assert_eq!(view["landings"][0]["id"], landed);
+                    assert_eq!(view["landings"][0]["members"][0]["id"], "item-000");
+                    assert_eq!(view["landings"][1]["id"], failed);
+                    let plan = farcooler_client::plan_json::with_workflow_state(&Plan::default(), workspace, Some(async { Ok(raw.clone()) })).await.unwrap();
+                    // These are the shared Plan models consumed by iPhone, Android and web.
+                    for style in ["apple", "material"] {
+                        let input = serde_json::json!({"schema": 1, "plan": plan, "context": {"style": style}});
+                        let rendered: serde_json::Value = serde_json::from_str(
+                            &farcooler_client::plan_view::json(&input.to_string())).unwrap();
+                        assert!(rendered["error"].is_null(), "{rendered}");
+                        let landings = rendered["view"]["landingGroups"].as_array().unwrap();
+                        assert_eq!(landings.len(), 6);
+                        assert!(landings.iter().any(|row| row["id"] == failed), "{landings:?}");
+                    }
+                }
+            }
+
+            let mut pages = farcooler_client::plan_json::WorkflowPlanPages::new(workspace);
+            let plan = loop {
+                let response = rpc.handle(pages.request()).await;
+                response_frame_len(response.clone());
+                let Some(farcooler_protocol::v1::response::Outcome::Result(reply)) = response.outcome else {
+                    panic!("Expected a Plan workflow reply");
+                };
+                if let Some(raw) = pages.push(reply.value.unwrap()).unwrap() {
+                    break farcooler_client::plan_json::with_workflow_state(
+                        &Plan::default(), workspace, Some(async { Ok(raw) }),
+                    ).await.unwrap();
+                }
+            };
+            let input = serde_json::json!({"schema": 1, "plan": plan, "context": {"style": "material"}});
+            let rendered: serde_json::Value = serde_json::from_str(
+                &farcooler_client::plan_view::json(&input.to_string()),
+            ).unwrap();
+            assert!(rendered["error"].is_null(), "{rendered}");
+            let landings = rendered["view"]["landingGroups"].as_array().unwrap();
+            assert!(landings.len() <= 12);
+            let newest = format!("group-{}-failed", groups - 1);
+            assert!(landings.iter().any(|row| row["id"] == newest));
+        }
+
+        let archived = receipt(&rpc.handle(request(workspace, &Action::ArchiveItem { item: "CLOSED-0000".into() })).await);
+        assert_eq!(archived["item"]["key"], "closed-0000");
+        assert_eq!(archived["item"]["run"], last_run.run);
+        assert_eq!(archived["item"]["pin"], last_run.pin);
+        assert_eq!(archived["item"]["phase"], "Cancelled");
+        let page = receipt(&rpc.handle(request(workspace, &Action::History {
+            section: HistorySection::Archive, offset: 0, item: Some("group-0-landed".into()),
+        })).await);
+        let retained: serde_json::Value = serde_json::from_str(page["chunk"].as_str().unwrap()).unwrap();
+        assert_eq!(retained["group-0-landed"]["group"]["tickets"], serde_json::json!(["item-000"]));
+        assert_eq!(retained["group-0-landed"]["phase"], "Done");
+
+        let mut offset = 0;
+        let mut encoded = String::new();
+        let mut digest = None;
+        loop {
+            let read = request(workspace, &Action::History { section: HistorySection::Groups, offset, item: None });
+            let page = receipt(&rpc.handle(read).await);
+            frame_len(&page);
+            assert_eq!(page["offset"], offset);
+            let first = digest.get_or_insert_with(|| page["digest"].clone());
+            assert_eq!(*first, page["digest"]);
+            encoded.push_str(page["chunk"].as_str().unwrap());
+            let Some(next) = page["next_offset"].as_u64() else { break };
+            assert!(next > offset);
+            offset = next;
+        }
+        assert!(offset > 0, "the retained groups must span multiple frames");
+        let groups: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(groups.as_object().unwrap().len(), 350);
+        assert_eq!(groups["group-0-failed"]["brief"], group.brief.unwrap());
+
+        let page = receipt(&rpc.handle(request(workspace, &Action::History {
+            section: HistorySection::Logs, offset: 0, item: Some("item-000".into()),
+        })).await);
+        assert!(page["next_offset"].is_null());
+        let logs: serde_json::Value = serde_json::from_str(page["chunk"].as_str().unwrap()).unwrap();
+        assert_eq!(logs[0]["tail"], output);
+
+        // Bind a cancellation from the summary and a targeted read of an older group.
+        let mut read = request(workspace, &Action::Get);
+        read.accepts.push("workflow_summary_v1".into());
+        let snapshot = receipt(&rpc.handle(read).await);
+        let state = &snapshot["state"];
+        let item = "group-0-failed";
+        assert!(state["items"].get(item).is_none());
+        let page = receipt(&rpc.handle(request(workspace, &Action::History {
+            section: HistorySection::Groups, offset: 0, item: Some(item.into()),
+        })).await);
+        assert!(page["next_offset"].is_null());
+        let targeted: serde_json::Value = serde_json::from_str(page["chunk"].as_str().unwrap()).unwrap();
+        assert_eq!(targeted.as_object().unwrap().len(), 1);
+        assert_eq!(targeted[item], groups[item]);
+        let row = &targeted[item];
+        let cancel = Action::Cancel {
+            mutation: Mutation {
+                id: "cancel-old-group".into(),
+                revision: state["revision"].as_u64().unwrap(),
+                epoch: state["epoch"].as_u64().unwrap(),
+                sequence: state["source_sequences"].as_object().unwrap()
+                    .values().filter_map(serde_json::Value::as_u64).max().unwrap_or(0) + 1,
+            },
+            item: item.into(),
+            run: row["run"].as_str().unwrap().into(),
+            pin: row["pin"].as_str().unwrap().into(),
+        };
+        let reply = receipt(&held(&mut runtime, &rpc, workspace, cancel, false, || {}).await);
+        assert!(reply["receipt"]["result"].get("Ok").is_some(), "{reply}");
+        let next = runtime.state(&workspace_key).unwrap().unwrap();
+        let phase = next.items.get(item).map(|row| &row.phase).or_else(|| next.archive.get(item).map(|row| &row.phase));
+        assert_eq!(phase, Some(&Phase::Cancelled));
+    }
+
+    #[tokio::test]
+    async fn failed_group_identities_cannot_overflow_workflow_get() {
+        use super::super::admission_tests::{factory, receipt};
+        use farcooler_protocol::v1::Scope;
+        use farcooler_transport::{Handler, Peer};
+
+        let (_service_dir, svc, repo) = crate::test_support::fixture().await;
+        let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
+        let key = workspace.to_string();
+        let (_runtime_dir, runtime) = failed_logs_in(&key, 1, "").await;
+        let mut state = runtime.state(&key).unwrap().unwrap();
+        let live = state.items.get_mut("item-000").unwrap();
+        live.phase = Phase::Failed;
+        live.pending = None;
+        let mut group = live.clone();
+        group.definition = Definition::coding();
+        group.pin = group.definition.pin();
+        group.group_of = Some(GroupOf { name: "landing".into(), pin: group.pin.clone() });
+        // The detached groups' guards and the sequence map together used to
+        // overflow the frame even after compacting all item rows.
+        state.source_sequences.extend((0..7_500).map(|n| (format!("wire:{}-{n:04}", "x".repeat(102)), 1)));
+        let mut identities = serde_json::Map::new();
+        let count = farcooler_workflow::MAX_ITEMS - state.items.len();
+        for n in 0..count {
+            let id = format!("group-{n:020}-{}", "g".repeat(100));
+            group.since_ms = n as i64;
+            group.run = digest(&(&key, &id));
+            group.resource = Exec::item_resource(&key, &id);
+            identities.insert(id.clone(), serde_json::json!({"run":group.run, "pin":group.pin, "phase":group.phase}));
+            state.items.insert(id, group.clone());
+        }
+        let unbounded_guards = serde_json::json!({"source_sequences":state.source_sequences, "items":identities});
+        assert!(serde_json::to_vec(&unbounded_guards).unwrap().len()
+            > farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES);
+        runtime.store.workflow_state_for_tests(&state).unwrap();
+
+        let rpc = factory(&svc, &runtime, Peer { client_id: None, scope: Scope::Control }, None);
+        for flag in ["workflow_summary_v1", "workflow_full_v1"] {
+            let mut read = farcooler_client::plan_json::workflow_request(workspace);
+            read.accepts.push(flag.into());
+            let response = rpc.handle(read).await;
+            let raw = receipt(&response);
+            response_frame_len(response);
+            assert_eq!(raw["state"]["source_sequences"], serde_json::json!(state.source_sequences));
+            assert_eq!(raw["source_sequences_omitted"], 0);
+            assert_eq!(raw["state"]["revision"], state.revision);
+            assert_eq!(raw["state"]["epoch"], state.epoch);
+            let live = &state.items["item-000"];
+            assert_eq!(raw["state"]["items"]["item-000"]["run"], live.run);
+            assert_eq!(raw["state"]["items"]["item-000"]["pin"], live.pin);
+            assert_eq!(raw["state"]["items"]["item-000"]["phase"], serde_json::json!(live.phase));
+            let omitted = raw["landing_groups_omitted"].as_u64().unwrap() as usize;
+            assert!(omitted >= count - 12);
+            assert_eq!(raw["state"]["items"].as_object().unwrap().len(), 1 + count - omitted);
+        }
+    }
+
+    #[tokio::test]
+    async fn engine_and_scripts_read_a_board_whose_source_sequences_alone_exceed_the_frame() {
+        use super::super::admission_tests::{factory, held, receipt, request};
+        use farcooler_client::workflow_presentation::Style;
+        use farcooler_protocol::{v1::Scope, workflow_commands::{Action, HistorySection, Mutation}};
+        use farcooler_transport::{Handler, Peer};
+
+        let (_service_dir, svc, repo) = crate::test_support::fixture().await;
+        let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
+        let key = workspace.to_string();
+        let (_runtime_dir, mut runtime) = failed_logs_in(&key, 1, "").await;
+        let mut state = runtime.state(&key).unwrap().unwrap();
+        let live = state.items.get_mut("item-000").unwrap();
+        live.phase = Phase::Failed;
+        live.pending = None;
+        state.source_sequences.extend((0..700)
+            .map(|n| (format!("wire:member:former-member-{n:018}"), 99)));
+        state.source_sequences.insert("wire:owner".into(), 41);
+        assert!(serde_json::to_vec(&state.source_sequences).unwrap().len() > 16 * 1024);
+        runtime.store.workflow_state_for_tests(&state).unwrap();
+
+        let rpc = factory(&svc, &runtime, Peer { client_id: None, scope: Scope::Control }, None);
+        let response = rpc.handle(farcooler_client::plan_json::workflow_request(workspace)).await;
+        let legacy = receipt(&response);
+        response_frame_len(response);
+        assert_eq!(legacy["state"]["source_sequences"], serde_json::json!(state.source_sequences));
+        assert_eq!(legacy["source_sequences_omitted"], 0);
+
+        state.source_sequences.extend((0..30_000)
+            .map(|n| (format!("wire:member:former-member-{n:018}"), 99)));
+        assert!(serde_json::to_vec(&state.source_sequences).unwrap().len()
+            > farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES);
+        runtime.store.workflow_state_for_tests(&state).unwrap();
+
+        let response = rpc.handle(farcooler_client::plan_json::workflow_request(workspace)).await;
+        let legacy = receipt(&response);
+        response_frame_len(response);
+        assert_eq!(legacy["state"]["source_sequences"], serde_json::json!({"wire:owner":41}));
+        assert_eq!(legacy["source_sequences_omitted"], state.source_sequences.len() - 1);
+        for style in [Style::Apple, Style::Material, Style::Web] {
+            farcooler_client::engine_view::from_workflow_reply(workspace, &legacy, None, style).unwrap();
+        }
+
+        let mut snapshot = serde_json::Value::Null;
+        for view in [None, Some("workflow_summary_v1"), Some("workflow_full_v1")] {
+            let mut pages = 0;
+            snapshot = farcooler_client::plan_json::read_workflow_view(workspace, view, async |read| {
+                if let Some(view) = view { assert!(read.accepts.iter().any(|entry| entry == view)); }
+                let response = rpc.handle(read).await;
+                response_frame_len(response.clone());
+                if receipt(&response)["workflow_page"].is_object() { pages += 1; }
+                let Some(farcooler_protocol::v1::response::Outcome::Result(reply)) = response.outcome else {
+                    panic!("Expected a workflow reply");
+                };
+                Ok(reply.value.unwrap())
+            }).await.unwrap();
+            assert!(pages > 1, "the complete map must span multiple frames");
+            let wire = &snapshot["state"];
+            assert_eq!(wire["revision"], state.revision);
+            assert_eq!(wire["epoch"], state.epoch);
+            assert_eq!(wire["source_sequences"], serde_json::json!(state.source_sequences));
+            assert_eq!(snapshot["source_sequences_omitted"], 0);
+            let live = &state.items["item-000"];
+            assert_eq!(wire["items"]["item-000"]["run"], live.run);
+            assert_eq!(wire["items"]["item-000"]["pin"], live.pin);
+            assert_eq!(wire["items"]["item-000"]["phase"], serde_json::json!(live.phase));
+            assert_eq!(wire["items"]["item-000"].get("definition").is_none(), view == Some("workflow_summary_v1"));
+            if view.is_none() {
+                for style in [Style::Apple, Style::Material, Style::Web] {
+                    farcooler_client::engine_view::from_workflow_reply(workspace, &snapshot, None, style).unwrap();
+                }
+            }
+        }
+
+        let mut offset = 0;
+        let mut digest = None;
+        let mut encoded = String::new();
+        loop {
+            let read = request(workspace, &Action::History { section: HistorySection::SourceSequences, offset, item: None });
+            let response = rpc.handle(read).await;
+            let page = receipt(&response);
+            response_frame_len(response);
+            assert_eq!(page["offset"], offset);
+            let first = digest.get_or_insert_with(|| page["digest"].as_str().unwrap().to_owned());
+            assert_eq!(page["digest"], *first);
+            encoded.push_str(page["chunk"].as_str().unwrap());
+            let Some(next) = page["next_offset"].as_u64() else { break };
+            assert!(next > offset);
+            offset = next;
+        }
+        assert!(offset > 0, "the complete map must span multiple frames");
+        let sequences: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(sequences, serde_json::json!(state.source_sequences));
+
+        let wire = &snapshot["state"];
+        let caller = snapshot["context"]["capabilities"]["decision_principal"].as_str().unwrap();
+        let sequence = wire["source_sequences"][format!("wire:{caller}")].as_u64().unwrap() + 1;
+        let row = &wire["items"]["item-000"];
+        let cancel = Action::Cancel {
+            mutation: Mutation { id: "cancel-from-paged-sequences".into(),
+                revision: wire["revision"].as_u64().unwrap(), epoch: wire["epoch"].as_u64().unwrap(), sequence },
+            item: "item-000".into(), run: row["run"].as_str().unwrap().into(), pin: row["pin"].as_str().unwrap().into(),
+        };
+        let response = held(&mut runtime, &rpc, workspace, cancel, false, || {}).await;
+        assert!(receipt(&response).pointer("/receipt/result/Ok").is_some());
+        state.source_sequences.insert("wire:owner".into(), sequence);
+        assert_eq!(runtime.state(&key).unwrap().unwrap().source_sequences, state.source_sequences);
+    }
+
+    #[tokio::test]
+    async fn engine_and_scripts_read_boards_that_exceed_the_frame_without_previews() {
+        use super::super::admission_tests::{factory, receipt, request};
+        use farcooler_protocol::{v1::{Plan, Scope}, workflow_commands::{Action, HistorySection}};
+        use farcooler_transport::{Handler, Peer};
+
+        let (_service_dir, svc, repo) = crate::test_support::fixture().await;
+        let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
+        let key = workspace.to_string();
+        let (_runtime_dir, runtime) = failed_logs_in(&key, 1, "").await;
+        let mut state = runtime.state(&key).unwrap().unwrap();
+        let mut running = state.items.pop_first().unwrap().1;
+        running.phase = Phase::Failed;
+        running.pending = None;
+        let reason = "Please revisit this build decision. ".repeat(100);
+        let send_back = farcooler_workflow::SendBack { id: "back-1".into(), revision: state.revision,
+            run: running.run.clone(), from: "review".into(), to: "build".into(), reason: reason.clone() };
+        let mut tracker = running.clone();
+        tracker.definition = Definition::ticket_at("todo").unwrap();
+        tracker.pin = tracker.definition.pin();
+        tracker.policy_pin = tracker.pin.clone();
+        tracker.phase = Phase::WaitingApproval;
+        let closed = "closed-dependency";
+        tracker.dependencies.insert(closed.into());
+        state.archive.insert(closed.into(), Archived { phase: Phase::Done, candidate: None,
+            group: None, start_load: None, closed: None, last_run: None, history: Vec::new() });
+        let rpc = factory(&svc, &runtime, Peer { client_id: None, scope: Scope::Control }, None);
+
+        let max = farcooler_workflow::MAX_ITEMS;
+        for (count, all_runs) in [(max, false), (max, true), (150, true)] {
+            state.items.clear();
+            let last = format!("ticket-{:04}", count - 1);
+            for n in 0..count {
+                let id = format!("ticket-{n:04}");
+                let mut item = if all_runs || id == last { running.clone() } else { tracker.clone() };
+                item.run = digest(&(&key, &id));
+                item.resource = Exec::item_resource(&key, &id);
+                if all_runs && (count < max || id == last) {
+                    item.sent_back = (0..3).map(|i| farcooler_workflow::SendBack {
+                        id: format!("back-{i}"), run: item.run.clone(), ..send_back.clone()
+                    }).collect();
+                } else if !all_runs && n == 0 {
+                    item.follows = Some(last.clone());
+                } else if !all_runs && id == last {
+                    item.followers.push("ticket-0000".into());
+                }
+                state.items.insert(id, item);
+            }
+            assert!(serde_json::to_vec(&state.items).unwrap().len() > farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES,
+                "the live items alone must overflow the frame");
+            runtime.store.workflow_state_for_tests(&state).unwrap();
+
+            let legacy = farcooler_client::plan_json::workflow_request(workspace);
+            for flag in [None, Some("workflow_full_v1"), Some("workflow_summary_v1")] {
+                let mut read = legacy.clone();
+                read.accepts.extend(flag.map(String::from));
+                let response = rpc.handle(read).await;
+                let raw = receipt(&response);
+                let bytes = response_frame_len(response);
+                eprintln!("{count} live items, all runs: {all_runs}, {flag:?}: {bytes} bytes");
+                assert_eq!(raw["state"]["revision"], state.revision);
+                assert_eq!(raw["state"]["epoch"], state.epoch);
+                assert_eq!(raw["state"]["source_sequences"], serde_json::json!(state.source_sequences));
+                if !all_runs {
+                    // The bare Done row fits the archive preview and survives dependency
+                    // compaction. If the final fallback removes it, dispatch needs the
+                    // omission count to look it up before opening a pane.
+                    if flag == Some("workflow_summary_v1") {
+                        assert_eq!(raw["state"]["archive"][closed]["phase"], "Done");
+                        assert_eq!(raw["archive_omitted"], 0);
+                    } else {
+                        assert!(raw["state"]["archive"].get(closed).is_none());
+                        assert_eq!(raw["archive_omitted"], 1);
+                    }
+                }
+                let items = raw["state"]["items"].as_object().unwrap();
+                for (id, item) in &state.items {
+                    match items.get(id) {
+                        Some(row) => {
+                            assert_eq!(row["run"], item.run);
+                            assert_eq!(row["pin"], item.pin);
+                            assert_eq!(row["phase"], serde_json::json!(item.phase));
+                        }
+                        None => assert!(flag.is_none() && count == max, "{id} missing from {flag:?}"),
+                    }
+                }
+                if flag == Some("workflow_full_v1") && !all_runs {
+                    assert_eq!(raw["items_compact"], true);
+                    assert_eq!(items["ticket-0000"]["definition"]["source"], farcooler_workflow::TICKET_SOURCE);
+                    assert_eq!(items["ticket-0000"]["follows"], last);
+                }
+                if flag.is_none() {
+                    if !all_runs {
+                        assert!(items.contains_key(&last), "keep the active run before at-rest tickets");
+                    }
+                    if count < max {
+                        assert_eq!(items[&last]["sent_back"].as_array().unwrap().len(), 3);
+                        assert_eq!(raw["item_details_omitted"], true);
+                    } else {
+                        assert_eq!(raw["items_omitted"], count - items.len());
+                        assert!(items.len() < count);
+                        if all_runs {
+                            assert!(!items.contains_key(&last), "the legacy preview can also omit active runs");
+                        }
+                    }
+                    farcooler_client::engine_view::from_workflow_reply(
+                        workspace, &raw, None, farcooler_client::workflow_presentation::Style::Apple).unwrap();
+                    farcooler_client::plan_json::with_workflow_state(&Plan::default(), workspace, Some(async { Ok(raw.clone()) })).await.unwrap();
+                }
+            }
+
+            // The reader used by the Mac's Engine command and every Session must
+            // assemble all live rows before rendering or creating action guards.
+            let mut pages = 0;
+            let raw = farcooler_client::plan_json::read_workflow(workspace, async |read| {
+                let response = rpc.handle(read).await;
+                response_frame_len(response.clone());
+                if receipt(&response)["workflow_page"].is_object() { pages += 1; }
+                let Some(farcooler_protocol::v1::response::Outcome::Result(reply)) = response.outcome else {
+                    panic!("Expected a workflow reply");
+                };
+                Ok(reply.value.unwrap())
+            }).await.unwrap();
+            assert!(pages > 1, "the live snapshot needs more than one frame");
+            assert_eq!(raw["state"]["items"].as_object().unwrap().len(), count);
+            assert_eq!(raw["state"]["archive"][closed]["phase"], "Done");
+            for (id, item) in &state.items {
+                let row = &raw["state"]["items"][id];
+                assert_eq!(row["run"], item.run);
+                assert_eq!(row["pin"], item.pin);
+                assert_eq!(row["phase"], serde_json::json!(item.phase));
+                assert_eq!(row["definition"], serde_json::to_value(&item.definition).unwrap());
+            }
+
+            use farcooler_client::workflow_presentation::{ActionKind, Presentation, Style};
+            let view = farcooler_client::engine_view::from_workflow_reply(workspace, &raw, None, Style::Apple).unwrap();
+            let view = serde_json::to_value(view).unwrap();
+            let tickets: std::collections::BTreeMap<_, _> = view["stations"].as_array().unwrap().iter()
+                .flat_map(|station| station["tickets"].as_array().unwrap())
+                .map(|ticket| (ticket["id"].as_str().unwrap(), ticket)).collect();
+            assert_eq!(tickets.len(), count);
+            assert_eq!(tickets[last.as_str()]["run"], state.items[&last].run);
+            if all_runs {
+                assert_eq!(tickets[last.as_str()]["sendBacks"]["history"][0]["reason"], reason);
+            } else {
+                assert_eq!(tickets["ticket-0000"]["run"], state.items[&last].run);
+            }
+            let plan = farcooler_client::plan_json::with_workflow_state(&Plan::default(), workspace, Some(async { Ok(raw) }))
+                .await.unwrap();
+            let presentation: Presentation = serde_json::from_value(plan["workflow"].clone()).unwrap();
+            assert_eq!(presentation.runs.len(), if all_runs { count } else { 1 });
+            for run in presentation.runs {
+                assert_eq!(run.run, state.items[&run.item].run);
+                assert!(run.actions.iter().any(|action| action.kind == ActionKind::Cancel), "{}", run.item);
+            }
+        }
+        let archived = receipt(&rpc.handle(request(workspace, &Action::ArchiveItem { item: closed.into() })).await);
+        assert_eq!(archived["item"]["key"], closed);
+        assert_eq!(archived["item"]["phase"], "Done");
+        let page = receipt(&rpc.handle(request(workspace, &Action::History {
+            section: HistorySection::Items, offset: 0, item: Some("ticket-0000".into()),
+        })).await);
+        let retained: serde_json::Value = serde_json::from_str(page["chunk"].as_str().unwrap()).unwrap();
+        assert_eq!(retained["ticket-0000"]["sent_back"][0]["reason"], reason);
     }
 
     #[tokio::test]
@@ -281,6 +844,7 @@ mod tests {
         let rpc = factory(&svc, &runtime, Peer { client_id: None, scope: Scope::Control }, None);
         let reply = receipt(&rpc.handle(request(workspace, &Action::Logs { item: "item-000".into() })).await);
         assert_eq!(reply["archived"], true);
+        assert_eq!(reply["process_logs_omitted"], 0);
         assert_eq!(reply["process_logs"][0]["tail"], "why it failed");
         let get = receipt(&rpc.handle(request(workspace, &Action::Get)).await);
         assert!(get["process_logs"].as_array().unwrap().iter().all(|log| log["item"] == "item-001"));

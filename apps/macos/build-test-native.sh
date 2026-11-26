@@ -20,8 +20,9 @@ cargo build --config profile.dev.opt-level=1 \
 # Swift packages link from target/release. Stage freshly built test libraries
 # there, as build-vt.sh debug already does. The real-CLI tests use target/debug,
 # so the CLI and its sibling daemon require no path override or copying.
-mkdir -p target/release
+target_dir="${CARGO_TARGET_DIR:-target}"
+mkdir -p "$target_dir/release"
 for name in farcooler_vt farcooler_client; do
-  cp "target/debug/lib$name.a" "target/release/lib$name.a"
+  cp "$target_dir/debug/lib$name.a" "$target_dir/release/lib$name.a"
 done
 cp -p crates/vt/include/farcooler_vt.h apps/macos/Sources/CFarCoolerVT/farcooler_vt.h

@@ -72,7 +72,8 @@ pub use coding::{AGENT_REVIEWER, CodingConfigExt,CodingConfig, CodingCommand, Co
 pub(crate) use coding::PinnedDefinition;
 pub use coding_execute::{CodingReviewReceipt, CodingCiReceipt, write_agent_verdict, write_agent_verdict_with_summary};
 mod wire_commands;
-pub(crate) use wire_commands::{GetView, encode_legacy_get, encode_plan_get};
+pub(crate) use wire_commands::{GetView, encode_plan_get};
+mod wire_history;
 mod named_tree;
 pub use named_tree::{RepoLocks, WorktreeHost};
 mod admission;

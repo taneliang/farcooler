@@ -512,7 +512,7 @@ receipt, and creates an informational In Review card for the owner. The ordinary
 board notification path announces that card; it does not ask for approval.
 The card is excluded from engine tracking, so notifying the owner does not
 advance the workflow revision or start a run.
-`workflow get <workspace-uuid>` includes the grant and publication history.
+`workflow get <workspace-uuid>` includes the grant and a preview of publication history.
 Environment values are excluded from the readable diff; bundle pins retain the
 complete adapter and notification settings for restoration.
 
@@ -663,3 +663,71 @@ This covers what publication adds. The orchestrator's own shell runs as the same
 Unix user, so the runner does not stop an agent that runs these commands
 directly. That limit comes from the Cloudflare and GitHub accounts, not from
 this grant.
+
+## Reading workflow history
+
+`farcooler workflow get <workspace-uuid> --json` carries the current
+`state.revision`, `state.epoch`, `state.source_sequences` and every active item's
+`run`, `pin` and `phase`. `--full` asks for pinned definitions and a
+preview of notification deliveries. Finished landing groups, including failed
+groups with no active work or joined tickets, archived tickets,
+previous runs, cleanup records, process logs and publication records have bounded
+previews. The `*_omitted` counts report records left out of the previews.
+
+For an explicit mutation, read `get` as the same caller that will submit the
+write. In `state.source_sequences`, look up the key formed by prefixing
+`context.capabilities.decision_principal` with `wire:` (for example,
+`wire:owner` or `wire:member:alice`). Pass that value plus one as
+`--sequence`, or pass 1 if the caller has no entry. Both forms of CLI
+`get` return the complete sequence map in `state.source_sequences`, including
+other sources. The CLI assembles pages before printing a single JSON object.
+Use the revision, epoch and caller sequence from that same object when binding
+a mutation.
+
+To act on a failed group outside the preview, read its record with
+`farcooler workflow history <workspace-uuid> groups --item <key> --json`.
+The record is keyed by group ID and contains its `run`, `pin` and `phase`.
+Use its run and pin with the revision, epoch and caller sequence from `get`.
+If the mutation reports `Stale`, refresh both reads before binding a new
+command. Routine `cancel` looks up an omitted group by key automatically.
+
+Engine and `workflow get` share a Rust reader that opts into `workflow_pages_v1`.
+If the snapshot needs more than one frame, it follows the `workflow_page`
+cursor with `GetPage` requests carrying `offset` and `digest` and repeats the
+initial request's `accepts` values. Each page has the same authorization as
+`Get`. If the snapshot changes during paging,
+the runner sends offset zero for the new snapshot and the reader retries
+once. A runner that responds with a complete single reply needs no paging.
+Older apps read the original single-reply format. If the complete sequence map
+would overflow that reply, the runner can keep the caller's own sequence and
+report the remaining count in `source_sequences_omitted`.
+If live rows alone fill the frame, `items_omitted` counts rows outside
+that reply. `item_details_omitted: true` means briefs or current-run decision
+reasons are available in history.
+
+Read retained details with `farcooler workflow history <workspace-uuid> <section> --json`.
+
+| Section | Retained records |
+| --- | --- |
+| `items` | Live non-group items keyed by ticket, including pinned definitions, briefs and current-run decisions |
+| `groups` | Landing groups in `state.items`, including failed and finished groups and their details |
+| `archive` | Archived tickets and groups keyed by item, including their run history |
+| `runs` | Earlier runs retained on live items, keyed by item |
+| `source_sequences` | Complete map of source keys to their latest recorded sequence, fetched on its own |
+| `cleanup` | Cleanup effects and their results |
+| `publications` | Publications, rollbacks and publication grants |
+| `notices` | The 32 most recent notification deliveries and outcomes |
+| `logs` | Retained process log paths and tails, including archived runs |
+
+Use `--item <key>` to filter `items`, `groups`, `archive`, `runs` or `logs`.
+For a quick read of one ticket's recent process tails and log paths, use
+`farcooler workflow logs <workspace-uuid> <key> --json`. Its
+`process_logs_omitted` count includes entries outside the preview. Read
+`history <workspace-uuid> logs --item <key> --json` for all retained entries.
+
+Each history page has a JSON string `chunk`. Start with the default
+`--offset 0`. Append each decoded chunk in order, with no separator, and pass
+the previous page's `next_offset` to `--offset` until it is null. Parse the
+concatenated text as JSON. All pages of a read must have the same `digest`.
+Start again at offset zero if the digest changes while the runner is writing
+records. For a single-page read, `jq -j .chunk` extracts the JSON text.

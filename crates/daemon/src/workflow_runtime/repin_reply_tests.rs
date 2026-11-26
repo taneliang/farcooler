@@ -1,7 +1,7 @@
 //! ov-1373: a busy workspace's `workflow.get` stays under the 1 MiB reply cap, and `workspace re-pin` asks only for
 //! the published workflow. Both lists grow without bound; the first fixture is the live machine's (766 cleanups).
 use super::Runtime;
-use super::wire_commands::bound_recent;
+use super::wire_history::{ListOrder::{NewestFirst, OldestFirst}, recent};
 use farcooler_workflow::cleanup::CleanupEffect;
 use farcooler_protocol::workflow_commands::Action;
 use std::time::Duration;
@@ -25,16 +25,19 @@ async fn busy() -> (impl Sized, tempfile::TempDir, std::sync::Arc<crate::service
 #[test]
 fn a_long_list_keeps_its_newest_entries_and_counts_the_rest() {
     let mut reply = serde_json::Map::new();
-    bound_recent(&mut reply, "process_logs", (0..800).map(|n| serde_json::json!({"n": n, "tail": "x".repeat(300)})).collect());
+    recent(&mut reply, "process_logs", (0..800).map(|n| serde_json::json!({"n": n, "tail": "x".repeat(300)})).collect(), OldestFirst, 20_000).unwrap();
     let kept = reply["process_logs"].as_array().unwrap();
     assert_eq!(kept.len(), 50);
     assert_eq!(kept[0]["n"], 750);
     assert_eq!(kept[49]["n"], 799);
     assert_eq!(reply["process_logs_omitted"], 750);
     let mut short = serde_json::Map::new();
-    bound_recent(&mut short, "build_cleanup", vec![1, 2, 3]);
+    recent(&mut short, "build_cleanup", vec![1, 2, 3], OldestFirst, 100).unwrap();
     assert_eq!(short["build_cleanup"], serde_json::json!([1, 2, 3]));
     assert_eq!(short["build_cleanup_omitted"], 0);
+    recent(&mut short, "publication_history", vec![3, 2, 1], NewestFirst, 4).unwrap();
+    assert_eq!(short["publication_history"], serde_json::json!([3, 2]));
+    assert_eq!(short["publication_history_omitted"], 1);
 }
 
 #[tokio::test]

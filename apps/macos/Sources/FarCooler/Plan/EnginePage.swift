@@ -79,14 +79,14 @@ struct EnginePage: View {
 
     @State private var snapshot: EngineSnapshot?
     @State private var observedAt: Date?
-    @State private var problem: String?
+    @State private var failed = false
     @State private var refreshRequest = 0
 
     private var readProblem: String? {
         if client.state == .unreachable(reason: HostState.runnerNotRespondingReason) {
             return HostState.runnerNotRespondingReason
         }
-        return problem
+        return failed ? EngineCopy.invalidResponse.text : nil
     }
 
     var body: some View {
@@ -122,19 +122,19 @@ struct EnginePage: View {
 
     private func read() async {
         let repository = workspace.repository ?? workspace.id
-        let (data, message) = await client.runnerRead(
+        let (data, _) = await client.runnerRead(
             ["plan", "engine", "--repo", repository]
                 + (workspace.boardWorkspace.map { ["--workspace", $0] } ?? []) + ["--json"])
         guard !Task.isCancelled else { return }
         guard let data, let next = try? JSONDecoder().decode(EngineSnapshot.self, from: data) else {
-            problem = message ?? EngineCopy.invalidResponse.text
+            failed = true
             return
         }
         if let snapshot, snapshot.workspace == next.workspace,
            snapshot.epoch == next.epoch, snapshot.revision > next.revision { return }
         snapshot = next
         observedAt = .now
-        problem = nil
+        failed = false
     }
 }
 

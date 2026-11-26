@@ -103,7 +103,7 @@ public struct WorkflowRunsView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
                 ToolbarItem(placement: .primaryAction) {
-                    Button("Refresh") { Task { await model.refresh(port) } }.disabled(model.busy)
+                    Button(model.readFailed ? PlanWords.tryAgain : "Refresh") { Task { await model.refresh(port) } }.disabled(model.busy)
                 }
             }
         }

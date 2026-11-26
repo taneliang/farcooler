@@ -141,15 +141,10 @@ fun LazyListScope.planItems(
             }
         }
         PlanReadState.Unavailable -> item(key = "plan/unavailable") {
-            Column(Modifier.testTag("plan-unavailable")) {
-                PlanNotice(PlanWords.COULDNT_READ, null)
-                TextButton(onClick = onRetry, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp), modifier = Modifier.testTag("plan-retry")) {
-                    Text(PlanWords.TRY_AGAIN)
-                }
-            }
+            PlanReadFailure(onRetry, Modifier.testTag("plan-unavailable"))
         }
         is PlanReadState.Loaded -> {
-            loaded(state.plan, statuses, onOpen, folds, needsYou, onNeedsYou, themeColumns, rulingsShown = rulings != null && state.plan.rulings.isNotEmpty(), band = band)
+            loaded(state.plan, statuses, onOpen, onRetry, folds, needsYou, onNeedsYou, themeColumns, rulingsShown = rulings != null && state.plan.rulings.isNotEmpty(), band = band)
             // Last, as on the Mac and the iPhone: rulings ask nothing, and stand until the owner says otherwise.
             rulingItems(state.plan, rulings)
         }
@@ -160,6 +155,7 @@ private fun LazyListScope.loaded(
     plan: Plan,
     statuses: Map<String, TaskStatus>,
     onOpen: (PlanPage) -> Unit,
+    onRetry: () -> Unit,
     folds: PlanFolds,
     needsYou: Int,
     onNeedsYou: (() -> Unit)?,
@@ -169,7 +165,7 @@ private fun LazyListScope.loaded(
 ) {
     // Read before choosing the empty layout: engine groups can outlive the themes and ticket line.
     val view = PlanViews.of(plan, needsYou = needsYou, statuses = statuses)
-    if (plan.isEmpty && view?.landingGroups.isNullOrEmpty()) {
+    if (view != null && plan.isEmpty && view.landingGroups.isNullOrEmpty()) {
         // Rulings alone plan nothing (review 1005a F1), but they're something to show.
         if (!rulingsShown) item(key = "plan/empty") {
             PlanNotice(PlanWords.NOTHING_PLANNED, PlanWords.NOTHING_PLANNED_DETAIL, Modifier.testTag("plan-empty"))
@@ -178,7 +174,7 @@ private fun LazyListScope.loaded(
     }
     // The same Rust answer supplies the band and every section, so they can't disagree (ov-1016).
     if (view == null) {
-        item(key = "plan/unreadable") { PlanNotice(PlanWords.COULDNT_READ, null, Modifier.testTag("plan-unreadable")) }
+        item(key = "plan/unreadable") { PlanReadFailure(onRetry, Modifier.testTag("plan-unreadable")) }
     } else {
         if (band != BandShown.NONE) item(key = "plan/band") { PlanGlanceBand(PlanGlanceSentence.of(view), view.needsYou.toInt(), onNeedsYou = onNeedsYou, pill = false, shown = band) }
         planSections(plan, view, folds, themeColumns, onOpen, onNeedsYou)
@@ -194,6 +190,16 @@ private fun LazyListScope.loaded(
             PlanHeader(landed.title, landed.count.toInt(), Modifier.testTag("plan-landed-header"), open = open) { folds.toggle(PlanFold.LANDED_TODAY) }
         }
         if (open) ticketRows(view.landedToday, "plan/landed", onOpen)
+    }
+}
+
+@Composable
+private fun PlanReadFailure(onRetry: () -> Unit, modifier: Modifier) {
+    Column(modifier) {
+        PlanNotice(PlanWords.COULDNT_READ, null)
+        TextButton(onClick = onRetry, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp), modifier = Modifier.testTag("plan-retry")) {
+            Text(PlanWords.TRY_AGAIN)
+        }
     }
 }
 

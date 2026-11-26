@@ -80,6 +80,7 @@ export function startPlanTab(
           cancel: () => board.cancel(),
           keep: id => void board.keep(id),
           keepAll: () => void board.keepAll(),
+          retry: () => void board.refresh(),
         },
         drawn,
         items,

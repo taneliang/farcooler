@@ -123,17 +123,18 @@ async fn a_large_board_loads_in_plan_overview_and_detail_commands() {
     assert!(read.cards.len() < 1500, "closed cards must be summarized");
 
     // The released app reads the unpaged board, then sends workflow.get with no view marker.
-    let get_full = farcooler_client::plan_json::workflow_request(repo.workspace);
-    let mut get_workflow = get_full.clone();
-    get_workflow.accepts.clear();
+    let get_workflow = farcooler_client::plan_json::workflow_request(repo.workspace);
+    let mut get_full = get_workflow.clone();
+    get_full.accepts.push(farcooler_protocol::accepts::WORKFLOW_FULL.into());
     let legacy = farcooler_client::plan_json::with_workflow(&read, repo.workspace, Some(async {
         let reply = link.call(get_workflow).await?.value.unwrap();
         let result::Value::WorkflowReply(workflow) = &reply else {
             panic!("wrong legacy workflow reply");
         };
         let wire: serde_json::Value = serde_json::from_str(&workflow.json).unwrap();
-        assert_eq!(wire["archive_omitted"], ARCHIVED_RUNS);
-        assert_eq!(wire["state"]["archive"], serde_json::json!({}));
+        let kept = wire["state"]["archive"].as_object().unwrap().len();
+        assert!(kept < ARCHIVED_RUNS);
+        assert_eq!(kept + wire["archive_omitted"].as_u64().unwrap() as usize, ARCHIVED_RUNS);
         Ok(reply)
     })).await.expect("released app Plan load");
     assert_eq!(legacy["themes"][0]["counts"]["cancelled"], 250);
@@ -141,10 +142,26 @@ async fn a_large_board_loads_in_plan_overview_and_detail_commands() {
     assert_eq!(legacy["themes"][0]["next"], "Next on the board");
     assert_eq!(legacy["landings"][0]["number"], 100);
     assert_eq!(legacy["workflow"]["runs"][0]["item"], "item");
-    assert!(matches!(
-        link.call(get_full).await,
-        Err(farcooler_transport::ClientError::Daemon { what, .. }) if what == "response_too_large"
-    ));
+    let result::Value::WorkflowReply(full) = link.call(get_full).await.unwrap().value.unwrap() else {
+        panic!("wrong Engine workflow reply");
+    };
+    let full: serde_json::Value = serde_json::from_str(&full.json).unwrap();
+    let engine = farcooler_client::engine_view::from_workflow_reply(
+        repo.workspace, &full, Some(&read), farcooler_client::workflow_presentation::Style::Apple,
+    ).expect("Engine loads with a history preview");
+    assert_eq!(engine.workspace, repo.workspace.to_string());
+
+    let cli = tokio::process::Command::new(env!("CARGO_BIN_EXE_farcooler"))
+        .env("FARCOOLER_HOME", h.socket.parent().unwrap())
+        .env_remove("FARCOOLER_WORKSPACE")
+        .env_remove("FARCOOLER_ACTOR")
+        .args(["plan", "engine", "--repo", &repo.id.to_string(),
+            "--workspace", &repo.workspace.to_string(), "--json"])
+        .output().await.unwrap();
+    assert!(cli.status.success(), "{}", String::from_utf8_lossy(&cli.stderr));
+    let cli: serde_json::Value = serde_json::from_slice(&cli.stdout).unwrap();
+    assert_eq!(cli["workspace"], repo.workspace.to_string());
+    assert_eq!(cli["revision"], full["state"]["revision"]);
 
     let session = farcooler_client::session::Session::connect_local(&h.socket).await.unwrap();
     let json = session.plan_with_workflow(repo.workspace).await.unwrap();
