@@ -7,44 +7,16 @@ use farcooler_agent_hooks::{Agent, assemble::MessageAssembler, facts::facts, wir
 use farcooler_tmux::TmuxServer;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
+#[path = "coding_native_receipts.rs"]
+mod receipts;
+use receipts::{NativeOwner, NativeSettlement};
+
 #[path = "coding_native_quiesce.rs"]
 mod quiesce;
 
 #[cfg(test)]
 thread_local! { pub(super) static TEST_ARGV: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) }; }
 use crate::native_hold::{self, Answer};
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct NativeOwner {
-    binding: Binding,
-    terminal: Uuid,
-    pane: String,
-    tty: String,
-    /// The agent runs under its hold (ov-1330), which is what ends it. False for an owner an earlier engine launched.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    hold: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    supervisor: Option<crate::effect_runner::Owner>,
-}
-/// Launched keeps the receipt shape previous engines wrote. A never-launched review records its binding
-/// directly rather than inventing a pane owner, and can only supply an interrupted exit, never a verdict.
-/// The optional failure preserves startup refusal reasons without changing older launched receipts.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(untagged, deny_unknown_fields)]
-enum NativeSettlement {
-    Launched { owner: NativeOwner, hooks: Vec<HookLine>, completed: Option<bool>, #[serde(default, skip_serializing_if = "Option::is_none")] failure: Option<String> },
-    NeverLaunched { binding: Binding },
-}
-impl NativeSettlement {
-    fn completion(&self, binding: &Binding) -> Result<Option<bool>> {
-        match self {
-            Self::Launched { owner, completed, .. } if owner.binding == *binding && owner.terminal == terminal(binding) => Ok(*completed),
-            Self::NeverLaunched { binding: original } if original == binding => Ok(None),
-            _ => Err(Error::Refused("foreign native settlement")),
-        }
-    }
-}
 
 /// How long a reviewer that has recorded its verdict may stay quiet before its turn is taken as over (ov-1082): a
 /// Stop lost on the way, under load, must not hold a decided review for the turn's three hours. Measured from the
