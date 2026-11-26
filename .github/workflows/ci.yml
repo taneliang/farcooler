@@ -1953,6 +1953,7 @@ jobs:
       - run: node scripts/size-gate.mjs dist
       - run: npx wrangler deploy --dry-run --env canary --outdir /tmp/web-build-canary
       - run: cargo build --locked --manifest-path ../../crates/web/Cargo.toml --example fake_daemon
+      - run: node test/browser/chat-check.mjs
       - run: node test/browser/plan-render-check.mjs
       - name: Check work and board actions in Chrome
         shell: bash

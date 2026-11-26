@@ -21,8 +21,7 @@
 // with mobile=true), since headless --window-size can't go below about 500 px.
 
 import { createServer } from 'node:http'
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { build } from 'esbuild'
@@ -32,7 +31,6 @@ const args = process.argv.slice(2)
 const shots = args.includes('--screenshots') ? args[args.indexOf('--screenshots') + 1] : null
 if (shots) mkdirSync(shots, { recursive: true })
 
-const out = mkdtempSync(join(tmpdir(), 'fc-chat-'))
 const bundle = await build({ entryPoints: ['test/browser/chat-page.ts'], bundle: true, format: 'esm', target: 'es2022', write: false })
 const css = readFileSync('src/client/app.css', 'utf8') + readFileSync('src/client/chat.css', 'utf8')
 const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Far Cooler</title>
@@ -233,6 +231,84 @@ const phone = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isM
   check((await page.locator('.turn-end', { hasText: 'Interrupted' }).count()) >= 1, 'and the turn is shown interrupted')
 
   check((await page.evaluate(() => window.__violations ?? [])).length === 0, 'no CSP violation')
+  await context.close()
+}
+
+// Replay the owner's passkey table alongside the rest of the Mac reply syntax.
+const markdown = readFileSync('test/browser/chat-markdown.md', 'utf8')
+async function reply(page, id, text) {
+  await page.evaluate(({ id, text }) => window.__chat.runner.put({
+    id, turn: 'turn:2', provisional: false, kind: { Prose: { text, conclusion: false } },
+  }), { id, text })
+}
+
+for (const width of [320, 1280]) {
+  const { context, page } = await open({
+    ...desktop, viewport: { width, height: width === 320 ? 1230 : 1050 }, isMobile: width === 320, hasTouch: width === 320,
+  })
+  await reply(page, 'p:markdown', markdown)
+  const message = page.locator('.prose', { hasText: 'Two different logins happen' })
+  await message.waitFor()
+  const table = message.locator('table')
+  check(await table.count() === 1, `the passkey reply renders a table at ${width}px`)
+  if (await table.count()) {
+    check((await table.locator('thead th[scope=col]').allTextContents()).join('|') === '|Account sign-in|Passkey' &&
+      await table.locator('tbody tr').count() === 3, 'the header and body cells keep their columns')
+    check(await table.evaluate(node => {
+      const head = [...node.tHead.rows[0].cells].map(cell => cell.offsetLeft)
+      const body = [...node.tBodies[0].rows]
+      return body.every(row => [...row.cells].every((cell, i) => cell.offsetLeft === head[i])) &&
+        node.rows[1].cells[2].clientHeight > node.tHead.rows[0].cells[2].clientHeight
+    }), 'the columns align across rows and the long cell wraps')
+    if (width === 320) {
+      check(await table.evaluate(node => {
+        const scroller = node.parentElement
+        scroller.scrollLeft = scroller.scrollWidth
+        return scroller.scrollLeft > 0 && getComputedStyle(scroller).overflowX === 'auto'
+      }), 'the table scrolls sideways inside the reply at 320px')
+    }
+  }
+  check(await message.locator('h2').count() === 1 && await message.locator('ul > li > ul > li').count() === 1 &&
+    await message.locator('ol[start="3"] > li').count() === 2, 'headings, nested bullets and numbered lists keep their structure')
+  check(await message.locator('blockquote').count() === 1 && await message.locator('strong', { hasText: 'passkey provider' }).count() === 1 &&
+    await message.locator('em', { hasText: 'enrolled device' }).count() === 1 &&
+    await message.locator('li code', { hasText: 'authorized_keys' }).count() === 1, 'quotes, bold, italics and inline code render')
+  check(await message.locator('a[href="https://www.openssh.com/"]', { hasText: 'SSH documentation' }).count() === 1, 'the HTTPS link renders')
+  const code = message.locator('pre > code')
+  check(await code.count() === 1 && (await code.textContent()).includes('farcooler@runner.example.com') &&
+    await code.evaluate(node => getComputedStyle(node).whiteSpace === 'pre' && node.parentElement.scrollWidth > node.parentElement.clientWidth),
+  'a long fenced command stays on one line and scrolls within its block')
+  check(await page.evaluate(() => [document.documentElement, document.querySelector('.chat-scroll')]
+    .every(node => node.scrollWidth <= node.clientWidth)), `the page and chat stay within ${width}px`)
+
+  if (shots && await table.count()) {
+    await message.evaluate(node => {
+      node.querySelector('.prose-table').scrollLeft = 0
+      node.scrollIntoView({ block: 'start' })
+    })
+    await page.screenshot({ path: join(shots, `markdown-${width}.png`) })
+  }
+
+  if (width === 1280) {
+    await reply(page, 'p:untrusted-markdown', [
+      'Safety fixture: <img src="missing.png" alt="literal"> and &lt;b&gt;text&lt;/b&gt;',
+      '<script>window.__agentScriptRan = true</script>',
+      'Dangerous [plain](javascript:void) and [encoded](jav&#x61;script:void) and [mixed](JaVaScRiPt:void).',
+      'Left | Middle | Right\n:--- | :---: | ---:\nA | B | C',
+    ].join('\n\n'))
+    const untrusted = page.locator('.prose', { hasText: 'Safety fixture:' })
+    await untrusted.waitFor()
+    const words = await untrusted.textContent()
+    check(words.includes('<img src="missing.png" alt="literal">') && words.includes('<b>text</b>') &&
+      words.includes('<script>window.__agentScriptRan = true</script>') &&
+      await untrusted.locator('img, b, script').count() === 0 && !await page.evaluate(() => window.__agentScriptRan),
+    'raw HTML and script are displayed literally')
+    check(await untrusted.locator('a').count() === 0 && words.includes('plain') && words.includes('encoded') && words.includes('mixed'),
+      'javascript URLs, including encoded and mixed-case forms, cannot become links')
+    check((await untrusted.locator('tbody td').evaluateAll(cells => cells.map(cell => getComputedStyle(cell).textAlign))).join() === 'left,center,right',
+      'table delimiter alignment applies to each column')
+  }
+  check((await page.evaluate(() => window.__violations ?? [])).length === 0, 'Markdown renders without a CSP violation')
   await context.close()
 }
 

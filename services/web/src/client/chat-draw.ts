@@ -25,57 +25,13 @@ import {
   transcriptWords,
 } from './chat-copy'
 import { bodyOf, kindOf, type Row } from './chat-rows'
-import { blocksOf, type Span } from './chat-text'
+import { prose } from './chat-text'
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = ''): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag)
   if (className) node.className = className
   if (text) node.textContent = text
   return node
-}
-
-function spans(into: HTMLElement, list: Span[]): void {
-  for (const span of list) {
-    if (span.code || span.bold) {
-      const node = el(span.code ? 'code' : 'strong', '', span.text)
-      into.append(node)
-    } else into.append(document.createTextNode(span.text))
-  }
-}
-
-/// Prose as paragraphs, lists and code.
-export function prose(text: string): HTMLElement {
-  const box = el('div', 'prose')
-  for (const block of blocksOf(text)) {
-    switch (block.kind) {
-      case 'paragraph': {
-        const p = el('p')
-        spans(p, block.spans)
-        box.append(p)
-        break
-      }
-      case 'heading': {
-        const h = el('p', 'prose-heading')
-        spans(h, block.spans)
-        box.append(h)
-        break
-      }
-      case 'list': {
-        const list = el(block.ordered ? 'ol' : 'ul')
-        for (const item of block.items) {
-          const li = el('li')
-          spans(li, item)
-          list.append(li)
-        }
-        box.append(list)
-        break
-      }
-      case 'code':
-        box.append(el('pre', 'code-block', block.text))
-        break
-    }
-  }
-  return box
 }
 
 /// A long message folded to a few lines with Show More, measured at the width

@@ -1,73 +1,130 @@
-/// An agent's prose, read as the small Markdown it writes (ov-776): paragraphs,
-/// bullet and numbered lists, headings, fenced code, and `code` and **bold**
-/// inside a line. Nothing else is interpreted, and nothing becomes markup: the
-/// result is a plain tree the view turns into elements with `textContent`, as
-/// the page's Trusted Types require, so a link or a tag in a reply is only
-/// ever text.
+import MarkdownIt, { type Token } from 'markdown-it'
 
-export type Span = { text: string; code?: boolean; bold?: boolean }
+// HTML tokens let us preserve raw blocks, including script bodies, verbatim.
+// Only this DOM renderer sees the tokens. It never uses markdown-it's HTML renderer.
+const markdown = MarkdownIt({ html: true })
 
-export type Block =
-  | { kind: 'paragraph'; spans: Span[] }
-  | { kind: 'heading'; spans: Span[] }
-  | { kind: 'list'; ordered: boolean; items: Span[][] }
-  | { kind: 'code'; text: string }
+const tags = new Map<string, keyof HTMLElementTagNameMap>([
+  ['paragraph_open', 'p'], ['blockquote_open', 'blockquote'],
+  ['bullet_list_open', 'ul'], ['ordered_list_open', 'ol'], ['list_item_open', 'li'],
+  ['strong_open', 'strong'], ['em_open', 'em'], ['s_open', 's'],
+  ['table_open', 'table'], ['thead_open', 'thead'], ['tbody_open', 'tbody'],
+  ['tr_open', 'tr'], ['th_open', 'th'], ['td_open', 'td'],
+])
 
-/// One line's `code` and **bold** spans. An unclosed marker is its own text.
-export function spansOf(line: string): Span[] {
-  const spans: Span[] = []
-  const pattern = /`([^`\n]+)`|\*\*([^*\n]+)\*\*/g
-  let at = 0
-  for (let m = pattern.exec(line); m; m = pattern.exec(line)) {
-    if (m.index > at) spans.push({ text: line.slice(at, m.index) })
-    spans.push(m[1] !== undefined ? { text: m[1], code: true } : { text: m[2], bold: true })
-    at = m.index + m[0].length
+function safeLink(href: string): URL | null {
+  // Use the browser's URL parser before checking the scheme. Relative links
+  // have no document base in a transcript from a runner.
+  try {
+    const url = new URL(href)
+    return ['https:', 'http:', 'mailto:'].includes(url.protocol) ? url : null
+  } catch {
+    return null
   }
-  if (at < line.length) spans.push({ text: line.slice(at) })
-  return spans
 }
 
-export function blocksOf(text: string): Block[] {
-  const blocks: Block[] = []
-  const lines = text.replace(/\r\n?/g, '\n').split('\n')
-  let paragraph: string[] = []
-  let list: { ordered: boolean; items: Span[][] } | null = null
-  const flush = () => {
-    if (paragraph.length) blocks.push({ kind: 'paragraph', spans: spansOf(paragraph.join('\n')) })
-    paragraph = []
+function openElement(token: Token): HTMLElement {
+  if (token.type === 'link_open') {
+    const href = token.attrGet('href')
+    const url = typeof href === 'string' ? safeLink(href) : null
+    if (!url) return document.createElement('span')
+    const link = document.createElement('a')
+    link.href = url.href
+    link.target = '_blank'
+    link.rel = 'noopener noreferrer'
+    const title = token.attrGet('title')
+    if (typeof title === 'string') link.title = title
+    return link
   }
-  const endList = () => {
-    if (list) blocks.push({ kind: 'list', ...list })
-    list = null
+
+  if (token.type === 'heading_open' && /^h[1-6]$/.test(token.tag)) {
+    const heading = document.createElement(token.tag as `h${1 | 2 | 3 | 4 | 5 | 6}`)
+    heading.className = 'prose-heading'
+    return heading
   }
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    if (/^\s*```/.test(line)) {
-      flush()
-      endList()
-      const code: string[] = []
-      for (i++; i < lines.length && !/^\s*```/.test(lines[i]); i++) code.push(lines[i])
-      blocks.push({ kind: 'code', text: code.join('\n') })
-      continue
+
+  const tag = tags.get(token.type)
+  const node = document.createElement(tag ?? 'div')
+  if (node instanceof HTMLOListElement) {
+    const start = token.attrGet('start')
+    if (start) node.start = Number(start)
+  }
+  if (node instanceof HTMLTableCellElement) {
+    if (tag === 'th') node.scope = 'col'
+    const alignment = token.attrGet('style')
+    if (alignment === 'text-align:center') node.className = 'prose-center'
+    if (alignment === 'text-align:right') node.className = 'prose-right'
+  }
+  return node
+}
+
+function appendTokens(parent: HTMLElement, tokens: readonly Token[]): void {
+  const stack = [parent]
+  for (const token of tokens) {
+    if (token.hidden) continue // Tight lists omit the paragraph around each item.
+    const current = stack[stack.length - 1]
+    if (token.nesting === 1) {
+      const node = openElement(token)
+      if (token.type === 'table_open') {
+        const scroll = document.createElement('div')
+        scroll.className = 'prose-table'
+        scroll.tabIndex = 0
+        scroll.append(node)
+        current.append(scroll)
+      } else current.append(node)
+      stack.push(node)
+    } else if (token.nesting === -1) {
+      stack.pop()
+    } else {
+      switch (token.type) {
+        case 'inline':
+          appendTokens(current, token.children ?? [])
+          break
+        case 'fence':
+        case 'code_block': {
+          const pre = document.createElement('pre')
+          pre.className = 'code-block'
+          pre.tabIndex = 0
+          const code = document.createElement('code')
+          code.textContent = token.content
+          pre.append(code)
+          current.append(pre)
+          break
+        }
+        case 'code_inline': {
+          const code = document.createElement('code')
+          code.textContent = token.content
+          current.append(code)
+          break
+        }
+        case 'html_block': {
+          const literal = document.createElement('div')
+          literal.className = 'prose-literal'
+          literal.textContent = token.content
+          current.append(literal)
+          break
+        }
+        case 'html_inline':
+        case 'text':
+        case 'image': // Show alt text without loading agent-supplied URLs.
+          current.append(document.createTextNode(token.content))
+          break
+        case 'softbreak': // Agents use single newlines to separate thoughts.
+        case 'hardbreak':
+          current.append(document.createElement('br'))
+          break
+        case 'hr':
+          current.append(document.createElement('hr'))
+          break
+      }
     }
-    const bullet = /^\s*(?:[-*•]|(\d+)[.)])\s+(.*)$/.exec(line)
-    if (bullet) {
-      flush()
-      const ordered = bullet[1] !== undefined
-      if (list && list.ordered !== ordered) endList()
-      list ??= { ordered, items: [] }
-      list.items.push(spansOf(bullet[2]))
-      continue
-    }
-    endList()
-    const heading = /^#{1,6}\s+(.*)$/.exec(line)
-    if (heading) {
-      flush()
-      blocks.push({ kind: 'heading', spans: spansOf(heading[1]) })
-    } else if (line.trim() === '') flush()
-    else paragraph.push(line)
   }
-  flush()
-  endList()
-  return blocks
+}
+
+/// Render untrusted chat Markdown using fixed DOM elements and text nodes.
+export function prose(text: string): HTMLElement {
+  const box = document.createElement('div')
+  box.className = 'prose'
+  appendTokens(box, markdown.parse(text, {}))
+  return box
 }

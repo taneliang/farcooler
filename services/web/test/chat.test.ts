@@ -23,7 +23,6 @@ import {
 } from '../src/client/chat-rows'
 import { Outbox, type Speaker } from '../src/client/chat-send'
 import { sourceOf } from '../src/client/chat'
-import { blocksOf } from '../src/client/chat-text'
 import { closesWithLine } from '../src/client/chat-draw'
 
 // wasm can't load under vitest's worker pool: the golden answers for the core.
@@ -162,16 +161,6 @@ describe('the words', () => {
     expect(sendFailure('closed', 'studio', 'send')).toContain('still in the box')
     expect(sendFailure('runner_too_old', 'studio', 'stop')).toContain('newer Far Cooler')
     expect(sendFailure('refused', 'studio', 'send')).not.toContain('refused')
-  })
-
-  it('reads the small Markdown an agent writes and nothing that could be markup', () => {
-    expect(blocksOf('Done.\n\n- one\n- **two**\n\n```\nx < y\n```\nUse `cargo test`')).toEqual([
-      { kind: 'paragraph', spans: [{ text: 'Done.' }] },
-      { kind: 'list', ordered: false, items: [[{ text: 'one' }], [{ text: 'two', bold: true }]] },
-      { kind: 'code', text: 'x < y' },
-      { kind: 'paragraph', spans: [{ text: 'Use ' }, { text: 'cargo test', code: true }] },
-    ])
-    expect(blocksOf('<img src=x onerror=1>')).toEqual([{ kind: 'paragraph', spans: [{ text: '<img src=x onerror=1>' }] }])
   })
 })
 
