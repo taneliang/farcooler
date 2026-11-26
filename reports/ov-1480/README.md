@@ -1,46 +1,64 @@
 # ov-1480 workflow and terminal writer verification
 
-Linux CI's pane process stopped after proposing the draft with `authentication required`, matching the caller-seat refusal reproduced in fcdiag and leaving the enclosing test waiting for landing, while the macOS landing report covers the quick gate and targeted socket and stdio runs and this workflow fixture passed when run separately on macOS. [CI attempt 1](https://github.com/taneliang/farcooler/actions/runs/45795667586/job/139827713806) · [CI attempt 2](https://github.com/taneliang/farcooler/actions/runs/45795667586/job/139842114609) · [ov-1454 landing report](../ov-1454/README.md#landing-gate-repair)
+The Linux CI shard exercised the pane fixture and hit a startup race in which the stand-in's seat changed from `Person` to `Agent` during a post-proposal read, and the passing macOS landing check covered the build-free quick gate and targeted suites that omitted the fixture. [CI attempt 1](https://github.com/taneliang/farcooler/actions/runs/45795667586/job/139827713806) · [CI attempt 2](https://github.com/taneliang/farcooler/actions/runs/45795667586/job/139842114609) · [ov-1454 landing report](../ov-1454/README.md#landing-gate-repair)
 
-Nextest counted one failed test per CI attempt. The standalone
-`the_orchestrator_pane_runs_the_skills_commands` entry passed because its
-pane environment was absent. It failed when
-`a_ticket_goes_from_draft_to_landed_on_the_commands_the_skill_teaches`
-launched it in tmux. The pane recorded `proposed` and panicked at the
-workflow RPC helper with `authentication required`. The 60-second line
-was nextest's slow-test notice. `common/mod.rs:242` asserted the detached
-test's exit status after the failure.
+## Root cause
 
-On fcdiag with tmux 3.4, temporary diagnostics showed `workflow.get`
-returning `authentication required` when the live caller-seat recheck
-changed from `Agent(Some(...))` to `Unreadable`. The VM refusal occurred
-later in the flow, while polling for review. Linux reads ancestry from
-`/proc` and macOS uses a kernel process-table snapshot. The exact check
-that failed in CI remains unconfirmed. The fixture sends `workflow.*`
-RPCs over a Unix socket, subject to workflow admission. The terminal
-input lease governs writes into the pane's PTY.
+Nextest counted one failure per CI attempt. The standalone pane entry exits
+when its pane environment is absent. The enclosing test starts it inside tmux,
+where it logged `proposed` and panicked with `authentication required` before
+`published`. The 60-second line was the slow-test notice. The assertion in
+`common/mod.rs:242` reported the detached test's failed exit status.
 
-The fixture now gives a refused `workflow.get` up to two seconds to recover
-its live proof. Workflow mutations still require successful admission and
-their expected receipts. The owner connection acquires the orchestrator
-pane's input lease before approving the draft, so the run exercises the
-orchestrator's commands while another client holds that lease.
+On fcdiag with CI's tmux 3.4, temporary diagnostics held the first nonempty
+inventory publication until the post-proposal Get had been admitted. The
+original fixture reproduced both CI errors with its original startup sequence
+and without taking an input lease. The trace showed the same caller PID
+throughout.
+
+```text
+admitted workflow.get     pid=263198 orchestrator=None
+admitted workflow.propose pid=263198 orchestrator=None
+admitted workflow.get     pid=263198 orchestrator=None
+first live inventory publication: pane PID 263174
+admission seat recheck: pid=263198 captured=Person now=Agent(Some(...))
+workflow.get: authentication required
+the orchestrator stopped short: Ok("proposed\n")
+```
+
+`Admission::recheck` refused the change in seat. The original CI logs report
+the wire error. The controlled run identifies the check by reproducing both
+symptoms without injecting an error. On macOS 27.2.1 with tmux 3.8, 10 of 35 runs of the previous
+ticket fixture with admission tracing and without the read retry captured
+the same `Person` to `Agent` transition. The race depends on startup ordering on both platforms.
+
+The fixture enables test-only caller attribution, which can admit its
+unregistered stand-in as a person. In the Linux comparison, disabling that
+stub and running the same stand-in binary under the recognized agent name
+`claude` made early calls fail the `known caller` check. Once the pane appeared,
+its first admitted Get and its proposal both carried the orchestrator seat,
+and the ticket landed. The deployed workflow CLI uses the same socket
+admission path with test attribution disabled. The writer lease governs PTY
+input.
+
+The fixture now starts its workflow RPCs after the owner receives the pane's
+writer lease. Its first reply must identify the caller as `orchestrator`.
+The owner keeps that connection open through landing. An authentication
+refusal fails immediately and records the method that was refused.
 
 ## Verification
 
+Both runs exercised `engine_flow_per_skill`, `rpc_over_socket`, and
+`stdio_transport` with CI assertions and the repository's leak checks. The enclosing workflow
+test checked proposal, publication, move, start, review, queue, and the landed
+Git commit while the owner held the writer lease.
+
 | Host | Result |
 | --- | --- |
-| fcdiag, Ubuntu 26.04 ARM64, tmux 3.4 | 105 passed across the same three suites with CI's leak checks. Nextest run `3d0a4ac6-d7b0-4f72-a953-60024a0961dc` |
-| macOS 27.2.1 ARM64, tmux 3.8 | 105 passed across `engine_flow_per_skill`, `rpc_over_socket`, and `stdio_transport`. Nextest run `afa9dc0a-9dc9-4eba-a2b0-4be63fa08d8d` |
+| fcdiag, Ubuntu 26.04 ARM64, tmux 3.4 | 105 passed. Nextest run `b8cde211-532f-4c9c-aa21-9b8353b1106f` |
+| macOS 27.2.1 ARM64, tmux 3.8 | 105 passed. Nextest run `327242e0-16e0-4a59-8910-82ebb1f1b029` |
 
-Both runs included OV-1454's five daemon regressions for exclusive typing,
-vacant lease claims, native takeover notification, shared stdio leases, and
-survival of the writer after the initial SSH session closes. The outer
-workflow test verified all the command markers and the landed Git commit.
-
-In a disposable Linux copy, injecting one `authentication required` result
-on the first read after proposal stopped the original fixture at
-`proposed` (1 passed, 1 failed). The revised fixture landed the ticket with
-the same injection (2 passed). Build output stayed in ticket scratch. The
-Linux tests used a private 32 GiB tmpfs within the guest scratch directory
-to meet the workflow's free-space check.
+Both runs included ov-1454's five live regressions for exclusive typing,
+claiming a vacant lease, notifying the previous native writer on takeover,
+sharing a lease across stdio sessions, and retaining the writer after the
+starting SSH connection closes.

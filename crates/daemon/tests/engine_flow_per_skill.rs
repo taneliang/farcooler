@@ -13,7 +13,7 @@ use farcooler_daemon::{rpc::RpcFactory, service::Service, watch::Watcher,
     workflow_runtime::{CodingCi, CodingLanding, CodingCommand, CodingConfig, CodingHarness}};
 use farcooler_protocol::{v1::{self as pb, request, result}, workflow_commands::{Action, Mutation}};
 use farcooler_store::models::{NoteKind, TaskStatus};
-use farcooler_transport::{Client, ClientError, HandshakeConfig, UnixListenerServer};
+use farcooler_transport::{Client, HandshakeConfig, UnixListenerServer};
 mod common;
 use uuid::Uuid;
 
@@ -83,27 +83,13 @@ impl Host {
         tokio::time::timeout(std::time::Duration::from_secs(15), self.service.stop_workflows()).await.unwrap().unwrap();
     }
 }
-async fn try_call(link: &mut Link, workspace: Uuid, action: &Action) -> Result<serde_json::Value, ClientError> {
+async fn call(link: &mut Link, workspace: Uuid, action: Action) -> serde_json::Value {
     let mut req = farcooler_transport::request(action.method());
     req.target_resource_id = Some(bytes::Bytes::copy_from_slice(workspace.as_bytes()));
-    req.payload = Some(request::Payload::WorkflowCommand(pb::WorkflowCommand { schema: 1, json: serde_json::to_string(action).unwrap() }));
-    let result::Value::WorkflowReply(reply) = link.call(req).await?.value.unwrap() else { panic!("wrong result") };
-    Ok(serde_json::from_str(&reply.json).unwrap())
-}
-async fn call(link: &mut Link, workspace: Uuid, action: Action) -> serde_json::Value {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
-    loop {
-        match try_call(link, workspace, &action).await {
-            Ok(reply) => return reply,
-            // A polling read may lose the live process proof between admission and reply.
-            Err(ClientError::Daemon { code, .. }) if matches!(action, Action::Get)
-                && code == pb::ErrorCode::AuthRequired as i32 && tokio::time::Instant::now() < deadline =>
-            {
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            }
-            Err(error) => panic!("{}: {error}", action.method()),
-        }
-    }
+    req.payload = Some(request::Payload::WorkflowCommand(pb::WorkflowCommand { schema: 1, json: serde_json::to_string(&action).unwrap() }));
+    let response = link.call(req).await.unwrap_or_else(|error| panic!("{}: {error}", action.method()));
+    let result::Value::WorkflowReply(reply) = response.value.unwrap() else { panic!("wrong result") };
+    serde_json::from_str(&reply.json).unwrap()
 }
 /// A note on the card, as `actor` says it.
 async fn say(link: &mut Link, card: Uuid, kind: pb::TaskNoteKind, actor: &str, body: &str) {
@@ -211,19 +197,15 @@ fn log(out: &str, line: &str) {
 async fn the_orchestrator_pane_runs_the_skills_commands() {
     let Ok(socket) = std::env::var("OV1012_SOCKET") else { return };
     let (ws, key, out) = (std::env::var("OV1012_WS").unwrap().parse::<Uuid>().unwrap(), std::env::var("OV1012_KEY").unwrap(), std::env::var("OV1012_OUT").unwrap());
+    // The test stub can look like a person before tmux publishes its pane. Wait for
+    // the owner to finish starting the pane and claim its input lease before any RPC.
+    let ready = Path::new(&out).with_extension("ready");
+    assert!(common::wait_until(tokio::time::Instant::now() + std::time::Duration::from_secs(60),
+        std::time::Duration::from_millis(25), async || ready.is_file()).await, "the owner never started the pane and claimed its input lease");
     let skill = skill();
     let mut link: Link = Client::connect(&socket, "orchestrator-pane", "1").await.unwrap();
-    // The daemon knows a pane only once its inventory has refreshed past it; until then it calls this process an
-    // unknown caller. A busy machine (the landing gate's) starts this before that refresh, so wait for it.
-    let mut known = false;
-    for _ in 0..1200 {
-        match try_call(&mut link, ws, &Action::Get).await {
-            Ok(_) => { known = true; break; }
-            Err(e) if e.to_string().contains("known caller") => tokio::time::sleep(std::time::Duration::from_millis(50)).await,
-            Err(e) => panic!("the pane's first read failed: {e}"),
-        }
-    }
-    assert!(known, "the daemon never knew this pane");
+    let first = call(&mut link, ws, Action::Get).await;
+    assert_eq!(first["context"]["capabilities"]["decision_principal"], "orchestrator", "the pane must never drive the workflow as the owner");
 
     // Section 4: no workflow yet. The skill sends the orchestrator to `workflow-draft`, which proposes; it never publishes.
     assert!(skill.contains("workspace workflow-draft") && skill.contains("--orchestrator-gate"), "the skill no longer teaches drafting");
@@ -339,16 +321,18 @@ async fn a_ticket_goes_from_draft_to_landed_on_the_commands_the_skill_teaches() 
     }));
     let Some(result::Value::TerminalWriter(writer)) = link.call(claim).await.unwrap().value else { panic!("expected writer lease") };
     assert!(writer.generation.is_some(), "the owner holds the only writer lease");
+    std::fs::write(out.with_extension("ready"), "").unwrap();
 
     // The person's part: the draft's card asks, and the owner answers with the words that approve it.
     let said = |what: &str| std::fs::read_to_string(&out).unwrap_or_default().lines().any(|l| l == what);
+    let pane_log = || std::fs::read_to_string(format!("{}.log", out.display())).unwrap_or_default();
     let mut card = None;
     for _ in 0..1200 {
+        if pane_log().contains("panicked at") { break; }
         let listed = call(&mut link, ws, Action::Drafts { draft: None }).await;
         if let Some(c) = listed["drafts"][0]["card"].as_str() { card = Some(c.parse::<Uuid>().unwrap()); break; }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
-    let pane_log = || std::fs::read_to_string(format!("{}.log", out.display())).unwrap_or_default();
     let card = card.unwrap_or_else(|| panic!("the orchestrator never proposed: {}", pane_log()));
     assert_eq!(pin(&host), None, "a draft publishes nothing");
     let words = asked(&host, card).1;
@@ -357,7 +341,7 @@ async fn a_ticket_goes_from_draft_to_landed_on_the_commands_the_skill_teaches() 
 
     // The orchestrator does the rest; the test only waits for it to say the ticket landed.
     for _ in 0..1800 {
-        if said("landed") { break; }
+        if said("landed") || pane_log().contains("panicked at") { break; }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     assert!(said("landed"), "the orchestrator stopped short: {:?}\n{}", std::fs::read_to_string(&out), pane_log());
