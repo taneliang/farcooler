@@ -188,23 +188,35 @@ async fn the_first_tunnel_at_start_never_admits_a_swept_device() {
     stop_any_tunnel();
     std::fs::write(&log, "").unwrap();
 
+    let stderr = root.path().join("startup-stderr");
     let child = Command::new(env!("CARGO_BIN_EXE_farcoolerd"))
         .env("FARCOOLER_HOME", root.path())
         .env("FARCOOLER_CONFIG", root.path().join("config.toml"))
         .env("FARCOOLER_TEST_STUB_AGENTS", "1")
         .env("HOME", root.path().join("home"))
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::fs::File::create(&stderr).expect("capture the daemon's startup stderr"))
         .kill_on_drop(true)
         .spawn()
         .expect("spawn farcoolerd");
-    let _daemon = DaemonChild { child, home: root.path().to_path_buf() };
+    let mut daemon = DaemonChild { child, home: root.path().to_path_buf() };
+    let daemon_log = root.path().join("logs").join(farcooler_daemon::daemon_log::FILE_NAME);
+    let diagnostics = || {
+        let startup = std::fs::read_to_string(&stderr).unwrap_or_default();
+        let log = std::fs::read_to_string(&daemon_log).unwrap_or_default();
+        format!("{startup}{log}")
+    };
 
     let deadline = Instant::now() + Duration::from_secs(30);
     while serves(&log).is_empty() && Instant::now() < deadline {
+        if let Some(status) = daemon.child.try_wait().expect("the daemon status") {
+            panic!("farcoolerd exited with {status} before serving a tunnel:\n{}", diagnostics());
+        }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    assert_eq!(serves(&log), [format!("serve 22 {}", NODES[3])], "the first tunnel admitted a swept device");
+    let served = serves(&log);
+    assert!(!served.is_empty(), "farcoolerd never served a tunnel:\n{}", diagnostics());
+    assert_eq!(served, [format!("serve 22 {}", NODES[3])], "the first tunnel admitted a swept device");
     let keys = std::fs::read_to_string(&authorized_keys).unwrap();
     for device in BOBS {
         assert!(!keys.contains(&format!("--client {device} ")), "{device} still has a line:\n{keys}");
