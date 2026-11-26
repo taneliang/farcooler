@@ -21,6 +21,7 @@ export class FakeRunner {
   child = new Map<string, FakeRunner>()
   rev = 0
   composed: string[] = []
+  queueNext = false
   /// Each message's images as `type:bytes`, by message.
   composedImages: string[][] = []
   limits = { images: true, each: 1_000_000, total: 3_000_000 }
@@ -56,6 +57,11 @@ export class FakeRunner {
   async compose(_t: string, text: string): Promise<boolean> {
     if (this.failing) throw new Error(this.failing)
     this.composed.push(text)
+    if (this.queueNext) {
+      this.queueNext = false
+      // Let the test deliver the transcript row after the compose reply.
+      return true
+    }
     // The Mac would show it as the person's turn, at once.
     this.put(turn(`turn:${this.rev + 1}`, 0, 0, text, { activity: 'Busy' }) as any)
     return false

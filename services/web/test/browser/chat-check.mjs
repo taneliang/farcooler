@@ -134,15 +134,29 @@ const phone = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isM
   const sent = await page.evaluate(() => window.__chat.runner.composed)
   check(JSON.stringify(sent) === JSON.stringify(['Run the whole suite when you are done']), 'Return sends the trimmed words as one message')
   check((await page.inputValue('.chat-input')) === '' && (await page.locator('.chat-send').isDisabled()), 'the box empties and Send goes off once it is taken')
+  const receipt = page.getByText('Message received and queued.', { exact: true })
+  check(await page.locator('.chat-working').isVisible() && !await receipt.isVisible(), 'the working line alone does not mean the runner queued the send')
   await page.fill('.chat-input', 'Line one')
   await page.press('.chat-input', 'Shift+Enter')
   check((await page.inputValue('.chat-input')).includes('\n') && (await page.evaluate(() => window.__chat.runner.composed.length)) === 1, 'Shift+Return is a new line, not a send')
+
+  await page.evaluate(() => (window.__chat.runner.queueNext = true))
+  const followUp = 'Check the release notes too'
+  await page.fill('.chat-input', followUp)
+  await page.click('.chat-send')
+  await page.waitForFunction(() => document.querySelector('.chat-input').value === '')
+  check(await receipt.isVisible() && !await page.locator('.chat-list').getByText(followUp, { exact: true }).count(), 'the runner’s queued reply acknowledges the send before its transcript row arrives')
+  await page.evaluate(text => window.__chat.runner.put({
+    id: 'queued:next', turn: null, provisional: false, kind: { Queued: { text, state: 'Waiting' } },
+  }), followUp)
+  await page.locator('.chat-list').getByText(followUp, { exact: true }).waitFor()
 
   // A message that fails stays in the box with a sentence, not a Rust word.
   await page.evaluate(() => (window.__chat.runner.failing = 'closed'))
   await page.fill('.chat-input', 'This one will not go')
   await page.click('.chat-send')
   await page.waitForSelector('.chat-problem:not([hidden])')
+  check(!await receipt.isVisible(), 'a failed send clears the previous acknowledgement')
   check((await page.inputValue('.chat-input')) === 'This one will not go', 'a message that failed is still in the box')
   check(!/closed/.test(await page.textContent('.chat-problem')) && /studio/.test(await page.textContent('.chat-problem')), 'and the page says why in its own words')
   await page.evaluate(() => (window.__chat.runner.failing = null))

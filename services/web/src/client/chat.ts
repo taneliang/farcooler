@@ -62,6 +62,7 @@ export class ChatView implements Pane<WebRunner> {
   private readonly box = el('textarea', 'chat-input')
   private readonly send = el('button', 'chat-send')
   private readonly composer = el('form', 'chat-composer')
+  private readonly receipt = el('p', 'chat-receipt')
   private readonly problem = el('p', 'chat-problem')
   /// Images waiting to go with the next message (attachments.ts), and their
   /// thumbnails' object URLs.
@@ -94,6 +95,7 @@ export class ChatView implements Pane<WebRunner> {
     this.note.hidden = true
     this.problem.setAttribute('role', 'alert')
     this.problem.hidden = true
+    this.receipt.setAttribute('role', 'status')
     this.box.rows = 1
     this.box.placeholder = 'Message'
     this.box.setAttribute('aria-label', 'Message')
@@ -128,7 +130,7 @@ export class ChatView implements Pane<WebRunner> {
     this.chooser.setAttribute('aria-hidden', 'true')
     this.chooser.tabIndex = -1
     field.append(this.attachButton, this.box, this.send)
-    this.composer.append(this.strip, field, this.chooser)
+    this.composer.append(this.receipt, this.strip, field, this.chooser)
     this.composer.hidden = !!agentId
     this.scroller.append(this.older, this.list, this.empty)
     const foot = el('div', 'chat-foot')
@@ -488,12 +490,15 @@ export class ChatView implements Pane<WebRunner> {
   private async submit(): Promise<void> {
     const text = this.box.value
     const sent = this.images
-    if (!this.writable || !this.outbox) return
+    if (!this.writable || !this.outbox || this.outbox.busy) return
+    this.receipt.textContent = ''
     this.say('')
     const sending = this.outbox.send(text, sent)
     this.paint()
     const done = await sending
     if (done.ok) {
+      // The runner can confirm the queue before the transcript shows the message.
+      if (done.queued) this.receipt.textContent = 'Message received and queued.'
       // The person's own words stay if they went on typing meanwhile.
       if (this.box.value === text) {
         this.box.value = ''

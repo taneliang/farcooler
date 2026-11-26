@@ -302,6 +302,8 @@ fn the_owners_conventions_ship_as_defaults() {
         let defaults = section(&body, "Defaults");
         for rule in [
             "a line under the heading it concerns, or under `## Anything else`, wins",
+            "When a person's message reaches you mid-turn, reply with one visible line at your next step, before you continue the work",
+            "Keep turns short enough that the person never waits minutes in silence",
             "A landing is numbered by the runner, and \"Landing N\" when you speak of it",
             "Every agent and landing gets a title that says what it does",
             "a ticket's branch starts with its key",

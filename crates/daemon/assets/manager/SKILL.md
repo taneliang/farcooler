@@ -268,18 +268,14 @@ How the owner's own orchestrators run work. Each holds until the charter says
 otherwise: a line under the heading it concerns, or under `## Anything else`,
 wins. When the owner overrules one in chat, ask to put it in the charter.
 
-- **Names.** A landing is numbered by the runner, and "Landing N" when you
-  speak of it. Every agent and landing gets a title that says what it does
+- **Mid-turn messages.** When a person's message reaches you mid-turn, reply with one visible line at your next step, before you continue the work.
+  Keep turns short enough that the person never waits minutes in silence. End the turn if the next update depends on a long-running job and pick up when it reports back.
+- **Names.** A landing is numbered by the runner, and "Landing N" when you speak of it. Every agent and landing gets a title that says what it does
   ("Agents message the orchestrator"); a ticket's branch starts with its key.
-- **Titles.** Cards are `<Area>: <outcome>`, sentence case, 45 characters or
-  fewer (never over 60): Area a part of the product (Mac, CLI, Docs; the
-  charter may list them), Spike for a question, Review for an audit. A feature
-  says what will be true, a bug what goes wrong, one idea each; keys, quotes
-  and identifiers go in the intent.
-- **Notes.** A one-sentence lead, short paragraphs, `-` lists, SHAs and paths in
-  backticks, under ~120 words, a report linked, not pasted; `--body "$(cat f)"`.
-- **Asks.** One sentence naming one decision; detail goes in the intent or a note.
-  Each `--option` of an ask is a short name (30 characters max), recommended first.
+- **Titles.** Cards are `<Area>: <outcome>`, sentence case, 45 characters or fewer (never over 60): Area a part of the product (Mac, CLI, Docs; the charter may list them),
+  Spike for a question, Review for an audit. A feature says what will be true, a bug what goes wrong, one idea each; keys, quotes and identifiers go in the intent.
+- **Notes.** A one-sentence lead, short paragraphs, `-` lists, SHAs and paths in backticks, under ~120 words, a report linked, not pasted; `--body "$(cat f)"`.
+- **Asks.** One sentence naming one decision; detail goes in the intent or a note. Each `--option` of an ask is a short name (30 characters max), recommended first.
 - **Cutover.** Only the owner's orchestrator runs `workflow-cutover`, on their `Allow cutover once`:
   the first answer to your latest ask, from the Mac app or a phone their Mac approved. Good 24 hours,
   one Prepare; past that mid-recovery, only the owner finishes it. Never answer it; Commit can't be undone.
@@ -291,8 +287,7 @@ wins. When the owner overrules one in chat, ask to put it in the charter.
   tickets in one module are sequenced or stacked, or reserve shared numbers
   (migrations, wire tags) up front. To let a landing go without a ticket that
   isn't ready, take it out of the group with `workflow leave`.
-- **Gates.** Every CI step (read from the remote's main), built for every
-  platform the change touches, judged by exit codes, never by grepping output.
+- **Gates.** Every CI step (read from the remote's main), built for every platform the change touches, judged by exit codes, never by grepping output.
   Chain them with `&&`, never `;`: `lint && test`. The engine does the push.
 - **Tests.** A test nobody has seen fail proves nothing: break the code, watch
   it go red, put it back, and say so in the commit. Show a mutation landed.
