@@ -1,7 +1,7 @@
 //! ov-1178: accepted settings must deliver through the CLI and the real native turn host.
 use super::*;
 use farcooler_protocol::v1::{self as pb, request, result};
-use farcooler_store::models::Actor;
+use farcooler_store::models::{AcceptanceItem, Actor, TaskUpdate};
 
 #[tokio::test]
 async fn deferred_claude_stop_delivers_direction_accepted_while_a_shell_runs() {
@@ -158,12 +158,21 @@ async fn accepted_native_claude_delivers_message_and_acceptance_before_turn_ends
         assert!(matches!(sent, result::Value::MessageSent(_)));
         for text in ["Rebase while this turn is active", "Acceptance changed on"] {
             if text.starts_with("Acceptance") {
-                crate::task_ops::update(&svc, &watcher, &pb::TaskUpdate {
-                    task_id: task.id.as_bytes().to_vec().into(), expected_version: task.resource_version,
-                    title: task.title.clone(), intent: task.intent.clone(), actor: "manager".into(),
-                    acceptance: vec![pb::TaskAcceptanceItem { text: "New mid-turn requirement".into(), ..Default::default() }],
-                    ..Default::default()
+                // Exercise native delivery from the watcher. The board update path is covered
+                // by engine_message_reaches_a_scratch_agent_and_acceptance_revision_notifies_it.
+                let revised = svc.store.update_task(task.id, task.resource_version, &TaskUpdate {
+                    title: task.title.clone(),
+                    intent: task.intent.clone(),
+                    acceptance: vec![AcceptanceItem {
+                        id: Uuid::now_v7(),
+                        text: "New mid-turn requirement".into(),
+                        met: false,
+                    }],
+                    constraints: task.constraints.clone(),
+                    labels: task.labels.clone(),
+                    worktree_id: task.worktree_id,
                 }).unwrap();
+                watcher.engine_acceptance_changed(&revised);
             }
             assert!(wait_until_async!(tokio::time::Instant::now() + Duration::from_secs(60),
                 Duration::from_millis(20), async || {
