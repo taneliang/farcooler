@@ -132,10 +132,12 @@ impl Exec {
                 if stored.active && board == workspace { effects.insert(stored.effect.id.clone(), stored); }
             }
         }
-        for (id, item) in state.items.iter_mut().filter(|(_, i)| matches!(i.phase, Phase::Running | Phase::WaitingSlot | Phase::Uncertain)) {
+        for (id, item) in state.items.iter_mut().filter(|(_, i)| matches!(i.phase, Phase::Running | Phase::WaitingSlot | Phase::Uncertain | Phase::Cancelling)) {
             let key = (workspace.to_owned(), item.pending.clone().unwrap_or_default());
             let activity = activities.get(&key);
             let stored = effects.get(&key.1);
+            if crate::engine_stuck::project_leftover_wait(workspace, item) { continue; }
+            if item.phase == Phase::Cancelling { continue; }
             // A kept uncertainty is an outcome, not evidence that a live session disappeared.
             if item.phase == Phase::Uncertain && activity.is_none() {
                 if item.stopping.is_some() && item.failure.is_none() {

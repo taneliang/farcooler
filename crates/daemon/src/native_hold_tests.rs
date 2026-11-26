@@ -3,6 +3,7 @@ use super::{Answer, BLIND, FLAG, Held, Leader, Lineage, ask_blocking, signal_gro
 use super::responsibility;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -10,11 +11,19 @@ use std::time::Duration;
 struct Hold { child: std::process::Child, socket: PathBuf, dir: tempfile::TempDir }
 fn hold(script: &str) -> Hold { hold_with(script, &[]) }
 fn hold_with(script: &str, env: &[(&str, &str)]) -> Hold {
+    launch_hold(script, env, false)
+}
+fn launch_hold(script: &str, env: &[(&str, &str)], ignore_sigchld: bool) -> Hold {
     let dir = tempfile::Builder::new().prefix("h").tempdir_in("/tmp").unwrap();
     let socket = dir.path().join("t.hold.sock");
-    let mut child = std::process::Command::new(crate::test_binary::daemon_binary().expect("build farcoolerd before this test"))
-        .args([FLAG, socket.to_str().unwrap(), "--", "/bin/sh", "-c", script])
-        .envs(env.iter().copied()).current_dir(dir.path()).stdin(std::process::Stdio::null()).spawn().unwrap();
+    let mut command = std::process::Command::new(crate::test_binary::daemon_binary().expect("build farcoolerd before this test"));
+    command.args([FLAG, socket.to_str().unwrap(), "--", "/bin/sh", "-c", script])
+        .envs(env.iter().copied()).current_dir(dir.path()).stdin(std::process::Stdio::null());
+    if ignore_sigchld {
+        // SAFETY: signal with a fixed disposition is async-signal-safe.
+        unsafe { command.pre_exec(|| { libc::signal(libc::SIGCHLD, libc::SIG_IGN); Ok(()) }); }
+    }
+    let mut child = command.spawn().unwrap();
     for _ in 0..500 {
         if ask_blocking(&socket, "ready", Duration::from_secs(1)) == Answer::Said("ready".into()) { return Hold { child, socket, dir }; }
         std::thread::sleep(Duration::from_millis(10));
@@ -82,6 +91,27 @@ fn an_agent_that_exits_takes_its_group_with_it() {
     assert!(was_alive, "the job was alive before the agent exited");
     assert!(job_exited(job), "the job it left in its group ended");
     assert!(!h.socket.exists());
+}
+
+#[test]
+fn ov_1475_a_hold_restores_child_accounting_when_its_launcher_ignored_sigchld() {
+    let mut h = launch_hold("echo $$ > agent; while [ ! -f go ]; do sleep 0.01; done; exit 0", &[], true);
+    let agent = pid_in(h.dir.path(), "agent");
+    std::fs::write(h.dir.path().join("go"), "").unwrap();
+    for _ in 0..300 {
+        if let Some(status) = h.child.try_wait().unwrap() {
+            assert_eq!(status.code(), Some(0));
+            assert!(!h.socket.exists());
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    // Clean up the test's hold only after the agent is gone.
+    if job_exited(agent) {
+        let _ = h.child.kill();
+        let _ = h.child.wait();
+    }
+    panic!("the hold never observed its agent's exit");
 }
 
 #[test]
@@ -281,7 +311,7 @@ fn an_agent_that_ends_its_own_stray_ends() {
 fn a_reaped_leader_is_never_signalled() {
     let mut other = std::process::Command::new("/bin/sleep").arg("30").spawn().unwrap();
     let pid = other.id() as i32;
-    let held = Held { leader: Leader(pid), reaped: Some(0), lineage: Lineage::new().unwrap(), gate_stop: false };
+    let held = Held { leader: Leader(pid), reaped: Some(0), lineage: Lineage::new().unwrap(), gate_stop: false, end_requested: false };
     assert!(!signal_group(&held, libc::SIGKILL));
     std::thread::sleep(Duration::from_millis(50));
     assert!(alive(pid));
@@ -362,4 +392,54 @@ fn the_signal_check_catches_what_it_forbids() {
     assert!(!violations(&format!("{hold}{unspawned}"), Rule::OnlySignalGroup).is_empty(), "a relay that spawned nothing");
     // Test modules may assert with `kill(pid, 0)`.
     assert!(violations("fn f() {}\n#[cfg(test)]\nmod tests { fn g() { unsafe { libc::kill(1, 0); } } }\n", Rule::NoSignals).is_empty());
+}
+
+
+// A macOS observation gap: when responsibility comes back as self and the
+// intermediary exits between snapshots, the orphan carries neither link.
+#[cfg(target_os = "macos")]
+#[test]
+fn ov_1475_self_responsibility_cannot_identify_an_unseen_orphan() {
+    let mut lineage = Lineage::new().unwrap();
+    // Disclaim explicitly so this also exercises the gap in an environment
+    // that normally inherits responsibility. The intermediate parent exits
+    // before the first lineage snapshot.
+    let mut parent = std::process::Command::new("/usr/bin/python3").args(["-c", r#"
+import ctypes as c
+import os
+lib = c.CDLL(None)
+attr = c.c_void_p()
+assert lib.posix_spawnattr_init(c.byref(attr)) == 0
+assert lib.responsibility_spawnattrs_setdisclaim(c.byref(attr), 1) == 0
+program = b'/usr/bin/python3'
+script = b'''
+import os
+with open("/dev/null", "r+b") as null:
+    for fd in (0, 1, 2):
+        os.dup2(null.fileno(), fd)
+os.setsid()
+os.execv("/bin/sleep", ["sleep", "3"])
+'''
+argv = (c.c_char_p * 4)(program, b'-c', script, None)
+env = (c.c_char_p * (len(os.environb) + 1))(*(k + b'=' + v for k, v in os.environb.items()), None)
+pid = c.c_int()
+assert lib.posix_spawn(c.byref(pid), program, None, c.byref(attr), argv, env) == 0
+assert lib.posix_spawnattr_destroy(c.byref(attr)) == 0
+print(pid.value)
+    "#]).stdout(std::process::Stdio::piped()).spawn().unwrap();
+    let leader = parent.id() as i32;
+    // Read one line without waiting for the child's inherited stdout to close.
+    let mut pid = String::new();
+    BufReader::new(parent.stdout.take().unwrap()).read_line(&mut pid).unwrap();
+    assert!(parent.wait().unwrap().success());
+    let pid: i32 = pid.trim().parse().unwrap();
+    let row = (0..100).find_map(|_| {
+        let row = super::rows()?.into_iter().find(|row| row.pid == pid && row.pgid == pid);
+        if row.is_none() { std::thread::sleep(Duration::from_millis(10)); }
+        row
+    }).expect("the detached sleep is still alive after reparenting");
+    assert_eq!(responsibility::of(pid), Some(pid));
+    assert!(!row.responsible);
+    assert_ne!(row.parent, lineage.me);
+    assert!(lineage.look(leader).unwrap().strays.iter().all(|child| child.pid != pid));
 }

@@ -135,3 +135,17 @@ fn a_landed_run_is_past_its_last_stage() {
 fn a_tracker_only_ticket_is_a_card_not_a_run() {
     assert!(run_of(&edited(|item| item.definition = Definition::ticket()), "ov-310").is_none());
 }
+
+#[test]
+fn the_ticket_displays_why_the_hold_is_waiting() {
+    let reason = "Waiting for processes left by the agent to exit: sleep (PID 123).";
+    let state = edited(|item| {
+        item.phase = Phase::Running;
+        item.execution = Some(farcooler_workflow::ExecutionView {
+            phase: Phase::Running, position: None, holders: Vec::new(), text: reason.into(), heavy_lock_wait: None,
+        });
+    });
+    let run = run_of(&state, "ov-310").unwrap();
+    assert_eq!(run.phase, "Running");
+    assert_eq!(run.reason.as_deref(), Some(reason));
+}

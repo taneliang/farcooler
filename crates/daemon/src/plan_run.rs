@@ -34,7 +34,7 @@ pub fn run_of(state: &State, key: &str) -> Option<pb::TicketRun> {
         stage_kind: stage.map(|s| serde_json::to_string(&s.kind)).transpose().ok()?.unwrap_or_default(),
         gate: gate.into(),
         gate_principal: principal,
-        reason: item.failed_reason(),
+        reason: item.failed_reason().or_else(|| item.execution.as_ref().map(|view| view.text.clone())),
         send_back_refused: None,
     })
 }

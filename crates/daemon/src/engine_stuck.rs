@@ -57,6 +57,10 @@ fn table() -> &'static Table { &STUCK }
 /// Every build stuck now, oldest first.
 pub fn list() -> Vec<Stuck> {
     let mut all: Vec<Stuck> = table().lock().map(|m| m.values().cloned().collect()).unwrap_or_default();
+    if let Ok(waiting) = leftovers().lock() {
+        all.retain(|s| !waiting.values().any(|w| w.workspace == s.workspace && w.item == s.item));
+        all.extend(waiting.values().cloned());
+    }
     all.sort_by(|a, b| (a.since_ms, &a.item).cmp(&(b.since_ms, &b.item)));
     all
 }
@@ -68,12 +72,66 @@ pub(crate) fn uncertain(store: &farcooler_store::Store) -> Vec<Stuck> {
     for workspace in store.workflow_workspaces().unwrap_or_default() {
         let Ok(Some(state)) = store.workflow_state(&workspace) else { continue };
         for (item, run) in state.items {
-            if run.phase != Phase::Uncertain { continue; }
+            if run.phase != Phase::Uncertain || leftover_wait(&workspace, &run).is_some() { continue; }
             let Some(question) = run.failure else { continue };
             items.push(Stuck { workspace: workspace.clone(), item, since_ms: run.since_ms, question });
         }
     }
     items
+}
+
+/// Hold observations are keyed by effect so a replaced step cannot inherit
+/// an earlier agent's wait. The active turn or recovery owns their lifetime.
+type LeftoverTable = Mutex<HashMap<Key, Stuck>>;
+#[cfg(not(test))]
+static LEFTOVERS: LazyLock<LeftoverTable> = LazyLock::new(Default::default);
+#[cfg(test)]
+thread_local! { static LEFTOVERS: &'static LeftoverTable = Box::leak(Box::default()); }
+fn leftovers() -> &'static LeftoverTable {
+    #[cfg(not(test))]
+    { &LEFTOVERS }
+    #[cfg(test)]
+    { LEFTOVERS.with(|t| *t) }
+}
+
+pub(crate) struct Leftovers { key: Key, item: String }
+impl Leftovers {
+    pub(crate) fn new(workspace: &str, effect: &farcooler_workflow::Effect) -> Self {
+        Self { key: (workspace.into(), effect.id.clone()), item: effect.item.clone() }
+    }
+
+    pub(crate) fn report(&self, reason: Option<String>) {
+        let changed = leftovers().lock().is_ok_and(|mut table| {
+            let Some(question) = reason else { return table.remove(&self.key).is_some() };
+            let since_ms = table.get(&self.key).map_or_else(now_ms, |s| s.since_ms);
+            let new = Stuck { workspace: self.key.0.clone(), item: self.item.clone(), since_ms, question };
+            table.insert(self.key.clone(), new.clone()).as_ref() != Some(&new)
+        });
+        if changed { announce_change(uuid::Uuid::parse_str(&self.key.0).ok()); }
+    }
+}
+impl Drop for Leftovers {
+    fn drop(&mut self) { self.report(None); }
+}
+
+fn leftover_wait(workspace: &str, item: &farcooler_workflow::Item) -> Option<String> {
+    let table = leftovers().lock().ok()?;
+    [item.pending.as_ref(), item.stopping.as_ref()].into_iter().flatten()
+        .find_map(|effect| table.get(&(workspace.into(), effect.clone())).map(|s| s.question.clone()))
+}
+
+pub(crate) fn project_leftover_wait(workspace: &str, item: &mut farcooler_workflow::Item) -> bool {
+    let Some(reason) = leftover_wait(workspace, item) else { return false };
+    item.execution = Some(farcooler_workflow::ExecutionView {
+        phase: item.phase.clone(), position: None, holders: Vec::new(), text: reason.clone(), heavy_lock_wait: None,
+    });
+    item.reason = Some(reason);
+    true
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64)
 }
 
 type Confirmed = Mutex<HashSet<String>>;
@@ -210,12 +268,19 @@ pub(crate) fn listen(watcher: &std::sync::Arc<crate::watch::Watcher>) {
     if let Ok(mut all) = listeners().lock() { all.push(std::sync::Arc::downgrade(watcher)); }
 }
 
-pub(crate) fn announce() {
+pub(crate) fn announce() { announce_change(None); }
+
+fn announce_change(board: Option<uuid::Uuid>) {
     let live: Vec<_> = listeners().lock().map(|mut all| {
         all.retain(|w| w.strong_count() > 0);
         all.iter().filter_map(|w| w.upgrade()).collect()
     }).unwrap_or_default();
-    for watcher in live { watcher.announce_needs_you(); }
+    for watcher in live {
+        watcher.announce_needs_you();
+        if let Some(board) = board {
+            watcher.announce_plan_changed(board, farcooler_store::models::Actor::Runner);
+        }
+    }
 }
 
 /// What a screen says of an agent that has not been heard from: its question, else nothing.

@@ -101,9 +101,9 @@ pub enum WorkflowCmd {
     /// Retry a failed step within its published retry allowance. After the review send-back limit,
     /// rebuild in the existing checkout with the last finding and a fresh allowance at that gate.
     Retry { workspace:Uuid,item:String,#[arg(long)] run:Option<String>,#[arg(long)] pin:Option<String>,#[command(flatten)] identity:RoutineIdentity },
-    /// Settle a run whose worktree step is Uncertain because its git never finished, or a cancel waiting on one. The
-    /// runner looks first: with nothing of the tree there (no directory, no worktree git lists, no branch it would
-    /// have made), the step fails and can be retried; anything there is named, to take away by hand first.
+    /// Settle an uncertain build or worktree step, or a build waiting for detached processes. For a native build,
+    /// a saved result can settle the step once its hold confirms the agent exited and its process group is empty.
+    /// For a worktree step, the runner checks for a directory, registered worktree or branch before allowing a retry.
     Resolve { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
     /// Queue a ticket waiting at its join step into the open group for that step.
     Queue { workspace:Uuid,item:String,#[arg(long)] run:Option<String>,#[arg(long)] pin:Option<String>,#[command(flatten)] identity:RoutineIdentity },

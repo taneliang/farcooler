@@ -99,7 +99,7 @@ impl Runtime {
         let refused = |sentence: String| Error::Domain(farcooler_core::DomainError::refused(sentence));
         let state = self.state(workspace)?.ok_or(Error::Refused("missing workspace"))?;
         let item = state.items.get(item_id).ok_or(Error::Refused("no such item"))?;
-        if item.phase != Phase::Uncertain {
+        if !matches!(item.phase, Phase::Uncertain | Phase::Running) {
             return Err(refused(format!("{item_id} isn't uncertain, so there is nothing to resolve.")));
         }
         let pending = item.pending.as_ref().ok_or(Error::Refused("nothing is pending"))?;
@@ -109,8 +109,10 @@ impl Runtime {
             EffectKind::Stop { operation } => outbox.iter().find(|s| &s.effect.id == operation).ok_or(Error::Refused("missing stopped effect"))?,
             _ => stored,
         };
-        self.refuse_active_probe(workspace, &provision.effect)?;
         let build = provision.effect.kind == EffectKind::Execute(StageKind::Build);
+        if !build && item.phase != Phase::Uncertain {
+            return Err(refused(format!("{item_id} isn't uncertain, so there is nothing to resolve.")));
+        }
         if provision.effect.kind != EffectKind::Execute(StageKind::Provision) && !build {
             return Err(refused(format!("Only a build, or a step that makes a run's worktree, can be resolved this way; \
                 {item_id}'s uncertain step is neither.")));
@@ -120,8 +122,11 @@ impl Runtime {
         let binding = Binding::new(workspace, &provision.effect,
             provision.resource_generation.ok_or(Error::Refused("the provision was never admitted"))?, item.iteration, &base);
         if build {
-            exec.resolve_build(item_id, &binding).await?;
+            let active = self.activities.lock().map_err(|_| Error::Refused("execution observations unavailable"))?
+                .contains_key(&(workspace.into(), binding.effect.id.clone()));
+            exec.resolve_build(item_id, &binding, item.phase == Phase::Uncertain, active).await?;
         } else {
+            self.refuse_active_probe(workspace, &provision.effect)?;
             exec.check_provision(&binding, false).await?;
         }
         self.recovery.wake();
@@ -250,11 +255,37 @@ impl Exec {
         self.refuse_unstarted(binding, format!("Git never finished making the run's worktree, and nothing was made; {checked}. Retry the run."))
     }
 
-    /// Believed only once the runner looks: a process fact (written only after the process ended), or a native
-    /// agent whose pane is gone with nothing on its terminal, or one that was never let out. Then the build is
-    /// recorded as having ended with no result, and the next sweep fails the step with that (it runs again in the
-    /// same worktree if it has attempts left), or ends the cancelled run waiting on it. Nothing is killed.
-    pub(super) async fn resolve_build(&self, item_id: &str, binding: &Binding) -> Result<()> {
+    /// Accept a saved native result once the hold confirms that only detached descendants remain.
+    /// For an uncertain build with no result, require proof that the process ended or never ran.
+    async fn resolve_build(&self, item_id: &str, binding: &Binding, uncertain: bool, active: bool) -> Result<()> {
+        let refused = |sentence: String| Error::Domain(farcooler_core::DomainError::refused(sentence));
+        let native = self.is_native_agent(binding);
+        if native {
+            if self.process_fact_recorded(binding)? {
+                self.ended_process(binding)?;
+                return Ok(());
+            }
+            match self.resolve_native_leftovers(binding, active).await {
+                Ok(true) => return Ok(()),
+                Ok(false) => {}
+                Err(Error::NativeLeftovers(reason)) => return Err(refused(format!(
+                    "{item_id} can't be resolved yet: no completed turn was saved. {reason}"))),
+                Err(error) => return Err(error),
+            }
+        }
+        if active { return Err(Error::Refused("the runner is checking this effect")); }
+        if !uncertain {
+            return Err(refused(format!("{item_id} has no exited build with leftovers to resolve.")));
+        }
+        if native {
+            match self.recover_native_result(binding).await {
+                Ok(true) => return Ok(()),
+                Ok(false) => {}
+                Err(Error::NativeLeftovers(reason)) => return Err(refused(format!(
+                    "{item_id} can't be resolved yet: {reason}"))),
+                Err(error) => return Err(error),
+            }
+        }
         self.check_build(item_id, binding, "the orchestrator resolved it").await?;
         Ok(())
     }

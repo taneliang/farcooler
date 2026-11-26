@@ -562,3 +562,124 @@ async fn workflow_native_review_recovers_from_its_recorded_verdict_after_a_crash
     assert!(!dir.path().join("reviews").exists(), "recovery launched a reviewer");
     assert_ne!(host.0.pane_life(&owner.pane, id).await.ok(), Some(farcooler_tmux::PaneLife::Live), "the reviewer was left running");
 }
+
+struct ReleaseLeftover(PathBuf);
+impl Drop for ReleaseLeftover {
+    fn drop(&mut self) { let _ = std::fs::write(&self.0, []); }
+}
+
+#[tokio::test]
+async fn ov_1475_resolve_settles_an_uncertain_build_while_a_leftover_is_alive() {
+    let (dir, mut runtime, _fake) = tests::native("leftover-resolve").await;
+    let release = ReleaseLeftover(dir.path().join("release-leftover"));
+    let definition = runtime.configured_definition().unwrap();
+    enqueue(&mut runtime, "w", "one", definition);
+    runtime.pump(2).await.unwrap();
+    let binding = admitted(&runtime).await;
+    let (_cancel, cancelled) = tokio::sync::watch::channel(false);
+    let mut build = Box::pin(runtime.execute_coding("w", &binding, cancelled));
+    let waiting = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let reply = runtime.wire_command("w", "owner", farcooler_protocol::workflow_commands::Action::Get).unwrap();
+            if let Some(reason) = reply["state"]["items"]["one"]["reason"].as_str()
+                && reason.contains("Waiting for processes left by the agent") {
+                break reason.to_owned();
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    });
+    let reason = tokio::select! {
+        outcome = &mut build => panic!("the build settled while its detached process was still running: {outcome:?}"),
+        reason = waiting => reason.expect("workflow get names the leftover while it is running"),
+    };
+    let pid = std::fs::read_to_string(dir.path().join("leftover")).unwrap();
+    assert!(reason.contains(&format!("sh (PID {pid})")), "{reason}");
+    assert!(crate::engine_stuck::list().iter().any(|stuck| stuck.item == "one" && stuck.question == reason));
+    let turn = runtime.saved_native_turn(&binding).unwrap().expect("the turn is durable while the hold is still waiting");
+    assert_eq!(turn.completion(&binding).unwrap(), Some(true));
+    let NativeSettlement::Launched { hooks, .. } = turn else { panic!("the agent ran") };
+    assert!(hooks.iter().any(|hook| hook.event == "Stop"));
+    assert!(!runtime.process_fact_recorded(&binding).unwrap());
+
+    // Lose the owned future while the hold still only has leftovers.
+    drop(build);
+    runtime.observe("w", &binding.effect, Outcome::Uncertain, false, 3).unwrap();
+    let socket = runtime.native_hold_socket(&binding);
+    let state = runtime.state("w").unwrap().unwrap();
+    let item = &state.items["one"];
+    let reply = runtime.resolve_wire("w", "one", &item.run, &item.pin, state.epoch).await.unwrap();
+    assert_eq!(reply["receipt"]["result"], serde_json::json!({"Ok": null}));
+    assert!(runtime.process_fact_recorded(&binding).unwrap(), "Resolve publishes the saved result immediately");
+    let settled: NativeSettlement = serde_json::from_slice(&std::fs::read(runtime.native_path(&binding, "settled")).unwrap()).unwrap();
+    let NativeSettlement::Launched { hooks, .. } = settled else { panic!("the saved turn came from a launched agent") };
+    assert!(hooks.iter().any(|hook| hook.payload["last_assistant_message"] == "Saved before quiescence."));
+    let state = super::super::tests::finish(&mut runtime, "w").await;
+    assert_eq!(state.items["one"].phase, Phase::Done, "{state:?}");
+    assert!(socket.exists(), "the hold still accounts for the detached process after settlement");
+    drop(release);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while socket.exists() { tokio::time::sleep(Duration::from_millis(25)).await; }
+    }).await.expect("the hold exits by itself after the detached process exits");
+}
+
+#[tokio::test]
+async fn ov_1475_resolve_can_release_a_build_waiting_for_leftovers() {
+    let (dir, mut runtime, _fake) = tests::native("leftover-resolve").await;
+    let release = ReleaseLeftover(dir.path().join("release-leftover"));
+    let definition = runtime.configured_definition().unwrap();
+    enqueue(&mut runtime, "w", "one", definition);
+    runtime.pump(2).await.unwrap();
+    let root = runtime.root.clone();
+    let handle = runtime.command_handle(&runtime.controller()).unwrap();
+    let send = runtime.send.clone();
+    let command = async {
+        loop {
+            let state = handle.state("w").await.unwrap().unwrap();
+            if state.items["one"].reason.as_deref().is_some_and(|reason| reason.contains("Waiting for processes left by the agent")) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        let (reply, result) = tokio::sync::oneshot::channel();
+        send.send(Inbox::Resolve("w".into(), "one".into(), reply)).await.ok().unwrap();
+        result.await.unwrap().unwrap();
+        std::fs::read_dir(root).unwrap().map(|entry| entry.unwrap().path()).find(|path| {
+            path.file_name().unwrap().to_string_lossy().starts_with("h-") && path.extension().is_some_and(|ext| ext == "sock")
+        }).expect("the build hold is still listening")
+    };
+    let (sweep, socket) = tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::join!(runtime.pump(3), command)
+    }).await.expect("Resolve settles while the detached process is still running");
+    sweep.unwrap();
+    let state = super::super::tests::finish(&mut runtime, "w").await;
+    assert_eq!(state.items["one"].phase, Phase::Done, "{state:?}");
+    let status = native_hold::status(&socket).await;
+    assert!(matches!(status, Some(native_hold::HoldStatus::Exited { group_empty: true, leftovers, .. })
+        if native_hold::leftover_reason(&leftovers).is_some()), "the hold still sees the detached process");
+    drop(release);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while socket.exists() { tokio::time::sleep(Duration::from_millis(25)).await; }
+    }).await.expect("the hold exits by itself after the detached process exits");
+}
+
+#[tokio::test]
+async fn ov_1475_native_build_passes_after_an_exited_agent_leaves_a_detached_sleep() {
+    let (dir, mut runtime, _fake) = tests::native("leftover-exit").await;
+    let definition = runtime.configured_definition().unwrap();
+    enqueue(&mut runtime, "w", "one", definition);
+    runtime.pump(2).await.unwrap();
+    let started = tokio::time::Instant::now();
+    for time in 3..40 {
+        runtime.pump(time).await.unwrap();
+        let state = runtime.state("w").unwrap().unwrap();
+        let item = &state.items["one"];
+        assert_ne!(item.phase, Phase::Uncertain, "{item:?}");
+        if matches!(item.phase, Phase::Done | Phase::Failed) {
+            assert!(dir.path().join("leftover").exists(), "the agent launched its detached sleep");
+            assert_eq!(item.phase, Phase::Done, "{item:?}");
+            assert!(started.elapsed() >= Duration::from_secs(3), "the run waited for the detached sleep");
+            return;
+        }
+    }
+    panic!("the build never settled");
+}

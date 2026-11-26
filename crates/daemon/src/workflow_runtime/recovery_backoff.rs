@@ -9,7 +9,13 @@ use std::collections::{BTreeMap, BTreeSet};
 pub(super) const FIRST_MS: i64 = 5_000;
 pub(super) const MOST_MS: i64 = 5 * 60_000;
 
-struct Wait { next_ms: i64, delay_ms: i64, woken: bool, said: Option<String> }
+struct Wait {
+    next_ms: i64,
+    delay_ms: i64,
+    woken: bool,
+    said: Option<String>,
+    leftovers: Option<crate::engine_stuck::Leftovers>,
+}
 
 /// Keyed by (workspace, effect).
 #[derive(Default)]
@@ -44,7 +50,8 @@ impl RecoveryBackoff {
     /// The look settled nothing: wait twice as long as last time, and say why once (again only if the reason changes).
     pub(super) fn unsettled(&mut self, workspace: &str, effect: &str, why: Option<String>, now_ms: i64) {
         let wait = self.waits.entry((workspace.to_string(), effect.to_string()))
-            .or_insert(Wait { next_ms: now_ms, delay_ms: 0, woken: false, said: None });
+            .or_insert(Wait { next_ms: now_ms, delay_ms: 0, woken: false, said: None, leftovers: None });
+        wait.leftovers = None;
         if now_ms >= wait.next_ms {
             wait.delay_ms = wait.delay_ms.saturating_mul(2).clamp(FIRST_MS, MOST_MS);
             wait.next_ms = now_ms.saturating_add(wait.delay_ms);
@@ -58,6 +65,16 @@ impl RecoveryBackoff {
             "workflow recovery inconclusive; will check again after backoff");
         wait.said = Some(why);
         #[cfg(test)] { self.warnings += 1; }
+    }
+    /// A known hold wait is checked promptly without turning an admitted
+    /// effect into an uncertain one or blocking the runner's inbox.
+    pub(super) fn wait_for_leftovers(&mut self, workspace: &str, effect: &farcooler_workflow::Effect,
+        reason: String, now_ms: i64) {
+        let wait = self.waits.entry((workspace.into(), effect.id.clone()))
+            .or_insert(Wait { next_ms: now_ms, delay_ms: 0, woken: false, said: None, leftovers: None });
+        wait.leftovers.get_or_insert_with(|| crate::engine_stuck::Leftovers::new(workspace, effect)).report(Some(reason));
+        wait.next_ms = now_ms.saturating_add(FIRST_MS);
+        wait.delay_ms = 0;
     }
     /// The look settled it, or it left the outbox.
     pub(super) fn settled(&mut self, workspace: &str, effect: &str) {

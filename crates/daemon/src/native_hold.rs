@@ -22,10 +22,10 @@
 //! It is not out of sight: [`Lineage`] follows every descendant of the hold, in the group or not. `end` sends
 //! `SIGTERM` first and waits a second, so an agent can end what it started itself (as their parent it can do so
 //! without a race), then kills the group. It answers `ended`, and removes its socket, only once nothing descended
-//! from it is alive. A descendant that outlives the group is waited for, and if it is still working the hold answers
-//! `unsettled` and keeps its socket, so the daemon refuses to settle. On macOS a descendant is known by the kernel's
-//! record of who is responsible for it (the hold, which a relay starts that way), so the hold need not have seen its
-//! parents; on Linux the hold is a child subreaper. See reports/ov-1330/design.md.
+//! from it is alive. While a detached descendant is alive the hold retains its socket, and the runner can read the
+//! leader's exit and the remaining processes with `status`. On macOS the hold uses observed lineage and the kernel's
+//! responsibility record. Some launch environments only report self-responsibility, so a reparented process the hold
+//! never saw can escape observation there. On Linux the hold is a child subreaper. See reports/ov-1330/design.md.
 //!
 //! Requests are answered one at a time, in the order their clients connected, so a `stop` asked before a `cont` is
 //! done before it even when its words arrive later (a landing gate tells and does not wait).
@@ -77,6 +77,7 @@ struct Held {
     reaped: Option<i32>,
     lineage: Lineage,
     gate_stop: bool,
+    end_requested: bool,
 }
 
 /// The only signal call in the native engine (ov-1330, enforced by `the_native_engine_signals_only_its_own_group`).
@@ -99,6 +100,10 @@ const BLIND: &str = "FARCOOLER_NATIVE_HOLD_BLIND_FOR_TEST";
 
 /// Run the hold: listen on `socket`, start `argv` in its own group, and answer until the group has ended.
 pub fn serve(socket: &Path, argv: &[String]) -> i32 {
+    // A launcher can ignore SIGCHLD across exec. Restore normal child
+    // accounting before any spawn so waitid can observe (and pin) our leader.
+    // SAFETY: SIG_DFL is a valid disposition.
+    unsafe { libc::signal(libc::SIGCHLD, libc::SIG_DFL); }
     // macOS: the hold must be the process the kernel holds responsible for everything the agent starts (see
     // `responsibility`). tmux started this process, so it is not; it starts the real hold as a disclaimed child and
     // relays to it. A relayed hold that still is not responsible for itself cannot prove its agent ended: refuse.
@@ -118,6 +123,12 @@ pub fn serve(socket: &Path, argv: &[String]) -> i32 {
         Ok(listener) => listener,
         Err(error) => { eprintln!("{FLAG}: cannot listen on {}: {error}", socket.display()); return 125; }
     };
+    let exit_record = socket.with_extension("exit");
+    if let Err(error) = std::fs::remove_file(&exit_record) && error.kind() != std::io::ErrorKind::NotFound {
+        eprintln!("{FLAG}: cannot clear {}: {error}", exit_record.display());
+        let _ = std::fs::remove_file(socket);
+        return 125;
+    }
     // An orphaned descendant is reparented to the hold, not to init, so it stays in sight (`Lineage`).
     #[cfg(target_os = "linux")]
     // SAFETY: `prctl` with integer arguments only.
@@ -140,7 +151,7 @@ pub fn serve(socket: &Path, argv: &[String]) -> i32 {
         }
     };
     lineage.look(leader);
-    let held = Arc::new(Mutex::new(Held { leader: Leader(leader), reaped: None, lineage, gate_stop: false }));
+    let held = Arc::new(Mutex::new(Held { leader: Leader(leader), reaped: None, lineage, gate_stop: false, end_requested: false }));
     let socket: PathBuf = socket.to_path_buf();
     {
         let (held, socket) = (held.clone(), socket.clone());
@@ -152,8 +163,14 @@ pub fn serve(socket: &Path, argv: &[String]) -> i32 {
     }
     let mut learned = Instant::now();
     loop {
-        if HANGUP.load(Ordering::SeqCst) || exited(leader) {
-            if let Ended::Settled(code) = end(&mut lock(&held), Duration::ZERO) { finish(&socket, code); }
+        if HANGUP.load(Ordering::SeqCst) || exit_code(leader).is_some() {
+            {
+                let mut held = lock(&held);
+                held.end_requested |= exit_code(leader).is_none();
+                if let Ended::Settled(code) = end(&mut held, Duration::ZERO) {
+                    finish(&socket, code, !held.end_requested, None);
+                }
+            }
             // Something that left the group is still alive. Keep the socket, so nobody takes its absence for an
             // ended agent, and look again.
             std::thread::sleep(Duration::from_millis(250));
@@ -263,8 +280,14 @@ mod responsibility {
 fn lock(held: &Mutex<Held>) -> std::sync::MutexGuard<'_, Held> { held.lock().unwrap_or_else(std::sync::PoisonError::into_inner) }
 
 /// Remove the socket, only now that the group is empty, and exit with the agent's status.
-fn finish(socket: &Path, code: i32) -> ! {
+fn finish(socket: &Path, code: i32, natural: bool, reply: Option<&UnixStream>) -> ! {
+    // Publish the status before removing the socket. A polling runner may miss
+    // the live status reply entirely when the agent and its work exit together.
+    if natural && let Err(error) = std::fs::write(socket.with_extension("exit"), code.to_string()) {
+        eprintln!("{FLAG}: cannot save the agent's exit status: {error}");
+    }
     let _ = std::fs::remove_file(socket);
+    if let Some(mut stream) = reply { let _ = stream.write_all(b"ended\n"); }
     std::process::exit(code)
 }
 
@@ -280,6 +303,23 @@ fn answer(stream: UnixStream, held: &Mutex<Held>, socket: &Path) {
         let _ = writeln!(&stream, "{}", held.leader.0);
         return;
     }
+    if line.trim() == "status" {
+        let status = match exit_code(held.leader.0) {
+            Some(code) => {
+                let leader = held.leader.0;
+                let look = held.lineage.look(leader);
+                HoldStatus::Exited {
+                    code,
+                    natural: !held.end_requested,
+                    group_empty: look.as_ref().is_some_and(|look| look.group == 0),
+                    leftovers: look.map_or_else(Vec::new, |look| look.strays),
+                }
+            }
+            None => HoldStatus::Running,
+        };
+        let _ = writeln!(&stream, "{}", serde_json::to_string(&status).expect("hold status serializes"));
+        return;
+    }
     let reply = match line.trim() {
         "ready" if held.reaped.is_none() => "ready",
         "stopped" if held.reaped.is_none() => if group_stopped(&held) { "stopped" } else { "unsettled" },
@@ -293,15 +333,14 @@ fn answer(stream: UnixStream, held: &Mutex<Held>, socket: &Path) {
             signal_group(&held, libc::SIGCONT);
             "continued"
         }
-        "end" => match end(&mut held, STRAY_WAIT) {
-            Ended::Settled(code) => {
-                // Gone before the answer, so whoever reads `ended` also finds the socket gone.
-                let _ = std::fs::remove_file(socket);
-                let _ = (&stream).write_all(b"ended\n");
-                finish(socket, code);
+        "end" | "end-now" => {
+            held.end_requested |= exit_code(held.leader.0).is_none();
+            let wait = if line.trim() == "end" { STRAY_WAIT } else { Duration::ZERO };
+            match end(&mut held, wait) {
+                Ended::Settled(code) => finish(socket, code, !held.end_requested, Some(&stream)),
+                Ended::Unsettled => "unsettled",
             }
-            Ended::Unsettled => "unsettled",
-        },
+        }
         "ready" | "pause" | "stop" | "stopped" | "cont" | "group" => "ended",
         _ => "unknown",
     };
@@ -373,13 +412,19 @@ fn spawn(argv: &[String]) -> std::io::Result<i32> {
     Ok(child.id() as i32)
 }
 
-/// Whether the leader has exited, without reaping it.
-fn exited(leader: i32) -> bool {
+/// The leader's shell exit status, without reaping it.
+fn exit_code(leader: i32) -> Option<i32> {
     let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
     // SAFETY: `info` is a valid siginfo_t; WNOWAIT leaves the child waitable, so its pid stays pinned.
     let got = unsafe { libc::waitid(libc::P_PID, leader as libc::id_t, &mut info, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) };
     // macOS answers a stopped child here too, though only WEXITED was asked for: a stop is not an exit.
-    got == 0 && info.si_signo == libc::SIGCHLD && matches!(info.si_code, libc::CLD_EXITED | libc::CLD_KILLED | libc::CLD_DUMPED)
+    if got != 0 || info.si_signo != libc::SIGCHLD { return None; }
+    // SAFETY: a successful waitid for this child initialized si_status.
+    match info.si_code {
+        libc::CLD_EXITED => Some(unsafe { info.si_status() }),
+        libc::CLD_KILLED | libc::CLD_DUMPED => Some(128 + unsafe { info.si_status() }),
+        _ => None,
+    }
 }
 
 fn group_stopped(held: &Held) -> bool {
@@ -421,9 +466,9 @@ fn end(held: &mut Held, wait: Duration) -> Ended {
     while clear < 2 {
         if started.elapsed() >= GRACE { signal_group(held, libc::SIGKILL); }
         let look = held.lineage.look(leader);
-        let group_gone = look.as_ref().is_some_and(|l| l.group == 0) && exited(leader);
+        let group_gone = look.as_ref().is_some_and(|l| l.group == 0) && exit_code(leader).is_some();
         match look {
-            Some(l) if group_gone && l.strays == 0 => clear += 1,
+            Some(l) if group_gone && l.strays.is_empty() => clear += 1,
             Some(_) if group_gone => {
                 clear = 0;
                 if emptied.get_or_insert_with(Instant::now).elapsed() >= wait { return Ended::Unsettled; }
@@ -443,10 +488,8 @@ fn end(held: &mut Held, wait: Duration) -> Ended {
 /// Everything descended from the hold, in the agent's group or not. Found by looking, so only ever waited for:
 /// nothing a look finds is signalled.
 ///
-/// macOS records, for every process, the kernel's unique id of the process that forked it (`p_puniqueid`), and keeps
-/// it when the process is reparented to launchd. Unique ids are 64-bit and never reused, so an id once learned to be
-/// ours stays ours, and `known` only grows; the hold learns while the agent runs, so a descendant whose parent has
-/// since exited is still recognised. Linux has no such id, but there the hold is a child subreaper: an orphaned
+/// macOS reports the current parent's unique id (`p_puniqueid`). Unique ids are 64-bit and never reused, so a
+/// process learned while its parent was alive remains recognised after it is reparented to launchd. Linux has no such id, but there the hold is a child subreaper: an orphaned
 /// descendant is reparented to the hold, never to init, so every live descendant has a chain of live parents back to
 /// the hold, and each look starts afresh from the hold's pid (a pid is no identity across looks there).
 ///
@@ -458,10 +501,51 @@ struct Lineage { me: u64, known: HashSet<u64>, blind: bool }
 
 /// A live process: its pid, group, identity and its parent's identity (unique ids on macOS, pids on Linux), and
 /// whether it names the hold as responsible for it (macOS; always false on Linux).
-struct Row { pid: i32, pgid: i32, id: u64, parent: u64, responsible: bool, stopped: bool }
+struct Row { pid: i32, pgid: i32, id: u64, parent: u64, responsible: bool, stopped: bool, command: [u8; 16] }
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(crate) struct Leftover { pid: i32, command: String }
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(crate) enum HoldStatus {
+    Running,
+    Exited {
+        code: i32,
+        natural: bool,
+        #[serde(default)]
+        group_empty: bool,
+        leftovers: Vec<Leftover>,
+    },
+}
+
+pub(crate) fn leftover_reason(leftovers: &[Leftover]) -> Option<String> {
+    if leftovers.is_empty() { return None; }
+    let processes = leftovers.iter().map(|p| format!("{} (PID {})", p.command, p.pid)).collect::<Vec<_>>();
+    Some(format!("Waiting for processes left by the agent to exit: {}.", processes.join(", ")))
+}
+
+pub(crate) async fn status(socket: &Path) -> Option<HoldStatus> {
+    match ask(socket, "status", Duration::from_millis(500)).await {
+        Answer::Said(line) => serde_json::from_str(&line).ok(),
+        Answer::Gone => recorded_exit(socket).map(|code| HoldStatus::Exited {
+            code, natural: true, group_empty: true, leftovers: Vec::new(),
+        }),
+        Answer::Silent => None,
+    }
+}
+
+fn recorded_exit(socket: &Path) -> Option<i32> {
+    let code = std::fs::read_to_string(socket.with_extension("exit")).ok()?.parse().ok()?;
+    (0..=255).contains(&code).then_some(code)
+}
+
+pub(crate) fn settled_exit(socket: &Path) -> Option<i32> {
+    if socket.try_exists().ok()? { return None; }
+    recorded_exit(socket)
+}
 
 /// What one look found alive: members of the agent's group (the leader among them), and descendants outside it.
-struct Look { group: usize, strays: usize }
+struct Look { group: usize, strays: Vec<Leftover> }
 
 impl Lineage {
     const LEARNS: bool = cfg!(target_os = "macos");
@@ -485,10 +569,16 @@ impl Lineage {
             if self.known.len() == before { break; }
         }
         let me = std::process::id() as i32;
-        let mut look = Look { group: 0, strays: 0 };
-        for row in rows.iter().filter(|row| row.pid != me) {
-            if row.pgid == leader { look.group += 1; } else if row.responsible || self.known.contains(&row.id) { look.strays += 1; }
+        let mut look = Look { group: 0, strays: Vec::new() };
+        for row in rows.into_iter().filter(|row| row.pid != me) {
+            if row.pgid == leader { look.group += 1; }
+            else if row.responsible || self.known.contains(&row.id) {
+                // Remember matches from responsibility as well: descendants can be reparented.
+                self.known.insert(row.id);
+                look.strays.push(Leftover { pid: row.pid, command: display_command(&row.command) });
+            }
         }
+        look.strays.sort_unstable_by_key(|p| p.pid);
         Some(look)
     }
 }
@@ -538,8 +628,9 @@ fn rows() -> Option<Vec<Row>> {
         let Some(ids) = unique_ids(pid) else { continue };
         complete |= pid == me;
         let responsible = pid != me && responsibility::of(pid) == Some(me);
+        let command = info.pbi_comm.map(|byte| byte as u8);
         rows.push(Row { pid, pgid: info.pbi_pgid as i32, id: ids.id, parent: ids.parent, responsible,
-            stopped: info.pbi_status == libc::SSTOP });
+            stopped: info.pbi_status == libc::SSTOP, command });
     }
     complete.then_some(rows)
 }
@@ -551,15 +642,25 @@ fn rows() -> Option<Vec<Row>> {
     for entry in std::fs::read_dir("/proc").ok()?.flatten() {
         let Some(pid) = entry.file_name().to_str().and_then(|name| name.parse::<i32>().ok()) else { continue };
         let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else { continue };
-        let Some((_, rest)) = stat.rsplit_once(')') else { continue };
+        let Some((name, rest)) = stat.rsplit_once(')') else { continue };
+        let bytes = name.split_once('(').map_or("", |(_, name)| name).as_bytes();
+        let mut command = [0; 16];
+        let len = bytes.len().min(command.len());
+        command[..len].copy_from_slice(&bytes[..len]);
         let mut fields = rest.split_whitespace();
         let (Some(state), Some(Ok(ppid)), Some(Ok(pgid))) =
             (fields.next(), fields.next().map(str::parse::<u32>), fields.next().map(str::parse::<i32>)) else { continue };
         if matches!(state, "Z" | "X" | "x") { continue; }
         complete |= pid == me;
-        rows.push(Row { pid, pgid, id: u64::from(pid as u32), parent: u64::from(ppid), responsible: false, stopped: matches!(state, "T" | "t") });
+        rows.push(Row { pid, pgid, id: u64::from(pid as u32), parent: u64::from(ppid), responsible: false, stopped: matches!(state, "T" | "t"), command });
     }
     complete.then_some(rows)
+}
+
+fn display_command(bytes: &[u8]) -> String {
+    let len = bytes.iter().position(|&byte| byte == 0).unwrap_or(bytes.len());
+    let name: String = String::from_utf8_lossy(&bytes[..len]).chars().filter(|c| !c.is_control()).collect();
+    if name.is_empty() { "unknown command".into() } else { name }
 }
 
 /// What a hold said.

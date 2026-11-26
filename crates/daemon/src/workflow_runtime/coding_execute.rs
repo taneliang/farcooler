@@ -541,7 +541,7 @@ impl Exec {
             exit, interrupted, log_path: Some(log.clone()), log_digest: digest(&self.bytes(&log)?) };
         durable(&self.fact_path(binding), &serde_json::to_vec(&fact)?)
     }
-    fn effect_pending(&self, binding: &Binding) -> Result<bool> {
+    pub(super) fn effect_pending(&self, binding: &Binding) -> Result<bool> {
         Ok(self.state(&binding.workspace)?.is_some_and(|state| state.items.get(&binding.effect.item)
             .is_some_and(|item| item.pending.as_ref() == Some(&binding.effect.id))))
     }
@@ -622,6 +622,9 @@ impl Exec {
     /// End a native agent whose turn was never settled, and write the process fact its settlement implies.
     async fn settle_interrupted_native(&self, binding: &Binding, completed: Option<bool>, restarting: bool) -> Result<()> {
         let completed = self.cancel_interrupted_native(binding, completed).await?;
+        self.write_native_fact(binding, completed, restarting)
+    }
+    pub(super) fn write_native_fact(&self, binding: &Binding, completed: Option<bool>, restarting: bool) -> Result<()> {
         let command = self.bound_command(binding, false, true)?;
         self.write_process_fact(binding, command.argv, command.environment,
             completed.map(|passed| if passed { 0 } else { 1 }), restarting && completed.is_none())
@@ -1001,10 +1004,12 @@ impl Exec {
         if matches!(kind, StageKind::Build | StageKind::Check | StageKind::Run | StageKind::Review(_) | StageKind::Ci) {
             if kind.resumes_after_runner_restart() && !self.fact_path(binding).try_exists()? {
                 if self.is_native_agent(binding) {
-                    // A recorded verdict or a retained native settlement takes precedence over a restart.
-                    let verdict = self.recorded_verdict(binding);
-                    let pending = self.effect_pending(binding)?;
-                    self.settle_interrupted_native(binding, verdict.then_some(true), pending).await?;
+                    if !self.recover_native_result(binding).await? {
+                        // A recorded verdict or a retained native settlement takes precedence over a restart.
+                        let verdict = self.recorded_verdict(binding);
+                        let pending = self.effect_pending(binding)?;
+                        self.settle_interrupted_native(binding, verdict.then_some(true), pending).await?;
+                    }
                 } else if self.owner_path(binding).try_exists()? {
                     if !crate::effect_runner::Owner::reap(&self.owner_path(binding)).await? {
                         return Err(Error::Refused("the interrupted process could not be ended"));

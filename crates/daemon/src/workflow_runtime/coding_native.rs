@@ -325,17 +325,27 @@ impl Exec {
         let mut continued_stop: Option<(serde_json::Value, Vec<u8>)> = None;
         // A reviewer's recorded verdict ends its turn once it has gone quiet, if its Stop never arrives (ov-1082).
         let mut look = tokio::time::interval(Duration::from_millis(250));
+        let hold = self.native_hold_socket(binding);
         let mut heard = clock.now();
         let mut verdict = None;
         let building = matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build));
         let mut unfinished: Option<Duration> = None;
         let mut claude_stop = None;
         let mut unread = PaneUnread::default();
+        let mut exited_cleanly = false;
         loop {
             let stream = tokio::select! {
+                biased;
                 accepted = listener.accept() => accepted?.0,
+                _ = std::future::ready(()), if exited_cleanly => return Ok((true, hooks, None)),
                 _ = look.tick() => {
                     if let Some(reason) = self.quarantine_reason(binding) { return Ok((false, hooks, Some(reason))); }
+                    if building && let Some(native_hold::HoldStatus::Exited { code: 0, natural: true, .. }) = native_hold::status(&hold).await {
+                        // A final hook may have connected while the hold status
+                        // was in flight. Read queued hooks before taking the exit.
+                        exited_cleanly = true;
+                        continue;
+                    }
                     let owner: NativeOwner = serde_json::from_slice(&self.bytes(&self.native_path(binding, "owner"))?)?;
                     let tmux = server(&self.root, binding);
                     let life = tmux.pane_life_with_exit_evidence(&owner.pane, owner.terminal).await;
@@ -558,6 +568,7 @@ impl Exec {
         // Its quiet periods, like its time limit, leave out time a landing gate held it stopped (ov-1301).
         let clock = super::native_control::ActiveClock::held_by(_builder.as_ref());
         let turn = self.native_turn(&listener, binding, &heard_from, &clock);
+        let cancel_signal = cancel.clone();
         let mut stop_reply = None;
         let mut frozen = None;
         let hold = self.native_hold_socket(binding);
@@ -574,15 +585,8 @@ impl Exec {
             a.settle();
             a.session.store(false, std::sync::atomic::Ordering::SeqCst);
         });
-        self.quiesce_native(&owner).await?;
-        if let Some(stopped) = frozen.take() { stopped.quiescent(); }
-        // Closing the pane ends its fanout. Drain it before hashing the log into the receipt.
-        match tokio::time::timeout(Duration::from_secs(5), &mut output).await {
-            Ok(result) => result.map_err(|_| Error::Refused("native output capture failed"))??,
-            Err(_) => { output.abort(); return Err(Error::Refused("native output did not drain")); }
-        }
         let cancelled = matches!(turn, Ok(Turn::Cancelled));
-        let (mut completed, hooks, mut failure) = match turn {
+        let (completed, hooks, failure) = match turn {
             Ok(Turn::Completed((passed, hooks, failure))) => (Some(passed), hooks, failure),
             Ok(Turn::TimedOut) => (Some(false), Vec::new(), Some(out_of_time_reason(Duration::from_millis(command.timeout_ms)))),
             Ok(Turn::Cancelled | Turn::Stopped) => (None, Vec::new(), None),
@@ -591,10 +595,16 @@ impl Exec {
                 (Some(false), Vec::new(), Some(turn_ended_reason(&error)))
             }
         };
-        // A recorded verdict is the review however the turn ended: cut short by a daemon stopping for an install, out
-        // of time, or failing after it (ov-1082). Read after the reviewer is ended, so it is the last verdict given.
-        if self.recorded_verdict(binding) { completed = Some(true); failure = None; }
-        durable(&self.native_path(binding, "settled"), &serde_json::to_vec(&NativeSettlement::Launched { owner, hooks, completed, failure })?)?;
+        let turn = NativeSettlement::Launched { owner: owner.clone(), hooks, completed, failure };
+        self.save_native_turn(binding, &turn)?;
+        self.quiesce_native_turn(&owner, &cancel_signal).await?;
+        if let Some(stopped) = frozen.take() { stopped.quiescent(); }
+        // Closing the pane ends its fanout. Drain it before hashing the log into the receipt.
+        match tokio::time::timeout(Duration::from_secs(5), &mut output).await {
+            Ok(result) => result.map_err(|_| Error::Refused("native output capture failed"))??,
+            Err(_) => { output.abort(); return Err(Error::Refused("native output did not drain")); }
+        }
+        let completed = self.save_native_settlement(binding, turn)?;
         drop(listener);
         std::fs::remove_file(socket)?;
         if let Some(reply) = stop_reply { let _ = reply.send(Ok(())); }
@@ -643,12 +653,12 @@ impl Exec {
             // A refusal written before the runner stopped is a failed launch, so keep it across recovery.
             let failure = if completed.is_none() { self.quarantine_reason(binding) } else { None };
             let completed = if failure.is_some() { Some(false) } else { completed };
-            durable(&settled, &serde_json::to_vec(&NativeSettlement::Launched { owner, hooks: Vec::new(), completed, failure })?)?;
-            completed
+            let turn = self.saved_native_turn(binding)?.unwrap_or(NativeSettlement::Launched {
+                owner, hooks: Vec::new(), completed, failure,
+            });
+            self.save_native_settlement(binding, turn)?
         };
-        // The socket is this build's alone, so a leftover one is stale by construction.
-        let socket = self.native_socket(binding);
-        if socket.try_exists()? { std::fs::remove_file(socket)?; }
+        self.remove_native_hook_socket(binding)?;
         Ok(completed)
     }
     async fn capture_native_output(&self, binding: &Binding, tmux: &TmuxServer, pane: &str) -> Result<()> {
@@ -731,18 +741,24 @@ impl Exec {
                 || out.stderr.contains("Connection refused")));
         Ok(out.ok() && out.stdout.trim().is_empty() || !out.ok() && absent)
     }
-    /// For the orchestrator's resolve (ov-1301): `None` when nothing of this native agent runs (its pane is gone or
-    /// dead with nothing on its terminal, or it was never let out and its server is empty), else what still runs.
-    pub(super) async fn native_ended(&self, binding: &Binding) -> Result<Option<&'static str>> {
+    fn retained_native_owner(&self, binding: &Binding) -> Result<Option<NativeOwner>> {
         let owner: NativeOwner = match self.bytes(&self.native_path(binding, "owner")) {
             Ok(raw) => serde_json::from_slice(&raw)?,
-            Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound =>
-                return Ok((!self.native_server_empty(binding).await?).then_some("its agent's terminal is still open")),
+            Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),
         };
         if owner.binding != *binding || owner.terminal != terminal(binding) || owner.tty.is_empty() {
             return Err(Error::Refused("foreign interrupted native owner"));
         }
+        Ok(Some(owner))
+    }
+
+    /// For the orchestrator's resolve (ov-1301): `None` when nothing of this native agent runs (its pane is gone or
+    /// dead with nothing on its terminal, or it was never let out and its server is empty), else what still runs.
+    pub(super) async fn native_ended(&self, binding: &Binding) -> Result<Option<&'static str>> {
+        let Some(owner) = self.retained_native_owner(binding)? else {
+            return Ok((!self.native_server_empty(binding).await?).then_some("its agent's terminal is still open"));
+        };
         let life = server(&self.root, binding).pane_life(&owner.pane, owner.terminal).await
             .map_err(|_| Error::Refused("native pane ownership unavailable"))?;
         if life == farcooler_tmux::PaneLife::Live { return Ok(Some("its agent is still running")); }
@@ -850,7 +866,7 @@ def hook(event, sid=session, cwd=os.getcwd(), **extra):
         s.connect(os.environ['FARCOOLER_NATIVE_HOOK_SOCKET'])
         takes = ['followup'] if mode in ('steering', 'active-steering') and event == 'Stop' and sid == session and cwd == os.getcwd() and 'agent_id' not in extra else []
         s.sendall((json.dumps(dict(agent=agent, event=event, takes=takes, payload=dict(session_id=sid,cwd=cwd,workspace_roots=[cwd],**extra)))+'\n').encode())
-        if takes:
+        if takes or (mode == 'leftover-resolve' and event == 'Stop'):
             return json.loads(s.makefile().readline())
 hook('sessionStart' if agent == 'cursor' else 'SessionStart')
 prompt = pathlib.Path(os.environ['TEST_LAUNCHED_PROMPT_FILE']).read_text() if 'TEST_LAUNCHED_PROMPT_FILE' in os.environ else os.environ['TEST_LAUNCHED_PROMPT']
@@ -923,6 +939,18 @@ else:
     print('native stderr evidence', file=sys.stderr, flush=True)
     # A terminal UI can erase both the screen and scrollback before its final hook.
     print('\x1b[2J\x1b[3J\x1b[Hscreen after clearing evidence', flush=True)
+    if mode in ('leftover-exit', 'leftover-resolve'):
+        release = pathlib.Path(os.environ['STARTED']).with_name('release-leftover')
+        argv = ['/bin/sleep', '3'] if mode == 'leftover-exit' else [
+            '/bin/sh', '-c', 'i=0; while [ "$i" -lt 300 ] && [ ! -e "$1" ]; do sleep .1; i=$((i+1)); done', 'leftover', str(release)]
+        job = subprocess.Popen(argv, start_new_session=True,
+                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        pathlib.Path(os.environ['STARTED']).with_name('leftover').write_text(str(job.pid))
+        # Let the hold see the parent edge before macOS reparents this child.
+        time.sleep(0.35)
+        if mode == 'leftover-resolve':
+            hook('Stop', last_assistant_message='Saved before quiescence.')
+        sys.exit(0)
     stop = 'stop' if agent == 'cursor' else 'Stop'
     hook(stop, sid='foreign')
     hook(stop, cwd='/foreign')

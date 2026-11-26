@@ -401,11 +401,14 @@ pub(crate) async fn read_plan(
         agent.doing_now = doing_now(svc, watcher, view).await;
     }
     crate::plan_stage::annotate(svc, &plan, &mut wire);
-    if let Ok(Some(state)) = svc.store.workflow_state(&workspace.to_string()) {
+    if let Ok(Some(mut state)) = svc.store.workflow_state(&workspace.to_string()) {
         let refusals = svc.store.workflow_send_back_refusals(&state).unwrap_or_else(|error| {
             tracing::warn!(%error, "workflow send-back receipts unreadable");
             Default::default()
         });
+        for item in state.items.values_mut() {
+            crate::engine_stuck::project_leftover_wait(&state.workspace, item);
+        }
         crate::plan_run::annotate(&state, &mut wire, &refusals);
     }
     if control {

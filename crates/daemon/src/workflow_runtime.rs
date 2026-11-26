@@ -102,6 +102,8 @@ pub enum Error {
     Encoding(#[from] serde_json::Error),
     #[error("runtime refused: {0}")]
     Refused(&'static str),
+    #[error("{0}")]
+    NativeLeftovers(String),
     #[error("workflow validation: {0}")]
     Validation(String),
     #[error("runtime refused: {0}")]
@@ -818,6 +820,10 @@ impl Runtime {
                                         None
                                     } else { Some("the engine could not accept the recovered result".into()) }
                                 }
+                                Err(Error::NativeLeftovers(reason)) => {
+                                    self.recovery.wait_for_leftovers(&job.workspace, &job.effect, reason, now);
+                                    None
+                                }
                                 Ok(_) => Some("the available evidence could not establish an outcome".into()),
                                 Err(error) => Some(error.to_string()),
                             };
@@ -909,8 +915,12 @@ impl Runtime {
                 let effect = stored.effect;
                 if stored.dispatch_state == "uncertain" { uncertain.insert(effect.id.clone()); }
                 if running.iter().any(|j| j.effect.id == effect.id && &j.workspace == workspace) { continue; }
-                // An Uncertain effect that recovery couldn't settle waits before it is looked at again (ov-1301).
-                if stored.dispatch_state == "uncertain" && self.recovery.waiting(workspace, &effect.id, now_ms) { continue; }
+                // Back off an inconclusive recovery or a hold still draining detached processes.
+                if matches!(stored.dispatch_state.as_str(), "admitted" | "uncertain")
+                    && self.recovery.waiting(workspace, &effect.id, now_ms) {
+                    uncertain.insert(effect.id.clone());
+                    continue;
+                }
                 let state = self.state(workspace)?.ok_or(Error::Refused("missing state"))?;
                 // A finished item has left live state and has nothing left to run.
                 let Some(item) = state.items.get(&effect.item) else { continue };
@@ -966,6 +976,7 @@ impl Runtime {
                         futures.push(effect_slot(async move {
                             match exec.reconcile_coding(&probe).await {
                                 Ok(outcome) if outcome != Outcome::Uncertain => Ok(outcome),
+                                Err(error @ Error::NativeLeftovers(_)) => Err(error),
                                 _ => exec.auto_settle(&probe).await,
                             }
                         }));
@@ -984,6 +995,11 @@ impl Runtime {
                     }.await;
                     let (outcome, why) = match recovered {
                         Ok(outcome) => (outcome.unwrap_or(Outcome::Uncertain), None),
+                        Err(Error::NativeLeftovers(reason)) => {
+                            uncertain.insert(effect.id.clone());
+                            self.recovery.wait_for_leftovers(workspace, &effect, reason, now_ms);
+                            continue;
+                        }
                         Err(error) => (Outcome::Uncertain, Some(error.to_string())),
                     };
                     if outcome == Outcome::Uncertain {
