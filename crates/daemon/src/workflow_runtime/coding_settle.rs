@@ -172,13 +172,28 @@ impl Exec {
         let candidate = binding.effect.candidate.as_deref().filter(|c| sha(c)).ok_or(Error::Refused("missing push candidate"))?;
         let identity = self.landing()?;
         let log = self.root.join("receipts").join(format!("{}.settle.fetch.output", digest(&binding.effect)));
-        // Take the lock before measuring absence. Even without the lock, a positive target
-        // read can settle the push. A person's settlement may supply external quiescence evidence.
-        let quiescent = expected.is_none().then(|| self.lock_push(binding));
+        // Check for surviving writers before measuring absence. A positive
+        // target read can settle the push regardless of the writer check.
+        let network = super::coding::landing_url(identity).is_some();
+        let quiescent = if expected.is_none() {
+            Some(match self.lock_push(binding) {
+                Ok(file) => Ok(Some(file)),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    if network { Ok(None) }
+                    else {
+                        check_legacy_git_writers(&[&self.repository(), &identity.repository]).await.map(|()| None)
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock =>
+                    Err(Error::Refused("the previous push may still be running")),
+                Err(error) => Err(error.into()),
+            })
+        } else { None };
         let landed = self.on_target(identity, candidate, &log).await?;
         if !landed && let Some(quiescent) = quiescent {
-            let _held = quiescent?;
-            if super::coding::landing_url(identity).is_some() && self.push_send_recorded(binding)? {
+            let held = quiescent?;
+            if network && (held.is_none() || self.push_send_recorded(binding)?)
+                && !self.push_receive_finished(binding, identity)? {
                 return Err(Error::Refused("the candidate is absent, but the remote may still be processing the previous push"));
             }
             return self.settle_push_fact(binding, false, "runner");
@@ -216,11 +231,10 @@ impl Exec {
         };
         let _quiescent = match self.lock_provision(binding) {
             Ok(file) => Some(file),
-            // A controller can still resolve older provisions after checking
-            // them by hand. The runner has no process evidence for these.
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound && !automatic => None,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound =>
-                return Err(Error::Refused("no provisioning process lock was recorded, so Git may still be running")),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if automatic { check_legacy_git_writers(&[&self.repository(), &path]).await?; }
+                None
+            }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock =>
                 return Err(Error::Refused("the provisioning Git process may still be running")),
             Err(error) => return Err(error.into()),
@@ -263,6 +277,16 @@ impl Exec {
         }
         self.refuse_unstarted(binding, format!("The build ended with no result the runner could read, and nothing of it is still \
             running; {checked}. Any work in the worktree carries over to the next build attempt."))
+    }
+}
+
+// An admitted effect is still fenced by the outbox. Its legacy writers
+// cannot be fenced by creating a lock they never inherited.
+async fn check_legacy_git_writers(paths: &[&Path]) -> Result<()> {
+    match crate::proc_table::legacy_git_writers(paths).await {
+        Some(false) => Ok(()),
+        Some(true) => Err(Error::Refused("a process in the repository or worktree may still be running")),
+        None => Err(Error::Refused("the runner could not check for surviving Git processes")),
     }
 }
 

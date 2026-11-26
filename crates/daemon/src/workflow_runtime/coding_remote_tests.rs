@@ -53,6 +53,54 @@ fn plain_git(dir: &Path, args: &[&str]) {
 }
 async fn head(bare: &Path) -> String { adapters::git(bare, &["rev-parse", "refs/heads/main"]).await.unwrap() }
 fn calls(remote: &Remote) -> String { std::fs::read_to_string(&remote.calls).unwrap_or_default() }
+
+#[tokio::test]
+async fn an_absent_legacy_network_push_requires_a_finished_receive() {
+    use super::recovery_backoff::FIRST_MS;
+
+    let mut r = remote("pass").await;
+    let first = head(&r.bare).await;
+    let definition = batched_push(&r.runtime, "any", 5000);
+    at_join(&mut r.runtime, "one", &definition).await;
+    command(&r.runtime, Command::Queue { item: "one".into() });
+    for time in 2..5 { r.runtime.pump(time).await.unwrap(); }
+    let binding = admitted(&r.runtime).await;
+    let hook = r.bare.join("hooks/pre-receive");
+    std::fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+    std::fs::set_permissions(hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (_hold, cancel) = tokio::sync::watch::channel(false);
+    r.runtime.execute_coding("w", &binding, cancel).await.unwrap();
+    std::fs::remove_file(r.runtime.verb_path(&binding)).unwrap();
+    std::fs::remove_file(r.runtime.push_lock_path(&binding.effect)).unwrap();
+    let receipt = r.runtime.root.join("receipts").join(format!("{}.push-process.json", digest(&binding.effect)));
+    let log = r.runtime.remote_log(&binding);
+    let original = std::fs::read(&receipt).unwrap();
+    let refusal = std::fs::read(&log).unwrap();
+    let mut disconnected: serde_json::Value = serde_json::from_slice(&original).unwrap();
+    let lost_output = b"the connection was closed".to_vec();
+    disconnected["exit"] = serde_json::Value::Null;
+    disconnected["log_digest"] = digest(&lost_output).into();
+    std::fs::write(&receipt, serde_json::to_vec(&disconnected).unwrap()).unwrap();
+    std::fs::write(&log, lost_output).unwrap();
+
+    let sends = calls(&r).matches("git-receive-pack").count();
+    r.runtime.pump(50).await.unwrap();
+    r.runtime.pump(50 + FIRST_MS + 1_000).await.unwrap();
+    let state = r.runtime.state("w").unwrap().unwrap();
+    let group = &binding.effect.item;
+    assert_eq!(state.items[group].phase, Phase::Uncertain);
+    assert!(state.items[group].failure.as_deref().unwrap().contains("remote may still be processing"));
+
+    std::fs::write(&receipt, original).unwrap();
+    std::fs::write(&log, refusal).unwrap();
+    r.runtime.pump(50 + 4 * FIRST_MS).await.unwrap();
+    let state = r.runtime.state("w").unwrap().unwrap();
+    assert_ne!(state.items[group].phase, Phase::Uncertain);
+    assert!(state.items[group].pushed.is_none());
+    assert_eq!(head(&r.bare).await, first);
+    assert_eq!(calls(&r).matches("git-receive-pack").count(), sends);
+}
+
 /// The push step's settlement: its label and why.
 fn push_fact(runtime: &Runtime) -> serde_json::Value { fact(runtime, StageKind::Push) }
 /// The last settlement of a `kind` step: its label and why.

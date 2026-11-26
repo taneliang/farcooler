@@ -75,7 +75,7 @@ impl Exec {
     fn push_phase_path(&self, binding: &Binding, phase: &str) -> PathBuf {
         self.root.join("receipts").join(format!("{}.push-{phase}.json", digest(&binding.effect)))
     }
-    fn push_lock_path(&self, effect: &Effect) -> PathBuf {
+    pub(super) fn push_lock_path(&self, effect: &Effect) -> PathBuf {
         self.root.join("receipts").join(format!("{}.push.lock", digest(effect)))
     }
     /// Older admitted pushes lack the lock and may have started an untracked writer.
@@ -86,15 +86,37 @@ impl Exec {
             result => result,
         }
     }
-    pub(super) fn lock_push(&self, binding: &Binding) -> Result<File> {
-        crate::git::try_process_lock(&self.push_lock_path(&binding.effect)).map_err(|error| match error.kind() {
-            std::io::ErrorKind::NotFound => Error::Refused("no push process lock was recorded, so the send may still be running"),
-            std::io::ErrorKind::WouldBlock => Error::Refused("the previous push may still be running"),
-            _ => error.into(),
-        })
+    pub(super) fn lock_push(&self, binding: &Binding) -> std::io::Result<File> {
+        crate::git::try_process_lock(&self.push_lock_path(&binding.effect))
     }
     pub(super) fn push_send_recorded(&self, binding: &Binding) -> Result<bool> {
         Ok(self.push_phase_path(binding, "send").try_exists()?)
+    }
+    fn push_process_path(&self, binding: &Binding) -> PathBuf {
+        self.root.join("receipts").join(format!("{}.push-process.json", digest(&binding.effect)))
+    }
+    /// A receiver can keep processing after the local client disconnects. A successful
+    /// client exit or an explicit ref refusal is evidence that the receive has finished.
+    pub(super) fn push_receive_finished(&self, binding: &Binding, identity: &CodingLanding) -> Result<bool> {
+        #[derive(Deserialize)]
+        struct Receipt { binding: Binding, identity: CodingLanding, exit: Option<i32>, log_digest: String }
+        let raw = match self.bytes(&self.push_process_path(binding)) {
+            Ok(raw) => raw,
+            Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        let fact: Receipt = serde_json::from_slice(&raw)?;
+        let output = self.bytes(&self.remote_log(binding))?;
+        if fact.binding != *binding || fact.identity != *identity || fact.log_digest != digest(&output) {
+            return Err(Error::Refused("the previous push's process receipt could not be verified"));
+        }
+        let refused = String::from_utf8_lossy(&output).lines().any(|line| {
+            let mut fields = line.split('\t');
+            fields.next() == Some("!")
+                && fields.next().and_then(|refs| refs.split_once(':')).is_some_and(|(_, target)| target == identity.target)
+                && fields.next().is_some_and(|reason| reason.starts_with("[rejected]") || reason.starts_with("[remote rejected]"))
+        });
+        Ok(fact.exit == Some(0) || (fact.exit.is_some() && refused))
     }
     /// Only an authenticated pre-send record without send intent proves that replay is safe.
     /// Missing legacy records, unreadable records and any send intent retain push uncertainty.
@@ -981,7 +1003,7 @@ impl Exec {
             (argv, environment, exit)
         };
         let output = self.bytes(&log)?;
-        durable(&self.root.join("receipts").join(format!("{}.push-process.json", digest(&binding.effect))),
+        durable(&self.push_process_path(binding),
             &serde_json::to_vec(&serde_json::json!({ "binding": binding, "identity": identity, "argv": argv,
                 "environment": environment, "exit": exit, "log_digest": digest(&output) }))?)?;
         let after = self.target_head(&identity, &read_log("after")).await.ok().flatten();

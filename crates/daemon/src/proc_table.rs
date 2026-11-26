@@ -21,6 +21,9 @@
 #[cfg(target_os = "macos")]
 use crate::process_reads::kinfo;
 
+mod legacy_git_writers;
+pub(crate) use legacy_git_writers::legacy_git_writers;
+
 /// One row in `ps`'s column order. `foreground` is `ps`'s `+`: in the
 /// foreground process group of the controlling terminal.
 fn line(pid: i32, ppid: i32, pgid: i32, tty: &str, foreground: bool, args: &str) -> String {

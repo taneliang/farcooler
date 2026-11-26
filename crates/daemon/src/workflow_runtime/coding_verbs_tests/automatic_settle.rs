@@ -3,8 +3,12 @@ use super::super::recovery_backoff::FIRST_MS;
 
 #[tokio::test]
 async fn an_uncertain_push_settles_automatically_from_the_bare_target() {
-    for landed in [false, true] {
+    for (landed, legacy) in [(false, false), (true, false), (false, true), (true, true)] {
         let (_dir, mut runtime, group) = uncertain_push(landed).await;
+        if legacy {
+            let push = runtime.store.workflow_outbox("w").unwrap().into_iter().find(|s| s.active).unwrap();
+            std::fs::remove_file(runtime.push_lock_path(&push.effect)).unwrap();
+        }
         let first = remote_head(&runtime).await;
         let initial = runtime.state("w").unwrap().unwrap();
         let candidate = initial.items[&group].candidate.clone().unwrap();
@@ -69,6 +73,12 @@ async fn a_delayed_bare_receive_can_land_after_the_runner_crashes() {
         panic!("the runner should have been killed: {:?}", runtime.execute_coding("w", &binding, cancel).await);
     }
 
+    for legacy in [false, true] {
+        delayed_bare_receive(CRASH_ROOT, legacy).await;
+    }
+}
+
+async fn delayed_bare_receive(crash_root: &str, legacy: bool) {
     let (_dir, mut runtime) = lander("pass").await;
     let definition = batched_push(&runtime, "any", 5000);
     at_join(&mut runtime, "one", &definition).await;
@@ -87,7 +97,7 @@ async fn a_delayed_bare_receive_can_land_after_the_runner_crashes() {
     let mut sender = tokio::process::Command::new(std::env::current_exe().unwrap())
         .arg("--exact").arg(format!("{}::a_delayed_bare_receive_can_land_after_the_runner_crashes",
             module_path!().split_once("::").unwrap().1))
-        .env(CRASH_ROOT, &root).kill_on_drop(true).spawn().unwrap();
+        .env(crash_root, &root).kill_on_drop(true).spawn().unwrap();
     tokio::time::timeout(Duration::from_secs(10), async {
         while !bare.join("push-paused").exists() {
             assert!(sender.try_wait().unwrap().is_none(), "the sender exited before Git reached the hook");
@@ -97,6 +107,7 @@ async fn a_delayed_bare_receive_can_land_after_the_runner_crashes() {
     sender.kill().await.unwrap();
 
     let mut runtime = Runtime::open(&root).unwrap();
+    if legacy { std::fs::remove_file(runtime.push_lock_path(&binding.effect)).unwrap(); }
     runtime.pump(50).await.unwrap();
     let group = binding.effect.item.clone();
     let now = 50 + FIRST_MS + 1_000;

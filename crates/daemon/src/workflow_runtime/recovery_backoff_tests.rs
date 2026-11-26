@@ -73,7 +73,7 @@ async fn an_uncertain_build_that_never_started_fails_after_the_grace_period_and_
 
 #[tokio::test]
 async fn an_uncertain_provision_checks_the_checkout_and_settles_after_the_grace_period() {
-    for intact in [false, true] {
+    for (intact, legacy) in [(false, false), (true, false), (false, true), (true, true)] {
         let (_dir, mut runtime) = configured(false, "pass").await;
         let definition = runtime.configured_definition().unwrap();
         enqueue(&mut runtime, "w", "one", definition);
@@ -83,6 +83,7 @@ async fn an_uncertain_provision_checks_the_checkout_and_settles_after_the_grace_
             assert!(matches!(runtime.execute_coding("w", &binding, cancelled).await.unwrap(), Outcome::Passed(_)));
             std::fs::remove_file(runtime.git_settlement(&binding)).unwrap();
         }
+        if legacy { std::fs::remove_file(runtime.provision_lock_path(&binding.effect)).unwrap(); }
         runtime.pump(1_000).await.unwrap();
         runtime.pump(1_000 + FIRST_MS - 1_000).await.unwrap();
         assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::Uncertain);
@@ -101,21 +102,6 @@ async fn an_uncertain_provision_checks_the_checkout_and_settles_after_the_grace_
     }
 }
 
-#[tokio::test]
-async fn an_older_provision_without_process_evidence_needs_a_person() {
-    let (_dir, mut runtime) = configured(false, "pass").await;
-    let definition = runtime.configured_definition().unwrap();
-    enqueue(&mut runtime, "w", "one", definition);
-    let binding = admitted(&runtime).await;
-    std::fs::remove_file(runtime.provision_lock_path(&binding.effect)).unwrap();
-    runtime.pump(1_000).await.unwrap();
-    runtime.pump(1_000 + FIRST_MS + 1_000).await.unwrap();
-    assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::Uncertain);
-    let needs = crate::engine_stuck::uncertain(&runtime.store);
-    assert_eq!(needs.len(), 1);
-    assert!(needs[0].question.contains("no provisioning process lock was recorded"));
-}
-
 /// The Git child outlives the process that launched it. Recovery must pause
 /// even when the checkout looks ready or when Git hasn't created anything yet.
 #[tokio::test]
@@ -123,7 +109,7 @@ async fn provision_recovery_waits_for_git_that_survived_the_runner() {
     use std::os::unix::fs::PermissionsExt;
     use std::time::Duration;
 
-    for intact in [false, true] {
+    for (intact, legacy) in [(false, false), (true, false), (false, true), (true, true)] {
         let (dir, mut runtime) = configured(false, "pass").await;
         let definition = runtime.configured_definition().unwrap();
         enqueue(&mut runtime, "w", "one", definition);
@@ -185,6 +171,7 @@ exec "$REAL_GIT" "$@"
         runner.kill().await.unwrap();
 
         let mut runtime = Runtime::open(&root).unwrap();
+        if legacy { std::fs::remove_file(runtime.provision_lock_path(&binding.effect)).unwrap(); }
         runtime.pump(1_000).await.unwrap();
         // The first sweep accounts for time spent before it reaches the effect.
         runtime.pump(1_000 + FIRST_MS + 1_000).await.unwrap();
@@ -193,16 +180,17 @@ exec "$REAL_GIT" "$@"
         assert!(!runtime.unstarted_recorded(&binding).unwrap());
         let needs = crate::engine_stuck::uncertain(&runtime.store);
         assert_eq!(needs.len(), 1);
-        assert!(needs[0].question.contains("provisioning Git process may still be running"));
+        let finding = if legacy { "a process in the repository or worktree may still be running" }
+            else { "provisioning Git process may still be running" };
+        assert!(needs[0].question.contains(finding), "{needs:?}");
 
         std::fs::write(dir.path().join("release"), "").unwrap();
         wait_for("done").await;
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while runtime.lock_provision(&binding).is_err() {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        }).await.unwrap();
-        runtime.pump(1_000 + 4 * FIRST_MS).await.unwrap();
+        for tick in 1..=5 {
+            runtime.pump(1_000 + tick * 4 * FIRST_MS).await.unwrap();
+            if runtime.state("w").unwrap().unwrap().items["one"].phase != Phase::Uncertain { break; }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
         let state = runtime.state("w").unwrap().unwrap();
         assert_eq!((state.items["one"].stage, &state.items["one"].phase), (1, &Phase::Running));
         assert!(crate::engine_stuck::uncertain(&runtime.store).is_empty());
