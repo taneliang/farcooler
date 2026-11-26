@@ -893,16 +893,31 @@ pub(super) fn android_build_output(tree: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) 
         personal.push(source);
         let elements = [name, replacement, format!("../{outside}"), "Local.kt".into()]
             .map(|name| serde_json::json!({"type": "SINGLE", "filters": [], "outputFile": name}));
-        std::fs::write(folder.join("output-metadata.json"), serde_json::to_vec(&serde_json::json!({
+        let manifest = folder.join("output-metadata.json");
+        std::fs::write(&manifest, serde_json::to_vec(&serde_json::json!({
             "version": 3,
             "artifactType": {"type": kind, "kind": "Directory"},
             "applicationId": "com.example.cleanup",
             "variantName": "debug",
             "elements": elements,
         })).unwrap()).unwrap();
+        let metadata = manifest.metadata().unwrap();
+        let completed = (metadata.mtime(), metadata.mtime_nsec());
         let original = replaced.metadata().unwrap().modified().unwrap();
         std::fs::write(&replaced, b"PK\x03\x04personal replacement").unwrap();
-        File::open(&replaced).unwrap().set_modified(original).unwrap();
+        let replacement = File::open(&replaced).unwrap();
+        // Keep the original mtime, but make the later change visible even on
+        // filesystems that give consecutive writes the same timestamp.
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            replacement.set_modified(original).unwrap();
+            let meta = replacement.metadata().unwrap();
+            if (meta.ctime(), meta.ctime_nsec()) > completed {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "replacement change time never advanced past {completed:?}");
+            std::thread::sleep(Duration::from_millis(1));
+        }
         personal.push(replaced);
         artifacts.push(output);
     }
