@@ -71,6 +71,10 @@ const GATE: &str = r#"elif stage == 'gate':
 /// A configured runtime whose landing target is a private bare repository. Every ticket's build writes a file of
 /// its own, so tickets fold without clashing, and the second check is a gate that can move the remote under the group.
 pub(super) async fn lander(mode: &str) -> (tempfile::TempDir, Runtime) {
+    lander_with_build_timeout(mode, None).await
+}
+
+pub(super) async fn lander_with_build_timeout(mode: &str, build_timeout_ms: Option<u64>) -> (tempfile::TempDir, Runtime) {
     let (dir, runtime) = configured(false, mode).await;
     let script = dir.path().join("adapter.py");
     let text = std::fs::read_to_string(&script).unwrap();
@@ -100,6 +104,10 @@ pub(super) async fn lander(mode: &str) -> (tempfile::TempDir, Runtime) {
     assert!(status.success());
     let root = runtime.root.clone();
     let mut config = runtime.coding.clone().unwrap();
+    if let Some(timeout) = build_timeout_ms {
+        let CodingHarness::Command(build) = &mut config.harness else { unreachable!("landing fixture uses a command harness") };
+        build.timeout_ms = timeout;
+    }
     config.landing = Some(CodingLanding { job: "landing-956".into(), repository: bare.canonicalize().unwrap(),
         target: "refs/heads/main".into(), config_digest: digest(&std::fs::read(bare.join("config")).unwrap()) });
     config.checks[1].argv[2] = "gate".into();
@@ -158,7 +166,7 @@ pub(super) async fn until(runtime: &mut Runtime, what: impl Fn(&State) -> bool) 
         if what(&state) { return state; }
     }
     let state = runtime.state("w").unwrap().unwrap();
-    let items: Vec<_> = state.items.iter().map(|(id, i)| format!("{id}: {:?} at {} attempt {}", i.phase, i.definition.stages[i.stage.min(i.definition.stages.len() - 1)].id, i.attempt)).collect();
+    let items: Vec<_> = state.items.iter().map(|(id, i)| format!("{id}: {:?} at {} attempt {}: {:?}", i.phase, i.definition.stages[i.stage.min(i.definition.stages.len() - 1)].id, i.attempt, i.failure)).collect();
     let effects: Vec<_> = runtime.store.workflow_outbox("w").unwrap().iter().map(|s| format!("{:?} {} {}", s.effect.kind, s.dispatch_state, s.active)).collect();
     let facts: Vec<_> = std::fs::read_dir(runtime.root.join("receipts")).unwrap().map(|e| e.unwrap().path())
         .filter(|p| p.to_string_lossy().ends_with(".verb.json"))

@@ -243,9 +243,11 @@ fn refuses_until_the_stray_is_gone(mut h: Hold) {
     assert!(h.child.try_wait().unwrap().is_none(), "the hold stays to account for it");
     assert!(alive(stray.0), "the hold never signals what left its group");
     drop(stray);
-    assert_eq!(ask_blocking(&h.socket, "end", Duration::from_secs(30)), Answer::Said("ended".into()));
+    // The hold also checks for exit on its own. It can remove the socket before this request gets a reply.
+    let answer = ask_blocking(&h.socket, "end", Duration::from_secs(30));
+    assert!(answer == Answer::Said("ended".into()) || answer == Answer::Gone, "{answer:?}");
     assert!(!h.socket.exists());
-    h.child.wait().unwrap();
+    assert_eq!(h.child.wait().unwrap().code(), Some(128 + libc::SIGTERM));
 }
 
 /// ov-1330 review: the group being empty is not quiescence while something the agent started outside it still works.
@@ -258,9 +260,8 @@ fn a_process_that_left_the_group_keeps_end_from_succeeding() {
 /// launchd, where the kernel still names the parent it was forked by.
 #[test]
 fn a_stray_whose_parent_exited_first_is_still_accounted_for() {
-    let h = hold(&format!("( {STRAY} & echo $! > stray; sleep 0.5 ); echo > orphaned; while :; do sleep 1; done"));
-    pid_in(h.dir.path(), "stray");
-    for _ in 0..500 { if h.dir.path().join("orphaned").exists() { break; } std::thread::sleep(Duration::from_millis(10)); }
+    // Publish the stray's PID only after the subshell that started it has exited.
+    let h = hold(&format!("( {STRAY} & echo $! > forked; sleep 0.5 ); mv forked stray; while :; do sleep 1; done"));
     refuses_until_the_stray_is_gone(h);
 }
 
