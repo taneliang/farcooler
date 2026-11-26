@@ -76,33 +76,6 @@ pub fn attention(count: usize) -> Option<String> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_drop_and_a_failed_reconnect_keep_recovery_within_the_client() {
-        assert_eq!(health("build", Connection::Up).state, "Connected");
-        let lost = health(
-            "build",
-            Connection::Reconnecting {
-                tunnel: Tunnel::Ready,
-            },
-        );
-        assert_eq!(lost.state, "Disconnected");
-        assert_eq!(lost.action, Some("Reconnect"));
-        assert_eq!(health("build", Connection::Failed).state, "Unavailable");
-        assert_eq!(health("build", Connection::Connecting).action, None);
-    }
-
-    #[test]
-    fn attention_has_an_accessible_label_only_while_work_is_waiting() {
-        assert_eq!(attention(0), None);
-        assert_eq!(attention(1).as_deref(), Some("1 item needs your attention"));
-        assert_eq!(attention(2).as_deref(), Some("2 items need your attention"));
-    }
-}
-
 /// The branch diff review surface uses the shared Changes RPCs, like native.
 pub fn review_files(changes: &serde_json::Value) -> serde_json::Value {
     serde_json::json!({
@@ -144,5 +117,32 @@ pub fn review_patch(diff: &serde_json::Value) -> String {
         "No text changes.".into()
     } else {
         patch
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_drop_and_a_failed_reconnect_keep_recovery_within_the_client() {
+        assert_eq!(health("build", Connection::Up).state, "Connected");
+        let lost = health(
+            "build",
+            Connection::Reconnecting {
+                tunnel: Tunnel::Ready,
+            },
+        );
+        assert_eq!(lost.state, "Disconnected");
+        assert_eq!(lost.action, Some("Reconnect"));
+        assert_eq!(health("build", Connection::Failed).state, "Unavailable");
+        assert_eq!(health("build", Connection::Connecting).action, None);
+    }
+
+    #[test]
+    fn attention_has_an_accessible_label_only_while_work_is_waiting() {
+        assert_eq!(attention(0), None);
+        assert_eq!(attention(1).as_deref(), Some("1 item needs your attention"));
+        assert_eq!(attention(2).as_deref(), Some("2 items need your attention"));
     }
 }
