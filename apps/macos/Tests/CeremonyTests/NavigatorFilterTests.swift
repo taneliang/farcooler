@@ -170,31 +170,36 @@ struct NavigatorFilterTests {
             return true
         }
 
-        /// Move the pointer to the middle of the view `identifier` names,
-        /// or off the window with nil, as the mouse would. False when it
-        /// isn't drawn.
-        @discardableResult
-        func hover(_ identifier: String?) -> Bool {
-            let at: NSPoint
-            if let identifier {
-                guard let frame = seen.views[identifier] else { return false }
-                at = NSPoint(x: frame.midX, y: Self.height - frame.midY)
-            } else {
-                at = NSPoint(x: -50, y: -50)
-            }
+        /// Move over the named view and wait for the hover-dependent render.
+        /// While other window tests are running, the synthetic move and the
+        /// layout pass that draws its result can land on different turns.
+        func hover(_ identifier: String, showsMarkRead: Bool = true) async -> Bool {
+            let deadline = ContinuousClock.now + .seconds(3)
+            repeat {
+                let moved = seen.views[identifier].map(movePointer(to:)) ?? false
+                await settle(3)
+                if moved, identifiers.contains("board-mark-all-read") == showsMarkRead { return true }
+            } while ContinuousClock.now < deadline
+            return false
+        }
+
+        private func movePointer(to frame: CGRect) -> Bool {
+            let at = NSPoint(x: frame.midX, y: Self.height - frame.midY)
             // To the hosting view's own tracking area, as the window server
             // would deliver it: an event sent through the window reaches a
             // hover region only by way of that area. Entered first, which
             // the view needs before it hit-tests a move.
-            let area = host.trackingAreas.first { ($0.owner as AnyObject?) === host }
+            guard let area = host.trackingAreas.first(where: { ($0.owner as AnyObject?) === host }) else {
+                return false
+            }
             let now = ProcessInfo.processInfo.systemUptime
-            if let area, !pointerInside {
+            if area !== pointerArea {
                 host.mouseEntered(
                     with: NSEvent.enterExitEvent(
                         with: .mouseEntered, location: at, modifierFlags: [], timestamp: now,
                         windowNumber: window.windowNumber, context: nil, eventNumber: 0,
                         trackingNumber: area.hash, userData: nil)!)
-                pointerInside = true
+                pointerArea = area
             }
             host.mouseMoved(
                 with: NSEvent.mouseEvent(
@@ -203,8 +208,8 @@ struct NavigatorFilterTests {
             return true
         }
 
-        /// Whether `hover` has sent the pointer into the window.
-        private var pointerInside = false
+        /// SwiftUI can replace its tracking area during layout.
+        private weak var pointerArea: NSTrackingArea?
 
         /// The navigator's filter field.
         var field: NSTextField? {
@@ -405,8 +410,7 @@ struct NavigatorFilterTests {
         defer { harness.close() }
         await harness.select("t2")
         await harness.settle()
-        #expect(harness.hover("section-header-summary"))
-        await harness.settle()
+        #expect(await harness.hover("section-header-summary"), "no Mark All as Read on hover")
         #expect(harness.press("board-mark-all-read"), "no Mark All as Read on Unread's header")
         await harness.settle(40)
         let ids = harness.identifiers
@@ -429,12 +433,9 @@ struct NavigatorFilterTests {
         defer { harness.close() }
         await harness.settle()
         #expect(!harness.identifiers.contains("board-mark-all-read"), "drawn without the pointer")
-        #expect(harness.hover("section-header-summary"), "no Unread header drawn")
-        await harness.settle()
-        #expect(harness.identifiers.contains("board-mark-all-read"), "not drawn with the pointer on the header")
-        harness.hover("board-summary-item-t1/created")
-        await harness.settle()
-        #expect(!harness.identifiers.contains("board-mark-all-read"), "still drawn with the pointer on a row")
+        #expect(await harness.hover("section-header-summary"), "not drawn with the pointer on the header")
+        #expect(await harness.hover("board-summary-item-t1/created", showsMarkRead: false),
+                "still drawn with the pointer on a row")
     }
 
     /// Filtered, the header's button reads only what the strip lists, the
@@ -449,8 +450,7 @@ struct NavigatorFilterTests {
         await harness.settle()
         harness.type("refund")
         await harness.settle()
-        harness.hover("section-header-summary")
-        await harness.settle()
+        #expect(await harness.hover("section-header-summary"), "no Mark These as Read on hover")
         #expect(harness.press("board-mark-all-read"), "no button on the filtered strip")
         await harness.settle(40)
         harness.type("")
