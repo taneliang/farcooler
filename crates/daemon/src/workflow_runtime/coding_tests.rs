@@ -134,98 +134,172 @@ elif stage == 'ci':
 }
 
 #[tokio::test]
-async fn review_limit_keeps_the_finding_and_retry_rebuilds_in_the_same_checkout() {
+async fn review_limit_keeps_the_finding_and_retries_engine_work() {
+    check_review_limit_restart(Reviewer::Dispatch, false).await;
+}
+
+#[tokio::test]
+async fn review_limit_keeps_the_finding_and_retries_adopted_work() {
+    check_review_limit_restart(Reviewer::Dispatch, true).await;
+}
+
+#[tokio::test]
+async fn review_limit_keeps_the_persons_finding_and_retries_engine_work() {
+    check_review_limit_restart(Reviewer::Person("owner".into()), false).await;
+}
+
+#[tokio::test]
+async fn review_limit_keeps_the_orchestrators_finding_and_retries_adopted_work() {
+    check_review_limit_restart(Reviewer::Orchestrator("orchestrator".into()), true).await;
+}
+
+async fn check_review_limit_restart(reviewer: Reviewer, adopted: bool) {
     use farcooler_protocol::workflow_commands::{Action, Mutation};
     use farcooler_store::models::{Actor, NoteKind};
 
-    for adopted in [false, true] {
-        let (dir, mut runtime) = configured(true, "review-limit").await;
-        let host = Uuid::now_v7();
-        let repo = runtime.repository();
-        let root = runtime.store.create_repository_root(host, repo.to_str().unwrap(), 0).unwrap();
-        let repository = runtime.store.create_repository(host, root.id, "Review limit", repo.join(".git").to_str().unwrap(), "").unwrap();
-        let board = runtime.store.ensure_main_workspace(repository.id).unwrap();
-        let workspace = board.id.to_string();
-        let card = runtime.store.create_task(board.id, "Fix the review finding", Actor::User).unwrap();
-        let key = &card.key;
-        let mut definition = runtime.configured_definition().unwrap();
-        definition.schema = 2;
-        definition.max_reworks = 0;
-        definition.rework_target = None;
-        let build = definition.stages[1].id.clone();
-        let gate = definition.stages.iter_mut().find(|s| matches!(s.kind, StageKind::Review(_))).unwrap();
-        gate.routes.insert("rejected".into(), Target::Step(build));
-        gate.limit = 3;
-        let gate = gate.id.clone();
+    const LIMIT: u8 = 3;
 
-        if adopted {
-            let base = runtime.base.clone();
-            let mut tree = rerun_tree(dir.path(), "adopted-work", &base);
-            tree.adopted = true;
-            adapters::git(&repo, &["branch", &tree.branch, &base]).await.unwrap();
-            runtime.host = Some(WorktreeHost { dir: dir.path().join("trees"), install_id: "test".into(), locks: Default::default() });
-            let resource = Exec::item_resource(&workspace, key);
-            let tracker = Definition::ticket();
-            rerun_command(&runtime, &workspace, Command::Enqueue {
-                item: key.clone(), initial_candidate: Some(tracker.pin()), definition: tracker,
-                policy_pin: "policy/v1".into(), resource: resource.clone(), dependencies: BTreeSet::new(),
-            });
-            rerun_command(&runtime, &workspace, Command::Start {
-                item: key.clone(), definition, tree: Some(Box::new(tree)), resource,
-                policy_pin: "policy/v1".into(), initial_candidate: None, dependencies: BTreeSet::new(),
-                models: Default::default(), with: vec![], start_load: None,
-            });
-        } else {
-            enqueue(&mut runtime, &workspace, key, definition);
-        }
-
-        let failed = finish(&mut runtime, &workspace).await;
-        let item = &failed.items[key];
-        assert_eq!(item.phase, Phase::Failed);
-        assert_eq!(item.back_edges[&gate], 3);
-        let get = runtime.wire_command(&workspace, "owner", Action::Get).unwrap();
-        let reason = get["state"]["items"][key]["reason"].as_str().unwrap();
-        assert!(reason.starts_with(&format!("{gate}:")) && reason.contains("send-back limit of 3"), "{reason}");
-        assert_eq!(item.failed_reason().as_deref(), Some(reason));
-        assert!(item.failure.is_some(), "{item:?}");
-        let notes = runtime.store.notes_for(card.id, Some(NoteKind::Finding)).unwrap();
-        assert_eq!(notes.len(), 4, "{notes:?}");
-        let finding = "Finding at review round 3";
-        assert!(notes.iter().any(|note| note.body == finding && note.extra["run"] == item.run));
-        let notes = runtime.store.notes_for(card.id, Some(NoteKind::Decision)).unwrap();
-        assert!(notes.iter().any(|note| note.body.starts_with(&format!("{gate}:"))
-            && note.body.contains("send-back limit of 3")), "{notes:?}");
-
-        let outbox = || runtime.store.workflow_outbox(&workspace).unwrap();
-        let last_review = outbox().into_iter().rfind(|stored| stored.effect.run == item.run).unwrap().effect;
-        let checkout = runtime.effect_tree(&workspace, &last_review);
-        let head = adapters::git(&checkout, &["rev-parse", "HEAD"]).await.unwrap();
-        assert_eq!(item.candidate.as_deref(), Some(head.as_str()));
-        let retry = Action::Retry {
-            mutation: Mutation { id: "retry-review-limit".into(), revision: failed.revision, epoch: failed.epoch, sequence: 1 },
-            item: key.clone(), run: item.run.clone(), pin: item.pin.clone(),
+    async fn reject_to_limit(runtime: &mut Runtime, workspace: &str, key: &str, principal: Option<&str>) -> State {
+        let Some(principal) = principal else {
+            return finish(runtime, workspace).await;
         };
-        let reply = runtime.wire_command(&workspace, "owner", retry.clone()).unwrap();
-        assert!(reply.pointer("/receipt/result/Ok").is_some(), "{reply}");
-        assert_eq!(runtime.wire_command(&workspace, "owner", retry).unwrap(), reply);
-        let state = runtime.state(&workspace).unwrap().unwrap();
-        let restarted = &state.items[key];
-        assert_ne!(restarted.run, item.run);
-        assert!(!restarted.back_edges.contains_key(&gate));
-        assert_eq!(restarted.history.last().unwrap().reason.as_deref(), Some(reason));
-        let effect = outbox().into_iter().find(|stored| stored.active).unwrap().effect;
-        assert_eq!(effect.kind, EffectKind::Execute(StageKind::Build));
-        assert_eq!(runtime.effect_tree(&workspace, &effect), checkout);
-        assert!(Exec::briefed("", &effect, restarted.iteration).contains(finding));
-
-        let failed_again = finish(&mut runtime, &workspace).await;
-        let next = &failed_again.items[key];
-        assert_eq!(next.phase, Phase::Failed);
-        assert_eq!(next.back_edges[&gate], 3);
-        let new_head = next.candidate.as_deref().unwrap();
-        assert_ne!(new_head, head);
-        adapters::git(&checkout, &["merge-base", "--is-ancestor", &head, new_head]).await.unwrap();
+        for round in 0..=LIMIT {
+            let start = 2 + i64::from(round) * 10;
+            for now in start..start + 10 {
+                runtime.pump(now).await.unwrap();
+                if runtime.state(workspace).unwrap().unwrap().items[key].phase == Phase::WaitingReview {
+                    break;
+                }
+            }
+            let state = runtime.state(workspace).unwrap().unwrap();
+            let item = &state.items[key];
+            assert_eq!(item.phase, Phase::WaitingReview, "{:?}", item.failed_reason());
+            assert_eq!(item.iteration, round);
+            let rejection = Action::Review {
+                mutation: Mutation {
+                    id: format!("reject-{}-{round}", item.run),
+                    revision: state.revision,
+                    epoch: state.epoch,
+                    sequence: state.revision + 1,
+                },
+                item: key.into(),
+                run: item.run.clone(),
+                pin: item.pin.clone(),
+                evidence: item.last_evidence.clone().unwrap(),
+                passed: false,
+                reason: Some(format!("Finding at review round {round}")),
+            };
+            let reply = runtime.wire_command(workspace, principal, rejection.clone()).unwrap();
+            assert!(reply.pointer("/receipt/result/Ok").is_some(), "{reply}");
+            if round == LIMIT {
+                assert_eq!(runtime.wire_command(workspace, principal, rejection).unwrap(), reply);
+            }
+        }
+        runtime.state(workspace).unwrap().unwrap()
     }
+
+    let (dir, mut runtime) = configured(true, "review-limit").await;
+    let host = Uuid::now_v7();
+    let repo = runtime.repository();
+    let root = runtime.store.create_repository_root(host, repo.to_str().unwrap(), 0).unwrap();
+    let repository = runtime.store.create_repository(host, root.id, "Review limit", repo.join(".git").to_str().unwrap(), "").unwrap();
+    let board = runtime.store.ensure_main_workspace(repository.id).unwrap();
+    let workspace = board.id.to_string();
+    let card = runtime.store.create_task(board.id, "Fix the review finding", Actor::User).unwrap();
+    let key = &card.key;
+    let mut definition = runtime.configured_definition().unwrap();
+    definition.schema = 2;
+    definition.max_reworks = 0;
+    definition.rework_target = None;
+    let build = definition.stages[1].id.clone();
+    let gate = definition.stages.iter_mut().find(|s| matches!(s.kind, StageKind::Review(_))).unwrap();
+    gate.routes.insert("rejected".into(), Target::Step(build));
+    gate.limit = LIMIT;
+    let principal = match &reviewer {
+        Reviewer::Person(principal) => {
+            gate.operation.arguments[1] = format!("person:{principal}");
+            Some(principal.as_str())
+        }
+        Reviewer::Orchestrator(principal) => {
+            gate.operation.arguments[1] = format!("orchestrator:{principal}");
+            Some(principal.as_str())
+        }
+        _ => None,
+    };
+    gate.kind = StageKind::Review(reviewer.clone());
+    let gate = gate.id.clone();
+
+    if adopted {
+        let base = runtime.base.clone();
+        let mut tree = rerun_tree(dir.path(), "adopted-work", &base);
+        tree.adopted = true;
+        adapters::git(&repo, &["branch", &tree.branch, &base]).await.unwrap();
+        runtime.host = Some(WorktreeHost { dir: dir.path().join("trees"), install_id: "test".into(), locks: Default::default() });
+        let resource = Exec::item_resource(&workspace, key);
+        let tracker = Definition::ticket();
+        rerun_command(&runtime, &workspace, Command::Enqueue {
+            item: key.clone(), initial_candidate: Some(tracker.pin()), definition: tracker,
+            policy_pin: "policy/v1".into(), resource: resource.clone(), dependencies: BTreeSet::new(),
+        });
+        rerun_command(&runtime, &workspace, Command::Start {
+            item: key.clone(), definition, tree: Some(Box::new(tree)), resource,
+            policy_pin: "policy/v1".into(), initial_candidate: None, dependencies: BTreeSet::new(),
+            models: Default::default(), with: vec![], start_load: None,
+        });
+    } else {
+        enqueue(&mut runtime, &workspace, key, definition);
+    }
+
+    let failed = reject_to_limit(&mut runtime, &workspace, key, principal).await;
+    let item = &failed.items[key];
+    assert_eq!(item.phase, Phase::Failed);
+    assert_eq!(item.back_edges[&gate], LIMIT);
+    let get = runtime.wire_command(&workspace, "owner", Action::Get).unwrap();
+    let reason = get["state"]["items"][key]["reason"].as_str().unwrap();
+    assert!(reason.starts_with(&format!("{gate}:")) && reason.contains("send-back limit of 3"), "{reason}");
+    assert_eq!(item.failed_reason().as_deref(), Some(reason));
+    assert!(item.failure.is_some(), "{item:?}");
+    let notes = runtime.store.notes_for(card.id, Some(NoteKind::Finding)).unwrap();
+    assert_eq!(notes.len(), if principal.is_some() { 1 } else { 4 }, "{notes:?}");
+    let finding = "Finding at review round 3";
+    assert!(notes.iter().any(|note| note.body == finding && note.extra["run"] == item.run
+        && (principal.is_none() || note.extra["receipt"] == item.last_evidence.as_ref().unwrap().receipt)), "{notes:?}");
+    let notes = runtime.store.notes_for(card.id, Some(NoteKind::Decision)).unwrap();
+    assert!(notes.iter().any(|note| note.body.starts_with(&format!("{gate}:"))
+        && note.body.contains("send-back limit of 3")), "{notes:?}");
+
+    let outbox = || runtime.store.workflow_outbox(&workspace).unwrap();
+    let effects = outbox();
+    assert!(effects.iter().all(|stored| !stored.active));
+    let last_effect = effects.into_iter().rfind(|stored| &stored.effect.item == key).unwrap().effect;
+    let checkout = runtime.effect_tree(&workspace, &last_effect);
+    let head = adapters::git(&checkout, &["rev-parse", "HEAD"]).await.unwrap();
+    assert_eq!(item.candidate.as_deref(), Some(head.as_str()));
+    let retry = Action::Retry {
+        mutation: Mutation { id: "retry-review-limit".into(), revision: failed.revision, epoch: failed.epoch,
+            sequence: failed.revision + 1 },
+        item: key.clone(), run: item.run.clone(), pin: item.pin.clone(),
+    };
+    let reply = runtime.wire_command(&workspace, "owner", retry.clone()).unwrap();
+    assert!(reply.pointer("/receipt/result/Ok").is_some(), "{reply}");
+    assert_eq!(runtime.wire_command(&workspace, "owner", retry).unwrap(), reply);
+    let state = runtime.state(&workspace).unwrap().unwrap();
+    let restarted = &state.items[key];
+    assert_ne!(restarted.run, item.run);
+    assert!(!restarted.back_edges.contains_key(&gate));
+    assert_eq!(restarted.history.last().unwrap().reason.as_deref(), Some(reason));
+    let effect = outbox().into_iter().find(|stored| stored.active).unwrap().effect;
+    assert_eq!(effect.kind, EffectKind::Execute(StageKind::Build));
+    assert_eq!(runtime.effect_tree(&workspace, &effect), checkout);
+    assert!(Exec::briefed("", &effect, restarted.iteration).contains(finding));
+
+    let failed_again = reject_to_limit(&mut runtime, &workspace, key, principal).await;
+    let next = &failed_again.items[key];
+    assert_eq!(next.phase, Phase::Failed);
+    assert_eq!(next.back_edges[&gate], LIMIT);
+    let new_head = next.candidate.as_deref().unwrap();
+    assert_ne!(new_head, head);
+    adapters::git(&checkout, &["merge-base", "--is-ancestor", &head, new_head]).await.unwrap();
 }
 
 #[tokio::test]

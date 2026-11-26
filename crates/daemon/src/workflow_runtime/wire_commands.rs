@@ -1208,13 +1208,14 @@ mod reasoned_tests {
             let request=Action::Review{mutation:m(&format!("rework-{iteration}"),current.revision,u64::from(iteration)+2),
                 item:"a".into(),run:i.run.clone(),pin:i.pin.clone(),evidence:i.last_evidence.clone().unwrap(),passed:false,reason:Some(reason.into())};
             let reply=runtime.wire_command("ws","owner",request.clone()).unwrap();
-            if iteration==1 {assert!(reply.pointer("/receipt/result/Ok").is_some(),"{reply}");}
-            else {
-                assert_eq!(reply.pointer("/receipt/result/Err").and_then(|v|v.as_str()),Some("Limit"));
-                assert_eq!(runtime.state("ws").unwrap().unwrap(),current);
+            assert!(reply.pointer("/receipt/result/Ok").is_some(),"{reply}");
+            if iteration==2 {
+                let failed=runtime.state("ws").unwrap().unwrap();
+                assert_eq!(failed.items["a"].phase,Phase::Failed);
+                assert_eq!(failed.items["a"].brief.as_deref(),Some(reason));
                 drop(runtime);runtime=Runtime::open(&root).unwrap();
                 assert_eq!(runtime.wire_command("ws","owner",request).unwrap(),reply);
-                assert_eq!(runtime.state("ws").unwrap().unwrap(),current);
+                assert_eq!(runtime.state("ws").unwrap().unwrap(),failed);
             }
         }
     }

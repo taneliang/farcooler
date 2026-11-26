@@ -611,17 +611,19 @@ fn record_step_note(tx: &Transaction<'_>, before: &State, after: &State, input: 
     };
     let previous = before.items.get(item);
     let next = after.items.get(item);
-    let step_note = match outcome {
-        Some(Outcome::ReviewRejected { summary, receipt, .. }) =>
+    let failure = previous.filter(|old| old.phase != Phase::Failed)
+        .and(next).and_then(|item| item.review_limit_failure());
+    let step_note = match (outcome, &input.command) {
+        (Some(Outcome::ReviewRejected { summary, receipt, .. }), _) =>
             Some((NoteKind::Finding, summary.as_str(), serde_json::json!({"run":run, "receipt":receipt}))),
-        Some(Outcome::Interrupted) if previous
+        (None, Command::Review { reason: Some(reason), evidence, .. }) if failure.is_some() =>
+            Some((NoteKind::Finding, reason.as_str(), serde_json::json!({"run":run, "receipt":evidence.receipt}))),
+        (Some(Outcome::Interrupted), _) if previous
             .is_some_and(|item| item.definition.stages[item.stage].kind.resumes_after_runner_restart()) =>
             next.and_then(|item| item.reason.as_deref())
                 .map(|reason| (NoteKind::Progress, reason, serde_json::json!({"run":run}))),
         _ => None,
     };
-    let failure = previous.filter(|old| old.phase != Phase::Failed)
-        .and(next).and_then(|item| item.review_limit_failure());
     if step_note.is_none() && failure.is_none() { return Ok(()); }
     // The verdict may split a group or hand its members back, so use the membership that was reviewed.
     let reviewed = before.items.get(item).filter(|item| item.group_of.is_some());

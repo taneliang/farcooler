@@ -414,7 +414,7 @@ fn workflow_reasoned_rework_fences_and_exact_retention() {
     for (label, refusal) in [("principal",Refusal::Unauthorized),("revision",Refusal::Stale),
         ("epoch",Refusal::Stale),("sequence",Refusal::Stale),("run",Refusal::Phase),
         ("evidence",Refusal::Evidence),("candidate",Refusal::Evidence),("policy",Refusal::Evidence),
-        ("passed",Refusal::Invalid),("budget",Refusal::Limit)] {
+        ("passed",Refusal::Invalid)] {
         let mut state = s.clone(); let mut bad = accepted.clone();
         match label {
             "principal" => bad.grant = Grant::Controller,
@@ -423,7 +423,6 @@ fn workflow_reasoned_rework_fences_and_exact_retention() {
             "sequence" => bad.source_sequence -= 1,
             "candidate" => state.items.get_mut("item").unwrap().candidate = Some("replacement".into()),
             "policy" => state.items.get_mut("item").unwrap().policy_pin = "replacement".into(),
-            "budget" => state.items.get_mut("item").unwrap().iteration = 2,
             _ => if let Command::Review { run, evidence, passed, .. } = &mut bad.command {
                 match label { "run" => *run = "old".into(), "evidence" => evidence.receipt = "unseen".into(),
                     "passed" => *passed = true, _ => unreachable!() }
@@ -449,7 +448,14 @@ fn workflow_reasoned_rework_bounds_budget_and_legacy_bytes() {
         }
     }
     assert_eq!(s.items["item"].rework_history.len(), 2);
-    assert_eq!(step(&s, &reasoned_review(&s, "exhausted")), Err(Refusal::Limit));
+    let exhausted = step(&s, &reasoned_review(&s, "Last finding")).unwrap();
+    let item = &exhausted.state.items["item"];
+    assert_eq!(item.phase, Phase::Failed);
+    assert_eq!(item.iteration, 2);
+    assert_eq!(item.rework_history.len(), 2);
+    assert_eq!(item.brief.as_deref(), Some("Last finding"));
+    assert!(item.review_limit_failure().unwrap().contains("send-back limit of 2"));
+    assert!(exhausted.effects.is_empty());
     let original = human_review();
     let mut old = reasoned_review(&original, "unused");
     if let Command::Review { reason, .. } = &mut old.command { *reason = None; }

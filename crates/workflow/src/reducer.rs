@@ -311,20 +311,24 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                         || item.candidate.as_ref() != Some(&evidence.candidate) {
                         evidence_matches(&item, evidence)?;
                     }
-                    if let Some(reason) = reason {
+                    let rework = if let Some(reason) = reason {
                         if *passed || !valid_rework_reason(reason) { return Err(Refusal::Invalid); }
                         if item.last_evidence.as_ref() != Some(evidence) { return Err(Refusal::Evidence); }
-                        if item.definition.schema == 2 { rework_room(&item, "rejected")?; }
-                        else if item.iteration >= item.definition.max_reworks { return Err(Refusal::Limit); }
-                        item.rework_history.push(ReworkDecision {
+                        if item.definition.schema == 2 {
+                            if !is_back_edge(&item, &target_of(&item, "rejected")) { return Err(Refusal::Invalid); }
+                        } else if item.definition.rework_target.is_none() { return Err(Refusal::Limit); }
+                        Some(ReworkDecision {
                             id: input.id.clone(), principal: p.clone(), revision: input.expected_revision,
                             run: item.run.clone(), definition_pin: item.pin.clone(), evidence: evidence.clone(),
                             iteration: item.iteration, reason: reason.clone(),
-                        });
-                        // The build it goes back to is told why (ov-968).
-                        item.brief = Some(reason.clone());
+                        })
+                    } else { None };
+                    finish(&mut item, id, input, *passed, evidence, reason.as_deref(),
+                        Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
+                    // The verdict's brief survives a terminal rejection. History counts send-backs taken.
+                    if let Some(rework) = rework.filter(|decision| item.iteration > decision.iteration) {
+                        item.rework_history.push(rework);
                     }
-                    finish(&mut item, id, input, *passed, evidence, None, Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
                 }
                 Command::Observe { effect, run, fence, outcome, .. }
                 | Command::Resolve { effect, run, fence, outcome, .. } => {
@@ -1261,13 +1265,6 @@ fn target_of(item: &Item, label: &str) -> Target {
 fn is_back_edge(item: &Item, target: &Target) -> bool {
     matches!(target, Target::Step(to) if item.definition.stages.iter().position(|s| &s.id == to)
         .is_some_and(|t| t <= item.stage))
-}
-/// Whether the step's route for `label` is a back edge with room left to take it.
-fn rework_room(item: &Item, label: &str) -> Result<(), Refusal> {
-    if !is_back_edge(item, &target_of(item, label)) { return Err(Refusal::Invalid); }
-    let stage = &item.definition.stages[item.stage];
-    if item.back_edges.get(&stage.id).copied().unwrap_or(0) >= stage.limit { return Err(Refusal::Limit); }
-    Ok(())
 }
 /// Whether one more item fits. The item being worked on is out of the map, so it counts too.
 /// A split with no room takes its fallback: a refusal here would stop the service, not the item.
