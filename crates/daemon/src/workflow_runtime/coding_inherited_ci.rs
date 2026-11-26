@@ -274,7 +274,8 @@ else:
         for ticket in tickets {
             at_join(&mut runtime, ticket, &definition).await;
             command(&runtime, Command::Queue { item: (*ticket).into() });
-            let state = until(&mut runtime, |s| phase_of(s, ticket) == Some(expected.clone())).await;
+            let state = until(&mut runtime, |s| matches!(phase_of(s, ticket), Some(Phase::Done | Phase::Failed))).await;
+            assert_eq!(phase_of(&state, ticket), Some(expected.clone()), "{ticket}");
             assert_ne!(remote_head(&runtime).await, root_red);
             assert_eq!(phase_of(&state, "breaker"), Some(Phase::Failed));
             let fact = settled(&runtime, StageKind::AwaitCi);
@@ -316,8 +317,13 @@ else:
     }
 
     #[tokio::test]
+    async fn a_different_single_test_failure_still_fails_the_ticket() {
+        exercise(Some(SINGLE_TEST.0), "Rust (ubuntu-24.04)", &[SINGLE_TEST]).await;
+    }
+
+    #[tokio::test]
     async fn every_failing_test_step_in_a_job_is_named_in_the_landing_note() {
-        exercise(None, "Rust (ubuntu-24.04)", &[TAILCAT, TAILCAT_INTEGRATION]).await;
+        exercise(None, "Rust (ubuntu-24.04)", &[TAILCAT, TAILCAT_INTEGRATION, SINGLE_TEST]).await;
     }
 
     #[test]
