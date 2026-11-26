@@ -289,9 +289,8 @@ async fn waiting_adopted_worktree_releases_build_output_and_reclaims_older_outpu
     // target directory is selected only through CARGO_TARGET_DIR.
     let target = tree.join(".artifacts");
     let old_artifacts = super::super::build_cleanup_tests::cargo_build_output(&package, &target);
-    let rlib = std::fs::read_dir(target.join("debug/deps")).unwrap()
-        .map(|entry| entry.unwrap().path())
-        .find(|path| path.extension().is_some_and(|ext| ext == "rlib")).unwrap();
+    let rlib = old_artifacts.iter().find(|path| path.file_name().and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("libcleanup_fixture-") && name.ends_with(".rlib"))).unwrap().clone();
     // Cargo writes one top-level .d file for the two crate types. Replace
     // the export it names, then rewrite the other type's hashed archive.
     let exports = target.join("debug/libcleanup_fixture");
@@ -301,7 +300,7 @@ async fn waiting_adopted_worktree_releases_build_output_and_reclaims_older_outpu
     let linked = if exported.extension().unwrap() == "a" { rlib.clone() } else { rlib.with_extension("a") };
     let personal_archive = std::fs::read(&rlib).unwrap();
     let stem = linked.file_stem().unwrap().to_str().unwrap().strip_prefix("lib").unwrap();
-    let deps_info = std::fs::read_to_string(target.join("debug/deps").join(format!("{stem}.d"))).unwrap();
+    let deps_info = std::fs::read_to_string(linked.with_file_name(format!("{stem}.d"))).unwrap();
     assert!(deps_info.contains(&linked.to_str().unwrap().replace(' ', "\\ ")));
     let temporary = dir.path().join("personal-prebuilt.a");
     let mtime = exported.metadata().unwrap().modified().unwrap();

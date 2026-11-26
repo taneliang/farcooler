@@ -60,6 +60,7 @@ pub(super) fn artifacts(tree: &Path, folder: &Path, files: &Files) -> io::Result
 struct Unit<'a> {
     fingerprint: &'a Path,
     profile: &'a Path,
+    build_unit: Option<&'a Path>,
     hash: &'a str,
     marker: &'a str,
     json: &'a Path,
@@ -73,10 +74,18 @@ impl<'a> Unit<'a> {
         let marker = path.file_name()?.to_str()?.strip_suffix(".json")?;
         let fingerprint = path.parent()?;
         let parent = fingerprint.parent()?;
-        if parent.file_name()? != ".fingerprint" { return None; }
-        let (_, hash) = fingerprint.file_name()?.to_str()?.rsplit_once('-')?;
+        // Cargo 1.100 groups fingerprints and outputs under build/<package>/<hash>.
+        let (profile, hash, build_unit) = match fingerprint.file_name()?.to_str()? {
+            "fingerprint" => {
+                let build = parent.parent()?.parent()?;
+                if build.file_name()? != "build" { return None; }
+                (build.parent()?, parent.file_name()?.to_str()?, Some(parent))
+            }
+            name if parent.file_name()? == ".fingerprint" =>
+                (parent.parent()?, name.rsplit_once('-')?.1, None),
+            _ => return None,
+        };
         if hash.len() != 16 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) { return None; }
-        let profile = parent.parent()?;
         let stamp = fingerprint.join(marker);
         let stamp_meta = files.get(&stamp)?;
         let digest = read_metadata(&stamp)?;
@@ -86,7 +95,7 @@ impl<'a> Unit<'a> {
         let json: Value = serde_json::from_str(&read_metadata(path)?).ok()?;
         if !["rustc", "target", "profile", "path", "config"].iter().all(|key| json[key].is_u64())
             || !json["deps"].is_array() || !json["local"].is_array() { return None; }
-        Some(Self { fingerprint, profile, hash, marker, json: path, stamp, local: json["local"].clone(), end })
+        Some(Self { fingerprint, profile, build_unit, hash, marker, json: path, stamp, local: json["local"].clone(), end })
     }
 
     fn window(&self, invocation: &Path, files: &Files) -> Option<BuildWindow> {
@@ -110,7 +119,7 @@ impl<'a> Unit<'a> {
             entry["CheckDepInfo"]["dep_info"].as_str().is_some_and(|name| recorded_path(name, &dep_cache)));
         if !cache_named || dep.len() < 6 || !is_cargo_dep_cache(&dep_cache) { return Ok(()); }
 
-        let (name, dir) = match self.marker {
+        let (name, legacy_dir) = match self.marker {
             COMPILE_SCRIPT => ("build_script_build", self.profile.join("build").join(self.fingerprint.file_name().unwrap())),
             marker if marker.starts_with("test-integration-test-") =>
                 (marker.trim_start_matches("test-integration-test-"), self.profile.join("deps")),
@@ -124,11 +133,20 @@ impl<'a> Unit<'a> {
                 (name, self.profile.join(output))
             }
         };
+        let dir = self.build_unit.map_or(legacy_dir, |unit| unit.join("out"));
         let crate_name = name.replace('-', "_");
-        let stem = format!("{crate_name}-{}", self.hash);
-        artifacts.invocations.entry(self.profile.join("incremental").join(crate_name)).or_default().push(window);
+        let hashed_stem = format!("{crate_name}-{}", self.hash);
+        let dep_info = dir.join(format!("{hashed_stem}.d"));
+        // In the unit layout some rustc invocations omit the hash from the
+        // filename. The unit directory still binds the dep-info to this hash.
+        let (stem, dep_info) = if self.build_unit.is_some() && !files.contains_key(&dep_info) {
+            let dep_info = dir.join(format!("{crate_name}.d"));
+            (crate_name.as_str(), dep_info)
+        } else {
+            (hashed_stem.as_str(), dep_info)
+        };
+        artifacts.invocations.entry(self.profile.join("incremental").join(&crate_name)).or_default().push(window);
         let result = &mut artifacts.files;
-        let dep_info = dir.join(format!("{stem}.d"));
 
         // The fingerprint and binary dep cache authenticate Cargo's bookkeeping
         // even when an earlier sweep already removed the compiled binaries.
@@ -137,7 +155,9 @@ impl<'a> Unit<'a> {
         let diagnostics = self.fingerprint.join(format!("output-{}", self.marker));
         if files.get(&diagnostics).is_some_and(|meta| window.contains(meta))
             && read_metadata(&diagnostics).is_some_and(|data| !data.is_empty() && data.lines().all(|line|
-                serde_json::from_str::<Value>(line).is_ok_and(|json| json["level"].is_string()))) {
+                serde_json::from_str::<Value>(line).is_ok_and(|json| json["level"].is_string()
+                    || (json["$message_type"] == "unused_extern" && json["lint_level"].is_string()
+                        && json["unused_extern_names"].as_array().is_some_and(|names| names.iter().all(Value::is_string)))))) {
             result.insert(diagnostics, FINGERPRINT);
         }
 
@@ -155,7 +175,7 @@ impl<'a> Unit<'a> {
         for (name, prerequisites) in rules {
             let path = resolve(name);
             if prerequisites != dependencies || path.parent() != Some(&dir) || path == dep_info
-                || !path.file_stem().and_then(|s| s.to_str()).is_some_and(|s| s == stem || s.strip_prefix("lib") == Some(&stem))
+                || !path.file_stem().and_then(|s| s.to_str()).is_some_and(|s| s == stem || s.strip_prefix("lib") == Some(stem))
                 || !files.get(&path).is_some_and(|meta| produced.contains(meta))
                 || !Layout::Cargo.recognizes(&path)? { continue; }
             self.release_export(tree, &path, window, files, result)?;
@@ -182,6 +202,7 @@ impl<'a> Unit<'a> {
     {
         let source = &files[path];
         if self.marker == COMPILE_SCRIPT {
+            if self.build_unit.is_some() { return Ok(()); }
             let export = path.with_file_name("build-script-build").with_extension(path.extension().unwrap_or_default());
             if let Some(meta) = files.get(&export).filter(|meta| window.contains(meta))
                 && same_output(path, source, &export, meta)? {
@@ -192,7 +213,7 @@ impl<'a> Unit<'a> {
         let prefix = self.marker.strip_prefix("test-").unwrap_or(self.marker);
         let Some((kind, name)) = prefix.split_once('-') else { return Ok(()); };
         if !matches!(kind, "bin" | "lib" | "example") { return Ok(()); }
-        let dir = if kind == "example" { path.parent().unwrap() } else { self.profile };
+        let dir = if kind == "example" { self.profile.join("examples") } else { self.profile.to_owned() };
         let basename = if kind == "lib" { format!("lib{}", name.replace('-', "_")) } else { name.to_owned() };
         let export = dir.join(basename).with_extension(path.extension().unwrap_or_default());
         let Some(meta) = files.get(&export).filter(|meta| window.contains(meta)) else { return Ok(()); };
@@ -212,11 +233,15 @@ impl<'a> Unit<'a> {
     }
 
     fn release_script_outputs(&self, files: &Files, artifacts: &mut Artifacts) {
-        let run = self.profile.join("build").join(self.fingerprint.file_name().unwrap());
+        let (out, run, stdout_name) = if let Some(unit) = self.build_unit {
+            (unit.join("out"), unit.join("run"), "stdout")
+        } else {
+            let unit = self.profile.join("build").join(self.fingerprint.file_name().unwrap());
+            (unit.join("out"), unit, "output")
+        };
         let invocation = run.join(INVOKED);
-        let out = run.join("out");
         let root_output = run.join("root-output");
-        let stdout = run.join("output");
+        let stdout = run.join(stdout_name);
         let Some(window) = self.window(&invocation, files) else { return; };
         if !files.get(&stdout).is_some_and(|meta| window.contains(meta))
             || !files.get(&root_output).is_some_and(|meta| window.contains(meta))

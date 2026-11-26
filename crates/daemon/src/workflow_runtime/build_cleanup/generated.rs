@@ -264,8 +264,6 @@ fn incremental_session(path: &Path) -> bool {
     let Some((disambiguator, session_hash)) = rest.split_once('-') else { return false };
     base36(hash) && base36(timestamp) && base36(disambiguator) && base36(session_hash)
         && session_hash != "working"
-        && incremental.parent().is_some_and(|profile|
-            profile.join(".fingerprint").symlink_metadata().is_ok_and(|meta| meta.is_dir()))
 }
 
 const RUSTC_END: &[u8] = b"rust-end-file";
@@ -293,7 +291,14 @@ fn incremental_outputs(session: &Path, cargo: &cargo::Artifacts, outputs: &mut B
         Some((file, meta, header))
     }) else { return };
     if meta.len() > METADATA_LIMIT { return; }
-    let completion = cargo.incremental_completion(session, &meta).unwrap_or_else(|| changed(&meta));
+    let completion = if let Some(completion) = cargo.incremental_completion(session, &meta) {
+        completion
+    } else if session.ancestors().nth(3).is_some_and(|profile|
+        profile.join(".fingerprint").symlink_metadata().is_ok_and(|meta| meta.is_dir())) {
+        changed(&meta)
+    } else {
+        return;
+    };
     let mut products = Vec::new();
     if file.seek(SeekFrom::Start(header.len() as u64)).is_err()
         || file.take(METADATA_LIMIT).read_to_end(&mut products).is_err() { return; }
