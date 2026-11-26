@@ -17,17 +17,25 @@ fn writers(paths: &[PathBuf]) -> Option<bool> {
     // These commands, including a local receive-pack, run as the runner user.
     let me = std::process::id() as i32;
     let mut checked = HashSet::from([me]);
+    let mut unreadable = HashSet::new();
     for _ in 0..4 {
         let pids = own_pids()?;
         if !pids.contains(&me) { return None; }
+        unreadable.retain(|pid| pids.contains(pid));
         let mut changed = false;
-        for pid in pids.into_iter().filter(|&pid| checked.insert(pid)) {
-            changed = true;
-            if could_write(pid, paths)? { return Some(true); }
+        for pid in pids {
+            let new = checked.insert(pid);
+            if !new && !unreadable.remove(&pid) { continue; }
+            changed |= new;
+            match could_write(pid, paths) {
+                Some(true) => return Some(true),
+                Some(false) => {}
+                None => { unreadable.insert(pid); }
+            }
         }
         // A command that exited during our reads may have forked a receiver
         // or checkout helper since the first inventory.
-        if !changed { return Some(false); }
+        if !changed && unreadable.is_empty() { return Some(false); }
     }
     None
 }
