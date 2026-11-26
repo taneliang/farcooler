@@ -273,7 +273,10 @@ for (const width of [320, 1280]) {
   check(await message.locator('blockquote').count() === 1 && await message.locator('strong', { hasText: 'passkey provider' }).count() === 1 &&
     await message.locator('em', { hasText: 'enrolled device' }).count() === 1 &&
     await message.locator('li code', { hasText: 'authorized_keys' }).count() === 1, 'quotes, bold, italics and inline code render')
-  check(await message.locator('a[href="https://www.openssh.com/"]', { hasText: 'SSH documentation' }).count() === 1, 'the HTTPS link renders')
+  const link = message.locator('a[href="https://www.openssh.com/"]', { hasText: 'SSH documentation' })
+  check(await link.count() === 1 && await link.evaluate(node => node.target === '_blank' &&
+    node.relList.contains('noopener') && node.relList.contains('noreferrer')),
+  'the HTTPS link renders with a new tab target and opener and referrer protection')
   const code = message.locator('pre > code')
   check(await code.count() === 1 && (await code.textContent()).includes('farcooler@runner.example.com') &&
     await code.evaluate(node => getComputedStyle(node).whiteSpace === 'pre' && node.parentElement.scrollWidth > node.parentElement.clientWidth),

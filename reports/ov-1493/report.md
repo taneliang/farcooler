@@ -12,12 +12,13 @@ Raw HTML and scripts stay visible as literal text. The web renderer constructs D
 
 ## Verification
 
-- Chromium chat check passed, including total page width, local table scrolling at 320 px, header and cell alignment, cell wrapping, long code, and unsafe content. This check now runs in Web CI.
+- Chromium chat check passed, including total page width, local table scrolling at 320 px, header and cell alignment, cell wrapping, long code, unsafe content, and opener and referrer protection for HTTPS links at both widths. This check now runs in Web CI.
 - Chat and header unit suites passed all 36 tests. Client TypeScript passed.
+- Shared-core lint passes with link security settings applied as DOM tokens.
 
 ## Brotli budget
 
-The production Canary size gate passed at **5,085,027 bytes** against the **5,500,000-byte** limit, leaving 414,973 bytes. The baseline was 5,048,563 bytes using the same production WASM assets. The parser and renderer increased the compressed client JavaScript from 159,445 to 195,667 bytes, a 36,222-byte increase. That cost covers CommonMark nested blocks, inline syntax, escaping, and pipe tables in one parser.
+After the landing-gate repair, the production Canary size gate passed at **5,089,170 bytes** against the **5,500,000-byte** limit, leaving 410,830 bytes. The initial before-and-after measurement with identical WASM assets put the parser and renderer’s cost at 36,222 compressed JavaScript bytes. That cost covers CommonMark nested blocks, inline syntax, escaping, and pipe tables in one parser.
 
 ## Browser captures
 

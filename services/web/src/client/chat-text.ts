@@ -31,7 +31,7 @@ function openElement(token: Token): HTMLElement {
     const link = document.createElement('a')
     link.href = url.href
     link.target = '_blank'
-    link.rel = 'noopener noreferrer'
+    link.relList.add('noopener', 'noreferrer')
     const title = token.attrGet('title')
     if (typeof title === 'string') link.title = title
     return link
