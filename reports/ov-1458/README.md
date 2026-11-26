@@ -21,6 +21,16 @@ The Rust client suite covers stable anchors, current and stale candidates, read-
 
 The socket review tests exercise pure and edited renames from a real Git candidate. A pure rename has no text hunks. An edited rename shows the original and replacement lines with their respective line numbers, and a comment on the original line reopens at the same anchor. The fixture includes other renames with similar names and nested paths to check that each patch stays on its selected file.
 
+## Landing-base verification
+
+All four ticket commits replayed onto `6570951376c01a51bb730b3fc528bc2dae9af094` with identical patches. The replay applied cleanly at both paths named in the handoff, `crates/daemon/src/workflow_runtime/native_messages.rs` and `services/web/src/client/wasm.d.ts`.
+
+The review browser scenario passed again at 320 and 1280 pixels with the authenticated runner fixture. The captures above were verified against that run. The Rust client passed 415 tests, and Web Rust passed 83, including real-sshd passkey tests. All 47 targeted daemon tests passed across file diffs, change sets, review operations and native messages.
+
+The Board, Work and Plan browser checks, 305 Web unit tests, workflow tests, both TypeScript checks, Tailcat Go WASM tests, and repository linters passed. The Canary Web bundle passed the size gate at 5,038,241 Brotli bytes.
+
+## Reproduce the review browser check
+
 To rerun the browser check with the Web dependencies and Playwright Chromium installed, start the fixture from the repository root.
 
 ```sh
