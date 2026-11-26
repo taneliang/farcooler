@@ -618,7 +618,7 @@ impl Runtime {
                 }
             }
         }
-        // A group that ended since the last sweep leaves its tree; the first sweep also clears what a stopped daemon left (ov-1084).
+        // Recover interrupted cleanup and retain output cleanup intents before starting effects.
         let mut recover_trees = !self.trees_recovered;
         if recover_trees {
             let exec = self.exec.clone();

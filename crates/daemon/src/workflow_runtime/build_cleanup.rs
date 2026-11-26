@@ -162,12 +162,21 @@ impl Exec {
                 continue;
             };
             if !self.store.workflow_cleanup_has_authority()? { break; }
-            if self.private_tree_in_use(tree)? || tree.canonicalize().ok().as_deref() != Some(tree.as_path())
+            if tree.canonicalize().ok().as_deref() != Some(tree.as_path())
                 || !tree.join(".git").symlink_metadata().is_ok_and(|m| m.is_file()) {
                 continue;
             }
-            if !registered_private_checkout(tree).await { continue; }
             let held = Arc::new(CleanupFences { _tree: guard, _repository: None });
+            let exec = self.clone();
+            let checkout = tree.clone();
+            let fences = held.clone();
+            if tokio::task::spawn_blocking(move || {
+                let _fences = fences;
+                exec.private_tree_in_use(&checkout)
+            }).await.map_err(|_| Error::Refused("legacy cleanup ownership worker failed"))?? {
+                continue;
+            }
+            if !registered_private_checkout(tree).await { continue; }
             for path in paths {
                 let mut retry = None;
                 match self.release_folder(tree, &path, held.clone(), &mut retry, true).await {
@@ -364,7 +373,7 @@ impl Exec {
         Ok(result)
     }
     fn check_tree_usage(&self, effect: &CleanupEffect, tree: &Path) -> Result<Option<CleanupResult>> {
-        let skip = |why: &str| CleanupResult { retry: false, bytes_freed: 0, skipped: vec![why.into()] };
+        let skip = |why: &str| CleanupResult { skipped: vec![why.into()], ..CleanupResult::default() };
         for workspace in &self.store.workflow_workspaces()? {
             let Some(state) = self.state(workspace)? else { continue };
             for (id, item) in &state.items {

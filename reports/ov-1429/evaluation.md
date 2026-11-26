@@ -245,3 +245,21 @@ The rebase keeps restart pacing, startup cleanup, and recurring log pruning in t
 The read sequence launched zero tmux clients. The idle minute recorded 13 `lsof` launches (12 recursive), 52 Git launches (one remote-head probe), one `gh` launch (zero polls of the finished run), and two tmux launches. All 20 pane echoes arrived within 100 ms. The slowest took 25.5 ms, ten overlapped the open-file probe, and an echo overlapped the accounting walk. The cleanup receipt recorded all 48,000 bytes.
 
 Nextest passed 4,826 of 4,828 tests across the daemon, CLI, store, and workflow unit suites and five socket and CLI integration suites. Both failures repeated in isolation with the same assertions on the unmodified landing base. The macOS native-hold tests reported `ended` for a stray process and found the same PID for the relay and the hold. Migration lint and its self-test, daemon-layer, file-size, doc-comment, Nightly dispatch, and workflow lint checks passed.
+
+## Verification on landing base `ebc4b7867`
+
+The rebased cleanup keeps the landing base’s artifact provenance checks, checkout preservation, retry deadlines, and disk totals. Both preflight and final open-file checks use the service’s shared probe budget. A blocking worker checks legacy checkout ownership while holding the tree fence. Recovery and hourly log pruning also run on blocking workers.
+
+| Loaded read | Latency | Budget |
+| --- | ---: | ---: |
+| Plan | 642 ms | < 2 s |
+| Plan theme list | 1,231 ms | < 2 s |
+| Workflow Get | 169 ms | < 1 s |
+| Task List, first page | 37 ms | — |
+| Worktree List | 0.45 ms | < 2 s |
+
+The loaded reads made zero tmux calls. The idle minute recorded 23 `lsof` launches (12 recursive), 72 Git launches (one remote-head probe), one `gh` launch (zero polls of the finished run), and 63 tmux launches. All 16 pane echoes met the 100 ms bound. The slowest took 53.5 ms, seven overlapped the open-file probe, and an echo overlapped the accounting walk. The cleanup receipt recorded all 48,000 bytes.
+
+The rebased Workflow Get can wait up to 200 ms for the first disk-usage sample. The sample runs on a blocking worker and later requests can use the cached result. The existing follow-ups cover filesystem accounting and the remaining read projection costs. [Filesystem accounting (ov-1438)](farcooler://task/-/ov-1438) [Read projection (ov-1436)](farcooler://task/-/ov-1436)
+
+Nextest ran 4,784 tests across the daemon, CLI, store, and workflow suites and ten CLI and socket integration suites. The first pass passed 4,717 tests. The scratch alias resolved to a path too long for native Unix sockets. The test guard reaped one private tmux server left by that run. All 67 affected tests passed with the same binaries and a short private socket path. The loaded read, spawn census, and pane echo regressions also passed in standalone runs. Migration lint and its self-test, daemon-layer, file-size, doc-comment, Nightly dispatch, and workflow lint checks passed.
