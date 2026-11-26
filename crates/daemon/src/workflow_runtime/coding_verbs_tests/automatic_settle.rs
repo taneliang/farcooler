@@ -24,6 +24,25 @@ async fn an_uncertain_push_settles_automatically_from_the_bare_target() {
 }
 
 #[tokio::test]
+async fn an_uncertain_push_settles_after_the_bare_target_advances() {
+    let (_dir, mut runtime, group) = uncertain_push(true).await;
+    let candidate = remote_head(&runtime).await;
+    let landing = runtime.coding.as_ref().unwrap().landing.as_ref().unwrap();
+    let tree = format!("{candidate}^{{tree}}");
+    let head = adapters::git(&landing.repository, &["-c", "user.name=Test",
+        "-c", "user.email=test@localhost", "-c", "commit.gpgsign=false",
+        "commit-tree", &tree, "-p", &candidate, "-m", "another landing"]).await.unwrap();
+    adapters::git(&landing.repository, &["update-ref", &landing.target, &head, &candidate]).await.unwrap();
+
+    runtime.pump(50 + FIRST_MS + 1_000).await.unwrap();
+    let resolved = runtime.state("w").unwrap().unwrap();
+    assert_ne!(resolved.items[&group].phase, Phase::Uncertain);
+    assert_eq!(resolved.items[&group].pushed.as_deref(), Some(candidate.as_str()));
+    assert_eq!(remote_head(&runtime).await, head);
+    assert_eq!(outbox(&runtime, StageKind::Push), 1);
+}
+
+#[tokio::test]
 async fn an_automatic_push_check_keeps_uncertain_when_the_bare_target_is_unreadable() {
     let (dir, mut runtime, group) = uncertain_push(false).await;
     let remote = &runtime.coding.as_ref().unwrap().landing.as_ref().unwrap().repository;

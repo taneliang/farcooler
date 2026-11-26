@@ -7,6 +7,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use farcooler_core::{DomainError, Result};
+use tokio::time::Instant;
+
+const LOCK_WAIT: Duration = Duration::from_secs(1);
 
 tokio::task_local! {
     /// The receipt file for a provisioning effect, shared by its sequence of Git commands.
@@ -23,6 +26,20 @@ pub(crate) fn try_provision_lock(path: &Path) -> std::io::Result<File> {
     }
     rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive)?;
     Ok(file)
+}
+
+/// Concurrent forks can briefly retain a close-on-exec copy of a lock.
+/// Give those copies time to close before reporting a surviving writer.
+pub(crate) async fn wait_provision_lock(path: &Path, deadline: Instant) -> std::io::Result<File> {
+    let deadline = deadline.min(Instant::now() + LOCK_WAIT);
+    loop {
+        match try_provision_lock(path) {
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < deadline => {
+                tokio::time::sleep_until(deadline.min(Instant::now() + Duration::from_millis(10))).await;
+            }
+            result => return result,
+        }
+    }
 }
 
 /// Keep the lock across exec by clearing close-on-exec in the child alone.
@@ -42,30 +59,32 @@ fn inherit_provision_lock(cmd: &mut std::process::Command, file: &File) {
     }
 }
 
-pub(super) fn track(cmd: &mut std::process::Command, args: &[&str]) -> Result<Option<File>> {
-    let writer = PROVISION_WRITERS.try_with(|path| {
-        try_provision_lock(path).map_err(|error| {
-            tracing::warn!(%error, ?args, "could not take the provisioning Git lock");
-            DomainError::OperationFailed
-        })
-    }).ok().transpose()?;
-    if let Some(file) = &writer {
-        inherit_provision_lock(cmd, file);
-    }
-    Ok(writer)
+pub(super) async fn track(cmd: &mut std::process::Command, args: &[&str], deadline: Instant) -> Result<Option<File>> {
+    let Ok(path) = PROVISION_WRITERS.try_with(Clone::clone) else { return Ok(None) };
+    let writer = wait_provision_lock(&path, deadline).await.map_err(|error| {
+        tracing::warn!(%error, ?args, "could not take the provisioning Git lock");
+        DomainError::OperationFailed
+    })?;
+    inherit_provision_lock(cmd, &writer);
+    Ok(Some(writer))
 }
 
-pub(super) async fn after_timeout(writer: Option<File>) {
-    // Dropping the future requests a kill. Give an owned provisioning
-    // writer a short chance to exit before any cleanup tries its lock.
-    if writer.is_some() {
-        drop(writer);
-        let _ = tokio::time::timeout(Duration::from_millis(100), async {
-            while PROVISION_WRITERS.with(|path| try_provision_lock(path))
-                .is_err_and(|error| error.kind() == std::io::ErrorKind::WouldBlock)
-            {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        }).await;
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn provisioning_waits_for_a_briefly_retained_lock() {
+        let receipt = tempfile::NamedTempFile::new().unwrap();
+        let writer = try_provision_lock(receipt.path()).unwrap();
+        let deadline = Instant::now() + Duration::from_millis(100);
+        let still_held = wait_provision_lock(receipt.path(), Instant::now()).await.unwrap_err();
+        assert_eq!(still_held.kind(), std::io::ErrorKind::WouldBlock);
+
+        let (lock, ()) = tokio::join!(wait_provision_lock(receipt.path(), deadline), async {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            drop(writer);
+        });
+        assert!(lock.is_ok());
     }
 }

@@ -674,7 +674,8 @@ impl Exec {
                 }
                 let provisioned = crate::git::PROVISION_WRITERS.scope(self.provision_lock_path(&binding.effect),
                     self.provision_checkout(workspace, binding, &tree)).await?;
-                let _quiescent = self.lock_provision(binding)?;
+                let _quiescent = crate::git::wait_provision_lock(&self.provision_lock_path(&binding.effect),
+                    tokio::time::Instant::now() + crate::git::timeout()).await?;
                 if let Some(why) = provisioned {
                     return self.refuse_unstarted(binding, why);
                 }

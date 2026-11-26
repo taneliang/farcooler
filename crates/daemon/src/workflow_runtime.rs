@@ -902,9 +902,7 @@ impl Runtime {
                 if stored.dispatch_state == "uncertain" { uncertain.insert(effect.id.clone()); }
                 if running.iter().any(|j| j.effect.id == effect.id && &j.workspace == workspace) { continue; }
                 // An Uncertain effect that recovery couldn't settle waits before it is looked at again (ov-1301).
-                if stored.dispatch_state == "uncertain" {
-                    if self.recovery.waiting(workspace, &effect.id, now_ms) { continue; }
-                }
+                if stored.dispatch_state == "uncertain" && self.recovery.waiting(workspace, &effect.id, now_ms) { continue; }
                 let state = self.state(workspace)?.ok_or(Error::Refused("missing state"))?;
                 // A finished item has left live state and has nothing left to run.
                 let Some(item) = state.items.get(&effect.item) else { continue };

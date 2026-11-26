@@ -109,7 +109,7 @@ async fn an_older_provision_without_process_evidence_needs_a_person() {
     let binding = admitted(&runtime).await;
     std::fs::remove_file(runtime.provision_lock_path(&binding.effect)).unwrap();
     runtime.pump(1_000).await.unwrap();
-    runtime.pump(1_000 + FIRST_MS).await.unwrap();
+    runtime.pump(1_000 + FIRST_MS + 1_000).await.unwrap();
     assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::Uncertain);
     let needs = crate::engine_stuck::uncertain(&runtime.store);
     assert_eq!(needs.len(), 1);
@@ -186,7 +186,8 @@ exec "$REAL_GIT" "$@"
 
         let mut runtime = Runtime::open(&root).unwrap();
         runtime.pump(1_000).await.unwrap();
-        runtime.pump(1_000 + FIRST_MS).await.unwrap();
+        // The first sweep accounts for time spent before it reaches the effect.
+        runtime.pump(1_000 + FIRST_MS + 1_000).await.unwrap();
         assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::Uncertain);
         assert!(!runtime.git_settlement(&binding).exists());
         assert!(!runtime.unstarted_recorded(&binding).unwrap());

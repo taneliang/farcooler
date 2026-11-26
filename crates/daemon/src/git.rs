@@ -19,7 +19,7 @@ use farcooler_core::{DomainError, Result};
 use tokio::process::Command;
 
 mod provision_lock;
-pub(crate) use provision_lock::{PROVISION_WRITERS, try_provision_lock};
+pub(crate) use provision_lock::{PROVISION_WRITERS, try_provision_lock, wait_provision_lock};
 
 /// How long any single git invocation may take before it is killed.
 ///
@@ -267,7 +267,7 @@ async fn spawn_bounded(
     if let Some(index) = index {
         cmd.env("GIT_INDEX_FILE", index);
     }
-    let writer = provision_lock::track(&mut cmd, args)?;
+    let _writer = provision_lock::track(&mut cmd, args, deadline).await?;
     let child = Command::from(cmd)
         .current_dir(cwd)
         .args(args)
@@ -284,7 +284,6 @@ async fn spawn_bounded(
             return Err(DomainError::OperationFailed);
         }
         Err(_) => {
-            provision_lock::after_timeout(writer).await;
             tracing::warn!(?args, "git timed out and was killed");
             return Err(DomainError::OperationFailed);
         }
