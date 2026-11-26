@@ -99,7 +99,7 @@ fn a_failed_and_an_uncertain_run_say_so_with_no_gate() {
 
 #[test]
 fn a_failed_ticket_line_carries_the_cause_and_the_send_back_refusal() {
-    let cause = "agent-review: fix the missing check (receipt review.json)";
+    let cause = "agent-review: The review rejected the candidate after reaching its send-back limit of 3. (receipt review.json)";
     let refusal = "agent-review: reached the back-edge limit of 2 (receipt wire:owner:deny)";
     let state = edited(|item| {
         item.phase = Phase::Failed;

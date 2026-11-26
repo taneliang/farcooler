@@ -186,7 +186,7 @@ async fn review_limit_keeps_the_finding_and_retry_rebuilds_in_the_same_checkout(
         let get = runtime.wire_command(&workspace, "owner", Action::Get).unwrap();
         let reason = get["state"]["items"][key]["reason"].as_str().unwrap();
         assert!(reason.starts_with(&format!("{gate}:")) && reason.contains("send-back limit of 3"), "{reason}");
-        assert_eq!(crate::plan_run::run_of(&failed, key).unwrap().reason.as_deref(), Some(reason));
+        assert_eq!(item.failed_reason().as_deref(), Some(reason));
         assert!(item.failure.is_some(), "{item:?}");
         let notes = runtime.store.notes_for(card.id, Some(NoteKind::Finding)).unwrap();
         assert_eq!(notes.len(), 4, "{notes:?}");
@@ -197,7 +197,7 @@ async fn review_limit_keeps_the_finding_and_retry_rebuilds_in_the_same_checkout(
             && note.body.contains("send-back limit of 3")), "{notes:?}");
 
         let outbox = || runtime.store.workflow_outbox(&workspace).unwrap();
-        let last_review = outbox().into_iter().filter(|stored| stored.effect.run == item.run).last().unwrap().effect;
+        let last_review = outbox().into_iter().rfind(|stored| stored.effect.run == item.run).unwrap().effect;
         let checkout = runtime.effect_tree(&workspace, &last_review);
         let head = adapters::git(&checkout, &["rev-parse", "HEAD"]).await.unwrap();
         assert_eq!(item.candidate.as_deref(), Some(head.as_str()));
