@@ -268,8 +268,8 @@ fn render_preset_command(preset: &str, session_id: Option<&str>, extras: &Launch
     let program = |name| {
         let program = agent_program(name);
         if cfg!(target_os = "macos") && replace_shell {
-            // Resolve after the login shell has loaded its PATH, then exec the same file
-            // we checked. The hold's agent still replaces every launch shell.
+            // Resolve after the login shell has loaded its PATH. Exec the checked
+            // entry point to preserve any setup done by the agent's launcher.
             format!("/bin/sh -c {} farcooler-agent {program}", shell_quote(NATIVE_AGENT_PREFLIGHT))
         } else {
             program
@@ -365,6 +365,13 @@ fn render_preset_command(preset: &str, session_id: Option<&str>, extras: &Launch
 }
 
 const NATIVE_AGENT_PREFLIGHT: &str = r#"
+check_quarantine() {
+    if /usr/bin/xattr -p com.apple.quarantine "$1" >/dev/null 2>&1; then
+        printf '%s\n' "$1" > "$FARCOOLER_NATIVE_QUARANTINE_RECEIPT"
+        exit 126
+    fi
+}
+
 program=$(command -v -- "$1") || {
     printf 'Agent executable not found: %s\n' "$1" >&2
     exit 127
@@ -374,10 +381,44 @@ case "$program" in
     /*) ;;
     *) program="./$program" ;;
 esac
-if /usr/bin/xattr -p com.apple.quarantine "$program" >/dev/null 2>&1; then
-    printf '%s\n' "$program" > "$FARCOOLER_NATIVE_QUARANTINE_RECEIPT"
-    exit 126
-fi
+check_quarantine "$program"
+
+launcher=$(/bin/realpath "$program" 2>/dev/null)
+case "$launcher" in
+    */@openai/codex/bin/codex.js)
+        # Use the launcher's Node to resolve the optional npm package and choose
+        # its architecture (which can differ from the daemon's under Rosetta).
+        if node=$(command -v node); then
+            check_quarantine "$node"
+            vendor=$("$node" - "$launcher" <<'FARCOOLER_CODEX_VENDOR'
+const {createRequire} = require("node:module");
+const path = require("node:path");
+const launcher = process.argv[2];
+const arch = process.arch;
+const triple = {arm64: "aarch64-apple-darwin", x64: "x86_64-apple-darwin"}[arch];
+if (!triple) process.exit(1);
+let root = path.dirname(path.dirname(launcher));
+try {
+    const resolve = createRequire(launcher).resolve;
+    root = path.dirname(resolve(`@openai/codex-darwin-${arch}/package.json`));
+} catch {
+    // Older releases and standalone npm packages can bundle vendor locally.
+}
+process.stdout.write(path.join(root, "vendor", triple));
+FARCOOLER_CODEX_VENDOR
+            ) && {
+                # Current npm releases use bin/codex. Older releases used codex/codex.
+                check_quarantine "$vendor/bin/codex"
+                check_quarantine "$vendor/codex/codex"
+            }
+        fi
+        ;;
+    */cursor-agent/versions/*/cursor-agent)
+        # Cursor's standalone launcher execs the Node shipped beside it.
+        check_quarantine "${launcher%/*}/node"
+        ;;
+esac
+
 unset FARCOOLER_NATIVE_QUARANTINE_RECEIPT
 exec "$program" "$@"
 "#;

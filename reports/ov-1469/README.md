@@ -10,8 +10,13 @@ The macOS native launch resolves the executable using the login shell’s
 PATH and checks it for `com.apple.quarantine` immediately before exec.
 A quarantined executable is refused. The engine retains the diagnostic on
 the workflow item and uses the same Needs You entry, including during
-automatic retries. For a launcher script, the check covers the selected
-script or symlink target.
+automatic retries. For a Codex npm launcher, it also checks Node and resolves
+the native vendor package using that Node's architecture and package lookup.
+It checks both the current `bin/codex` and older `codex/codex` layouts for
+the selected architecture. For the standalone Cursor launcher it checks the
+bundled Node executable. Custom launch scripts receive the entry-point
+check. [Current Codex launcher](https://github.com/openai/codex/blob/rust-v0.172.0/codex-cli/bin/codex.js),
+[older Codex launcher](https://github.com/openai/codex/blob/rust-v0.100.0/codex-cli/bin/codex.js).
 
 ## macOS process responsibility
 
@@ -36,7 +41,8 @@ Services gave the probe the inherited responsibility needed for the
 comparison.
 
 The app probe measured process attribution. The regression tests cover a
-real quarantine xattr on a scratch executable, prompt submission through
-the hold, and a private builder resuming after a landing pause. These
+real quarantine xattr on a scratch executable, a clean npm launcher that
+points to a quarantined Mach-O and reports its path in Needs You, prompt
+submission through the hold, and a private builder resuming after a landing pause. These
 results leave the cause of the four historical Canary stalls unconfirmed.
 The probe used a scratch home and private tmux sockets.

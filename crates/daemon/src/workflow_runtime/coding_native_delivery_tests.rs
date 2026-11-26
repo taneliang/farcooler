@@ -257,43 +257,100 @@ with socket.socket(socket.AF_UNIX) as sock:
 #[cfg(target_os = "macos")]
 #[tokio::test]
 async fn the_native_launch_refuses_a_quarantined_binary_and_lists_the_ticket() {
-    use super::super::{coding_tests::admitted, tests::enqueue};
-
     let (dir, mut runtime, _fake) = tests::native_agent("pass", "codex-engine").await;
     let executable = dir.path().join("quarantined codex");
-    let ran = dir.path().join("ran");
     std::fs::write(&executable, r#"#!/bin/sh
 touch "$FC_TEST_RAN"
 "#).unwrap();
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
-    assert!(std::process::Command::new("/usr/bin/xattr")
-        .args(["-w", "com.apple.quarantine", "0081;00000000;test;"])
-        .arg(&executable).status().unwrap().success());
+    quarantine(&executable);
 
     let link = dir.path().join("agent link");
     std::os::unix::fs::symlink(&executable, &link).unwrap();
-    let _stand_in = crate::service::test_agent::stand_in(&link);
+    assert_quarantine_refused(&mut runtime, &link, &link, &dir.path().join("ran")).await;
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn the_native_launch_refuses_the_quarantined_binary_behind_an_npm_codex_launcher() {
+    let (dir, mut runtime, _fake) = tests::native_agent("pass", "codex-engine").await;
+    let node = farcooler_core::programs::find("node").expect("the npm launcher fixture requires Node.js");
+    let arch = std::process::Command::new(&node).args(["-p", "process.arch"]).output().unwrap();
+    assert!(arch.status.success());
+    let (package, triple) = match std::str::from_utf8(&arch.stdout).unwrap().trim() {
+        "arm64" => ("codex-darwin-arm64", "aarch64-apple-darwin"),
+        "x64" => ("codex-darwin-x64", "x86_64-apple-darwin"),
+        other => panic!("unexpected Node.js architecture {other}"),
+    };
+    let scope = dir.path().join("npm install/node_modules/@openai");
+    let launcher = scope.join("codex/bin/codex.js");
+    std::fs::create_dir_all(launcher.parent().unwrap()).unwrap();
+    std::fs::write(&launcher, r#"#!/usr/bin/env node
+const path = require("node:path");
+const triple = process.arch === "arm64" ? "aarch64-apple-darwin" : "x86_64-apple-darwin";
+const pkg = require.resolve(`@openai/codex-darwin-${process.arch}/package.json`);
+const binary = path.join(path.dirname(pkg), "vendor", triple, "bin", "codex");
+require("node:fs").writeFileSync(process.env.FC_TEST_RAN, "launcher entered");
+const result = require("node:child_process").spawnSync(binary, ["-c", "exit 0"], {stdio: "inherit"});
+process.exit(result.status ?? 1);
+"#).unwrap();
+    std::fs::set_permissions(&launcher, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let platform = scope.join(package);
+    let executable = platform.join("vendor").join(triple).join("bin/codex");
+    std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+    std::fs::write(platform.join("package.json"), "{}").unwrap();
+    std::fs::copy("/bin/sh", &executable).unwrap();
+    quarantine(&executable);
+
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    std::os::unix::fs::symlink(&node, bin.join("node")).unwrap();
+    let entry = bin.join("codex");
+    std::os::unix::fs::symlink(&launcher, &entry).unwrap();
+    let CodingHarness::Native { process, .. } = &mut runtime.coding.as_mut().unwrap().harness else { unreachable!() };
+    process.environment.insert("PATH".into(), format!("{}:/usr/bin:/bin", bin.display()));
+
+    assert_quarantine_refused(&mut runtime, &entry, &executable, &dir.path().join("ran")).await;
+}
+
+#[cfg(target_os = "macos")]
+fn quarantine(executable: &Path) {
+    assert!(std::process::Command::new("/usr/bin/xattr")
+        .args(["-w", "com.apple.quarantine", "0081;00000000;test;"])
+        .arg(executable).status().unwrap().success());
+}
+
+#[cfg(target_os = "macos")]
+async fn assert_quarantine_refused(runtime: &mut Runtime, entry: &Path, refused: &Path, ran: &Path) {
+    use super::super::{coding_tests::admitted, tests::enqueue};
+
+    let _stand_in = crate::service::test_agent::stand_in(entry);
     TEST_ARGV.with(|p| p.borrow_mut().take());
     let CodingHarness::Native { process, .. } = &mut runtime.coding.as_mut().unwrap().harness else { unreachable!() };
     process.environment.insert("FC_TEST_RAN".into(), ran.to_string_lossy().into_owned());
     let mut definition = runtime.configured_definition().unwrap();
     definition.stages.iter_mut().find(|s| s.kind == StageKind::Build).unwrap().max_attempts = 2;
     let ticket = "ov-1469";
-    enqueue(&mut runtime, "w", ticket, definition);
+    enqueue(runtime, "w", ticket, definition);
     runtime.pump(2).await.unwrap();
-    let binding = admitted(&runtime).await;
+    let binding = admitted(runtime).await;
     assert!(matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build)));
     let (_cancel, orders) = tokio::sync::watch::channel(false);
     let outcome = runtime.execute_coding("w", &binding, orders).await.unwrap();
     let Outcome::SafeFailureBecause(reason) = &outcome else { panic!("{outcome:?}") };
-    assert!(reason.contains("com.apple.quarantine") && reason.contains("agent link"), "{reason}");
-    assert!(!ran.exists(), "the quarantined executable ran");
+    // macOS may spell the fixture's root /tmp or /private/tmp.
+    let canonical_refused = refused.canonicalize().unwrap();
+    let names_executable = |text: &str| [refused, canonical_refused.as_path()].iter()
+        .any(|path| text.contains(path.to_str().unwrap()));
+    assert!(reason.contains("com.apple.quarantine") && names_executable(reason), "{reason}");
+    assert!(!ran.exists(), "the refused launch ran");
     assert!(runtime.observe("w", &binding.effect, outcome, false, 10).unwrap());
     let item = &runtime.state("w").unwrap().unwrap().items[ticket];
     assert_eq!(item.attempt, 2, "a queued retry still has to show the refusal");
-    let mut items = crate::engine_stuck::list();
+    let mut items = Vec::new();
     crate::engine_stuck::include_refusals(&runtime.store, &mut items);
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].item, ticket);
     assert!(items[0].question.contains("com.apple.quarantine"));
+    assert!(names_executable(&items[0].question));
 }
