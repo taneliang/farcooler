@@ -89,3 +89,29 @@ async fn older_runner_uses_history_in_its_plan() {
     assert!(landing_say(&mut link, "list").await.unwrap().contains("Landing 9"));
     assert!(landing_say(&mut link, "show 9").await.unwrap().contains("Landing 9"));
 }
+
+#[tokio::test]
+async fn an_engine_uuid_and_a_historical_number_select_different_landings() {
+    let mut plan = the_plan();
+    let group_id = uuid::Uuid::from_u128(0x6002);
+    plan.landings.insert(0, pb::Landing {
+        id: bytes::Bytes::copy_from_slice(group_id.as_bytes()),
+        title: "Landing".into(),
+        ..Default::default()
+    });
+    let mut link = Runner { plan: Some(plan), ..runner() };
+
+    let engine = landing_in(&mut link, &format!("show {group_id}"), true).await.unwrap();
+    let engine: Value = serde_json::from_str(&engine).unwrap();
+    assert_eq!(engine["id"], group_id.to_string());
+    assert_eq!(engine["events"], serde_json::json!([]));
+    assert_eq!(last(&link).method, "landing.history");
+    let by_zero = landing_in(&mut link, "show 0", true).await.unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&by_zero).unwrap(), engine);
+
+    let historical = landing_in(&mut link, "show 9", true).await.unwrap();
+    let historical: Value = serde_json::from_str(&historical).unwrap();
+    assert_eq!(historical["number"], 9);
+    assert_ne!(historical["id"], engine["id"]);
+    assert_eq!(last(&link).method, "plan.events");
+}
