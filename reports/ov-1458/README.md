@@ -23,13 +23,15 @@ The socket review tests exercise pure and edited renames from a real Git candida
 
 ## Landing-base verification
 
-The ticket was rebased onto `b74589a669753bf050362dac8f402306c064aa62`. Both the base and the ticket had reduced the size of the Rust client session. The resolved budget gives the rebased 1,912-line file the standard 50 lines of headroom, lowering its ceiling from 2,086 to 1,962 lines.
+The ticket was rebased onto `1d4ef97b11e812cf71a43d0b2bce295c9ba4ac58`. The WASM declaration conflict was resolved by retaining the landing base’s terminal writer methods and the ticket’s review method. The generated browser WASM bindings expose all three methods.
 
-The review browser scenario passed at 320 and 1280 pixels against the authenticated runner fixture. The captures above show the long file preview and the restored inline comment after reload. The Rust client passed 415 tests, including projection and socket coverage for stable anchors, rename diffs, truncated diffs, scope refusal, and stale candidates. Web Rust passed 83 tests, including passkey sign-in against a local SSH server. The 95 targeted daemon tests passed across change sets, file diffs, review operations, Git isolation, Git LFS, and native messages.
+The review browser scenario passed at 320 and 1280 pixels against the authenticated runner fixture. The refreshed captures show the long file preview and the restored inline comment after reload. The Rust client passed 415 tests, including coverage for stable anchors, rename diffs, truncated diffs, scope refusal and stale candidates. Web Rust passed 83 tests, including passkey sign-in against a local SSH server.
 
-The Board, Work, and Plan browser checks passed, along with 305 Web unit tests, workflow tests, both TypeScript checks, Tailcat Go WASM tests, and the file-size, daemon-layer, shared-core, and Canary protocol checks. Both Web bundles passed the size gate at 5,037,775 Brotli bytes for Canary and 5,036,136 for Stable.
+The daemon passed 79 targeted tests covering change sets, file diffs, rooted worktree reads, review operations, Git isolation and Git LFS. The protocol and review crates passed 117 tests.
 
-The Canary bundle passed the Chromium security and split-pane reconnect checks on rerun. The first runs stalled during teammate enrollment and missed terminal input after a simulated ten-minute background period with a dead tunnel.
+The Board, Work, and Plan browser checks passed, along with 305 Web unit tests, 266 Rust workflow tests, the Web workflow suite, both TypeScript checks, Tailcat Go WASM tests, and the file-size, daemon-layer, shared-core, client dependency and Canary protocol checks. Both Web bundles passed the size gate at 5,045,167 Brotli bytes for Canary and 5,045,051 for Stable.
+
+The Canary Chromium security check passed, including runner host-key pinning and passkey isolation. The split-pane reconnect check verified passkey re-authentication and input in both panes after a simulated ten-minute background period with a dead tunnel.
 
 ## Reproduce the review browser check
 
