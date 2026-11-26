@@ -54,3 +54,28 @@ to the engine layer.
 Workspace Clippy passed with warnings denied. All 3,409 selected daemon unit
 tests passed across the full run and focused retries with the daemon and hook
 CLI fixtures available.
+
+## Landing gate send-back
+
+Group 7079 ran the layer check against `aff2e5d0c`. The gate receipt
+`wf1:10157f66ae037cb43fa99b599e08bce111734534feb1bcfc6592b73b5d0b8d85.json`
+records both ov-1462 and ov-1441 as group members. The layer check passed on
+the ov-1462 candidate `b081346c7`. It failed on the recorded fold with nine
+`engine -> board` edges against a ceiling of eight. The extra edge is the
+`crate::plan_run::run_of` assertion added to `workflow_runtime/coding_tests.rs`
+by ov-1441 (`a775f2f70`, folded as `9bbadd178`).
+
+In a scratch copy of the recorded fold, replacing the assertion expression
+with `item.failed_reason().as_deref()` preserved the comparison with the
+reason returned by the workflow API. The same layer check then passed with
+645 recorded edges across 55 layer pairs and the original ceiling of eight.
+The board layer already tests the plan's failure reason in `plan_run_tests.rs`.
+The assertion repair belongs on ov-1441, which owns the line and its test.
+
+On the send-back, Clippy passed with warnings denied. The landing-gate
+Python suite, floor checks, daemon layer checks, and file-size budget check
+passed. The daemon run passed 3,401 tests, including the shared-floor fold
+and the code-conflict send-back. Eight tests failed on the first run and
+passed in isolated retries. The builder-priority retry used the shell's
+inherited niceness of 10 so the builder could lower its priority further.
+Eighteen tests were ignored by the harness.
