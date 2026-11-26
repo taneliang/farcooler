@@ -32,6 +32,7 @@ if prompt.startswith('You are reviewing'):
     with log.open('a') as f: f.write(os.environ.get('FARCOOLER_WORKFLOW_MODEL', '-') + '\n')
     if mode in ('background-shell', 'background-no-verdict', 'background-timeout'):
         wait_for_shell(30 if mode == 'background-timeout' else 1.5)
+        log.with_name('review-shell-finished').touch()
         print('\x1b[2J\x1b[HClaude Code', flush=True)
         if mode == 'background-shell':
             print('  esc to interrupt', flush=True)
@@ -149,13 +150,14 @@ async fn a_claude_reviewer_without_a_verdict_settles_when_idle_or_exited_or_at_t
         ("exits-after-stop", "The reviewing agent ended without recording a verdict."),
         ("background-timeout", "ran past the step's 1-minute time limit"),
     ] {
-        let (_dir, mut runtime, _fake) = three_gates(mode).await;
+        let (dir, mut runtime, _fake) = three_gates(mode).await;
         let mut definition = definition(&runtime);
         definition.stages.iter_mut().find(|stage| stage.id == "agent-review").unwrap().max_attempts = 1;
         enqueue(&mut runtime, "w", "one", definition);
         let state = settle(&mut runtime, 2).await;
         assert_eq!(at(&state), ("agent-review".into(), Phase::Failed), "{mode}");
         assert!(state.items["one"].failed_reason().unwrap().contains(reason), "{mode}: {state:?}");
+        assert_eq!(dir.path().join("review-shell-finished").exists(), mode == "background-no-verdict", "{mode}");
     }
 }
 

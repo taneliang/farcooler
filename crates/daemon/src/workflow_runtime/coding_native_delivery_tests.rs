@@ -84,7 +84,7 @@ os.execv(root / 'claude', [str(root / 'claude'), str(root / 'composer.pl'), 'cla
     };
     let (_cancel, cancelled) = tokio::sync::watch::channel(false);
     let (completion, ()) = tokio::join!(runtime.exec.run_native(&binding, &command, cancelled), steer);
-    assert_eq!(completion.unwrap(), Some(0), "{}", std::fs::read_to_string(runtime.process_log(&binding)).unwrap_or_default());
+    assert_eq!(completion.unwrap().code, Some(0), "{}", std::fs::read_to_string(runtime.process_log(&binding)).unwrap_or_default());
     assert_eq!(std::fs::read_to_string(runtime.tree(&binding).join("result.txt")).unwrap(), "steered candidate");
     assert!(svc.store.pending_message_wakes().unwrap().is_empty());
 }
