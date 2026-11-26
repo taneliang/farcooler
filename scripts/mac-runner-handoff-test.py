@@ -12,6 +12,7 @@ import fcntl
 import json
 import os
 import pathlib
+import plistlib
 import runpy
 import select
 import signal
@@ -30,7 +31,7 @@ APP_RESOURCES = "Contents/Resources"
 
 
 def run(*args, env=None, check=True):
-    result = subprocess.run(args, env=env, capture_output=True, text=True, timeout=45)
+    result = subprocess.run(args, env=env, capture_output=True, text=True, timeout=75)
     if check and result.returncode:
         raise RuntimeError(f"{args[0]} exited {result.returncode}: {result.stderr}")
     return result
@@ -71,6 +72,21 @@ def unload(env):
         time.sleep(0.1)
 
 
+def unload_login(env):
+    run("/bin/launchctl", "bootout", f"{GUI}/{BOOTSTRAP_LABEL}", env=env, check=False)
+
+
+def load_older_template(env, plist, cli):
+    older = plistlib.loads(plist.read_bytes())
+    older["EnvironmentVariables"]["LEGACY_FIXTURE"] = "old-template"
+    old_bytes = plistlib.dumps(older, fmt=plistlib.FMT_BINARY)
+    unload(env)
+    plist.write_bytes(old_bytes)
+    run("/bin/launchctl", "bootstrap", f"user/{os.getuid()}", plist, env=env)
+    run(cli, "status", env=env)
+    return old_bytes
+
+
 def clean_install(home, feed, profile):
     env = environment(home)
     try:
@@ -82,6 +98,7 @@ def clean_install(home, feed, profile):
         print("Clean HOME: launchd started the daemon and the CLI/daemon links resolve.", flush=True)
 
         if run("/bin/launchctl", "print", GUI, env=env, check=False).returncode == 0:
+            unload_login(env)
             unload(env)
             plist = home / f"Library/LaunchAgents/{BOOTSTRAP_LABEL}.plist"
             run("/bin/launchctl", "bootstrap", GUI, plist, env=env)
@@ -95,7 +112,7 @@ def clean_install(home, feed, profile):
                 time.sleep(0.1)
             print("Login bootstrap: the Aqua LaunchAgent restored the background job.", flush=True)
     finally:
-        run("/bin/launchctl", "bootout", f"{GUI}/{BOOTSTRAP_LABEL}", env=env, check=False)
+        unload_login(env)
         unload(env)
 
 
@@ -170,7 +187,13 @@ def preserved_state(home, app, feed, profile):
             print("Migration fixture: workspace, worktree, tmux pane PID, install ID and enrollment survived.", flush=True)
 
             publish(feed, 900001, profile)
+            # Load an older template so the test checks both the on-disk
+            # replacement and launchd's in-memory configuration.
+            plist = home / "Library/LaunchAgents/com.farcooler.daemon.canary.standalone.plist"
+            original_plist = plist.read_bytes()
+            load_older_template(env, plist, new)
             job = run("/bin/launchctl", "print", JOB, env=env).stdout
+            assert "LEGACY_FIXTURE" in job
             old_pid = next(line.strip() for line in job.splitlines() if line.strip().startswith("pid = "))
             with (runtime / "landing-update.lock").open("r+b") as landing:
                 fcntl.flock(landing, fcntl.LOCK_SH)
@@ -192,9 +215,27 @@ def preserved_state(home, app, feed, profile):
             assert_state(existing_panes)
             job = run("/bin/launchctl", "print", JOB, env=env).stdout
             assert old_pid not in {line.strip() for line in job.splitlines()}
-            assert (home / ".local/share/farcooler-runner-canary/current").readlink().name.startswith("900001-")
-            print("Update fixture: signed CLI update refused the landing, waited with --wait, restarted the job and kept its pane and enrollment.", flush=True)
+            assert "LEGACY_FIXTURE" not in job
+            assert plist.read_bytes() == original_plist
+            current = home / ".local/share/farcooler-runner-canary/current"
+            previous = current.readlink()
+            assert previous.name.startswith("900001-")
+            print("Update fixture: signed CLI update waited for the landing, reloaded the old LaunchAgent template and preserved state.", flush=True)
+
+            # A correctly signed payload whose daemon exits before it can
+            # answer must leave the previous release serving the same state.
+            previous_plist = load_older_template(env, plist, new)
+            feed.publish(900002, profile / "farcooler", pathlib.Path("/usr/bin/false"),
+                         profile / "farcooler-lfs-filter")
+            failed = run(new, "runner", "update", env=env, check=False)
+            assert failed.returncode and "Previous release restored" in failed.stderr, failed
+            assert current.readlink() == previous
+            assert plist.read_bytes() == previous_plist
+            assert "LEGACY_FIXTURE" in run("/bin/launchctl", "print", JOB, env=env).stdout
+            assert_state(existing_panes)
+            print("Rollback fixture: a signed failing daemon left the previous release serving the same state.", flush=True)
         finally:
+            unload_login(env)
             unload(env)
             if old.poll() is None:
                 old.terminate()

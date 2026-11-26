@@ -41,9 +41,17 @@ publication rules.
 - The focused Rust run passed 33 tests across standalone activation, local
   daemon connections, and SSH stdio transport. The canary planner, wire gate
   self-test, and workflow lint passed locally.
-- A no-root install can start at graphical login after a reboot. Operation from
-  power-on before any user logs in needs a system-level service. Logout and
-  reboot were not exercised on the shared Mac. [Apple launchd documentation](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html)
+
+## Split acceptance item
+
+Acceptance item 2 is split. This change delivers the documented no-root
+installer and exercises the Aqua-to-background bootstrap in real launchd
+with an isolated HOME on the shared macOS account. The remaining acceptance
+check is to record a signed install on a fresh macOS user account, verify
+the background runner through logout, and verify it starts automatically
+at the first graphical login after reboot. That check needs a dedicated
+Mac or VM and remains open. Operation before the first login after power-on
+requires a system-level service. [Apple launchd documentation](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html)
 
 Production notarization and R2 publication will run on green main. The local
 tests used a fixture signing key and a local feed.

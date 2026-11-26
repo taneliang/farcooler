@@ -90,6 +90,59 @@ fn standalone_launch_agent_is_valid_xml_and_preserves_child_processes() {
 }
 
 #[test]
+fn standalone_update_replaces_owned_older_plists_and_can_restore_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().to_owned();
+    let install = Install { root: install_root(&home), home, domain: "user/999".into() };
+    for (label, domain, path, desired) in [
+        (LABEL, install.domain.clone(), install.plist_path(), install.plist()),
+        (LOGIN_LABEL, install.gui_domain(), install.login_plist_path(), install.login_plist()),
+    ] {
+        let older = desired.replace("<key>RunAtLoad</key><true/>", "<key>RunAtLoad</key><false/>");
+        assert_ne!(older, desired);
+        write_plist(&path, older.as_bytes(), false).unwrap();
+        // Binary plists also have a valid ownership record.
+        success(Command::new("/usr/bin/plutil").args(["-convert", "binary1"])
+            .arg(&path).output().unwrap(), "convert fixture plist").unwrap();
+        let old_bytes = fs::read(&path).unwrap();
+        let agent = LaunchAgent::inspect(&install, label, domain, path.clone(), desired.clone()).unwrap();
+        assert!(agent.changed());
+        write_plist(&agent.path, agent.desired.as_bytes(), true).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), desired);
+        agent.restore().unwrap();
+        assert_eq!(fs::read(&path).unwrap(), old_bytes);
+    }
+}
+
+#[test]
+fn standalone_update_refuses_foreign_launch_agents() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().to_owned();
+    let install = Install { root: install_root(&home), home, domain: "user/999".into() };
+    let desired = install.plist();
+    let path = install.plist_path();
+    let daemon = xml(&install.root.join("current").join(DAEMON));
+    for foreign in [
+        desired.replace(LABEL, "com.example.unrelated"),
+        desired.replace(&daemon, "/bin/sleep"),
+        desired.replace(&daemon, &format!("{}/../other", xml(&install.root))),
+        desired.replace("<key>ProgramArguments</key>", "<key>Program</key><string>/bin/sleep</string><key>ProgramArguments</key>"),
+    ] {
+        write_plist(&path, foreign.as_bytes(), true).unwrap();
+        let result = LaunchAgent::inspect(&install, LABEL, install.domain.clone(), path.clone(), desired.clone());
+        assert!(result.err().unwrap().to_string().contains("LaunchAgent conflict"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), foreign);
+    }
+
+    let desired = install.login_plist();
+    let path = install.login_plist_path();
+    let foreign = desired.replace(&xml(&install.plist_path()), "/tmp/another.plist");
+    write_plist(&path, foreign.as_bytes(), false).unwrap();
+    let result = LaunchAgent::inspect(&install, LOGIN_LABEL, install.gui_domain(), path, desired);
+    assert!(result.err().unwrap().to_string().contains("LaunchAgent conflict"));
+}
+
+#[test]
 fn standalone_migration_refuses_a_running_app_for_the_same_runtime() {
     let dir = tempfile::tempdir().unwrap();
     let runtime = dir.path();

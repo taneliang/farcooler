@@ -1,9 +1,9 @@
 //! Install a verified canary payload and let launchd own its lifecycle.
 
 use std::fs::{self, File, OpenOptions, TryLockError};
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Write};
 use std::os::unix::{fs::symlink, process::CommandExt};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::Duration;
 
@@ -49,6 +49,10 @@ impl Install {
 
     fn job(&self) -> String {
         format!("{}/{LABEL}", self.domain)
+    }
+
+    fn gui_domain(&self) -> String {
+        self.domain.replacen("user/", "gui/", 1)
     }
 
     fn plist_path(&self) -> PathBuf {
@@ -138,21 +142,22 @@ pub(crate) async fn activate(
     if let Err(err) = mutex.try_lock() {
         return Err(format!("Cannot lock the standalone runner installation: {err}").into());
     }
-    let installed = match fs::read_link(&current) {
-        Ok(path) => Some(release_build(&path).ok_or("Invalid standalone runner installation pointer.")?),
+    let previous = match fs::read_link(&current) {
+        Ok(path) => Some(path),
         Err(err) if err.kind() == ErrorKind::NotFound => None,
         Err(err) => return Err(err.into()),
     };
+    let installed = previous.as_deref().map(|path| {
+        release_build(path).ok_or("Invalid standalone runner installation pointer.")
+    }).transpose()?;
     if installed.is_some_and(|old| build < old) {
         return Err("The canary feed is older than the installed runner.".into());
     }
 
-    let plist_path = install.plist_path();
-    let plist = install.plist();
-    let login_path = install.login_plist_path();
-    let login = install.login_plist();
-    check_plist(&plist_path, &plist)?;
-    check_plist(&login_path, &login)?;
+    let background = LaunchAgent::inspect(&install, LABEL, install.domain.clone(),
+        install.plist_path(), install.plist())?;
+    let login = LaunchAgent::inspect(&install, LOGIN_LABEL, install.gui_domain(),
+        install.login_plist_path(), install.login_plist())?;
     let app = app.map(|path| migration_app(path, build)).transpose()?;
     let links = install.links();
     for (link, binary) in &links {
@@ -162,16 +167,15 @@ pub(crate) async fn activate(
     check_app_stopped(&install, &runtime, app.is_some())?;
     let socket = runtime.join("farcoolerd.sock");
     let database = runtime.join("farcooler.db");
+    background.is_loaded()?;
+    login.is_loaded()?;
 
-    if installed == Some(build) && app.is_none() {
+    if installed == Some(build) && app.is_none() && !background.changed() && !login.changed() {
         // Recovery also covers an interrupted bootstrap after the current link moved.
-        write_plist(&plist_path, &plist)?;
-        write_plist(&login_path, &login)?;
-        publish_service(&install, &links, &current)?;
-        let output = Command::new(current.join(CLI)).arg("--version").output()?;
-        let version = success(output, "read installed CLI version")?;
-        let version = version.split_whitespace().last().ok_or("Installed CLI returned no version.")?;
-        wait_for_job(&install, &socket, version).await?;
+        publish_links(&links, &current)?;
+        background.bootstrap()?;
+        login.bootstrap_at_login()?;
+        wait_for_job(&install, &socket, &installed_version(&current)?).await?;
         println!("Standalone canary runner build {build} is up to date.");
         return Ok(());
     }
@@ -188,25 +192,55 @@ pub(crate) async fn activate(
     check_app_stopped(&install, &runtime, app.is_some())?;
     let reservation = reserve(&runtime, &socket, &database, wait).await?;
     drain(reservation.link, &socket, &database, reservation.legacy).await?;
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    while job_pid(&install.job())?.is_some() {
-        if tokio::time::Instant::now() >= deadline {
-            return Err("The previous LaunchAgent process is still running.".into());
+    let activation = async {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while job_pid(&install.job())?.is_some() {
+            if tokio::time::Instant::now() >= deadline {
+                return Err("The previous LaunchAgent process is still running.".into());
+            }
+            tokio::time::sleep(POLL).await;
         }
-        tokio::time::sleep(POLL).await;
-    }
 
-    if let Some(app) = app {
-        unregister_app(&app).await?;
+        if let Some(app) = app {
+            unregister_app(&app).await?;
+        }
+        check_app_stopped(&install, &runtime, false)?;
+        // Unload before replacing the plist so a retry can bootstrap the
+        // correct configuration even if this process is interrupted.
+        login.replace()?;
+        background.replace()?;
+        let path = release.path().strip_prefix(&install.root)?.to_owned();
+        atomic_link(&current, &path)?;
+        let _ = release.keep();
+        publish_links(&links, &current)?;
+        background.bootstrap()?;
+        login.bootstrap_at_login()?;
+        wait_for_job(&install, &socket, BUILD).await
+    }.await;
+    if let Err(error) = activation {
+        if let Some(previous) = previous {
+            let rollback = async {
+                if login.changed() {
+                    login.bootout()?;
+                }
+                background.bootout()?;
+                wait_for_runtime_stop(&socket).await?;
+                atomic_link(&current, &previous)?;
+                background.restore()?;
+                login.restore()?;
+                background.bootstrap()?;
+                if login.previous.is_some() {
+                    login.bootstrap_at_login()?;
+                }
+                wait_for_job(&install, &socket, &installed_version(&current)?).await
+            }.await;
+            return match rollback {
+                Ok(()) => Err(format!("Standalone runner update failed: {error} Previous release restored.").into()),
+                Err(rollback) => Err(format!("Standalone runner update failed: {error} Could not restart the previous release: {rollback}").into()),
+            };
+        }
+        return Err(error);
     }
-    check_app_stopped(&install, &runtime, false)?;
-    let path = release.path().strip_prefix(&install.root)?.to_owned();
-    atomic_link(&current, &path)?;
-    let _ = release.keep();
-    write_plist(&plist_path, &plist)?;
-    write_plist(&login_path, &login)?;
-    publish_service(&install, &links, &current)?;
-    wait_for_job(&install, &socket, BUILD).await?;
     println!("Standalone canary runner build {build} is running.");
     Ok(())
 }
@@ -297,41 +331,171 @@ fn atomic_link(link: &Path, target: &Path) -> std::io::Result<()> {
     fs::rename(staged, link)
 }
 
-fn check_plist(path: &Path, expected: &str) -> Fallible {
-    match fs::read_to_string(path) {
-        Ok(existing) if existing == expected => Ok(()),
-        Ok(_) => Err(format!("LaunchAgent conflict at {}", path.display()).into()),
-        Err(err) if err.kind() == ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err.into()),
+struct LaunchAgent {
+    label: &'static str,
+    domain: String,
+    path: PathBuf,
+    desired: String,
+    previous: Option<Vec<u8>>,
+}
+
+impl LaunchAgent {
+    fn inspect(
+        install: &Install, label: &'static str, domain: String, path: PathBuf, desired: String,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let conflict = || format!("LaunchAgent conflict at {}", path.display());
+        let previous = match fs::symlink_metadata(&path) {
+            Ok(meta) if meta.is_file() => {
+                let content = fs::read(&path)?;
+                if content != desired.as_bytes() && !owns_plist(install, label, &path)? {
+                    return Err(conflict().into());
+                }
+                Some(content)
+            }
+            Ok(_) => return Err(conflict().into()),
+            Err(err) if err.kind() == ErrorKind::NotFound => None,
+            Err(err) => return Err(err.into()),
+        };
+        Ok(Self { label, domain, path, desired, previous })
+    }
+
+    fn changed(&self) -> bool {
+        self.previous.as_deref() != Some(self.desired.as_bytes())
+    }
+
+    fn replace(&self) -> Fallible {
+        if self.changed() {
+            self.bootout()?;
+            write_plist(&self.path, self.desired.as_bytes(), self.previous.is_some())?;
+        }
+        Ok(())
+    }
+
+    fn restore(&self) -> Fallible {
+        if self.changed() {
+            if let Some(previous) = &self.previous {
+                write_plist(&self.path, previous, true)?;
+            } else if self.label == LABEL {
+                // An earlier interrupted install may have left only the
+                // release pointer. The background job still needs a plist.
+                write_plist(&self.path, self.desired.as_bytes(), true)?;
+            } else {
+                match fs::remove_file(&self.path) {
+                    Ok(()) => {}
+                    Err(err) if err.kind() == ErrorKind::NotFound => {}
+                    Err(err) => return Err(err.into()),
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn job(&self) -> String {
+        format!("{}/{}", self.domain, self.label)
+    }
+
+    fn is_loaded(&self) -> Result<bool, Box<dyn std::error::Error>> {
+        let job = self.job();
+        let Some(info) = launch_info(&job)? else { return Ok(false) };
+        let path = info.lines().find_map(|line| line.trim_start().strip_prefix("path = ")).map(Path::new);
+        let owns_job = path.is_some_and(|path| {
+            path == self.path || path.canonicalize().is_ok_and(|loaded| {
+                self.path.canonicalize().is_ok_and(|expected| loaded == expected)
+            })
+        });
+        if !owns_job {
+            return Err(format!("LaunchAgent {job} is loaded from a different location.").into());
+        }
+        Ok(true)
+    }
+
+    fn bootout(&self) -> Fallible {
+        let job = self.job();
+        if self.is_loaded()? {
+            let output = Command::new("/bin/launchctl").args(["bootout", &job]).output()?;
+            if !output.status.success() && self.is_loaded()? {
+                success(output, &format!("unload LaunchAgent {job}"))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn bootstrap(&self) -> Fallible {
+        let job = self.job();
+        if !self.is_loaded()? {
+            let output = Command::new("/bin/launchctl").args(["bootstrap", &self.domain])
+                .arg(&self.path).output()?;
+            if !output.status.success() && !self.is_loaded()? {
+                success(output, &format!("register LaunchAgent {job}"))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn bootstrap_at_login(&self) -> Fallible {
+        if launch_info(&self.domain)?.is_some() {
+            self.bootstrap()?;
+        }
+        Ok(())
     }
 }
 
-fn write_plist(path: &Path, content: &str) -> Fallible {
-    use std::io::Write;
+fn owns_plist(install: &Install, label: &str, path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
+    let output = Command::new("/usr/bin/plutil").args(["-convert", "json", "-o", "-", "--"])
+        .arg(path).output()?;
+    if !output.status.success() {
+        return Ok(false);
+    }
+    let plist: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    if plist["Label"].as_str() != Some(label) {
+        return Ok(false);
+    }
+    let args = &plist["ProgramArguments"];
+    let program = match plist.get("Program").unwrap_or(&args[0]).as_str() {
+        Some(program) => Path::new(program),
+        None => return Ok(false),
+    };
+    if label == LOGIN_LABEL && program == Path::new("/bin/launchctl") {
+        // The original login helper calls launchctl directly.
+        return Ok(*args == serde_json::json!([
+            "/bin/launchctl", "bootstrap", install.domain, install.plist_path(),
+        ]));
+    }
+    Ok(program.strip_prefix(&install.root).is_ok_and(|relative| {
+        !relative.as_os_str().is_empty() && relative.components().all(|c| matches!(c, Component::Normal(_)))
+    }) && match program.canonicalize() {
+        Ok(program) => install.root.canonicalize().is_ok_and(|root| program.starts_with(&root)),
+        Err(err) => err.kind() == ErrorKind::NotFound,
+    })
+}
 
-    if !path.exists() {
-        let dir = path.parent().expect("LaunchAgent path has a parent");
-        fs::create_dir_all(dir)?;
-        let mut staged = tempfile::NamedTempFile::new_in(dir)?;
-        staged.write_all(content.as_bytes())?;
+fn write_plist(path: &Path, content: &[u8], replace: bool) -> Fallible {
+    let dir = path.parent().expect("LaunchAgent path has a parent");
+    fs::create_dir_all(dir)?;
+    let mut staged = tempfile::NamedTempFile::new_in(dir)?;
+    staged.write_all(content)?;
+    if replace {
+        staged.persist(path)?;
+    } else {
         staged.persist_noclobber(path)?;
     }
     Ok(())
 }
 
-fn publish_service(install: &Install, links: &[(PathBuf, &str)], current: &Path) -> Fallible {
-    let plist_path = install.plist_path();
+fn publish_links(links: &[(PathBuf, &str)], current: &Path) -> Fallible {
     for (link, binary) in links {
         let target = current.join(binary);
         if fs::read_link(link).ok().as_ref() != Some(&target) {
             atomic_link(link, &target)?;
         }
     }
-    if launch_info(&install.job())?.is_none() {
-        let output = Command::new("/bin/launchctl").args(["bootstrap", &install.domain]).arg(plist_path).output()?;
-        success(output, "register the standalone LaunchAgent")?;
-    }
     Ok(())
+}
+
+fn installed_version(current: &Path) -> Result<String, Box<dyn std::error::Error>> {
+    let output = Command::new(current.join(CLI)).arg("--version").output()?;
+    let version = success(output, "read installed CLI version")?;
+    Ok(version.split_whitespace().last().ok_or("Installed CLI returned no version.")?.to_owned())
 }
 
 fn launch_info(job: &str) -> Result<Option<String>, Box<dyn std::error::Error>> {
@@ -418,15 +582,20 @@ async fn drain(link: Option<Link>, socket: &Path, database: &Path, legacy: bool)
     if let Some(mut link) = link {
         tokio::time::timeout(Duration::from_secs(5), daemon_link::stop(&mut link)).await??;
     }
+    wait_for_runtime_stop(socket).await?;
+    if legacy {
+        farcooler_store::workflow_effects::clear_legacy_landing_fence(database)?;
+    }
+    Ok(())
+}
+
+async fn wait_for_runtime_stop(socket: &Path) -> Fallible {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     while !landing_update::runner_stopped(socket)? {
         if tokio::time::Instant::now() >= deadline {
             return Err("The previous runner still owns the runtime directory.".into());
         }
         tokio::time::sleep(POLL).await;
-    }
-    if legacy {
-        farcooler_store::workflow_effects::clear_legacy_landing_fence(database)?;
     }
     Ok(())
 }

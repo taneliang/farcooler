@@ -94,9 +94,17 @@ launchctl print "user/$(id -u)/com.farcooler.daemon.canary.standalone"
 
 An update waits for the runner's existing landing checks and pushes only
 when you pass `--wait`. The new build starts with the same database,
-install identity, and tmux server. Use the log at
+install identity, and tmux server. The updater reloads its LaunchAgents
+when their configuration changes. If startup fails on an existing
+standalone installation, the updater restores the previous release and
+LaunchAgent configuration and reports whether the old runner answered.
+A database migration can prevent the old binary from starting. The
+rollback leaves the runner database in place.
+
+Use the log at
 `~/Library/Logs/com.farcooler.FarCoolerCanary/farcoolerd.log`
-if the job fails to start. Rerun the installer to retry registration.
+if the job fails to start. Rerun the installer to retry registration or
+apply a newer canary build.
 The standalone runner follows the canary feed. Intel artifact publication
 and other channels are outside this rollout.
 
