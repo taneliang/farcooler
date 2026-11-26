@@ -305,17 +305,17 @@ fn roll_back_to_67(path: &std::path::Path) {
 
 /// The commit's own answer, then the release's: a hand-changed guard must be refused at the commit, by the exact
 /// text check, before `schema:unknown` refuses the release.
-fn cut_over(path: &std::path::Path) -> Result<Result<()>> {
+fn cut_over(path: &std::path::Path, registry: u32) -> Result<Result<()>> {
     // Raw, as the cutover reads a source: no ordinary open has migrated it.
     let mut conn = Connection::open(path).unwrap();
     conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA recursive_triggers=ON;").unwrap();
     let plan = preflight(&conn)?;
-    assert_eq!(plan.registry, 67);
+    assert_eq!(plan.registry, registry);
     // What the freeze does in the same transaction as the quiesce: the source takes every later migration.
-    crate::migrate::migrate(&mut conn, 67).unwrap();
+    crate::migrate::migrate(&mut conn, registry).unwrap();
     let store = Store::from_engine_cutover_connection(conn, None).unwrap();
     store.engine_quiesce(joined(&store))?;
-    store.engine_commit_for_test(&plan, &proof(&store), "sixty-seven")?;
+    store.engine_commit_for_test(&plan, &proof(&store), "stage-migration")?;
     Ok(store.engine_release(&plan, joined(&store)))
 }
 
@@ -338,7 +338,7 @@ fn a_legacy_67_source_cuts_over_through_the_named_delta_only() {
             let sql = crate::engine_stage::excludes("ticket_lines", "insert", "INSERT", false).replace("WHEN NEW.task_id IS NOT NULL AND", "WHEN");
             conn.execute_batch(&format!("DROP TRIGGER workflow_excludes_ticket_lines_insert; {sql};")).unwrap();
         }
-        let done = cut_over(&path);
+        let done = cut_over(&path, 67);
         if tampered { assert!(matches!(&done, Err(Error::Refused(why)) if why.contains("source changed")), "refused at the commit: {done:?}"); }
         else { assert!(matches!(done, Ok(Ok(()))), "{done:?}"); }
         if !tampered {
@@ -346,6 +346,34 @@ fn a_legacy_67_source_cuts_over_through_the_named_delta_only() {
             assert_eq!(store.schema().unwrap().version, crate::migrate::CURRENT_SCHEMA_VERSION);
             assert_eq!(store.engine_authority().unwrap().phase, "released");
         }
+    }
+}
+
+#[test]
+fn registry_70_cutover_keeps_read_indexes_and_backfills_board_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db.sqlite");
+    let store = Store::open(&path).unwrap().legacy_for_tests();
+    let repo = store.register_repository_for_test("Board upgrade");
+    let workspace = store.ensure_main_workspace(repo).unwrap().id;
+    let first = store.create_task(workspace, "Filed first", Actor::User).unwrap();
+    let second = store.create_task(workspace, "Placed first", Actor::User).unwrap();
+    store.put_on_line(second.id, &line(), Actor::User).unwrap();
+    {
+        let conn = store.conn();
+        conn.execute("UPDATE ticket_lines SET plan_rank=1 WHERE task_id=?1", [second.id.as_bytes().as_slice()]).unwrap();
+        conn.execute_batch("DROP TABLE task_board_positions;
+            UPDATE meta SET value='70' WHERE key IN ('schema_version', 'compatible_down_to');").unwrap();
+    }
+    drop(store);
+
+    cut_over(&path, 70).unwrap().unwrap();
+    let store = Store::open(&path).unwrap();
+    assert_eq!(store.board_task_keys(workspace).unwrap(), [second.key, first.key]);
+    let conn = store.conn();
+    for (name, _, expected) in crate::workflow::READ_INDEXES {
+        let sql: String = conn.query_row("SELECT sql FROM sqlite_master WHERE name=?1", [name], |row| row.get(0)).unwrap();
+        assert_eq!(sql, expected);
     }
 }
 
