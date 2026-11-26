@@ -71,10 +71,10 @@ const GATE: &str = r#"elif stage == 'gate':
 /// A configured runtime whose landing target is a private bare repository. Every ticket's build writes a file of
 /// its own, so tickets fold without clashing, and the second check is a gate that can move the remote under the group.
 pub(super) async fn lander(mode: &str) -> (tempfile::TempDir, Runtime) {
-    lander_with_build_timeout(mode, None).await
+    lander_with(mode, |_| {}).await
 }
 
-pub(super) async fn lander_with_build_timeout(mode: &str, build_timeout_ms: Option<u64>) -> (tempfile::TempDir, Runtime) {
+pub(super) async fn lander_with(mode: &str, configure: impl FnOnce(&mut CodingConfig)) -> (tempfile::TempDir, Runtime) {
     let (dir, runtime) = configured(false, mode).await;
     let script = dir.path().join("adapter.py");
     let text = std::fs::read_to_string(&script).unwrap();
@@ -104,10 +104,6 @@ pub(super) async fn lander_with_build_timeout(mode: &str, build_timeout_ms: Opti
     assert!(status.success());
     let root = runtime.root.clone();
     let mut config = runtime.coding.clone().unwrap();
-    if let Some(timeout) = build_timeout_ms {
-        let CodingHarness::Command(build) = &mut config.harness else { unreachable!("landing fixture uses a command harness") };
-        build.timeout_ms = timeout;
-    }
     config.landing = Some(CodingLanding { job: "landing-956".into(), repository: bare.canonicalize().unwrap(),
         target: "refs/heads/main".into(), config_digest: digest(&std::fs::read(bare.join("config")).unwrap()) });
     config.checks[1].argv[2] = "gate".into();
@@ -116,6 +112,7 @@ pub(super) async fn lander_with_build_timeout(mode: &str, build_timeout_ms: Opti
     for (key, value) in [("MARKER", dir.path().join("marker")), ("REMOTE", bare.clone()), ("SCRATCH", dir.path().join("other-lander"))] {
         config.checks[1].environment.insert(key.into(), value.to_string_lossy().into_owned());
     }
+    configure(&mut config);
     std::fs::write(root.join("coding.json"), serde_json::to_vec(&config).unwrap()).unwrap();
     drop(runtime);
     (dir, Runtime::open(&root).unwrap())
@@ -168,6 +165,9 @@ pub(super) async fn until(runtime: &mut Runtime, what: impl Fn(&State) -> bool) 
     let state = runtime.state("w").unwrap().unwrap();
     let items: Vec<_> = state.items.iter().map(|(id, i)| format!("{id}: {:?} at {} attempt {}: {:?}", i.phase, i.definition.stages[i.stage.min(i.definition.stages.len() - 1)].id, i.attempt, i.failure)).collect();
     let effects: Vec<_> = runtime.store.workflow_outbox("w").unwrap().iter().map(|s| format!("{:?} {} {}", s.effect.kind, s.dispatch_state, s.active)).collect();
+    for id in state.items.keys() {
+        eprintln!("Process logs for {id}: {:?}", runtime.exec.item_process_logs("w", id));
+    }
     let facts: Vec<_> = std::fs::read_dir(runtime.root.join("receipts")).unwrap().map(|e| e.unwrap().path())
         .filter(|p| p.to_string_lossy().ends_with(".verb.json"))
         .map(|p| String::from_utf8_lossy(&std::fs::read(p).unwrap()).chars().filter(|c| *c != '\n').collect::<String>().replace(|c: char| c == '{' && false, "")).collect();

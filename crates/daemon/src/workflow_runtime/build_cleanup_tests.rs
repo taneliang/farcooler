@@ -2,9 +2,6 @@
 use super::*;
 use super::tests::enqueue;
 
-// The adapter needs to finish Git setup before these tests can exercise cleanup.
-const CLEANUP_BUILD_TIMEOUT_MS: u64 = 30_000;
-
 async fn building() -> (tempfile::TempDir, Runtime, PathBuf) {
     building_with(None).await
 }
@@ -382,10 +379,23 @@ async fn build_cleanup_crash_after_deletion_does_not_replay_against_rebuilt_outp
 }
 
 
+// Cleanup depends on a new candidate, so a single Git command can supply it.
+async fn cleanup_lander(check_passes: bool) -> (tempfile::TempDir, Runtime) {
+    super::coding_verbs_tests::lander_with("pass", |config| {
+        let CodingHarness::Command(build) = &mut config.harness else { unreachable!("landing fixture uses a command harness") };
+        let git = crate::git_launch::git_launch().unwrap();
+        build.argv = [git.program.to_str().unwrap(), "-c", "core.hooksPath=/dev/null",
+            "-c", "commit.gpgsign=false", "commit", "--allow-empty", "--quiet", "-m", "cleanup candidate"]
+            .into_iter().map(str::to_owned).collect();
+        let check = if check_passes { "/usr/bin/true" } else { "/usr/bin/false" };
+        config.checks[0].argv = vec![check.into()];
+    }).await
+}
+
 // A published group may provision and build its own candidate before a person's review.
 pub(super) async fn building_group(folders: Option<Vec<String>>) -> (tempfile::TempDir, Runtime, String, PathBuf) {
-    use super::coding_verbs_tests::{at_join, batched_push, command, lander_with_build_timeout, until};
-    let (dir, mut runtime) = lander_with_build_timeout("pass", Some(CLEANUP_BUILD_TIMEOUT_MS)).await;
+    use super::coding_verbs_tests::{at_join, batched_push, command, until};
+    let (dir, mut runtime) = cleanup_lander(true).await;
     std::fs::write(runtime.repository().join(".git/info/exclude"), "target/\ncustom-output/\n").unwrap();
     let mut definition = batched_push(&runtime, "any", 5000);
     definition.build_folders = folders;
@@ -535,9 +545,8 @@ async fn build_cleanup_defers_an_executing_effect_then_releases_after_it_settles
 }
 
 async fn gradle_reports_cleanup(phase: Phase) {
-    use super::coding_verbs_tests::{batched_push, lander_with_build_timeout, phase_of, until};
-    let mode = if phase == Phase::Failed { "check-fail" } else { "pass" };
-    let (_dir, mut runtime) = lander_with_build_timeout(mode, Some(CLEANUP_BUILD_TIMEOUT_MS)).await;
+    use super::coding_verbs_tests::{batched_push, phase_of, until};
+    let (_dir, mut runtime) = cleanup_lander(phase != Phase::Failed).await;
     std::fs::write(runtime.repository().join(".git/info/exclude"), "target/\napps/\nreports/\n").unwrap();
     let definition = batched_push(&runtime, "any", 5000);
     enqueue(&mut runtime, "w", "one", definition);
