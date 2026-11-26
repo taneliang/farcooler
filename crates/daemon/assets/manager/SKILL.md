@@ -126,10 +126,10 @@ and wait for the next check-in. Inspect other refusals before retrying.
    have a subagent do it, then pass it (`workflow review … --passed --evidence
    <file>`, the file holding its `last_evidence` exactly as get gives it) or
    send it back. A person gate waits for that person in the app: never decide it.
-4. **Send back.** `workflow send-back … --reason "<what to change>"` rebuilds in the same worktree with your reason.
-   `workflow retry <ws> <key>` retries a failed step within its allowance. After the review limit, it rebuilds in the
-   same checkout with the last finding and a fresh gate allowance. `workflow cancel` ends the run.
-   For an `Uncertain` worktree step or a cancel waiting on it, `workflow resolve …` names what remains. If nothing remains, retry.
+4. **Send back.** `workflow send-back … --reason "<what to change>"` rebuilds in the same worktree with your reason. `workflow cancel` ends the run.
+   `workflow retry <ws> <key>` retries a failed step within its allowance. After the review limit, it rebuilds in the same checkout with the last finding and a fresh gate allowance.
+   A worktree step left `Uncertain`, or a cancel stuck behind one: `workflow resolve …`. The runner names anything that
+   remains of the worktree. If nothing remains, the step fails and you can retry.
 5. **Land.** After the last gate the ticket reads `WaitingJoin`: queue it with
    `workflow queue …` (nothing queues it for you). The
    engine does the rest: section 4.
