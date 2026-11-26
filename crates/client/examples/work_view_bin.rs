@@ -22,6 +22,7 @@ fn main() {
             print!("{}", farcooler_client::web_board::ticket(&task, &scope, true, guard.as_deref(), links));
         }
         Some("/ticket-form") => print!("{}", farcooler_client::web_board::form(None)),
+        Some("/layout") => print!("{}", farcooler_client::workspace_layout::json(&body)),
         _ => panic!("unknown projection"),
     }
 }

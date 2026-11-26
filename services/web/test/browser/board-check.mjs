@@ -48,6 +48,18 @@ const commands = []
 let time = 10
 
 function answer(args, scope) {
+  if (args.method === 'layout') return project('/layout', args.request)
+  if (args.method === 'work') {
+    const { workspace, repo } = args
+    return project('/projection', [{
+      scope,
+      workspaces: [{ id: workspace, name: 'Web first', repository: repo, isMain: true, orchestrator: 'seat' }],
+      repositories: [{ id: repo, label: 'Far Cooler development' }],
+      worktrees: [{ id: 'main', label: 'Main', repository: repo, workspace }],
+      terminals: [{ id: 'seat', title: 'Orchestrator', worktree: 'main', workspace,
+        agent: true, orchestrator: true, state: 'running', columns: 80, rows: 24 }],
+    }, { workspace }])
+  }
   if (args.method === 'form') return project('/ticket-form', {})
   if (args.method === 'board') {
     assert.equal(args.workspace, 'delivery')
@@ -91,7 +103,7 @@ function answer(args, scope) {
 }
 
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH })
-async function page(scope, width = 1280) {
+async function page(scope, width = 1280, query = '') {
   const context = await browser.newContext({ viewport: { width, height: 850 }, isMobile: width < 500 })
   await context.route(origin + '/**', route => {
     switch (new URL(route.request().url()).pathname) {
@@ -105,11 +117,99 @@ async function page(scope, width = 1280) {
   })
   const p = await context.newPage()
   p.setDefaultTimeout(5000)
-  await p.goto(destination)
+  await p.goto(destination + query)
   return p
 }
 
+async function layoutPage(width, openSplit = true) {
+  const tab = await page('control', width, '&layout')
+  await tab.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' })
+  await tab.getByRole('heading', { name: 'Board', exact: true }).waitFor()
+  if (openSplit) {
+    await tab.locator('#show-orchestrator').click()
+    await tab.getByRole('region', { name: 'Orchestrator', exact: true }).waitFor()
+  }
+  return tab
+}
+
 try {
+  if (output) {
+    for (const width of [320, 1280]) {
+      const tab = await layoutPage(width, width === 1280)
+      await tab.mouse.move(width - 1, 0)
+      await tab.screenshot({ path: join(output, `sidebar-${width}.png`) })
+      await tab.context().close()
+    }
+  }
+
+  for (const width of [320, 641, 1280]) {
+    const tab = await layoutPage(width)
+    const sidebar = tab.getByRole('navigation', { name: 'Runner' })
+    const tabs = sidebar.getByRole('group', { name: 'Show' }).getByRole('button')
+    assert.deepEqual(await tabs.allTextContents(), ['Terminals', 'Needs You (123)', 'Board', 'Plan'])
+    assert.deepEqual(await tabs.evaluateAll(buttons => buttons.filter(button => {
+      const range = document.createRange()
+      range.selectNodeContents(button)
+      const label = range.getBoundingClientRect()
+      const bounds = button.getBoundingClientRect()
+      const sidebar = button.closest('.sidebar').getBoundingClientRect()
+      return label.left < bounds.left || label.right > bounds.right ||
+        label.top < bounds.top || label.bottom > bounds.bottom ||
+        label.left < sidebar.left || label.right > sidebar.right || button.scrollWidth > button.clientWidth
+    }).map(button => button.textContent)), [], `section labels fit at ${width}px`)
+    assert.deepEqual(await sidebar.getByRole('button').evaluateAll(buttons => {
+      const primary = document.createElement('button')
+      document.body.append(primary)
+      const fill = getComputedStyle(primary).backgroundColor
+      primary.remove()
+      return buttons.filter(button => getComputedStyle(button).backgroundColor === fill).map(button => button.textContent)
+    }), ['Start Work'], `sidebar primary actions at ${width}px`)
+    await tab.context().close()
+  }
+  console.log('PASS full section labels and one primary sidebar action at 320, 641 and 1280px')
+
+  for (const width of [1280, 1440]) {
+    const tab = await layoutPage(width)
+    const pane = tab.getByRole('region', { name: 'Orchestrator', exact: true })
+    const columns = tab.getByRole('region', { name: 'Board', exact: true })
+    const stages = columns.getByRole('heading', { level: 2 })
+    assert.equal(await stages.count(), JSON.parse(project('/board', [board, 'control'])).columns.length)
+    assert.ok(await columns.evaluate(node => node.scrollWidth > node.clientWidth), `board scrolls sideways at ${width}px`)
+    assert.equal(await stages.evaluateAll(headings => new Set(headings.map(h => h.getBoundingClientRect().top)).size), 1)
+    await columns.focus()
+    await tab.keyboard.press('ArrowRight')
+    await tab.waitForFunction(() => document.querySelector('.board-columns').scrollLeft > 0)
+    for (const stage of await stages.all()) {
+      await stage.scrollIntoViewIfNeeded()
+      assert.ok(await stage.evaluate(node => {
+        const stage = node.getBoundingClientRect()
+        const scroller = node.closest('.board-columns').getBoundingClientRect()
+        return stage.left >= scroller.left - 1 && stage.right <= scroller.right + 1
+      }), `stage is reachable at ${width}px: ${await stage.textContent()}`)
+      assert.ok(await pane.isVisible())
+    }
+    const position = await columns.evaluate(node => node.scrollLeft)
+    const ticket = board.tasks[0]
+    const originalTitle = ticket.title
+    ticket.title += ' (updated)'
+    try {
+      await tab.getByRole('button', { name: 'Refresh', exact: true }).click()
+      await columns.getByText(ticket.title, { exact: true }).waitFor()
+      assert.equal(await columns.evaluate(node => node.scrollLeft), position)
+    } finally {
+      ticket.title = originalTitle
+    }
+    assert.equal(await tab.evaluate(() => document.documentElement.scrollWidth), width)
+    await tab.reload()
+    await pane.waitFor()
+    await tab.locator('#close-split').click()
+    await tab.reload()
+    await tab.getByRole('heading', { name: 'Board', exact: true }).waitFor()
+    assert.equal(await pane.isVisible(), false)
+    await tab.context().close()
+  }
+  console.log('PASS all board stages reachable beside the orchestrator at 1280 and 1440px, with split state restored after reload')
+
   const editor = await page('control')
   const reader = await page('read')
   const action = name => editor.getByRole('button', { name, exact: true })

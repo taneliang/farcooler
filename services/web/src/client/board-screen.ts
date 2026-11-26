@@ -76,7 +76,7 @@ function anchor(text: string, url: URL, run: () => void): HTMLAnchorElement {
 
 export function mountBoard(options: Options) {
   const { root, dialog } = options
-  const body = el('div')
+  const body = el('div', undefined, 'board-content')
   const notice = el('p', '', 'plan-notice')
   notice.setAttribute('role', 'status')
   notice.hidden = true
@@ -158,7 +158,7 @@ export function mountBoard(options: Options) {
         }
       } else renderBoard(JSON.parse(raw) as Board)
       if (focused) [...body.querySelectorAll<HTMLElement>('a,button')].find(node =>
-        href ? node.getAttribute('href') === href : node.textContent === label)?.focus()
+        href ? node.getAttribute('href') === href : node.textContent === label)?.focus({ preventScroll: !task })
     } catch (e) {
       if (version === revision) report(options.failure(e as WorkError))
     } finally {
@@ -195,7 +195,9 @@ export function mountBoard(options: Options) {
 
   function renderBoard(view: Board): void {
     const toolbar = el('header', undefined, 'board-toolbar')
-    toolbar.append(el('h1', view.title))
+    const heading = el('h1', view.title)
+    heading.id = 'board-title'
+    toolbar.append(heading)
     if (view.unread) toolbar.append(el('span', view.unread, 'board-meta'))
     const actions = el('div', undefined, 'board-actions')
     if (view.create) actions.append(button(view.create, () => edit(JSON.parse(options.create()) as Form)))
@@ -205,12 +207,12 @@ export function mountBoard(options: Options) {
     }
     actions.append(button(view.refresh, () => void refresh(), true))
     toolbar.append(actions)
-    const columns = el('div', undefined, 'board-columns')
+    const stages = document.createDocumentFragment()
     for (const column of view.columns) {
       const section = el('section', undefined, 'board-column')
-      const heading = el('h2', column.title)
-      heading.append(el('span', String(column.rows.length), 'board-meta'))
-      section.append(heading)
+      const title = el('h2', column.title)
+      title.append(el('span', String(column.rows.length), 'board-meta'))
+      section.append(title)
       const list = el('ul')
       for (const row of column.rows) {
         const item = el('li')
@@ -221,9 +223,21 @@ export function mountBoard(options: Options) {
         list.append(item)
       }
       section.append(column.rows.length ? list : el('p', view.empty, 'board-meta'))
-      columns.append(section)
+      stages.append(section)
     }
-    body.replaceChildren(toolbar, columns)
+    // Keep the scroll container mounted as the board polls for updates.
+    const existing = body.querySelector('.board-columns')
+    if (existing) {
+      body.firstElementChild?.replaceWith(toolbar)
+      existing.replaceChildren(stages)
+    } else {
+      const columns = el('div', undefined, 'board-columns')
+      columns.setAttribute('role', 'region')
+      columns.setAttribute('aria-labelledby', heading.id)
+      columns.tabIndex = 0
+      columns.append(stages)
+      body.replaceChildren(toolbar, columns)
+    }
   }
 
   function renderTicket(view: Ticket): void {
