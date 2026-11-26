@@ -875,6 +875,7 @@ jobs:
             --sign "$MACOS_SIGN_IDENTITY" "$app"
 
       - name: Notarise the app
+        if: env.HAS_SIGN_IDENTITY == 'true'
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}

@@ -1,9 +1,7 @@
 //! Start the installed standalone runner via its owner, even over SSH.
 
-use std::fs::{self, File, TryLockError};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 pub const LABEL: &str = "com.farcooler.daemon.canary.standalone";
 pub const INSTALL_LOCK: &str = "activate.lock";
@@ -14,7 +12,11 @@ pub fn install_root(home: &Path) -> PathBuf {
 
 /// True when launchd owns startup. An updater holding the exclusive lock
 /// will start the job itself, so clients can wait for the socket.
+#[cfg(target_os = "macos")]
 pub fn start_if_installed() -> io::Result<bool> {
+    use std::fs::{self, File, TryLockError};
+    use std::process::Command;
+
     if farcooler_protocol::CHANNEL != farcooler_protocol::Channel::Canary
         || std::env::var_os("FARCOOLER_HOME").is_some()
     {
@@ -45,4 +47,9 @@ pub fn start_if_installed() -> io::Result<bool> {
         )));
     }
     Ok(true)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn start_if_installed() -> io::Result<bool> {
+    Ok(false)
 }

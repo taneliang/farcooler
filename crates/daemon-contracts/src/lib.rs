@@ -10,6 +10,5 @@ pub mod opening;
 pub mod path_routes;
 pub mod paths;
 pub mod report;
-#[cfg(target_os = "macos")]
 pub mod standalone_macos;
 pub mod workspace_paths;

@@ -637,10 +637,7 @@ async fn serve_stdio_session(selected: &paths::RuntimeSelection) -> Result<(), i
     let lock_path = socket.with_extension("lock");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     let mut starter: Option<tokio::process::Child> = None;
-    #[cfg(target_os = "macos")]
     let mut launchd_starts_runner = None;
-    #[cfg(not(target_os = "macos"))]
-    let launchd_starts_runner = false;
     loop {
         if let Ok(mut stream) = tokio::net::UnixStream::connect(&socket).await {
             if let Some(preamble) = session.preamble() {
@@ -681,7 +678,6 @@ async fn serve_stdio_session(selected: &paths::RuntimeSelection) -> Result<(), i
             // Another runner can win the startup lock.
             starter = None;
         }
-        #[cfg(target_os = "macos")]
         let managed = match launchd_starts_runner {
             Some(managed) => managed,
             None => {
@@ -694,8 +690,6 @@ async fn serve_stdio_session(selected: &paths::RuntimeSelection) -> Result<(), i
                 managed
             }
         };
-        #[cfg(not(target_os = "macos"))]
-        let managed = launchd_starts_runner;
         if !managed && starter.is_none() && runner_can_start(&lock_path)? {
             starter = Some(start_stdio_runner().map_err(|e| {
                 eprintln!("cannot start the on-demand runner: {e}");
