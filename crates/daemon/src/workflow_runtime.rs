@@ -797,7 +797,8 @@ impl Runtime {
                 }
                 Event::Finished(index, result) => {
                     let job = running.remove(index);
-                    self.activities.lock().unwrap().remove(&(job.workspace.clone(), job.effect.id.clone()));
+                    // Keep any startup confirmation visible until the result replaces the old refusal.
+                    let _activity = self.activities.lock().unwrap().remove(&(job.workspace.clone(), job.effect.id.clone()));
                     futures.remove(index);
                     self.note_holding(running);
                     if job.reconciling {
@@ -1074,7 +1075,7 @@ impl Runtime {
                 if !self.admit_effect(&claim, clock())? { continue; }
                 let per_minute = self.places().cap(Pool::Agent);
                 self.restart_pacing.started(workspace, &effect, per_minute);
-                let activity = std::sync::Arc::new(execution::Activity::default());
+                let activity = std::sync::Arc::new(execution::Activity::for_effect(&effect, item));
                 self.activities.lock().unwrap().insert((workspace.clone(), effect.id.clone()), activity.clone());
                 let binding = Binding::new(workspace, &effect, claim.resource_generation, item.iteration, &base);
                 // Any I/O failure beyond admission is ambiguous, not a retry permission.

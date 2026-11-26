@@ -13,8 +13,16 @@ pub(crate) struct Activity {
     pub(crate) startup_stall: Mutex<Option<String>>,
     pub(super) session: AtomicBool,
     pub(super) lost: AtomicBool,
+    pub(super) quarantine_retry: Option<crate::engine_stuck::QuarantineRetry>,
 }
 impl Activity {
+    pub(super) fn for_effect(effect: &Effect, item: &Item) -> Self {
+        let quarantine_retry = item.failure.as_deref()
+            .filter(|reason| reason.starts_with(crate::engine_stuck::QUARANTINE_PREFIX))
+            .map(|_| crate::engine_stuck::QuarantineRetry::new(&effect.id));
+        Self { quarantine_retry, ..Self::default() }
+    }
+
     fn alive(&self) -> bool {
         let pid = self.process.load(Ordering::SeqCst);
         self.settling.load(Ordering::SeqCst) || self.session.load(Ordering::SeqCst) || (pid > 0 && crate::effect_runner::present(pid))

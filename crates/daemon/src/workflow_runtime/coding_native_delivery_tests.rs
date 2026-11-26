@@ -256,18 +256,47 @@ with socket.socket(socket.AF_UNIX) as sock:
 
 #[cfg(target_os = "macos")]
 #[tokio::test]
-async fn the_native_launch_refuses_a_quarantined_binary_and_lists_the_ticket() {
-    let (dir, mut runtime, _fake) = tests::native_agent("pass", "codex-engine").await;
+async fn a_queued_quarantine_retry_is_listed_until_the_native_agent_reports_its_start() {
+    let (dir, mut runtime, _fake) = tests::native_agent("hook-disconnect", "codex-engine").await;
     let executable = dir.path().join("quarantined codex");
-    std::fs::write(&executable, r#"#!/bin/sh
-touch "$FC_TEST_RAN"
+    std::fs::write(&executable, r#"#!/usr/bin/python3
+import os, pathlib, sys
+pathlib.Path(os.environ['FC_TEST_RAN']).touch()
+assert sys.argv[1] == 'codex', sys.argv
+os.environ['TEST_LAUNCHED_PROMPT'] = sys.argv[-1]
+script = pathlib.Path(__file__).with_name('interactive.py')
+os.execv('/usr/bin/python3', ['/usr/bin/python3', str(script), 'hook-disconnect', 'codex'])
 "#).unwrap();
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
     quarantine(&executable);
 
     let link = dir.path().join("agent link");
     std::os::unix::fs::symlink(&executable, &link).unwrap();
-    assert_quarantine_refused(&mut runtime, &link, &link, &dir.path().join("ran")).await;
+    let _stand_in = crate::service::test_agent::stand_in(&link);
+    assert_quarantine_refused(&mut runtime, &link, &dir.path().join("ran")).await;
+
+    assert!(std::process::Command::new("/usr/bin/xattr")
+        .args(["-d", "com.apple.quarantine"]).arg(&executable).status().unwrap().success());
+    let store = runtime.store.clone();
+    let retry = runtime.pump(11);
+    tokio::pin!(retry);
+    let started = dir.path().join("started");
+    tokio::select! {
+        result = &mut retry => panic!("retry ended before startup was confirmed: {result:?}"),
+        cleared = wait_until(tokio::time::Instant::now() + Duration::from_secs(10), Duration::from_millis(20), || {
+            let mut items = crate::engine_stuck::list();
+            crate::engine_stuck::include_refusals(&store, &mut items);
+            started.exists() && items.is_empty()
+        }) => assert!(cleared, "a working retry still has a Needs You entry"),
+    }
+    let state = store.workflow_state("w").unwrap().unwrap();
+    let item = &state.items["ov-1469"];
+    assert_eq!(item.phase, Phase::Running);
+    assert!(item.failure.as_deref().is_some_and(|reason| reason.contains("com.apple.quarantine")));
+    std::fs::write(dir.path().join("direction-ready"), "").unwrap();
+    retry.await.unwrap();
+    let state = store.workflow_state("w").unwrap().unwrap();
+    assert!(state.items["ov-1469"].candidate.is_some(), "the retry did not produce its candidate");
 }
 
 #[cfg(target_os = "macos")]
@@ -310,7 +339,8 @@ process.exit(result.status ?? 1);
     let CodingHarness::Native { process, .. } = &mut runtime.coding.as_mut().unwrap().harness else { unreachable!() };
     process.environment.insert("PATH".into(), format!("{}:/usr/bin:/bin", bin.display()));
 
-    assert_quarantine_refused(&mut runtime, &entry, &executable, &dir.path().join("ran")).await;
+    let _stand_in = crate::service::test_agent::stand_in(&entry);
+    assert_quarantine_refused(&mut runtime, &executable, &dir.path().join("ran")).await;
 }
 
 #[cfg(target_os = "macos")]
@@ -321,12 +351,12 @@ fn quarantine(executable: &Path) {
 }
 
 #[cfg(target_os = "macos")]
-async fn assert_quarantine_refused(runtime: &mut Runtime, entry: &Path, refused: &Path, ran: &Path) {
+async fn assert_quarantine_refused(runtime: &mut Runtime, refused: &Path, ran: &Path) {
     use super::super::{coding_tests::admitted, tests::enqueue};
 
-    let _stand_in = crate::service::test_agent::stand_in(entry);
     TEST_ARGV.with(|p| p.borrow_mut().take());
     let CodingHarness::Native { process, .. } = &mut runtime.coding.as_mut().unwrap().harness else { unreachable!() };
+    process.environment.insert("HOME".into(), ran.parent().unwrap().to_string_lossy().into_owned());
     process.environment.insert("FC_TEST_RAN".into(), ran.to_string_lossy().into_owned());
     let mut definition = runtime.configured_definition().unwrap();
     definition.stages.iter_mut().find(|s| s.kind == StageKind::Build).unwrap().max_attempts = 2;
@@ -347,10 +377,18 @@ async fn assert_quarantine_refused(runtime: &mut Runtime, entry: &Path, refused:
     assert!(runtime.observe("w", &binding.effect, outcome, false, 10).unwrap());
     let item = &runtime.state("w").unwrap().unwrap().items[ticket];
     assert_eq!(item.attempt, 2, "a queued retry still has to show the refusal");
+    assert_eq!(item.phase, Phase::Running);
+    assert!(item.pending.as_ref().is_some_and(|effect| *effect != binding.effect.id));
     let mut items = Vec::new();
     crate::engine_stuck::include_refusals(&runtime.store, &mut items);
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].item, ticket);
     assert!(items[0].question.contains("com.apple.quarantine"));
     assert!(names_executable(&items[0].question));
+    let startup = crate::engine_stuck::Startup::new("w", ticket, "codex");
+    startup.observe(false, false, Some("The new attempt is waiting for input."));
+    let mut items = crate::engine_stuck::list();
+    let current = items.clone();
+    crate::engine_stuck::include_refusals(&runtime.store, &mut items);
+    assert_eq!(items, current);
 }

@@ -426,7 +426,11 @@ impl Exec {
                 continue;
             }
             heard = clock.now();
-            heard_from.store(true, std::sync::atomic::Ordering::Relaxed);
+            if !heard_from.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                let _ = super::execution::ACTIVITY.try_with(|a| {
+                    if let Some(retry) = &a.quarantine_retry { retry.confirm(); }
+                });
+            }
             if matches!(line.event.as_str(), "UserPromptSubmit" | "beforeSubmitPrompt") {
                 // What the agent was launched with is the briefed prompt, so that is what its hook reports.
                 if line.payload.get("prompt").and_then(|p| p.as_str()) == Some(prompt.as_str()) { prompted = true; }

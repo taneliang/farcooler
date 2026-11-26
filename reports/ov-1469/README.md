@@ -8,10 +8,11 @@ included in the diagnosis while the gate holds the builder.
 
 The macOS native launch resolves the executable using the login shell’s
 PATH and checks it for `com.apple.quarantine` immediately before exec.
-A quarantined executable is refused. The engine retains the diagnostic on
-the workflow item and uses the same Needs You entry, including during
-automatic retries. If the runner restarts after the quarantine check writes
-its refusal, recovery preserves the refusal as a failed launch.
+A quarantined executable is refused. The engine shows the refusal in Needs
+You while an automatic retry is queued. A fresh startup stall or question
+takes precedence, and the retry's first accepted hook clears the old
+alert. If the runner restarts after the quarantine check writes its
+refusal, recovery preserves the refusal as a failed launch.
 
 For a Codex npm launcher, the preflight also checks Node and resolves
 the native vendor package using that Node's architecture and package lookup.

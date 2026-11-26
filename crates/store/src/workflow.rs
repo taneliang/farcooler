@@ -23,6 +23,15 @@ pub enum WorkflowError {
     Board(String),
 }
 pub type Result<T> = std::result::Result<T, WorkflowError>;
+
+pub struct WorkflowFailure {
+    pub workspace: String,
+    pub item: String,
+    pub since_ms: i64,
+    pub reason: String,
+    pub pending: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Receipt {
     /// Immutable publication or grant audit, written with the selection and receipt.
@@ -172,18 +181,21 @@ impl Store {
         ).optional()?;
         raw.map(|s| serde_json::from_str(&s)).transpose().map_err(Into::into)
     }
-    /// A runner diagnostic requiring operator attention persists through the step's automatic retries.
-    pub fn workflow_failures_with_prefix(&self, prefix: &str) -> Result<Vec<(String, String, i64, String)>> {
+    /// Include a queued retry's previous failure and the pending effect that can supersede it.
+    pub fn workflow_failures_with_prefix(&self, prefix: &str) -> Result<Vec<WorkflowFailure>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT s.workspace, i.key, COALESCE(json_extract(i.value, '$.since_ms'), 0), json_extract(i.value, '$.failure')
+            "SELECT s.workspace, i.key, COALESCE(json_extract(i.value, '$.since_ms'), 0),
+                    json_extract(i.value, '$.failure'), json_extract(i.value, '$.pending')
              FROM workflow_states s, json_each(s.state, '$.items') i
              WHERE instr(json_extract(i.value, '$.failure'), ?1) = 1
              AND (json_extract(i.value, '$.phase') = 'Failed'
                  OR (json_extract(i.value, '$.phase') IN ('Running', 'WaitingApproval')
                      AND json_extract(i.value, '$.attempt') > 1))",
         )?;
-        Ok(stmt.query_map([prefix], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+        Ok(stmt.query_map([prefix], |r| Ok(WorkflowFailure {
+            workspace: r.get(0)?, item: r.get(1)?, since_ms: r.get(2)?, reason: r.get(3)?, pending: r.get(4)?,
+        }))?
             .collect::<rusqlite::Result<_>>()?)
     }
 
