@@ -10,6 +10,7 @@ directories.workspace = true
 farcooler-core.workspace = true
 farcooler-protocol.workspace = true
 farcooler-workflow.workspace = true
+libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true

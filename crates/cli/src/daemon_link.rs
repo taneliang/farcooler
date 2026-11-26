@@ -56,6 +56,12 @@ impl Link {
         &self.client.server_hello().daemon_version
     }
 
+    /// The process that owns this local connection, as reported by the kernel.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn local_pid(&self) -> Option<i32> {
+        self.peer
+    }
+
     /// What the daemon on the other end can do, by name.
     ///
     /// Also free, and for the same reason. The Mac app drives remote runners
@@ -114,7 +120,7 @@ async fn connect_in(socket: &std::path::Path, database: &std::path::Path) -> Res
     wait_for(socket).await
 }
 
-async fn dial(socket: &std::path::Path) -> Result<Link, ClientError> {
+pub(crate) async fn dial(socket: &std::path::Path) -> Result<Link, ClientError> {
     let stream = tokio::net::UnixStream::connect(socket).await.map_err(ClientError::Connect)?;
     let peer = peer_pid(&stream);
     let (read, write) = stream.into_split();
@@ -356,7 +362,7 @@ fn keep_running(build: &str, database: &Path) -> Option<Ensured> {
     }
 }
 
-fn has_landing_update_lock(link: &Link) -> bool {
+pub(crate) fn has_landing_update_lock(link: &Link) -> bool {
     link.daemon_capabilities().iter().any(|cap| cap == farcooler_protocol::capability::LANDING_UPDATE_LOCK)
 }
 
@@ -468,6 +474,10 @@ async fn wait_until_gone(socket: &Path, legacy_fenced: bool) -> Result<(), Box<d
 }
 
 fn spawn_daemon() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(target_os = "macos")]
+    if farcooler_daemon_contracts::standalone_macos::start_if_installed()? {
+        return Ok(());
+    }
     let binary = daemon_binary()?;
     tracing::debug!(binary = %binary.display(), "starting the daemon");
     daemon_command(&binary, std::env::var_os("FARCOOLER_TEST_STUB_AGENTS").as_deref())

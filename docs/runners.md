@@ -1,7 +1,8 @@
 # Runners
 
 **A runner is one `farcoolerd`:** one Unix user, on one host, with its own
-worktrees, its own `~/.ssh/authorized_keys` and its own `systemd --user` service.
+worktrees, its own `~/.ssh/authorized_keys` and its own user service (launchd on Mac,
+`systemd --user` on Linux).
 
 A host may carry several. Three engineers sharing a Linux box is three runners —
 three fences, three key sets, three sets of worktrees, nothing shared — because
@@ -61,6 +62,63 @@ Three consequences worth understanding before anything else:
   at once without them meeting, and a build only ever talks to the daemon it put
   there. See [releasing.md](releasing.md).
 
+## Standalone Mac runner (canary)
+
+On an Apple silicon Mac running macOS 26 or later, sign in as the account that will run Far Cooler and
+make sure Git and tmux are available. The launchd job searches
+`~/.local/bin`, `~/.cargo/bin`, `/opt/homebrew/bin`, and `/usr/local/bin`
+as well as the system paths. From a trusted Far Cooler checkout, run:
+
+```sh
+./scripts/install-mac-runner.sh
+```
+
+The installer verifies the canary-signed manifest and archive checksum, then
+checks the executables' macOS code signatures. It puts the CLI and daemon in
+`~/.local/bin` as `farcooler-canary` and `farcoolerd-canary`. Add that
+directory to your shell's `PATH`, or use the full command path below. The
+installer needs neither sudo nor the Mac app.
+
+The background job runs in the launchd user domain. An agent in
+`~/Library/LaunchAgents` starts it at graphical login, including the first
+login after reboot. A Mac that must be available before anyone logs in after
+a reboot needs system-level configuration. Existing terminal processes live
+in tmux and can survive a runner restart. A machine reboot ends those processes.
+
+```sh
+~/.local/bin/farcooler-canary status
+launchctl print "user/$(id -u)/com.farcooler.daemon.canary.standalone"
+~/.local/bin/farcooler-canary runner update
+~/.local/bin/farcooler-canary runner update --wait
+```
+
+An update waits for the runner's existing landing checks and pushes only
+when you pass `--wait`. The new build starts with the same database,
+install identity, and tmux server. Use the log at
+`~/Library/Logs/com.farcooler.FarCoolerCanary/farcoolerd.log`
+if the job fails to start. Rerun the installer to retry registration.
+The standalone runner follows the canary feed. Intel artifact publication
+and other channels are outside this rollout.
+
+### Move the Mac app's canary runner to standalone
+
+Quit Far Cooler Canary first, then give the installer the app bundle's path.
+The installer waits for the old daemon to shut down and unregisters the app's
+agent before handing its runtime to launchd. Use `--wait` to let a landing
+finish first.
+
+```sh
+./scripts/install-mac-runner.sh --wait --migrate-app "/Applications/Far Cooler Canary.app"
+```
+
+The install reuses the app runner's home at
+`~/Library/Application Support/com.farcooler.FarCoolerCanary`, the existing
+SSH enrollment, and the same-channel CLI links. Keep the app closed after
+the handoff. Some existing panes and agent hook configurations can still
+reference tools in the old bundle. Keep the bundle on disk while those
+sessions are working and check remaining references before removing it.
+A fresh runner still needs the usual SSH and browser enrollment.
+
 ## What a Linux host needs
 
 - **tmux.** Far Cooler keeps every terminal inside one, and that is what keeps
@@ -104,9 +162,8 @@ farcooler runner install you@box --from /path/to/checkout/target/release
 
 ### What `runner install` actually does
 
-1. Checks `uname`: Linux only. A **macOS** host is set up by running the
-   Far Cooler app there once — registering its LaunchAgent needs a GUI session,
-   so there is no headless path.
+1. Checks `uname`. This SSH installer targets Linux. On macOS, use
+   the [standalone Mac installer](#standalone-mac-runner-canary) locally.
 2. Checks for tmux, and stops with instructions if it is missing.
 3. Copies `farcoolerd` and `farcooler` to `~/.local/bin/`, each as `.new` first.
 4. **Verifies the SHA-256 on the host before anything runs.** The transfer is

@@ -378,6 +378,17 @@ Cutting a release gets a build onto GitHub. It does nothing for the Mac that
 installed last month — that Mac has to find out on its own, which is Sparkle,
 wired in per channel.
 
+The standalone Mac job builds, Developer ID-signs, and notarizes the CLI,
+daemon, and LFS filter from green main. It publishes under
+`canary/runner/<arch>/`, including green commits skipped by the app build
+filter. CI uploads the SHA-256-addressed archive before
+replacing the one `latest` object containing the manifest and its detached
+OpenSSH signature. The manifest uses the existing `CANARY_SPARKLE_KEY` in
+the `runner@farcooler.com` signature namespace. The bootstrap pins the
+committed canary public key. The standalone feed uses the existing R2
+credentials and publishes independently of the `SPARKLE_PUBLISH` appcast
+switch. See [the Mac runner install instructions](runners.md#standalone-mac-runner-canary).
+
 **What a person sees.** Every shipping channel — stable, preview, canary —
 checks once a day (`SUScheduledCheckInterval` is `86400`) and asks before
 installing (`SUAutomaticallyUpdate` is false everywhere, canary included: Far

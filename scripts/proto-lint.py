@@ -344,7 +344,10 @@ def canary_gate_problems(text):
         mac_gate = "${{ !cancelled() && needs.wire.result == 'success' && needs.linux.result == 'success' && needs.plan.outputs.build == 'true' }}"
         safe_mac = (job == "macos" and keys.get("if") == mac_gate
                     and {"wire", "linux", "plan", "ios"} <= needs_of(keys.get("needs")))
-        if re.search(r"\b(always|cancelled|failure)\(\)", keys.get("if", "")) and not safe_mac:
+        runner_gate = "${{ !cancelled() && needs.wire.result == 'success' && needs.plan.outputs.runner == 'true' }}"
+        safe_runner = (job == "mac-runner" and keys.get("if") == runner_gate
+                       and {"wire", "plan", "macos"} <= needs_of(keys.get("needs")))
+        if re.search(r"\b(always|cancelled|failure)\(\)", keys.get("if", "")) and not (safe_mac or safe_runner):
             problems.append(f"`{job}`'s `if` uses a status function, so it can run after the lint failed")
         seen, todo = set(), [job]
         while todo:
@@ -889,7 +892,12 @@ def self_test():
         ("needs as a flow list", "    needs: [linux, plan, quiet, ios, wire]\n", "    needs: [wire, linux, plan, quiet, ios]\n", 0),
         ("a new job that skips the lint", "\njobs:\n", "\njobs:\n  extra:\n    needs: plan\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    steps:\n      - run: echo\n", 1),
     ]
-    gate_cases.append(("Mac ships after failed wire", "needs.wire.result == 'success' && ", "", 1))
+    gate_cases.append(("Mac app ships after failed wire",
+                       "needs.wire.result == 'success' && needs.linux.result",
+                       "needs.linux.result", 1))
+    gate_cases.append(("Mac runner ships after failed wire",
+                       "needs.wire.result == 'success' && needs.plan.outputs.runner",
+                       "needs.plan.outputs.runner", 1))
     for what, old, new, want in gate_cases:
         count += 1
         if old not in canary:

@@ -139,12 +139,21 @@ def read_candidates(path):
     return [r["head_sha"] for r in rows if r.get("head_sha")]
 
 
-def emit(build, sha, reason):
+def runner_build(repo, head, tip, candidates):
+    """Ship the latest green main build, including docs-only commits."""
+    if git(repo, "merge-base", "--is-ancestor", head, tip).returncode != 0:
+        return False
+    green = {*candidates, head}
+    latest = tip if tip in green else base_commit(repo, tip, green)
+    return head == latest
+
+
+def emit(build, sha, reason, runner=False):
     print(f"canary-plan: {'build' if build else 'skip'} {sha[:8]}: {reason}")
     out = os.environ.get("GITHUB_OUTPUT")
     if out:
         with open(out, "a") as f:
-            f.write(f"build={'true' if build else 'false'}\nsha={sha}\n")
+            f.write(f"build={'true' if build else 'false'}\nsha={sha}\nrunner={'true' if runner else 'false'}\n")
 
 
 def main_run():
@@ -171,8 +180,9 @@ def main_run():
     if not tip or git(repo, "cat-file", "-e", f"{head}^{{commit}}").returncode != 0:
         emit(False, head, f"{head[:8]} is not in main's history, so it is not built")
         return 0
-    build, reason = decide(repo, head, tip, read_candidates(os.environ.get("CANDIDATES")))
-    emit(build, head, reason)
+    candidates = read_candidates(os.environ.get("CANDIDATES"))
+    build, reason = decide(repo, head, tip, candidates)
+    emit(build, head, reason, runner=runner_build(repo, head, tip, candidates))
     return 0
 
 
@@ -215,7 +225,7 @@ def self_test():
                 p = repo / f
                 p.parent.mkdir(parents=True, exist_ok=True)
                 p.write_text(f"{name}\n")
-            run("add", "-A")
+            run("add", "--", *files)
             run("commit", "-m", name)
             return run("rev-parse", "HEAD")
 
@@ -264,10 +274,14 @@ def self_test():
         expect("the head itself is not its own base", base_commit(repo, i, [i]), None)
         # Nearest base, docs only since: skip.
         expect("docs since the last green run skip", decide(repo, i, i, [h])[0], False)
+        expect("green docs still get a runner", runner_build(repo, i, i, [h]), True)
+        expect("a newer green commit supersedes runner publication", runner_build(repo, h, i, [i]), False)
+        expect("a newer untested commit permits runner publication", runner_build(repo, h, i, [f]), True)
         # A commit off main is refused.
         run("checkout", "-q", "-b", "side", c)
         s = commit("s", "apps/s.swift")
         expect("a commit not on main is refused", decide(repo, s, i, [a])[0], False)
+        expect("a runner commit not on main is refused", runner_build(repo, s, i, [a]), False)
         expect("... with the reason", "not on main" in decide(repo, s, i, [a])[1], True)
 
         # And through the environment, the way the workflow calls it.
@@ -280,11 +294,11 @@ def self_test():
                "GITHUB_OUTPUT": str(outputs)}
         done = subprocess.run([sys.executable, __file__], cwd=repo, env=env, capture_output=True, text=True)
         expect("the script runs", done.returncode, 0)
-        expect("it writes build=false and the commit", outputs.read_text(), f"build=false\nsha={i}\n")
+        expect("a green docs commit ships only the runner", outputs.read_text(), f"build=false\nsha={i}\nrunner=true\n")
         outputs.unlink()
         env.update(EVENT="workflow_dispatch", SHA=c)
         done = subprocess.run([sys.executable, __file__], cwd=repo, env=env, capture_output=True, text=True)
-        expect("a dispatch builds what it was given", outputs.read_text(), f"build=true\nsha={c}\n")
+        expect("a dispatch builds the app it was given", outputs.read_text(), f"build=true\nsha={c}\nrunner=false\n")
         # A shallow checkout cannot show the history the range needs, so the
         # script refuses rather than guess.
         shallow = pathlib.Path(tmp) / "shallow-clone"

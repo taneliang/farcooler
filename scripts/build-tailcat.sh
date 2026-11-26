@@ -28,7 +28,7 @@ cd "$(dirname "$0")/.."
 export PATH="$PATH:/opt/homebrew/bin"
 
 TARGET="${1:?usage: build-tailcat.sh <target>}"
-OUT="dist/tailcat/$TARGET"
+OUT="${FARCOOLER_TAILCAT_OUTPUT_DIR:-dist/tailcat/$TARGET}"
 
 command -v go >/dev/null 2>&1 || {
   cat <<EOF

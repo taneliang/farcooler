@@ -36,6 +36,8 @@ mod remote;
 mod runner_install;
 mod node_key;
 mod runner_pipe;
+#[cfg(target_os = "macos")]
+mod standalone_runner;
 mod runner_proof;
 #[cfg(test)]
 mod status_build_tests;
@@ -558,6 +560,26 @@ enum RunnerCmd {
         /// The Linux binaries to install. Defaults to ./dist/<arch>-linux/.
         #[arg(long)]
         from: Option<PathBuf>,
+    },
+    /// Update this Mac's standalone canary runner.
+    #[cfg(target_os = "macos")]
+    Update {
+        /// Wait for in-flight landing checks and pushes to finish.
+        #[arg(long)]
+        wait: bool,
+    },
+    /// Activate an already verified standalone runner payload.
+    #[cfg(target_os = "macos")]
+    #[command(hide = true)]
+    StandaloneActivate {
+        #[arg(long)]
+        build: u64,
+        #[arg(long)]
+        payload: PathBuf,
+        #[arg(long)]
+        migrate_app: Option<PathBuf>,
+        #[arg(long)]
+        wait: bool,
     },
     /// Report what is installed and running on a runner.
     Status { target: String },
@@ -1295,6 +1317,12 @@ async fn run() -> Fallible {
         Command::Client(c) => clients::client(runner, c, cli.json).await,
         Command::RunnerCmd(RunnerCmd::Install { target, from }) => {
             runner_install::install(&target, from.as_deref()).await
+        }
+        #[cfg(target_os = "macos")]
+        Command::RunnerCmd(RunnerCmd::Update { wait }) => standalone_runner::update(runner, wait),
+        #[cfg(target_os = "macos")]
+        Command::RunnerCmd(RunnerCmd::StandaloneActivate { build, payload, migrate_app, wait }) => {
+            standalone_runner::activate(runner, build, &payload, migrate_app.as_deref(), wait).await
         }
         Command::RunnerCmd(RunnerCmd::Status { target }) => runner_install::status(&target).await,
         Command::RunnerCmd(RunnerCmd::Pipe { id }) => runner_pipe::run(&id).await,

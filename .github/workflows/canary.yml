@@ -88,6 +88,7 @@ jobs:
     outputs:
       build: ${{ steps.plan.outputs.build }}
       sha: ${{ steps.plan.outputs.sha }}
+      runner: ${{ steps.plan.outputs.runner }}
     steps:
       # Main, whole: the script reads history to find the last green commit.
       - uses: actions/checkout@v4
@@ -832,13 +833,10 @@ jobs:
       - name: Build Far Cooler.app
         run: apps/macos/build-app.sh
 
-      - name: Sign and notarise
+      - name: Sign the app and runner binaries
         if: env.HAS_SIGN_IDENTITY == 'true'
         env:
           MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
           app="apps/macos/build/$APP_NAME.app"
@@ -876,6 +874,14 @@ jobs:
             --entitlements apps/macos/Resources/FarCooler.entitlements \
             --sign "$MACOS_SIGN_IDENTITY" "$app"
 
+      - name: Notarise the app
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          app="apps/macos/build/$APP_NAME.app"
           ditto -c -k --keepParent "$app" 'Far Cooler.zip'
           ./scripts/notarytool-retry.sh submit 'Far Cooler.zip' \
             --apple-id "$APPLE_ID" \
@@ -1051,3 +1057,104 @@ jobs:
   # No job here records the wire baseline: canary-baseline.yml does, when this
   # run ends, because the cancel above would take a recording job down with
   # the run after its build had shipped. See that file.
+
+  mac-runner:
+    name: Standalone Mac runner
+    runs-on: xcode-27
+    timeout-minutes: 45
+    # Serialize Mac jobs on the shared slot. A skipped or failed app job
+    # does not withhold a runner build whose source passed CI.
+    needs: [plan, wire, macos]
+    if: ${{ !cancelled() && needs.wire.result == 'success' && needs.plan.outputs.runner == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          fetch-depth: 0
+      - name: Set standalone build directories
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/mac-runner-target
+          FARCOOLER_TAILCAT_OUTPUT_DIR: ${{ runner.temp }}/mac-runner-tailcat
+        run: |
+          echo "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" >> "$GITHUB_ENV"
+          echo "FARCOOLER_TAILCAT_OUTPUT_DIR=$FARCOOLER_TAILCAT_OUTPUT_DIR" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: standalone-mac-runner
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: crates/tailcat/go/go.mod
+          cache-dependency-path: crates/tailcat/go/go.sum
+      - name: Build the Mac runner and CLI
+        run: |
+          test "$(scripts/version.sh channel)" = canary
+          scripts/build-mac-runner.sh
+      - name: Sign and notarise the runner binaries
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          : "${MACOS_CERTIFICATE:?}" "${MACOS_SIGN_IDENTITY:?}"
+          keychain="$RUNNER_TEMP/mac-runner.keychain"
+          certificate="$RUNNER_TEMP/mac-runner.p12"
+          trap 'rm -f "$certificate"; security delete-keychain "$keychain"' EXIT
+          security create-keychain -p actions "$keychain"
+          security default-keychain -s "$keychain"
+          security unlock-keychain -p actions "$keychain"
+          security set-keychain-settings "$keychain"
+          printf '%s' "$MACOS_CERTIFICATE" | base64 --decode > "$certificate"
+          security import "$certificate" -k "$keychain" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k actions "$keychain"
+          cd "$CARGO_TARGET_DIR/release"
+          for binary in farcooler farcoolerd farcooler-lfs-filter; do
+            codesign --force --options runtime --timestamp \
+              --sign "$MACOS_SIGN_IDENTITY" "$binary"
+          done
+          zip "$RUNNER_TEMP/mac-runner-notary.zip" farcooler farcoolerd farcooler-lfs-filter
+          "$GITHUB_WORKSPACE/scripts/notarytool-retry.sh" submit "$RUNNER_TEMP/mac-runner-notary.zip" \
+            --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" \
+            --wait --timeout 30m
+
+      - name: Set up Node.js for the update feeds
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Test the standalone runner package verifier
+        run: python3 scripts/mac-runner-package-test.py
+
+      - name: Sign and package the standalone Mac runner
+        env:
+          CANARY_SPARKLE_KEY: ${{ secrets.CANARY_SPARKLE_KEY }}
+        run: |
+          scripts/package-mac-runner.sh "$CARGO_TARGET_DIR/release" \
+            "$RUNNER_TEMP/standalone-mac-runner"
+
+      - name: Publish the standalone Mac runner
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/standalone-mac-runner"
+          prefix="farcooler-updates/canary/runner/$(uname -m)"
+          archive=("$out"/*.tar.gz)
+          test "${#archive[@]}" -eq 1
+          npx --yes wrangler@4 r2 object put "$prefix/$(basename "${archive[0]}")" \
+            --file "${archive[0]}" --content-type application/gzip --remote
+          npx --yes wrangler@4 r2 object put "$prefix/latest" \
+            --file "$out/latest" --content-type text/plain --cache-control 'max-age=60' --remote
+
+      - name: Upload the standalone runner
+        uses: actions/upload-artifact@v4
+        with:
+          name: canary-mac-runner
+          path: ${{ runner.temp }}/standalone-mac-runner/
+          if-no-files-found: error
