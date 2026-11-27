@@ -16,6 +16,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
 use farcooler_ceremony::Liveness;
+use farcooler_client::terminal_input::{self, BufferedKeys, RawKey, WriterInput};
 
 use crate::enroll;
 use crate::error::WebError;
@@ -40,6 +41,44 @@ fn web_failure(e: WebError) -> JsValue {
         let _ = Reflect::set(&error, &"what".into(), &what.into());
     }
     error
+}
+
+fn writer_input(input: &str) -> Result<WriterInput, JsValue> {
+    match input {
+        "claiming" => Ok(WriterInput::Claiming),
+        "writable" => Ok(WriterInput::Writable),
+        "viewing" => Ok(WriterInput::Viewing),
+        _ => Err(failure("invalid_input", "unknown writer input state")),
+    }
+}
+
+#[wasm_bindgen(js_name = composerInput)]
+pub fn composer_input(input: &str, sending: bool, connected: bool, has_draft: bool) -> Result<String, JsValue> {
+    let view = terminal_input::composer(writer_input(input)?, sending, connected, has_draft);
+    serde_json::to_string(&view).map_err(|e| failure("json", &e.to_string()))
+}
+
+#[wasm_bindgen(js_name = terminalInputChange)]
+pub fn terminal_input_change(previous: &str, next: &str, buffered: bool) -> Result<String, JsValue> {
+    let action = match terminal_input::writer_changed(writer_input(previous)?, writer_input(next)?, buffered) {
+        BufferedKeys::Keep => "keep",
+        BufferedKeys::Wait => "wait",
+        BufferedKeys::Flush => "flush",
+        BufferedKeys::Clear => "clear",
+        BufferedKeys::Refused => "writer_keys_refused",
+    };
+    Ok(action.into())
+}
+
+#[wasm_bindgen(js_name = terminalKeyAction)]
+pub fn terminal_key_action(input: &str, attaching: bool, buffered_bytes: usize, key_bytes: usize) -> Result<String, JsValue> {
+    let action = match terminal_input::raw_key(writer_input(input)?, attaching, buffered_bytes, key_bytes) {
+        RawKey::Ignore => "ignore",
+        RawKey::Buffer => "buffer",
+        RawKey::BufferFull => "still_attaching",
+        RawKey::Write => "write",
+    };
+    Ok(action.into())
 }
 
 /// A browser future is not `Send`, and russh's signer must return one that is.

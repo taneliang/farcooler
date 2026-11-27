@@ -1,8 +1,8 @@
-import type { WebRunner } from 'fc-web'
+import type { WebRunner, WriterInput } from 'fc-web'
 
+export type { WriterInput } from 'fc-web'
 type Runner = Pick<WebRunner, 'terminal_writer_supported' | 'terminal_writer'>
 type Action = 'watch' | 'claim' | 'status' | 'take-over' | 'release'
-export type WriterInput = 'claiming' | 'writable' | 'viewing'
 interface State {
   writable: boolean
   label: string

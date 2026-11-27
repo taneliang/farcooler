@@ -1,6 +1,6 @@
 # ov-1499 · Web message feedback and idle requests
 
-Enter now explains a pending writer claim, a read-only terminal, or an earlier send still in flight. The composer keeps the draft and its attachments until the runner accepts them. The raw terminal replays buffered keys if the claim succeeds and reports that they were unsent if the claim is denied.
+Enter now explains a pending writer claim, a read-only terminal, an earlier send still in flight, or a disconnected runner. The composer keeps the draft and its attachments until the runner accepts them. The raw terminal replays buffered keys if the claim succeeds and reports that they were unsent if the claim is denied. The Rust client core supplies the composer’s enabled state and explanation, and tells the raw terminal when to buffer, replay, or report unsent keys.
 
 The runner records one `terminal.compose` outcome with elapsed milliseconds and the client from its hello. The success words are `sent` and `queued`. Refusals use the runner’s reason or error code. The record omits the message and attachments.
 
@@ -22,6 +22,6 @@ Runners that predate lease notifications still accept explicit claims and takeov
 
 ## Regression evidence
 
-The three Enter feedback assertions failed against the original chat renderer. The raw-terminal browser test also failed against the original renderer when the request was held, Enter was typed, and the runner denied the claim. The updated browser suites exercise both outcomes for buffered keys, the three composer states, and takeover in two tabs. The Rust tests cover compose log fields and notifications on release, claim, takeover, and disconnect.
+The three Enter feedback assertions failed against the original chat renderer. The raw-terminal browser test also failed against the original renderer when the request was held, Enter was typed, and the runner denied the claim. Both Chromium suites now load the production WebAssembly bridge. They exercise all four composer states, both outcomes for buffered keys, and takeover in two tabs. The Rust tests cover compose log fields and notifications on release, claim, takeover, and disconnect.
 
-Both Chromium suites passed, along with 89 affected web unit tests, the focused Rust tests for compose logging, lease changes, work projection, conversation copy, session closure, and transport events, and the TypeScript and WebAssembly checks. The existing live lease and compose integration tests reached fixture setup. macOS rejected the Unix socket paths under the configured scratch directory, and the compose fixtures that start a pane could not bring up tmux there.
+Both Chromium suites, 93 affected web unit tests, 16 focused Rust tests, the TypeScript check, and the WebAssembly build passed on the follow-up. The original run also covered session closure and transport events. Its live lease and compose integration tests stopped during fixture setup. macOS rejected the Unix socket paths under the configured scratch directory, and the compose fixtures that start a pane could not bring up tmux there.

@@ -3,6 +3,7 @@
 /// browser. Nothing here is shipped; `FakeRunner` plays the three calls the
 /// wasm module gives the view.
 
+import init from 'fc-web'
 import { ChatView } from '../../src/client/chat'
 import { useConversationWords } from '../../src/client/chat-copy'
 import words from '../../../../test/fixtures/conversation-words.json'
@@ -155,6 +156,7 @@ runner.child.set('01a1d142-5ac6-76b3-a8a0-fc7491c5720c', child)
 const host = document.createElement('div')
 host.className = 'terminal-host'
 document.getElementById('terminal')!.append(host)
+await init({ module_or_path: '/farcooler_web.wasm' })
 const view = new ChatView(host, 'studio')
 ;(window as any).__chat = { runner, view, child }
 void view.attach(runner as any, 'term-1', () => {}).then(() => view.show(true))

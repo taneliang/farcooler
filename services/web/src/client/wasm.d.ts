@@ -7,6 +7,11 @@
 declare module 'fc-web' {
   export default function init(options: { module_or_path: string }): Promise<unknown>
   export function newWriterKey(): string
+  type WriterInput = 'claiming' | 'writable' | 'viewing'
+  /// The composer projection, as JSON with can_send and problem fields.
+  export function composerInput(input: WriterInput, sending: boolean, connected: boolean, hasDraft: boolean): string
+  export function terminalInputChange(previous: WriterInput, next: WriterInput, buffered: boolean): 'keep' | 'wait' | 'flush' | 'clear' | 'writer_keys_refused'
+  export function terminalKeyAction(input: WriterInput, attaching: boolean, bufferedBytes: number, keyBytes: number): 'ignore' | 'buffer' | 'still_attaching' | 'write'
   /// A new ceremony's reply key, as its secret half. Kept while the code on
   /// screen is up, and given to `makeOffer` and `openReply`.
   export function newReplySecret(): string

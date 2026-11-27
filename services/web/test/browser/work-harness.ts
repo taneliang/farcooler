@@ -1,4 +1,4 @@
-import type { WebRunner } from 'fc-web'
+import init, { workFailure, workView, type WebRunner } from 'fc-web'
 import { PaneSet } from '../../src/client/panes'
 import { PaneView } from '../../src/client/terminal'
 import { TerminalWriter } from '../../src/client/terminal-writer'
@@ -102,6 +102,7 @@ const fake = {
   },
 }
 
+await init({ module_or_path: '/farcooler_web.wasm' })
 const stage = document.getElementById('terminal')!
 function writerConnection() {
   let freed = false
@@ -130,15 +131,13 @@ const panes = new PaneSet<WebRunner>(id => {
   root.append(content)
   stage.append(root)
   const pane = new PaneView(host, word => {
-    void fakeFailure(new Error(word)).then(words => {
-      const note = document.getElementById('pane-note')!
-      note.textContent = words
-      note.hidden = false
-    })
+    const note = document.getElementById('pane-note')!
+    note.textContent = workFailure(word, '', '')
+    note.hidden = false
   })
   writers.set(id, {
     root,
-    view: new TerminalWriter(root, id, input => pane.setInput(input), fakeFailure,
+    view: new TerminalWriter(root, id, input => pane.setInput(input), explain,
       connection => connection === writerRunner),
   })
   return pane
@@ -149,10 +148,7 @@ document.getElementById('work')!.hidden = false
 const screen = mountWork({
   runner,
   current: () => fake,
-  project: async (inventory: string, selection: string) => {
-    const reply = await fetch('/projection', { method: 'POST', body: JSON.stringify([JSON.parse(inventory), JSON.parse(selection)]) })
-    return await reply.text()
-  },
+  project: workView,
   select: (_view, terminal, open, replace) => {
     if (replace) {
       panes.forget(replace)
@@ -174,7 +170,7 @@ const screen = mountWork({
     note.textContent = words
   },
   prefer: () => null,
-  failure: (error: Error & { code?: string }) => fakeFailure(error),
+  failure: explain,
 })
 window.addEventListener('pagehide', () => {
   for (const [id] of writers) {
@@ -193,7 +189,6 @@ Object.assign(window, { dropStream: () => dropStream?.(), chooseTerminal: screen
   writerChanged: (terminal: string) => writers.get(terminal)?.view.refresh(),
 })
 void screen.refresh(true, 'replaceState')
-async function fakeFailure(error: Error & { code?: string }): Promise<string> {
-  const reply = await fetch('/failure', { method: 'POST', body: JSON.stringify([error.message, error.code ?? '', '']) })
-  return await reply.text()
+function explain(error: Error & { code?: string }): string {
+  return workFailure(error.message, error.code ?? '', '')
 }

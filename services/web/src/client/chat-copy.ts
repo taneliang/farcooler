@@ -38,8 +38,6 @@ function phrase(name: string, fill: Record<string, string | number> = {}, by?: s
   return Object.entries(fill).reduce((line, [key, value]) => line.replaceAll(`{${key}}`, String(value)), words)
 }
 
-export const blockedSend = (reason: 'waiting_for_input' | 'read_only' | 'send_in_flight' | 'not_connected'): string => phrase(reason)
-
 export const transcriptWords = () => ({
   title: phrase('transcript_title'), open: phrase('transcript_open'),
   close: phrase('transcript_close'), empty: phrase('transcript_empty'),

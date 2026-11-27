@@ -63,6 +63,11 @@ pub struct Group {
 pub const LONGEST: u32 = 500;
 pub const MOST_IMAGES: u32 = 10;
 
+pub(crate) const NOT_CONNECTED: &str = "The runner isn’t connected, so the message wasn’t sent.";
+pub(crate) const WAITING_FOR_INPUT: &str = "Waiting for terminal input. Try sending again when it’s ready.";
+pub(crate) const READ_ONLY: &str = "This terminal is read-only. Request input before sending.";
+pub(crate) const SEND_IN_FLIGHT: &str = "The previous message is still sending. Try again when it finishes.";
+
 pub fn words(style: Style, agent: &str) -> Words {
     let send_now = style.label("send now");
     let send = BTreeMap::from([
@@ -131,10 +136,10 @@ pub fn words(style: Style, agent: &str) -> Words {
     let phrases = [
         // The composer.
         ("may_have_been_sent", "The runner didn’t answer in time. The message may have been sent, so check the terminal before sending it again.".to_string()),
-        ("not_connected", "The runner isn’t connected, so the message wasn’t sent.".into()),
-        ("waiting_for_input", "Waiting for terminal input. Try sending again when it’s ready.".into()),
-        ("read_only", "This terminal is read-only. Request input before sending.".into()),
-        ("send_in_flight", "The previous message is still sending. Try again when it finishes.".into()),
+        ("not_connected", NOT_CONNECTED.into()),
+        ("waiting_for_input", WAITING_FOR_INPUT.into()),
+        ("read_only", READ_ONLY.into()),
+        ("send_in_flight", SEND_IN_FLIGHT.into()),
         ("key_timed_out", "The runner didn’t answer in time. Check the terminal.".into()),
         ("key_not_connected", "The runner isn’t connected. Use the terminal.".into()),
         ("too_long_composed", "That message is over 100,000 characters. Shorten it, or paste it in the terminal.".into()),

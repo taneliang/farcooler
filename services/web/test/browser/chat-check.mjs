@@ -2,7 +2,7 @@
 // The conversation view in headless Chromium (ov-776), under the CSP the shell
 // is served with (Trusted Types included), against a scripted runner.
 //
-//   node test/browser/chat-check.mjs [--screenshots DIR] [--measure FILE]
+//   WEB_WASM_DIR=<built wasm directory> node test/browser/chat-check.mjs [--screenshots DIR] [--measure FILE]
 //
 // It checks, in a real browser:
 // - the rows of a long conversation are drawn as the Mac's kinds: the person's
@@ -22,7 +22,7 @@
 
 import { createServer } from 'node:http'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
 import { build } from 'esbuild'
 import { chromium } from 'playwright-core'
@@ -33,7 +33,10 @@ const args = process.argv.slice(2)
 const shots = args.includes('--screenshots') ? args[args.indexOf('--screenshots') + 1] : null
 if (shots) mkdirSync(shots, { recursive: true })
 
-const bundle = await build({ entryPoints: ['test/browser/chat-page.ts'], bundle: true, format: 'esm', target: 'es2022', write: false })
+const wasmDir = process.env.WEB_WASM_DIR
+if (!wasmDir) throw new Error('Set WEB_WASM_DIR to the built crates/web wasm directory')
+const wasm = readFileSync(join(wasmDir, 'farcooler_web.wasm'))
+const bundle = await build({ alias: { 'fc-web': resolve(wasmDir, 'farcooler_web.js') }, entryPoints: ['test/browser/chat-page.ts'], bundle: true, format: 'esm', target: 'es2022', write: false })
 const css = styles().toString()
 const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Far Cooler</title>
 <link rel="stylesheet" href="/app.css"><script type="module" src="/app.js"></script></head><body>
@@ -41,10 +44,10 @@ const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta n
 <main><section class="work" id="work"><nav class="sidebar" aria-label="Terminals"><span class="runner">studio</span><div class="terminal-list">
 <button class="terminal-choice" aria-current="true" type="button">Fix the web build</button><button class="terminal-choice" type="button">Plan the release</button><button class="terminal-choice" type="button">shell</button></div></nav>
 <div class="pane"><div class="terminal" id="terminal"></div></div></section></main></body></html>`
-const files = { '/': [html, 'text/html'], '/app.js': [bundle.outputFiles[0].text, 'text/javascript'], '/app.css': [css, 'text/css'] }
+const files = { '/': [html, 'text/html'], '/app.js': [bundle.outputFiles[0].text, 'text/javascript'], '/app.css': [css, 'text/css'], '/farcooler_web.wasm': [wasm, 'application/wasm'] }
 // img-src as the shell's own policy has it (src/headers.ts): thumbnails of
 // attached images are blob: URLs.
-const csp = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; require-trusted-types-for 'script'; trusted-types fc"
+const csp = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; require-trusted-types-for 'script'; trusted-types fc"
 const server = createServer((req, res) => {
   const hit = files[req.url]
   if (!hit) return void res.writeHead(404).end()
@@ -182,6 +185,13 @@ if (args.includes('--measure')) {
   await page.waitForFunction(() => window.__chat.runner.composed.length === 2)
   check(await page.inputValue('.chat-input') === 'Next draft', 'finishing the first send leaves the next draft')
   check(!await page.locator('.chat-problem').isVisible(), 'the send-in-flight notice clears when the send finishes')
+
+  await page.evaluate(() => window.__chat.view.detach())
+  await page.press('.chat-input', 'Enter')
+  check(await page.locator('.chat-problem').isVisible() && /isn’t connected/i.test(await page.textContent('.chat-problem')), 'Return explains a disconnected composer')
+  check(await page.inputValue('.chat-input') === 'Next draft' && (await page.evaluate(() => window.__chat.runner.composed.length)) === 2,
+    'Return preserves the disconnected draft without composing')
+  await page.evaluate(() => window.__chat.view.attach(window.__chat.runner, 'term-1', () => {}))
 
   for (const replyFirst of [true, false]) {
     for (const state of ['Sent', 'Withdrawn']) {

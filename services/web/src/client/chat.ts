@@ -9,24 +9,16 @@
 /// so it reports itself inactive and never takes one of the connection's few
 /// channels from a terminal.
 
-import type { WebRunner } from 'fc-web'
+import { composerInput, type WebRunner } from 'fc-web'
 
 import { admit, filesOf, IMAGE_TYPES, IMAGE_WORDS, parseLimits, type Picked, readImages } from './attachments'
-import { blockedSend, chatTrouble, isWorking, transcriptWords } from './chat-copy'
+import { chatTrouble, isWorking, transcriptWords } from './chat-copy'
 import { Outbox } from './chat-send'
 import { type Ask, Media } from './chat-files'
 import { closesWithLine, drawEnd, drawRow, type Memory, toolsGroup } from './chat-draw'
-import { bodyOf, type Delta, itemsOf, nodesOf, type Phase, RowFollower, RowLedger, type RowSource, type ViewNode } from './chat-rows'
+import { bodyOf, type Delta, itemsOf, nodesOf, type Phase, RowFollower, RowLedger, sourceOf, type ViewNode } from './chat-rows'
 import type { Pane } from './panes'
 import type { WriterInput } from './terminal-writer'
-
-/// A runner's rows, through the wasm module's JSON.
-export function sourceOf(runner: WebRunner, terminal: string, agent?: string): RowSource {
-  return {
-    page: async (before, limit) => JSON.parse(await runner.agentRows(terminal, before ?? undefined, limit, agent)),
-    follow: async (epoch, rev, waitMs) => JSON.parse(await runner.agentRowsFollow(terminal, epoch, rev, waitMs, agent)),
-  }
-}
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = ''): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag)
@@ -243,6 +235,7 @@ export class ChatView implements Pane<WebRunner> {
     this.runner = runner
     this.terminal = terminal
     if (!this.agentId) this.outbox ??= new Outbox(() => this.runner, terminal, this.runnerLabel)
+    if (this.blockedSend) this.say('')
     this.shownBefore = true
     this.host.dataset.attached = 'true'
     this.follower = new RowFollower(this.ledger, sourceOf(runner, terminal, this.agentId), {
@@ -269,6 +262,8 @@ export class ChatView implements Pane<WebRunner> {
     this.child?.dialog.close()
     this.follower?.stop()
     this.follower = null
+    this.runner = null
+    this.paintSend()
     delete this.host.dataset.attached
   }
 
@@ -415,7 +410,7 @@ export class ChatView implements Pane<WebRunner> {
     this.note.textContent = trouble
     this.note.hidden = trouble === ''
     this.host.dataset.stale = trouble ? 'true' : 'false'
-    this.send.disabled = !this.writable || !!this.outbox?.busy || (this.box.value.trim() === '' && this.images.length === 0)
+    this.paintSend()
   }
 
   private toBottom(): void {
@@ -431,7 +426,16 @@ export class ChatView implements Pane<WebRunner> {
   private sizeBox(): void {
     this.box.style.height = 'auto'
     this.box.style.height = `${Math.min(this.box.scrollHeight, 200)}px`
-    this.send.disabled = !this.writable || !!this.outbox?.busy || (this.box.value.trim() === '' && this.images.length === 0)
+    this.paintSend()
+  }
+
+  private sendState(): { can_send: boolean; problem: string | null } {
+    return JSON.parse(composerInput(this.input, !!this.outbox?.busy, !!this.runner,
+      this.box.value.trim() !== '' || this.images.length > 0))
+  }
+
+  private paintSend(): void {
+    this.send.disabled = !this.sendState().can_send
   }
 
   private say(text: string, blocked = false): void {
@@ -509,15 +513,14 @@ export class ChatView implements Pane<WebRunner> {
   /// Send the box's words, and the images beside it. They leave the box only
   /// once the runner has taken them, so a message that didn't go is never lost.
   private async submit(): Promise<void> {
+    const state = this.sendState()
+    if (state.problem) return this.say(state.problem, true)
+    const outbox = this.outbox
+    if (!state.can_send || !outbox) return
     const text = this.box.value
     const sent = this.images
-    if (this.outbox?.busy) return this.say(blockedSend('send_in_flight'), true)
-    if (this.input === 'claiming') return this.say(blockedSend('waiting_for_input'), true)
-    if (!this.writable) return this.say(blockedSend('read_only'), true)
-    if (!this.outbox || !this.runner) return this.say(blockedSend('not_connected'), true)
-    if (!text.trim() && sent.length === 0) return
     this.say('')
-    const sending = this.outbox.send(text, sent)
+    const sending = outbox.send(text, sent)
     this.paint()
     const done = await sending
     if (this.blockedSend) this.say('')

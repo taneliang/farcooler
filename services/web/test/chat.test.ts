@@ -20,9 +20,9 @@ import {
   type RowSource,
   itemsOf,
   nodesOf,
+  sourceOf,
 } from '../src/client/chat-rows'
 import { Outbox, type Speaker } from '../src/client/chat-send'
-import { sourceOf } from '../src/client/chat'
 import { closesWithLine } from '../src/client/chat-draw'
 
 // wasm can't load under vitest's worker pool: the golden answers for the core.

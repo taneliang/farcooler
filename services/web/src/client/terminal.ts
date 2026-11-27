@@ -9,7 +9,7 @@
 import { CanvasAddon } from '@xterm/addon-canvas'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
-import type { WebPane, WebRunner } from 'fc-web'
+import { terminalInputChange, terminalKeyAction, type WebPane, type WebRunner } from 'fc-web'
 import type { WriterInput } from './terminal-writer'
 
 import { Claim, SizeLease } from './lease'
@@ -17,8 +17,6 @@ import type { Pane } from './panes'
 import { paneOutput, Replacement } from './reconnect'
 
 const SCROLLBACK = 5000
-/// The most typed before a pane is live that is held for it.
-const EARLY_LIMIT = 64 * 1024
 
 export class PaneView implements Pane<WebRunner> {
   private readonly term: Terminal
@@ -104,17 +102,17 @@ export class PaneView implements Pane<WebRunner> {
   }
 
   setInput(input: WriterInput): void {
-    if (this.input === input && input !== 'claiming') return
-    const refused = this.input === 'claiming' && input !== 'writable' && this.typedEarlyBytes > 0
+    const action = terminalInputChange(this.input, input, this.typedEarlyBytes > 0)
+    if (action === 'keep') return
     this.input = input
     this.term.options.disableStdin = input === 'viewing'
-    if (input === 'writable') {
+    if (action === 'flush') {
       this.refit(true)
       this.flushEarly()
     } else {
-      this.clearEarly()
+      if (action !== 'wait') this.clearEarly()
       this.lease.release()
-      if (refused) this.onProblem('writer_keys_refused')
+      if (action === 'writer_keys_refused') this.onProblem(action)
     }
   }
 
@@ -273,12 +271,11 @@ export class PaneView implements Pane<WebRunner> {
   }
 
   private send(bytes: Uint8Array): void {
-    if (this.input === 'viewing') return
-    if (this.input === 'claiming') this.typedEarly ??= []
-    if (this.typedEarly) {
-      // Hold up to a paste's worth while the pane attaches or requests input.
-      if (this.typedEarlyBytes + bytes.length > EARLY_LIMIT) return this.onProblem('still_attaching')
-      this.typedEarly.push(bytes)
+    const action = terminalKeyAction(this.input, this.holding && !this.pane, this.typedEarlyBytes, bytes.length)
+    if (action === 'ignore') return
+    if (action === 'still_attaching') return this.onProblem(action)
+    if (action === 'buffer') {
+      (this.typedEarly ??= []).push(bytes)
       this.typedEarlyBytes += bytes.length
       return
     }

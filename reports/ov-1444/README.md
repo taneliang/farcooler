@@ -43,15 +43,15 @@ The macOS landing replay built the example, then exited at the lookup for `googl
 
 The existing SSH browser fixtures now serve the work inventory and preserve runner identity during the host-pin test. All seven Chromium sleep cases passed once the test waited for terminal reattachment before sending input.
 
-To rerun the browser tests after installing the web dependencies, build the shared client example and install Playwright Chromium. Set `CHROME_PATH` to use an existing Chrome executable.
+To rerun the browser tests after installing the web dependencies, build the web WebAssembly module and install Playwright Chromium. Set `CHROME_PATH` to use an existing Chrome executable.
 
 ```sh
 export CARGO_TARGET_DIR="$FARCOOLER_SCRATCH/target"
 mkdir -p "$FARCOOLER_SCRATCH/tmp"
 export TMPDIR="$FARCOOLER_SCRATCH/tmp"
-cargo build -p farcooler-client --example work_view_bin
+crates/web/build.sh --channel canary --out "$FARCOOLER_SCRATCH/wasm"
 cd services/web
 npx playwright-core install --only-shell chromium
-WORK_VIEW_BIN="$CARGO_TARGET_DIR/debug/examples/work_view_bin" \
+WEB_WASM_DIR="$FARCOOLER_SCRATCH/wasm" \
   node test/browser/work-check.mjs ../../reports/ov-1444
 ```

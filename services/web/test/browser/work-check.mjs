@@ -1,17 +1,19 @@
 #!/usr/bin/env node
-// Run from services/web with WORK_VIEW_BIN set. Playwright uses its installed
+// Run from services/web with WEB_WASM_DIR set. Playwright uses its installed
 // Chromium unless CHROME_PATH is set. An optional argument captures screenshots.
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { build } from 'esbuild'
 import { chromium } from 'playwright-core'
 import { harnessHtml, styles } from '../../scripts/styles.mjs'
 
 const out = process.argv[2]
 if (out) mkdirSync(out, { recursive: true })
-const bundle = await build({ entryPoints: ['test/browser/work-harness.ts'], bundle: true, write: false, format: 'esm' })
+const wasmDir = process.env.WEB_WASM_DIR
+if (!wasmDir) throw new Error('Set WEB_WASM_DIR to the built crates/web wasm directory')
+const wasm = readFileSync(join(wasmDir, 'farcooler_web.wasm'))
+const bundle = await build({ alias: { 'fc-web': resolve(wasmDir, 'farcooler_web.js') }, entryPoints: ['test/browser/work-harness.ts'], bundle: true, write: false, format: 'esm' })
 const html = harnessHtml()
   .replaceAll('{{app.css}}', '/app.css').replaceAll('{{app.js}}', '/harness.js')
 const css = styles().toString()
@@ -48,11 +50,8 @@ async function test(name, run, { query = '', width = 1280, sharedWriter = false 
         action: writable ? null : occupied ? { label: 'Take Over', intent: 'take-over' } : { label: 'Request Input', intent: 'claim' },
       } })
     }
-    if (path === '/projection' || path === '/failure') {
-      const body = execFileSync(process.env.WORK_VIEW_BIN, [path], { input: route.request().postData(), encoding: 'utf8' })
-      return route.fulfill({ body })
-    }
     if (path === '/harness.js') return route.fulfill({ contentType: 'text/javascript', body: bundle.outputFiles[0].text })
+    if (path === '/farcooler_web.wasm') return route.fulfill({ contentType: 'application/wasm', body: wasm })
     if (path === '/app.css') return route.fulfill({ contentType: 'text/css', body: css })
     await route.fulfill({ contentType: 'text/html', body: html })
   })

@@ -7,6 +7,16 @@
 ///
 /// No DOM and no wasm in this file: a test plays the runner.
 
+import type { WebRunner } from 'fc-web'
+
+/// A runner's rows, through the wasm module's JSON.
+export function sourceOf(runner: Pick<WebRunner, 'agentRows' | 'agentRowsFollow'>, terminal: string, agent?: string): RowSource {
+  return {
+    page: async (before, limit) => JSON.parse(await runner.agentRows(terminal, before ?? undefined, limit, agent)),
+    follow: async (epoch, rev, waitMs) => JSON.parse(await runner.agentRowsFollow(terminal, epoch, rev, waitMs, agent)),
+  }
+}
+
 /// One row as `projector::Row` serializes it. Every enum is externally tagged:
 /// `kind` is `{"Prose": {...}}`.
 export interface Row {
