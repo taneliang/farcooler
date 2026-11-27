@@ -46,27 +46,52 @@ async fn a_running_builder_is_paused_while_a_landing_gate_runs_and_resumes_after
 }
 
 #[tokio::test]
-async fn no_build_starts_below_25_gb_and_the_refusal_survives_recovery() {
+async fn a_build_waits_on_its_ticket_while_disk_is_short_and_starts_once_there_is_room() {
     let (dir, mut runtime) = configured(false, "pass").await;
     runtime.build_free_bytes = Some(MIN_FREE - 1);
     adapter(dir.path(), |s| s.replace("if stage == 'build':\n", "if stage == 'build':\n    pathlib.Path(os.environ['STARTED']).write_text('launched')\n"));
     let definition = runtime.configured_definition().unwrap();
     enqueue(&mut runtime, "w", "one", definition);
-    runtime.pump(2).await.unwrap(); // provision
-    let binding = admitted(&runtime).await;
-    let (_send, cancel) = tokio::sync::watch::channel(false);
-    assert_eq!(runtime.execute_coding("w", &binding, cancel).await.unwrap(), Outcome::SafeFailureBecause(LOW_DISK.into()));
-    assert!(!dir.path().join("started").exists());
+    for time in 2..10 { runtime.pump(time).await.unwrap(); }
+    let held = runtime.state("w").unwrap().unwrap().items["one"].failure.clone();
+    assert_eq!(held, Some(low_disk(MIN_FREE - 1)));
     let root = runtime.root.clone();
     drop(runtime);
+    // The runner restarts with the build still short of space: it holds, spends no attempt, and says why on the ticket.
     let mut runtime = Runtime::open(&root).unwrap();
-    runtime.pump(200).await.unwrap();
+    runtime.build_free_bytes = Some(MIN_FREE - 1);
+    for time in 200..210 { runtime.pump(time).await.unwrap(); }
     let state = runtime.state("w").unwrap().unwrap();
-    assert_eq!(state.items["one"].phase, Phase::Failed);
-    assert_eq!(state.items["one"].failure.as_deref(), Some(LOW_DISK));
-    assert!(!dir.path().join("started").exists(), "recovery must never launch a refused build");
+    let item = &state.items["one"];
+    assert_eq!((&item.phase, item.attempt), (&Phase::Running, 1));
+    let reason = item.failure.as_deref().unwrap();
+    assert!(reason.starts_with(LOW_DISK_PREFIX) && reason.contains("70 GB is free") && reason.contains("71 GB")
+        && reason.contains("61 GB"), "{reason}");
+    assert!(!dir.path().join("started").exists(), "a held build never launches");
+    let view = runtime.wire_command("w", "owner", farcooler_protocol::workflow_commands::Action::Get).unwrap().to_string();
+    assert!(view.contains("Waiting for disk space") && view.contains("WaitingSlot"), "{view}");
+    // Space frees: the next look, a minute on, starts the build and the hold's words leave the ticket.
     runtime.build_free_bytes = Some(MIN_FREE);
-    assert!(runtime.build_has_space(dir.path()).unwrap(), "exactly 25 GB is enough");
+    let state = finish_after(&mut runtime, 70_000).await;
+    assert!(dir.path().join("started").exists());
+    assert_eq!(state.items["one"].phase, Phase::Done);
+    assert!(state.items["one"].failure.is_none());
+}
+
+/// The hold is the landing check's 61 GB need plus a 10 GB margin, on the fuller volume.
+#[test]
+fn a_build_needs_the_landing_checks_space_and_a_margin() {
+    assert_eq!((LANDING_NEED, MIN_FREE), (61 << 30, 71 << 30));
+    assert!(low_disk(MIN_FREE - 1).len() < 300);
+}
+
+async fn finish_after(runtime: &mut Runtime, from: i64) -> farcooler_workflow::State {
+    for time in from..from + 40 {
+        runtime.pump(time).await.unwrap();
+        let state = runtime.state("w").unwrap().unwrap();
+        if state.items.values().all(|i| matches!(i.phase, Phase::Done | Phase::Failed | Phase::Cancelled)) { return state; }
+    }
+    panic!("runtime failed to settle: {:?}", runtime.state("w").unwrap());
 }
 
 #[tokio::test]
@@ -224,12 +249,14 @@ async fn adopted_preexisting_output_is_preserved_through_build_and_cleanup() {
 }
 
 #[tokio::test]
-async fn low_disk_refusal_never_touches_adopted_output() {
+async fn a_low_disk_hold_never_touches_adopted_output() {
     let (_dir, mut runtime, tree, workspace) = adopted(false).await;
     std::fs::create_dir(tree.join("target")).unwrap();
     std::fs::write(tree.join("target/keep"), "personal output").unwrap();
     runtime.build_free_bytes = Some(MIN_FREE - 1);
-    assert_eq!(finish(&mut runtime, &workspace).await.items["one"].failure.as_deref(), Some(LOW_DISK));
+    for time in 2..20 { runtime.pump(time).await.unwrap(); }
+    let state = runtime.state(&workspace).unwrap().unwrap();
+    assert!(state.items["one"].failure.as_deref().is_some_and(|f| f.starts_with(LOW_DISK_PREFIX)), "{:?}", state.items["one"]);
     assert_eq!(std::fs::read_to_string(tree.join("target/keep")).unwrap(), "personal output");
 }
 

@@ -38,6 +38,8 @@ async fn native_codex_build_review_and_landing_release_owned_output() {
 
     let (dir, mut runtime, fake) = super::super::coding_native::tests::native_in(dir, runtime, "pass", "codex-engine").await;
     drop(fake);
+    // Codex's workspace-write sandbox reaches /tmp, where the runner puts scratch.
+    runtime.scratch_base = Some(Path::new("/tmp").canonicalize().unwrap());
     eprintln!("Native Codex probe in {}", dir.path().display());
     let home = dir.path().join("codex-home");
     std::fs::DirBuilder::new().mode(0o700).create(&home).unwrap();
@@ -207,8 +209,8 @@ async fn build_review_send_back_and_landing_release_owned_output() {
     assert_eq!(scratch.len(), 2);
     for record in scratch {
         assert!(!Path::new(&record.effect.directory.as_ref().unwrap().path).exists());
-        assert_eq!(Path::new(&record.effect.directory.as_ref().unwrap().path).parent(),
-            Some(Path::new("/tmp").canonicalize().unwrap().as_path()));
+        assert_eq!(Path::new(&record.effect.directory.as_ref().unwrap().path).parent(), runtime.root.parent(),
+            "test scratch stays inside the test's own directory");
     }
     let tree = runtime.item_tree("w", "one");
     assert!(!tree.join("target").exists());
@@ -246,4 +248,70 @@ async fn build_review_send_back_and_landing_release_owned_output() {
     let board = runtime.wire_command("w", "owner", farcooler_protocol::workflow_commands::Action::Get).unwrap();
     assert!(board["build_cleanup"].as_array().unwrap().iter().any(|row|
         row["effect"]["item"] == *group && row["result"]["bytes_freed"] == 3));
+}
+
+/// A build admitted by a runner that died before it reported, with scratch output on disk:
+/// its owner effect stays uncertain for good, as ov-1435's hold did (ov-1516).
+async fn uncertain_build_with_scratch() -> (tempfile::TempDir, crate::workflow_runtime::Runtime, std::path::PathBuf) {
+    use crate::workflow_runtime::{Runtime, coding_tests::{admitted, configured}, owned_directories::SCRATCH_ENV, tests::enqueue};
+    let (dir, mut runtime) = configured(false, "pass").await;
+    let definition = runtime.configured_definition().unwrap();
+    enqueue(&mut runtime, "w", "one", definition);
+    runtime.pump(2).await.unwrap();
+    let binding = admitted(&runtime).await;
+    let mut command = runtime.coding_command(&binding).unwrap();
+    runtime.attach_owned_directory(&binding, &binding.effect.id, &mut command).unwrap();
+    let scratch = std::path::PathBuf::from(&command.environment[SCRATCH_ENV]);
+    assert!(scratch.starts_with(dir.path().canonicalize().unwrap()), "test scratch stays inside the test's directory");
+    std::fs::create_dir(scratch.join("target")).unwrap();
+    std::fs::write(scratch.join("target/lib.rlib"), vec![b'r'; 1 << 20]).unwrap();
+    let root = runtime.root.clone();
+    drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    runtime.pump(1_000).await.unwrap();
+    assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::Uncertain);
+    assert!(scratch.join("target/lib.rlib").exists(), "an uncertain run that may still build keeps its scratch");
+    (dir, runtime, scratch)
+}
+
+fn scratch_record(runtime: &crate::workflow_runtime::Runtime, scratch: &Path) -> farcooler_store::workflow_cleanup::CleanupRecord {
+    runtime.store.workflow_cleanups("w").unwrap().into_iter()
+        .find(|r| r.effect.directory.as_ref().is_some_and(|d| Path::new(&d.path) == scratch)).unwrap()
+}
+
+#[tokio::test]
+async fn a_cancelled_build_releases_its_scratch_though_its_hold_never_reports() {
+    let (_dir, mut runtime, scratch) = uncertain_build_with_scratch().await;
+    runtime.internal("w", Command::Cancel { item: "one".into(), reason: None }, Grant::Controller, 1_100).unwrap();
+    runtime.pump(1_200).await.unwrap();
+    let item = &runtime.state("w").unwrap().unwrap().items["one"];
+    assert_eq!((item.phase.clone(), item.stopping.is_some()), (Phase::Uncertain, true), "the stop can't prove the build ended");
+    assert!(!scratch.exists(), "the cancelled run's scratch is released at the next cleanup round");
+    let result = scratch_record(&runtime, &scratch).result.unwrap();
+    assert!(result.bytes_freed >= 1 << 20 && result.skipped.is_empty(), "{result:?}");
+}
+
+#[tokio::test]
+async fn an_uncertain_build_is_an_orphan_a_day_after_its_scratch_was_recorded() {
+    use crate::workflow_runtime::owned_directories::ORPHAN_AGE_MS;
+    let (_dir, runtime, scratch) = uncertain_build_with_scratch().await;
+    let recorded = scratch_record(&runtime, &scratch).effect.directory.unwrap().retain_until_ms;
+    runtime.release_builds_at(&["w".into()], recorded + ORPHAN_AGE_MS - 1, || Ok(())).await.unwrap();
+    assert!(scratch.exists(), "under a day old, a live uncertain run keeps its scratch");
+    runtime.release_builds_at(&["w".into()], recorded + ORPHAN_AGE_MS, || Ok(())).await.unwrap();
+    assert!(!scratch.exists(), "a day old, its scratch is an orphan: {:?}", scratch_record(&runtime, &scratch).result);
+}
+
+#[tokio::test]
+async fn an_open_file_keeps_an_ended_runs_scratch_until_it_closes() {
+    use crate::workflow_runtime::owned_directories::ORPHAN_AGE_MS;
+    let (_dir, runtime, scratch) = uncertain_build_with_scratch().await;
+    let recorded = scratch_record(&runtime, &scratch).effect.directory.unwrap().retain_until_ms;
+    let reader = std::fs::File::open(scratch.join("target/lib.rlib")).unwrap();
+    runtime.release_builds_at(&["w".into()], recorded + ORPHAN_AGE_MS, || Ok(())).await.unwrap();
+    assert!(scratch.join("target/lib.rlib").exists(), "a process with a file open in scratch holds it");
+    assert!(scratch_record(&runtime, &scratch).result.is_some_and(|r| r.retry));
+    drop(reader);
+    runtime.release_builds_at(&["w".into()], recorded + ORPHAN_AGE_MS, || Ok(())).await.unwrap();
+    assert!(!scratch.exists());
 }

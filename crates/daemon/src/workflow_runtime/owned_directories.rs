@@ -1,10 +1,12 @@
 //! Scratch and gate logs have an explicit owner in the cleanup outbox.
-use super::{Binding, CodingCommand, EffectKind, Error, Exec, Result, StageKind, adapters, digest, now};
+use super::{Binding, CodingCommand, EffectKind, Error, Exec, Phase, Result, StageKind, adapters, digest, now};
 use farcooler_workflow::cleanup::{CleanupEffect, CleanupResult, OwnedDirectory};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 use std::path::{Path, PathBuf};
 
 const LOG_RETENTION_MS: i64 = 7 * 24 * 60 * 60 * 1_000;
+/// An uncertain owner's directory is an orphan this long after it was recorded (or its retention ended).
+pub(super) const ORPHAN_AGE_MS: i64 = 24 * 60 * 60 * 1_000;
 pub(super) const DIRECTORY_INTERRUPTED: &str = "directory cleanup interrupted; bytes freed unknown";
 pub(super) const SCRATCH_ENV: &str = "FARCOOLER_SCRATCH";
 pub(super) const SCRATCH_PROMPT: &str = "Put temporary build output in `$FARCOOLER_SCRATCH`, for example by setting `CARGO_TARGET_DIR=\"$FARCOOLER_SCRATCH/target\"`. Never create build folders elsewhere under `/tmp` or `/private/tmp`. The engine clears this scratch directory when the step ends.";
@@ -42,13 +44,42 @@ impl Exec {
         // Codex workspace-write includes /tmp. Use its canonical spelling on macOS,
         // and namespace each directory by the engine root as well as the effect.
         let name = adapters::folder_name(&digest(&(&self.root, id)));
-        Ok(Path::new("/tmp").canonicalize()?.join(format!("farcooler-scratch-{name}")))
+        Ok(self.scratch_base()?.join(format!("farcooler-scratch-{name}")))
+    }
+
+    /// Tests keep scratch beside their engine root, which their temporary directory removes. In
+    /// /tmp no recorded path would ever name them: 6,568 empty folders built up in three days (ov-1516).
+    fn scratch_base(&self) -> Result<PathBuf> {
+        #[cfg(test)]
+        if let Some(base) = &self.scratch_base { return Ok(base.clone()); }
+        #[cfg(test)]
+        if let Some(parent) = self.root.parent() { return Ok(parent.to_path_buf()); }
+        Ok(Path::new("/tmp").canonicalize()?)
+    }
+
+    /// Whether the effect that created `directory` can no longer write to it. A settled or never-run
+    /// owner cannot. An uncertain one (its hold never reported, ov-1435) cannot once its run is over:
+    /// ended, cancelled or failed, archived, moved on to another step, or recorded over a day ago.
+    /// Deletion still waits for no process to have files open in the directory.
+    fn owner_ended(&self, effect: &CleanupEffect, directory: &OwnedDirectory, at: i64) -> Result<bool> {
+        let Some(dispatch) = self.store.workflow_cleanup_owner_state(effect, &directory.owner_effect)? else { return Ok(false) };
+        match dispatch.as_str() {
+            "settled" | "suppressed" => Ok(true),
+            "uncertain" => {
+                if at.saturating_sub(directory.retain_until_ms) >= ORPHAN_AGE_MS { return Ok(true); }
+                let Some(state) = self.state(&effect.workspace)? else { return Ok(false) };
+                Ok(state.items.get(&effect.item).is_none_or(|item|
+                    matches!(item.phase, Phase::Done | Phase::Failed | Phase::Cancelled)
+                        || item.run.starts_with("cancel:")
+                        || item.pending.as_deref() != Some(directory.owner_effect.as_str())))
+            }
+            _ => Ok(false),
+        }
     }
 
     pub(super) async fn release_owned_directory(&self, effect: &CleanupEffect, directory: &OwnedDirectory,
         previous: Option<&CleanupResult>, at: i64) -> Result<bool> {
-        if at < directory.retain_until_ms
-            || !self.store.workflow_cleanup_owner_settled(effect, &directory.owner_effect)? { return Ok(false); }
+        if at < directory.retain_until_ms || !self.owner_ended(effect, directory, at)? { return Ok(false); }
         if !self.store.workflow_cleanup_begin(effect, previous)? { return Ok(false); }
         let path = PathBuf::from(&directory.path);
         let mut result = CleanupResult::default();

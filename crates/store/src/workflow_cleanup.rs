@@ -1,7 +1,7 @@
 //! Transactional outbox for non-gating build cleanup (ov-1126). Results remain readable by the board.
 use crate::{Store, workflow::Result};
 use farcooler_workflow::{cleanup::{CleanupEffect, CleanupResult}, State};
-use rusqlite::{params, Transaction};
+use rusqlite::{OptionalExtension, params, Transaction};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -24,16 +24,19 @@ impl Store {
         Ok(crate::engine_cutover::engine_allowed(&self.conn(), self.engine_incarnation)?)
     }
 
-    /// A directory's creating process must have settled before it can be reclaimed.
-    /// A missing, replaced or uncertain owner is never evidence of quiescence.
-    pub fn workflow_cleanup_owner_settled(&self, effect: &CleanupEffect, owner: &str) -> Result<bool> {
+    /// The dispatch state of a directory's creating effect once the engine no longer runs it:
+    /// `settled` or `suppressed` once inactive, or `uncertain` (the runner lost track of it, active
+    /// or not). `None` while it runs or is pending, or when it is missing or quarantined. A missing
+    /// or replaced owner is never evidence of quiescence; the runtime decides what an `uncertain`
+    /// owner's run means (ov-1516).
+    pub fn workflow_cleanup_owner_state(&self, effect: &CleanupEffect, owner: &str) -> Result<Option<String>> {
         let conn = self.conn();
-        if !crate::engine_cutover::engine_allowed(&conn, self.engine_incarnation)? { return Ok(false); }
-        Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM workflow_outbox
-            WHERE workspace=?1 AND id=?2 AND active=0 AND dispatch_state='settled')
+        if !crate::engine_cutover::engine_allowed(&conn, self.engine_incarnation)? { return Ok(None); }
+        Ok(conn.query_row("SELECT dispatch_state FROM workflow_outbox o
+            WHERE workspace=?1 AND id=?2 AND (active=0 OR dispatch_state='uncertain')
             AND NOT EXISTS(SELECT 1 FROM engine_cutover_quarantine WHERE resource='workspace:'||?1
-            OR resource=(SELECT json_extract(payload,'$.resource') FROM workflow_outbox WHERE workspace=?1 AND id=?2))",
-            params![effect.workspace, owner], |r| r.get(0))?)
+            OR resource=json_extract(o.payload,'$.resource'))",
+            params![effect.workspace, owner], |r| r.get(0)).optional()?)
     }
 
     /// Recovery can retain a new, deterministic build-output intent for a known finished group.

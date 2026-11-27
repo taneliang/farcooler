@@ -719,9 +719,9 @@ impl Exec {
                     }
                     Err(error) => return Err(error),
                 };
-                let build = matches!(kind, StageKind::Build);
-                if build && !self.build_has_space(&tree)? {
-                    return self.refuse_unstarted(binding, builder_resources::LOW_DISK.into());
+                // Nothing has launched: the build waits on the ticket, and the runner offers it again (ov-1516).
+                if matches!(kind, StageKind::Build) && let Some(free) = self.build_short_of_space(&tree)? {
+                    return Ok(Outcome::ResourceHold(builder_resources::low_disk(free)));
                 }
                 if let Some(check) = self.review_check(binding) {
                     self.pin_review_check_base(binding, &check)?;

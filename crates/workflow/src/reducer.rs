@@ -602,9 +602,13 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                             item.phase = Phase::Failed;
                         }
                         Outcome::ResourceHold(reason) => {
-                            if item.run.starts_with("cancel:") || item.group_of.is_none()
-                                || item.definition.stages[item.stage].kind != StageKind::Run
-                                || !valid_rework_reason(reason) { return Err(Refusal::Invalid); }
+                            // A group's gate waits for its resources; a build waits for disk space (ov-1516).
+                            let holds = match item.definition.stages[item.stage].kind {
+                                StageKind::Run => item.group_of.is_some(),
+                                StageKind::Build => true,
+                                _ => false,
+                            };
+                            if item.run.starts_with("cancel:") || !holds || !valid_rework_reason(reason) { return Err(Refusal::Invalid); }
                             item.failure = Some(reason.clone());
                             item.pending = None;
                             item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;

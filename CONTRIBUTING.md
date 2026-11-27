@@ -140,13 +140,23 @@ Heavy jobs use `/tmp/lane-gate.lock.queue` regardless of `TMPDIR`. During an
 upgrade, already queued jobs in older temp-directory queues run to completion.
 The pause is written to `yielding.json` in the engine root, so a
 daemon that restarts mid-gate continues what it had paused. Builders also start
-at niceness 10. The engine refuses
-a build when either the engine volume or its worktree has less than 25 GB free;
-the run explains the refusal and can be retried after freeing space.
+at niceness 10. A new build waits while either the engine volume or its
+worktree has less than 71 GB free: a Rust landing check needs 61 GB
+(`scripts/gate_disk.py`), and 10 GB more leaves room for the builds already
+running. The ticket says so while the build waits, spends no attempt, and the
+runner looks again about once a minute (ov-1516).
 
 When a run reaches WaitingJoin, Failed or Cancelled, the engine deletes the
 `target/` directory in its own worktree, keeping source files and branches. It
 never touches named or adopted worktrees, tracked files or symlinks.
+
+Each build and review step gets its own `$FARCOOLER_SCRATCH` folder in `/tmp`,
+recorded by exact path when it is made. The engine deletes it once its step can
+no longer write to it: the step settled, or the run ended, failed, was
+cancelled or moved on even though its agent's hold never reported. A folder
+whose step stays uncertain is deleted a day after it was recorded. Each cleanup
+round checks: at runner start, after runs finish, and hourly. Nothing is deleted
+while a process has a file open inside it (ov-1516).
 
 ### A Linux runner
 
