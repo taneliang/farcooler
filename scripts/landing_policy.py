@@ -82,6 +82,7 @@ SCRIPT_USERS = {
     'scripts/daemon-layers-counts.txt': {'wire'},  # wire daemon-layers reads dependency counts and checks them against main.
     'scripts/daemon-layers.json': {'wire'},  # wire daemon-layers reads layer membership and allowed dependencies.
     'scripts/daemon-layers.py': {'wire'},  # ci.yml wire runs self-test/check; script calls are checks or release automation, not platform builds.
+    'scripts/dependency-seed.py': {'wire'},  # ci.yml wire runs its self-test on fixture names; the seed build runs only from the engine's dependency_seed command.
     'scripts/demo-host.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
     'scripts/derp-hosts-check.py': {'wire'},  # ci.yml wire runs self-test/check; script calls are checks or release automation, not platform builds.
     'scripts/device-keys-readiness.py': {'wire'},  # ci.yml wire runs self-test/check; script calls are checks or release automation, not platform builds.
