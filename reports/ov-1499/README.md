@@ -32,3 +32,6 @@ A later pass added three tests, each run red first or checked by putting the old
 That pass also restored the earlier handling of a grant with no writer lease, so the runner’s own refusal is shown instead of a read-only notice with no button. It fixed two checks CI would have failed (`daemon-layers.py` and `shared-core-lint.py`) and removed the unused plan-based orchestrator lookup.
 
 On macOS the five live daemon cases for lease takeover, input admission, the shared stdio writer and compose dispatch passed with the ticket scratch directory.
+
+On the same macOS machine, the full page walk through a scratch sshd, the Chromium sleep and reconnect walk, and the two-runner workday walk passed against the canary bundle. The workday walk covers a native input pipe taking over from the browser on a real runner. Two expectations in those walks were out of date. Billing’s fixture now names its orchestrator, so that pane leads its sidebar. The lost agent’s link name includes its state badge, which was already true on the landing base.
+
