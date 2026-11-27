@@ -41,6 +41,10 @@ pub mod validate;
 
 pub use error::{DomainError, Result};
 
+/// The title of the Plan's landing entry saying main's checks fail. The runner
+/// writes it and the shared Plan view finds the entry by it.
+pub const MAIN_IS_RED: &str = "Main is red";
+
 /// Schema version stamped onto every managed tmux object.
 pub const SCHEMA_VERSION: u32 = 1;
 

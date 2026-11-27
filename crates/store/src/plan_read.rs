@@ -33,7 +33,7 @@ use crate::ticket_work::TicketWork;
 // Reuse the culprit's card when it's still on this board. An external or
 // archived culprit gets one board-wide row, without assigning it any tickets.
 fn draw_red_main(landings: &mut Vec<LandingView>, workspace: Uuid, since: i64, origin: Option<&str>) {
-    let title = "Main is red";
+    let title = farcooler_core::MAIN_IS_RED;
     if let Some(culprit) = landings.iter_mut().find(|view| origin.is_some() && view.landing.pushed_sha.as_deref() == origin
         && matches!(view.phase, LandingPhase::CiFailed | LandingPhase::Stalled)) {
         culprit.title = title.into();

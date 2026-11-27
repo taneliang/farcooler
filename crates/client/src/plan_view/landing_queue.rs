@@ -10,29 +10,45 @@ pub struct LandingGroupView {
     /// Complete lines, in reading order; renderers only wrap and lay them out.
     pub lines: Vec<String>,
 }
+fn elapsed(plan: &input::Plan, since: i64) -> String {
+    let seconds = plan.now_ms.saturating_sub(since).max(0) / 1000;
+    if since <= 0 { "Time unavailable".to_owned() }
+    else if seconds < 60 { "Less than a minute in this step".to_owned() }
+    else if seconds < 3600 { format!("{} min in this step", seconds / 60) }
+    else { format!("{} hr {} min in this step", seconds / 3600, seconds % 3600 / 60) }
+}
+
+fn ticket(plan: &input::Plan, context: &input::Context, key: &str) -> String {
+    let line = plan.lines.iter().find(|l| l.key == key);
+    let title = line.map(|l| l.title.as_str()).filter(|t| !t.is_empty())
+        .or_else(|| plan.cards.iter().find(|c| c.key == key).map(|c| c.title.as_str()).filter(|t| !t.is_empty()))
+        .or_else(|| line.and_then(|l| context.titles.get(&l.task)).map(String::as_str));
+    title.map_or_else(|| key.to_owned(), |t| format!("{key} · {t}"))
+}
+
+/// The runner's "Main is red" entry as a row: it comes in the plan's landings,
+/// not in the workflow's groups, and no numbered card draws it.
+fn main_red<'a>(plan: &'a input::Plan, context: &'a input::Context) -> impl Iterator<Item = LandingGroupView> + 'a {
+    plan.landings.iter().filter(|l| l.title == farcooler_core::MAIN_IS_RED).map(move |l| {
+        let since = l.phase_since.unwrap_or(l.state_since);
+        let mut lines = vec![LandingPhase::CiFailed.word(context.style), elapsed(plan, since)];
+        lines.extend(l.tickets.iter().map(|t| ticket(plan, context, &t.key)));
+        LandingGroupView { id: l.id.clone(), title: l.title.clone(), lines }
+    })
+}
+
 pub(super) fn groups(plan: &input::Plan, context: &input::Context, workflow: Option<&Presentation>) -> Vec<LandingGroupView> {
-    workflow.into_iter().flat_map(|w| &w.landing_groups).map(|g| {
-        let seconds = plan.now_ms.saturating_sub(g.since).max(0) / 1000;
-        let elapsed = if g.since <= 0 { "Time unavailable".to_owned() }
-            else if seconds < 60 { "Less than a minute in this step".to_owned() }
-            else if seconds < 3600 { format!("{} min in this step", seconds / 60) }
-            else { format!("{} hr {} min in this step", seconds / 3600, seconds % 3600 / 60) };
-        let mut lines = vec![g.step.clone(), elapsed];
+    main_red(plan, context).chain(workflow.into_iter().flat_map(|w| &w.landing_groups).map(|g| {
+        let mut lines = vec![g.step.clone(), elapsed(plan, g.since)];
         if let Some(wait) = &g.heavy_lock_wait { lines.push(wait.clone()); }
-        for key in &g.members {
-            let line = plan.lines.iter().find(|l| &l.key == key);
-            let title = line.map(|l| l.title.as_str()).filter(|t| !t.is_empty())
-                .or_else(|| plan.cards.iter().find(|c| &c.key == key).map(|c| c.title.as_str()).filter(|t| !t.is_empty()))
-                .or_else(|| line.and_then(|l| context.titles.get(&l.task)).map(String::as_str));
-            lines.push(title.map_or_else(|| key.clone(), |t| format!("{key} · {t}")));
-        }
+        lines.extend(g.members.iter().map(|key| ticket(plan, context, key)));
         if g.split { lines.push("Split after a gate failed".into()); }
         if let Some(f) = &g.failure {
             lines.push(format!("Failed job: {}", f.job));
             lines.push(f.first_line.clone());
         }
         LandingGroupView { id: g.id.clone(), title: g.label.clone(), lines }
-    }).collect()
+    })).collect()
 }
 
 #[cfg(test)]

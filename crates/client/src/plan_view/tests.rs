@@ -296,6 +296,33 @@ fn an_engine_group_entry_draws_no_landing_card() {
     assert_eq!(view.in_review.len(), 1, "the ticket stays on the Plan");
 }
 
+/// The engine's "Main is red" warning arrives as a number-0 entry, on the
+/// culprit's group or on a row of its own with no tickets. With no numbered
+/// cards to carry it, it draws as a group row, ahead of the engine's groups.
+#[test]
+fn main_is_red_still_shows_without_a_landing_card() {
+    for tickets in [json!([]), json!([{ "task": "t1", "key": "ov-1" }])] {
+        let carried = tickets.as_array().unwrap().len();
+        let plan = json!({ "now_ms": 1_800_000_000_000i64,
+            "lines": [{ "task": "t1", "key": "ov-1", "title": "Broke it", "stage": "landing" }],
+            "landings": [{ "id": "red", "number": 0, "state": "red", "phase": "ci_failed",
+                "phase_since": 1_800_000_000_000i64 - 120_000, "title": "Main is red", "tickets": tickets }] });
+        let view = view_of(json!({ "schema": SCHEMA, "plan": plan, "context": { "style": "apple" } }));
+        assert!(view.landings.is_empty());
+        let groups = view.landing_groups;
+        assert_eq!(groups.len(), 1);
+        assert_eq!((groups[0].id.as_str(), groups[0].title.as_str()), ("red", "Main is red"));
+        let mut lines = vec!["CI Failed", "2 min in this step"];
+        if carried == 1 {
+            lines.push("ov-1 · Broke it");
+        }
+        assert_eq!(groups[0].lines, lines);
+        assert!(view.landing_group_heading.is_some());
+        let landing = view.sections.iter().find(|s| s.kind == SectionKind::Landing).unwrap();
+        assert_eq!((landing.count, landing.empty.as_deref()), (1, None));
+    }
+}
+
 /// Android draws a working ticket's agent as a line of its own, and its second
 /// line says only the stage and key; the Apple apps and the web say the agent
 /// and the time in stage in the second line.

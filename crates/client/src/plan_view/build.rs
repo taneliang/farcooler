@@ -157,7 +157,7 @@ impl LandingPhase {
     }
 
     /// The phase alone, as a label.
-    fn word(self, style: Style) -> String {
+    pub(super) fn word(self, style: Style) -> String {
         style.label(self.sentence())
     }
 
