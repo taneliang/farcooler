@@ -52,10 +52,15 @@ publication rules.
 - The focused Rust run passed 33 tests across standalone activation, local
   daemon connections, and SSH stdio transport. The canary planner, wire gate
   self-test, and workflow lint passed locally.
-- The macOS handoff fixture now unloads both LaunchAgents before testing
-  cold startup through the installed CLI and the SSH stdio entry point. The
-  fixture runs the stdio protocol through a local SSH shim and then exercises
-  the Aqua agent's launchd bootstrap.
+- On macOS 27.2.1, the handoff fixture unloaded both LaunchAgents and
+  verified separate cold starts through the installed CLI and the SSH stdio
+  entry point. It ran the stdio protocol through a local SSH shim, then
+  verified that the Aqua agent restored the background job in real launchd.
+  The same run passed migration, signed update with landing refusal and
+  `--wait`, LaunchAgent reload, and rollback.
+- The pre-login rework passed 38 focused Rust tests across launchctl result
+  handling, standalone activation, CLI daemon connections, and stdio
+  transport. The signed package verifier also passed.
 
 ## Split acceptance item
 
