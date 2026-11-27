@@ -69,3 +69,15 @@ The idle request counts above still apply. These commits add no periodic request
 On macOS with Node 24, these passed on the rebased code: both TypeScript checks, the 263 web unit tests, the 50 Needs You tests and the workflow tests; the chat, sent-files, plan, work and board Chromium suites; the canary bundle with its size gate and self-test, the CSP walk against the fake runner, the Chromium sleep walk and the two-runner workday walk; all `crates/web` tests; the client (423 passed, 2 ignored), protocol (73) and transport (23) library tests; the CLI event tests (10); the selected runner library tests (231 passed, 2 ignored); the `rpc_over_socket` (90), `stdio_transport` (13), `agent_rows_over_every_transport` (6 passed, 1 ignored) and relay hang-up (1) suites; the web-only `wasm32` check of the client core; `daemon-layers.py`, `shared-core-lint.py`, and `lane-gate.py` with `--quick-only` and with `--clippy-only`.
 
 The full Rust suite, the stable bundle, the Go wasm test and the Swift families weren't run.
+
+## Rebase onto `022667bfb`
+
+The five new commits are ov-1510's React shell. Four browser checks conflicted: `chat-check.mjs`, `chat-files-check.mjs`, `work-check.mjs` and `csp-check.mjs`. The first three now use ov-1510's shared styles and HTML (`scripts/styles.mjs`), keep its `--measure` option, and load the WebAssembly bridge as this branch did. `csp-check.mjs` uses ov-1510's selectors and still expects Billing's orchestrator first.
+
+The `crates`, `proto` and `scripts` trees and `Cargo.lock` are identical to the previous candidate's, and the new commits add no timer or periodic request to the web client. The idle request counts above still apply.
+
+The workday walk then failed on a line this branch hadn't touched. ov-1510 replaced the **Switch Runner** `<select>` with its own picker, but the walk on `022667bfb` still called `selectOption` on it. The walk now opens the picker and selects the option. This is a test-only change.
+
+On macOS with Node 24, the local gate's `web` family passed. It covers both TypeScript checks, the web unit and workflow tests, the `crates/web` tests, the Go wasm test, the client's `wasm32` check, and the chat, sent-files, plan, shell, work and board Chromium suites. `lane-gate.py` passed with `--quick-only` and with `--clippy-only`. By hand, the canary bundle passed its size gate, and the CSP walk against the fake runner, the Chromium sleep walk and the two-runner workday walk passed.
+
+The other gate families, including the full Rust suite and the Swift families, and the stable bundle weren't run.
