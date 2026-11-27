@@ -33,23 +33,34 @@ impl Exec {
     pub(super) async fn red_landing_ci(&self, binding: &Binding, candidate: &str, required: &[CiCheck],
         poll: u32, cancel: &tokio::sync::watch::Receiver<bool>) -> LandingCi
     {
-        const WALK: u32 = 12;
+        // Commits read, not pushes: every commit below a push's head is one of them.
+        const WALK: u32 = 64;
         let observed_ms = self.clock_ms();
         let mut origin = None;
         let mut inherited = Vec::new();
+        // The oldest red commit that CI ran on: what the plan can name as breaking main.
+        let mut red = candidate.to_owned();
+        // How far back the walk has read, through commits with and without a run.
         let mut commit = candidate.to_owned();
+        let mut compared = false;
         for depth in 0..WALK {
             if *cancel.borrow() { break; }
             let Some(parent) = self.ci_parent(binding, &commit).await else { break };
+            commit = parent.clone();
             // Separate receipt names for ancestry reads and the ordinary poll.
             let numbered = 0x8000_0000 + (poll % 0x100_0000) * WALK + depth;
-            let Ok(Some(previous)) = self.ci_poll(binding, &parent, numbered, cancel).await else { break };
+            let previous = match self.ci_poll(binding, &parent, numbered, cancel).await {
+                Ok(Some(previous)) => previous,
+                // CI runs on the head of a push, so a commit below one has no run to compare.
+                Ok(None) => continue,
+                Err(_) => break,
+            };
             if previous.status == CiStatus::Passed {
-                origin = Some(commit);
+                origin = Some(red);
                 break;
             }
             if previous.status != CiStatus::Failed { break; }
-            if depth == 0
+            if !compared
                 && let Some(child) = self.failed_tests(binding, required, cancel).await
                 && let Some(parent) = self.failed_tests(binding, &previous.required, cancel).await
                 && child.is_subset(&parent)
@@ -58,18 +69,19 @@ impl Exec {
                     .map(|f| format!("{} / {} / {} — {}", f.workflow, f.job, f.step, f.test))
                     .collect::<Vec<_>>();
                 // The entire list goes on the ticket. Oversized evidence can't clear the failure.
-                let red = LandingCi::Red { observed_ms, origin: None, inherited: names };
-                if red.note().is_some_and(|note| farcooler_workflow::valid_rework_reason(&note) && !note.chars().any(char::is_control))
-                    && let LandingCi::Red { inherited: names, .. } = red
+                let verdict = LandingCi::Red { observed_ms, origin: None, inherited: names };
+                if verdict.note().is_some_and(|note| farcooler_workflow::valid_rework_reason(&note) && !note.chars().any(char::is_control))
+                    && let LandingCi::Red { inherited: names, .. } = verdict
                 {
                     inherited = names;
                 }
             }
+            compared = true;
             if let Some(known) = self.known_red_origin(&binding.workspace, &parent) {
                 origin = Some(known);
                 break;
             }
-            commit = parent;
+            red = parent;
         }
         LandingCi::Red { observed_ms, origin, inherited }
     }
@@ -196,11 +208,15 @@ mod tests {
     use crate::workflow_runtime::coding_verbs_tests::{at_join, batched_push, command, lander, phase_of, remote_head, settled, until};
     use std::os::unix::fs::PermissionsExt;
 
-    const PROVIDER: &str = r#"import json, os, pathlib
+    // As GitHub does, only a commit that was the head of a push gets a run.
+    const PROVIDER: &str = r#"import json, os, pathlib, subprocess, sys
 candidate = os.environ['FARCOOLER_CANDIDATE']
 registry = pathlib.Path(__file__).with_name('commits')
 commits = registry.read_text().splitlines() if registry.exists() else [os.environ['RED']]
+head = subprocess.check_output(['/usr/bin/git', '--git-dir', os.environ['REMOTE'], 'rev-parse', 'refs/heads/main'], text=True).strip()
 if candidate not in commits:
+    if candidate != head:
+        sys.exit(0)
     commits.append(candidate)
     registry.write_text('\n'.join(commits))
 run = 100 + commits.index(candidate)
@@ -247,6 +263,13 @@ else:
 
     async fn exercise(new_failure_step: Option<&str>, job: &str, steps: &[TestStep]) {
         let (dir, runtime) = lander("pass").await;
+        // Each build leaves two commits, so each push has one below its head that CI never ran on.
+        let adapter = dir.path().join("adapter.py");
+        let script = std::fs::read_to_string(&adapter).unwrap();
+        let one = "'-m', 'build '+iteration])";
+        assert!(script.contains(one));
+        let two = format!("{one}\n    pathlib.Path('second-' + name).write_text('more')\n    subprocess.check_call(['/usr/bin/git', 'add', '--', 'second-' + name])\n    subprocess.check_call(['/usr/bin/git', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'second'])");
+        std::fs::write(&adapter, script.replace(one, &two)).unwrap();
         let provider = dir.path().join("provider.py");
         let gh = dir.path().join("gh");
         std::fs::write(&provider, PROVIDER).unwrap();
