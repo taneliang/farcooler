@@ -82,6 +82,14 @@ libc = "0.2"
 lto = "thin"
 strip = true
 
+# Dev and test builds keep file-and-line backtraces but not full debug info
+# (ov-1516). Every test binary links the whole tree, so full debug info made
+# a builder's cold target 30 to 50 GB. A debugger still steps by line; for
+# variable inspection, build with CARGO_PROFILE_DEV_DEBUG=true. CI and the
+# landing gate override this with debug=0.
+[profile.dev]
+debug = "line-tables-only"
+
 # Dependencies built optimized in dev and test builds; the workspace's own
 # crates stay unoptimized for quick rebuilds (ov-993). Tests spend much of
 # their CPU in serde_json, sha2, SQLite and tokio: a cutover boundary test took

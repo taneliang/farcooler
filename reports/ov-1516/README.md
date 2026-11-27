@@ -1,6 +1,11 @@
 # ov-1516 Build scratch within a disk budget
 
-All four acceptance lines are done and tested. For shared dependencies, builders now start from a clone of landed main's third-party build output. That halves a cold build's time but saves under 1 GB of disk, because most of a builder's target is the workspace's own output. See [Shared dependencies](#shared-dependencies-acceptance-3).
+All four acceptance lines are done and tested. For acceptance 3, the disk now comes back in two ways:
+
+- **Dev and test builds use line tables only.** Measured back to back, a cold full-workspace build dropped from 26.1 GiB and 496 s to 17.5 GiB and 374 s.
+- **Builders start from a clone of landed main's third-party build.** That halves a typical builder's cold build time and saves another 1.8 GiB of disk.
+
+See [Shared dependencies](#shared-dependencies-acceptance-3).
 
 **One step is left for the orchestrator.** The engine seeds only when the adapter config names a `dependency_seed` command, and an agent can't publish config. The config to add is under [Turning it on](#turning-it-on).
 
@@ -92,38 +97,47 @@ Tests (`builder_resources/tests.rs`):
 The review ruled out two sources for a seed. Builder scratch can't be trusted, because Codex can write anywhere in `/tmp`. The gate tree is built with `debug=0`, so its units never match a builder's. The seed therefore comes from a third place: the engine builds it itself, with the builders' own flags, in a folder only the engine writes to.
 
 - **Config.** `CodingConfig.dependency_seed` is an optional command. It's left out of the pinned bytes when absent, so existing pins don't move. It's validated like any other configured command and shown in the workflow summary.
-- **When it runs.** It runs when a landing push lands (`PushVerdict::Landed`). It also runs when a build starts and no seed exists yet, which covers first use. Only one seed builds at a time. A commit whose seed failed isn't tried again; the next landing is. A seed waits for the same 71 GB free that a new build needs, and it pauses for a landing check as builders do (`owned_yielding` with the builder yield).
+- **When it runs.** It runs when a landing push lands (`PushVerdict::Landed`). It also runs when a build starts and no seed exists yet, which covers first use. Only one seed builds at a time. A commit whose seed failed isn't tried again; the next landing is. It pauses for a landing check as builders do (`owned_yielding` with the builder yield).
+- **When it waits for disk.** A seed builds the whole workspace cold and keeps everything it wrote while it pauses for a landing check. So it waits until there's room for the landing check's 61 GB beside a full seed: **91 GB** free, which is 61 GB, the seed's 20 GB peak (`SEED_PEAK`, measured at 17.5 GiB) and the 10 GB margin. A builder waits for only 71 GB, which isn't enough room for a seed.
 - **Where it runs.** It runs in a detached checkout of the landed commit at `<engine root>/dependency-seed/<sha>.checkout`. `FARCOOLER_SEED` points to `<sha>.partial`, an empty `0700` folder, and the environment is exactly what the config names. On success, the partial folder becomes `<sha>`, and the ledger's `current` moves to it.
 - **What builders get.** Each Build or Review step's new `$FARCOOLER_SCRATCH` gets an APFS `clonefile` of every top-level entry of the current seed. This happens before the agent starts, under the same lock that a seed swap takes, so a seed is never removed mid-clone. Clones share blocks until written, and a builder's writes never reach the seed (tested). Without a seed, or off APFS, the build simply starts cold.
-- **Deletion.** `dependency-seed/ledger.json` names every folder before it's made. The engine deletes only folders the ledger names, by exact path, inside the seed folder, and never while `lsof` shows a file open in them. The previous seed goes once the new one is ready, and a failed seed's partial output goes straight away.
+- **Deletion.** `dependency-seed/ledger.json` names every folder before it's made. Removal runs on a blocking thread without the seed lock, because a failed seed's partial output can run to many gigabytes. No lock is needed: builders clone only `current`, and a folder is retired only after `current` has moved off it under the lock. The engine deletes only folders the ledger names, by exact path, inside the seed folder, and never while `lsof` shows a file open in them. The previous seed goes once the new one is ready, and a failed seed's partial output goes straight away.
 
 The cargo-specific half is in the repository: `scripts/dependency-seed.py`.
 
-- It runs `cargo test --workspace --no-run` and `cargo build --workspace --bins` with no `CARGO_*`, `RUSTFLAGS` or `RUSTC_*` variables. Builders have none either; I checked this lane's own environment. Profile, Rust version and lockfile therefore all match, and no profile decision is needed.
+- It runs `cargo test --workspace --no-run` and `cargo build --workspace --bins` with no `CARGO_*`, `RUSTFLAGS` or `RUSTC_*` variables. Builders have none either; I checked this lane's own environment. Profile, Rust version and lockfile therefore all match. The profile comes from the landed commit's `Cargo.toml`, so it matches the builders' after a profile change too.
 - It then keeps only third-party units. It reads the hash of every `.fingerprint/<package>-<hash>` whose package is a workspace member (`cargo metadata --no-deps`). It then removes every `deps`, `build` and `.fingerprint` entry with one of those hashes, any entry not named for a unit, and everything else under `debug/`, including `incremental/`. No workspace unit is seeded, so a seed can't hide a builder's changed source behind file modification times.
 - `--self-test` covers the strip. CI runs it. With either half of the filter broken, it fails.
 
 ### Measurements
 
-All runs were on this machine, Nov 28. They used a clean `git archive` of `2f80562d2` inside this lane's scratch, Rust 1.98.1 and default jobs.
+All runs were on this machine, Nov 28, from a clean `git archive` of this branch inside this lane's scratch, with Rust 1.98.1, default jobs and no `CARGO_*` variables. "New disk" is `du -sk` of the target folder afterwards.
 
-**Seed build.** The full-workspace cold build took 811 s at load 30 to 43 and wrote **38.3 GB**. After the strip, the seed is **1.9 GB**: 3,149 entries kept, and 221 workspace units removed.
+**Line tables only (Cargo.toml `[profile.dev] debug = "line-tables-only"`).** The pairs ran back to back:
 
-**Per build, before and after.** The command was a typical builder's `cargo test -p farcooler-daemon -p farcooler-store -p farcooler-workflow --lib --no-run`. The two runs went back to back at the same load (1-minute average 16 at each start):
+| Cold build | Full debug info (before) | Line tables only (after) |
+| --- | ---: | ---: |
+| Whole workspace: `cargo test --workspace --no-run`, then `cargo build --workspace --bins` (what a seed builds, and close to a builder that tests everything) | **26.1 GiB**, 496 s, 2,203 s CPU, load 19 to 26 | **17.5 GiB**, 374 s, 1,517 s CPU, load 8 to 21 |
+| of which `deps/` | 18.0 GiB | 10.2 GiB |
+| of which `incremental/` | 7.1 GiB | 6.5 GiB |
+| Typical builder: `cargo test -p farcooler-daemon -p farcooler-store -p farcooler-workflow --lib --no-run` | 5.5 GiB, 153 s, load 3 to 8 | 4.1 GiB, 121 s, load 8 |
 
-| | Cold (before) | From the seed (after) |
+The earlier round measured the same whole-workspace build at 38.3 GB (811 s, load 30 to 43), with a different counter and under heavier load. The back-to-back pair above is the comparison to use. Backtraces keep files and lines. A debugger still steps by line but can't show variables; `CARGO_PROFILE_DEV_DEBUG=true` restores full debug info for one build. CI and the landing gate set `debug=0`, so they don't change.
+
+What's left is `incremental/`, at 6.5 GiB. Builders rebuild the same crates many times and incremental data speeds those rebuilds, so I kept it on.
+
+**Seed, earlier round (full debug info).** The seed is **1.9 GB** after the strip: it kept 3,149 entries and removed 221 workspace units. A typical builder command, cold and then from the seed, ran back to back at load 16:
+
+| | Cold | From the seed |
 | --- | ---: | ---: |
 | Wall time | 250 s | **127 s** |
 | CPU (user) | 771 s | 309 s |
 | Crates compiled | 327 (17 workspace) | 44 (17 workspace) |
-| New disk in scratch | 6.89 GiB | **5.99 GiB** (+1.78 GiB shared with the seed) |
+| New disk in scratch | 6.89 GiB | 5.99 GiB (+1.78 GiB shared with the seed) |
 
-An earlier, separate pair agreed: 131 s cold at load 6 and 173 s seeded at load 16 to 29. The CPU was 649 s against 327 s.
+Together, a cold whole-workspace builder needs about 17.5 GiB instead of 26 to 38 GB. A seeded builder needs about 1.8 GiB less again, and builds in half the time.
 
-What this means:
-
-- **Time halves.** The 283 third-party crates the seed supplies are built at `opt-level = 2` (`[profile.dev.package."*"]`), which makes them the costly part of a cold build. A relocated target works: cargo rewrites build-script output paths from the seed's folder to the builder's.
-- **Disk barely moves, and the ticket's premise was off.** Third-party units are only about 1.8 GiB. A builder's 30 to 50 GB is the workspace's own output: test binaries that each link everything with full debug info, plus incremental data. ov-1435's 22 GB target is the same, at about 12 GB of workspace and 10 GB of third-party output, because a builder's many `-p` and feature combinations each rebuild their own copy. The seed covers the one combination it builds.
+- **Time halves with the seed.** The 283 third-party crates the seed supplies are built at `opt-level = 2` (`[profile.dev.package."*"]`), which makes them the costly part of a cold build. A relocated target works: cargo rewrites build-script output paths from the seed's folder to the builder's.
 - **27 third-party crates still rebuild**, including `syn`, `serde_derive` and `url`. A `-p` subset selects other features than `--workspace` does, so those units have different hashes. They're a sixth of the crates and cheap ones.
 
 ### Turning it on
@@ -140,18 +154,20 @@ Add this to the workspace's adapter config, then publish it:
 
 The arguments resolve inside the seed checkout. The first seed is made by the next landing, or by the next build if no landing comes first.
 
-### What would cut disk
-
-Cutting a builder's 30 to 50 GB needs a profile decision that this ticket was asked not to make. With `debug = "line-tables-only"` for the workspace, builders keep file and line backtraces, and the test binaries shrink to a fraction of their size. It is worth its own ticket, "Engine: builders build with line tables only", if the owner wants disk back as well as time.
-
 ## Verification
 
-**This round (seed):**
+**Third round (profile, seed disk threshold, removal off the async workers):**
+
+- `cargo test -p farcooler-daemon --lib -- dependency_seed builder_resources owned_directories`: 21 passed, 1 ignored (the live Codex probe).
+  - `a_seed_waits_until_a_landing_check_keeps_its_need_beside_a_full_seed` replaces `a_seed_waits_for_the_disk_a_build_needs`. A seed holds at 71 GB free (room for a builder) and at one byte under 91 GB, then builds at 91 GB. With the seed back on the builder threshold, this test fails.
+- `cargo clippy -p farcooler-daemon --tests`: clean. `doc-comment-check.py`, `daemon-layers.py`, `copy-lint.py`, `file-size-budget.py` and `dependency-seed.py --self-test` all pass.
+- The measurement builds above ran in this lane's scratch, and I deleted each target folder afterwards.
+
+**Second round (seed):**
 
 - `cargo test -p farcooler-daemon --lib -- dependency_seed`: 4 passed.
   - `a_landing_seeds_the_next_builds_scratch_and_retires_the_old_seed`: a ticket lands through a group. The landing starts a seed of the landed commit. The old seed goes. The next ticket's build finds the landed commit's unit in `$FARCOOLER_SCRATCH`, and its write doesn't reach the seed.
   - `a_failed_seed_leaves_builders_cold_and_is_not_rebuilt_for_the_same_commit`
-  - `a_seed_waits_for_the_disk_a_build_needs`
   - `only_folders_the_ledger_names_are_removed_and_never_while_open`: an unrecorded folder and a ledger entry outside the seed folder are left alone, and an open file keeps a retired folder.
 - Mutation checks:
   - With the landing refresh removed, the landing test fails.

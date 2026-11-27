@@ -165,9 +165,17 @@ can't write. Each new scratch folder then starts as an APFS clone of the newest
 seed. For this repository, the command is `scripts/dependency-seed.py`. It
 builds with the same plain environment builders use and then keeps only the
 third-party crates, so a builder's `CARGO_TARGET_DIR="$FARCOOLER_SCRATCH/target"`
-compiles just the workspace. A seed waits for the same free space as a build.
-The engine removes the previous seed by its recorded path once the new one is
-ready.
+compiles just the workspace. A seed builds the whole workspace cold, writing
+17.5 GiB before it strips, and keeps that space while it pauses for a landing
+check. So it waits for 91 GB free: the landing check's 61 GB, the seed's 20 GB
+and the 10 GB margin. The engine removes the previous seed by its recorded path
+once the new one is ready.
+
+Dev and test builds use `debug = "line-tables-only"` (ov-1516). Backtraces keep
+files and lines, and a debugger still steps by line, but a cold full-workspace
+test build takes 17.5 GiB instead of 26. To inspect variables in a debugger,
+build with `CARGO_PROFILE_DEV_DEBUG=true`. CI and the landing gate build with
+`debug=0`, as before.
 
 ### A Linux runner
 

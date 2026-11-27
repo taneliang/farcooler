@@ -104,14 +104,20 @@ async fn a_failed_seed_leaves_builders_cold_and_is_not_rebuilt_for_the_same_comm
 }
 
 #[tokio::test]
-async fn a_seed_waits_for_the_disk_a_build_needs() {
+async fn a_seed_waits_until_a_landing_check_keeps_its_need_beside_a_full_seed() {
+    use super::super::builder_resources::{BUILD_MARGIN, LANDING_NEED, MIN_FREE, SEED_MIN_FREE, SEED_PEAK};
+    // A full seed and the margin still leave a landing check its 61 GB.
+    assert_eq!((LANDING_NEED, SEED_PEAK, BUILD_MARGIN, SEED_MIN_FREE), (61 << 30, 20 << 30, 10 << 30, 91 << 30));
     let (_dir, mut runtime) = seeded(false).await;
     let base = head(&runtime).await;
-    runtime.build_free_bytes = Some(super::super::builder_resources::MIN_FREE - 1);
-    seed_now(&runtime, &base).await;
-    assert_eq!(runtime.seed_ledger().unwrap(), Ledger::default());
-    assert!(seeds(&runtime).is_empty(), "nothing was made: {:?}", seeds(&runtime));
-    runtime.build_free_bytes = Some(u64::MAX);
+    // Room for a builder is not room for a seed, nor is a byte short of the seed's own need.
+    for free in [MIN_FREE, SEED_MIN_FREE - 1] {
+        runtime.build_free_bytes = Some(free);
+        seed_now(&runtime, &base).await;
+        assert_eq!(runtime.seed_ledger().unwrap(), Ledger::default(), "a seed started with {free} bytes free");
+        assert!(seeds(&runtime).is_empty(), "nothing was made: {:?}", seeds(&runtime));
+    }
+    runtime.build_free_bytes = Some(SEED_MIN_FREE);
     seed_now(&runtime, &base).await;
     assert_eq!(runtime.seed_ledger().unwrap().current, Some(base));
 }

@@ -88,9 +88,10 @@ impl Exec {
     async fn build_seed(&self, command: &CodingCommand, commit: &str) -> Result<bool> {
         std::fs::DirBuilder::new().recursive(true).mode(0o700).create(self.seeds_dir())?;
         self.remove_retired_seeds().await;
-        // A seed takes about as much space as a build, so it waits for the same room a new build does.
-        if let Some(free) = self.build_short_of_space(&self.root)? {
-            tracing::info!(%commit, free, "no dependency seed until there is room for a build");
+        // Cold every time, a seed writes its whole peak before it strips, and keeps it while it pauses for a
+        // landing check: it starts only when that check would still have its need with the seed at full size.
+        if let Some(free) = self.short_of_space(&self.root, super::builder_resources::SEED_MIN_FREE)? {
+            tracing::info!(%commit, free, "no dependency seed until a landing check would still have room beside it");
             return Ok(false);
         }
         let (partial, checkout) = (self.seed_partial(commit), self.seed_checkout(commit));
@@ -159,12 +160,12 @@ impl Exec {
                 kept.push(path.clone());
                 continue;
             }
-            let removed = {
-                let _state = self.seeds.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                match std::fs::remove_dir_all(&folder) {
-                    Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
-                    _ => Ok(()),
-                }
+            // No lock: builders clone only `current`, and a folder is retired only after `current` moved off it
+            // under the lock. A failed seed's partial output can be tens of GB, so it goes off the async workers.
+            let removed = match tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&folder)).await {
+                Ok(Err(error)) if error.kind() != std::io::ErrorKind::NotFound => Err(error.to_string()),
+                Err(error) => Err(error.to_string()),
+                Ok(_) => Ok(()),
             };
             if let Err(error) = removed {
                 tracing::warn!(path, %error, "could not remove a retired dependency seed");
