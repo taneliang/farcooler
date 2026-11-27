@@ -61,6 +61,12 @@ publication rules.
 - The pre-login rework passed 38 focused Rust tests across launchctl result
   handling, standalone activation, CLI daemon connections, and stdio
   transport. The signed package verifier also passed.
+- After rebasing onto main at 29c41d4de, the focused Rust run passed:
+  21 CLI tests for standalone activation and daemon links, and 4
+  daemon-contracts tests. `farcoolerd` still builds. These checks also
+  passed: the signed package verifier, the canary planner and wire gate
+  self-tests, the file-size budget, the curated macOS test list check,
+  the doc-comment checker and copy-lint.
 
 ## Split acceptance item
 
