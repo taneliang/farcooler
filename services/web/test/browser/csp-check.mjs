@@ -1562,25 +1562,31 @@ async function terminalsWalk({ page, runner, chooseCheckout, work, assert, wait 
   }
   const state = word => page.locator('#terminal-state').filter({ hasText: new RegExp(`^${word}$`) }).waitFor(wait)
   const selected = () => new URL(page.url()).searchParams.get('terminal')
+  const attached = '#terminal .terminal-host:not(.chat-host):not([hidden])[data-attached="true"]:visible'
   /// Keystrokes in the browser's pane, read off the runner's screen.
   async function typeAndSee(id, keys, expected) {
-    const live = page.locator('#terminal .terminal-host:not(.chat-host):not([hidden])[data-attached="true"]:visible')
+    const live = page.locator(attached)
     await live.waitFor(wait)
     await page.locator('.terminal-writer:not([hidden]):visible').getByText('Writer', { exact: true }).waitFor(wait)
     await live.click()
     await page.keyboard.type(keys)
     await page.keyboard.press('Enter')
-    await eventually(`the runner's screen shows ${expected}`, () => cli('terminal', 'screen', id).includes(expected))
+    let screen = ''
+    try {
+      await eventually(`the runner's screen shows ${expected}`, () => (screen = cli('terminal', 'screen', id)).includes(expected))
+    } catch (e) {
+      throw new Error(`${e.message}, not ${JSON.stringify(screen.trim().slice(-400))}`)
+    }
   }
   async function openNew(type, model) {
     await page.click('#show-terminals')
-    const before = selected()
+    const had = new Set(listed().flatMap(tree => tree.terminals.map(t => t.id)))
     await chooseCheckout()
     await work.getByLabel('Terminal Type').selectOption(type)
     if (model) await work.getByLabel('Model', { exact: true }).selectOption(model)
     await work.getByRole('button', { name: 'Start Terminal' }).click()
     await work.waitFor({ state: 'hidden', ...wait })
-    await eventually('the new terminal was selected', () => selected() && selected() !== before)
+    await eventually('the new terminal was selected', () => selected() && !had.has(selected()))
     await state('Running')
     return selected()
   }
@@ -1589,7 +1595,8 @@ async function terminalsWalk({ page, runner, chooseCheckout, work, assert, wait 
       await run()
       console.log(`workday: ${name}`)
     } catch (e) {
-      failures.push(`workday: ${name}: ${e.message.split('\n')[0]}`)
+      await shoot(page, `workday-failed-${name.split(' ')[0]}`, 320)
+      failures.push(`workday: ${name}: ${e.message.replace(/\s+/g, ' ').slice(0, 600)}`)
       if (await work.isVisible()) await work.getByRole('button', { name: 'Done' }).click()
     }
   }
@@ -1599,20 +1606,20 @@ async function terminalsWalk({ page, runner, chooseCheckout, work, assert, wait 
     shell = await openNew('shell')
     const checkout = listed().find(tree => tree.terminals.some(t => t.id === shell))
     assert(JSON.stringify(checkout).includes('workday-review'), 'the shell opened in the chosen worktree')
-    await typeAndSee(shell, 'echo typed-$((6*7))', 'typed-42')
+    await typeAndSee(shell, "printf 'typed-%d\\n' 42", 'typed-42')
   })
 
   await scenario('restarted a shell whose process exited, in place', async () => {
     if (!shell) shell = await openNew('shell')
     const { epoch } = pane(shell)
-    await typeAndSee(shell, 'echo leaving-$((2*3)); exit', 'leaving-6')
+    await typeAndSee(shell, "printf 'leaving-%d\\n' 6; exit", 'leaving-6')
     await state('Exited')
     await shoot(page, 'workday-restart-exited', 320)
     await page.getByRole('button', { name: 'Restart Terminal', exact: true }).click()
     await state('Running')
     assert(selected() === shell, 'the same terminal stayed selected')
     await eventually('a new epoch', () => pane(shell).epoch > epoch)
-    await typeAndSee(shell, 'echo again-$((7*7))', 'again-49')
+    await typeAndSee(shell, "printf 'again-%d\\n' 49", 'again-49')
   })
 
   await scenario('started Claude Code with a chosen model', async () => {
@@ -1637,9 +1644,13 @@ async function terminalsWalk({ page, runner, chooseCheckout, work, assert, wait 
     await typeAndSee(seat.id, 'before-the-restart', 'before-the-restart')
     const { epoch } = pane(seat.id)
     await shoot(page, 'workday-restart-orchestrator', 320)
+    // The pane on screen is the process being replaced. Typing counts only
+    // once a new one is attached in its place.
+    const replaced = await page.locator(attached).elementHandle()
     page.once('dialog', dialog => dialog.accept())
     await page.getByRole('button', { name: 'Restart Orchestrator', exact: true }).click()
     await eventually('a new epoch', () => pane(seat.id).epoch > epoch)
+    await page.waitForFunction(old => !old.isConnected, replaced, wait)
     await state('Running')
     await typeAndSee(seat.id, 'after-the-restart', 'after-the-restart')
   })

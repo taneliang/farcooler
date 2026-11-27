@@ -153,7 +153,9 @@ export class WorkspacePanes {
     this.set.forget(id)
     this.mounts.get(id)?.writer.show(null)
     this.mounts.get(id)?.root.remove()
-    this.mounts.delete(id)
+    // A restarted terminal keeps its id, so the next layout can look the same
+    // as the last. With its pane gone, it still has to attach again.
+    if (this.mounts.delete(id)) this.content = ''
   }
 
   private failure(error: Pick<WorkError, 'message' | 'code' | 'what'>): string {
