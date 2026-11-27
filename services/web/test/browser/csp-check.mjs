@@ -945,6 +945,8 @@ async function workspaceWalk(page) {
   const picker = () => spaceOptions(page)
   const rows = () => page.$$eval('#needs .need-question', r => r.map(x => x.textContent))
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+  // Billing's agent holds its orchestrator seat, so it leads the sidebar.
+  const billing = ['Orchestratorbilling agent', 'billing shell']
 
   // Main is showing: its twelve shells, and nothing of Billing's.
   await waitForOptions(page, options => options.includes('Billing · Studio (2)'))
@@ -990,7 +992,7 @@ async function workspaceWalk(page) {
   await shoot(page, 'workspace-needs')
   await page.click('#show-terminals')
   await page.waitForSelector(LIVE, { timeout: 60_000 })
-  if (!same(await titles(), ['billing shell', 'billing agent'])) failures.push(`Billing lists ${JSON.stringify(await titles())}`)
+  if (!same(await titles(), billing)) failures.push(`Billing lists ${JSON.stringify(await titles())}`)
   console.log('csp-check: picking Billing swapped the terminals, Needs You (2) and the plan, and opened its first terminal')
   await shoot(page, 'workspace-billing')
 
@@ -999,7 +1001,7 @@ async function workspaceWalk(page) {
   await statusSays(page, 'Connect to studio')
   await page.click('#status-action')
   await page.waitForSelector('.app[data-screen="work"] .terminal-choice', { timeout: 120_000 })
-  if (!(await pickedSpace(page)) || !same(await titles(), ['billing shell', 'billing agent'])) failures.push('the pick was not remembered')
+  if (!(await pickedSpace(page)) || !same(await titles(), billing)) failures.push('the pick was not remembered')
   else console.log('csp-check: the pick survived a reload')
 }
 
