@@ -1,17 +1,26 @@
 use super::*;
 
-fn script(dir: &Path, body: &str) -> ScriptPolicy {
+/// For a rule a test expects to answer. The deadline runs in real time and starts before the rule's
+/// checkout is made, so on a busy Mac a short one expires before the script can write its receipt.
+const ANSWERS_MS: u64 = 60_000;
+/// For the tests about expiry.
+const EXPIRES_MS: u64 = 200;
+
+fn script(dir: &Path, body: &str, timeout_ms: u64) -> ScriptPolicy {
     let path = dir.join("rule.sh");
     let bytes = format!("#!/bin/sh\n{body}\n").into_bytes();
     std::fs::write(&path, &bytes).unwrap();
     ScriptPolicy { point: HookPoint::RunFails, script: path.to_str().unwrap().into(), digest: digest(&bytes),
-        timeout_ms: 200, max_calls: 1, fallback: HookMove::Leave }
+        timeout_ms, max_calls: 1, fallback: HookMove::Leave }
 }
 /// The fixture clock is explicit: neither firing, retry nor replay reads wall time.
 async fn failed(body: &str) -> (tempfile::TempDir, Runtime) {
+    failed_within(body, ANSWERS_MS).await
+}
+async fn failed_within(body: &str, timeout_ms: u64) -> (tempfile::TempDir, Runtime) {
     let dir = tempfile::tempdir_in("/tmp").unwrap();
     let mut runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
-    let policy = script(dir.path(), body);
+    let policy = script(dir.path(), body, timeout_ms);
     let mut definition = coding_definition(false);
     definition.stages.truncate(1); definition.stages[0].max_attempts = 1;
     definition.script_policies.insert("triage".into(), policy);
@@ -61,8 +70,8 @@ async fn script_hooks_good_bad_and_illegal_decisions_are_logged_and_replayed() {
 }
 #[tokio::test]
 async fn script_hooks_timeout_and_no_receipt_retry_once_then_fall_back() {
-    for body in ["exit 1", "/bin/sleep 2"] {
-        let (_dir, mut runtime) = failed(body).await;
+    for (body, timeout_ms) in [("exit 1", ANSWERS_MS), ("/bin/sleep 2", EXPIRES_MS)] {
+        let (_dir, mut runtime) = failed_within(body, timeout_ms).await;
         runtime.pump(20).await.unwrap();
         wait_for_decision(&mut runtime, 30).await;
         let events = runtime.events("w").unwrap();
@@ -88,7 +97,7 @@ async fn script_hooks_restart_mid_call_recovers_receipt_or_spends_one_retry() {
         if receipt {
             runtime.exec.launched = Some((20, std::time::Instant::now()));
             let outcome = runtime.execute_hook(&binding, None).await.unwrap();
-            assert!(matches!(outcome, Outcome::Hook(HookResult::Receipt { .. })));
+            assert!(matches!(outcome, Outcome::Hook(HookResult::Receipt { .. })), "{outcome:?}");
         }
         if receipt {
             // Recovery consumes the pinned answer, even if the published source is no longer there.
@@ -144,14 +153,14 @@ async fn script_hooks_changed_script_falls_back_and_retry_budget_remains_authori
 
 #[tokio::test]
 async fn script_hooks_fake_clock_expiry_is_logged_and_keeps_the_retry_deadline() {
-    let (dir, mut runtime) = failed(&response("retry")).await;
+    let (dir, mut runtime) = failed_within(&response("retry"), EXPIRES_MS).await;
     runtime.pump(1_000).await.unwrap();
     let state = runtime.state("w").unwrap().unwrap();
     let open = state.items["coding"].deciding.as_ref().unwrap();
     assert_eq!(open.attempt, 2);
     let events = runtime.events("w").unwrap();
     let first_timeout = events.iter().find(|e| matches!(e.command, Command::Decide { result: HookResult::Timeout, .. })).unwrap().now_ms;
-    assert_eq!(open.deadline_ms, first_timeout + 200, "the retry retains its published timeout from the observed expiry");
+    assert_eq!(open.deadline_ms, first_timeout + EXPIRES_MS as i64, "the retry retains its published timeout from the observed expiry");
     drop(runtime);
     let mut runtime = Runtime::open(&dir.path().join("runtime")).unwrap();
     wait_for_decision(&mut runtime, 2_000).await;

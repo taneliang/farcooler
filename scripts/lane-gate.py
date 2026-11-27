@@ -832,6 +832,8 @@ def run_step_safely(step, repo, env, logdir, tmp, fail_fast=False, *, quick=Fals
     notes = "" if "--self-test" in step.run else leak_notes(output)  # a self-test prints notes on purpose
     if notes:
         result += f"; {notes}"
+    if code != 0 and "--self-test" not in step.run and LEAK_ONLY.search(output):
+        result += f"; {LEAK_ONLY_RESULT}"
     return result, secs, count_tests(output), code == 0, log, output
 
 
@@ -842,6 +844,12 @@ FLAKY_LINES = []  # every FLAKY line this run's steps printed (scripts/gate-flak
 def flaky_notes(output):
     """The `FLAKY: <binary> <test>: first Ns (failed), rerun Ns (passed)` lines a step printed (ov-1285)."""
     return FLAKY_LINE.findall(output)
+
+
+# test-leak-check's line for a command that passed and still failed on what it left behind.
+LEAK_ONLY = re.compile(r"^test-leak-check: FAILED on leftovers alone", re.M)
+LEAK_ONLY_RESULT = ("failed by test-leak-check alone: the tests passed but left files behind (named in the log); "
+                    "a FLAKY rerun did not fail this")
 
 
 LEAK_NOTE = re.compile(r"test-leak-check: note: (\d+) new (entries|plists) appeared")
@@ -2001,6 +2009,19 @@ def _self_test():
             run_step = real_run_step
         expect("an exception inside a step is that step's FAIL row", (row[0], row[3]), ("FAIL: lane-gate could not run it: OSError: boom", False))
 
+    # The real wrapper round a command that passes and leaves a file: the Result column must name the leak check,
+    # or a row that also says FLAKY reads as if the flake failed it (ov-1517).
+    with tempfile.TemporaryDirectory() as t:
+        t = pathlib.Path(t)
+        flake = "echo 'FLAKY: pkg::bin a_test: first 1.2s (failed), rerun 1.0s (passed)'"
+        for name, inner, want in (("leaves a file", flake + '; touch "$TMPDIR/ov1517-left"', True),
+                                  ("fails and leaves a file", 'touch "$TMPDIR/ov1517-left"; exit 3', False),
+                                  ("is clean", flake, False)):
+            step = Step("rust", "n", f"python3 '{ROOT}/scripts/test-leak-check.py' -- sh -c {shlex.quote(inner)}\n")
+            del FLAKY_LINES[:]
+            result = run_step_safely(step, ROOT, {**os.environ}, t, t)[0]
+            expect(f"a command that {name}: the Result column blames the leak check alone", LEAK_ONLY_RESULT in result, want)
+        del FLAKY_LINES[:]
     expect("a leak note is carried into the Result column", "leak note: 3" in leak_notes("test-leak-check: note: 3 new entries appeared in /x"), True)
     expect("no note, no addition", leak_notes("test-leak-check: the run left nothing"), "")
     env = base_env(ROOT, pathlib.Path("/tmp"), ctx)

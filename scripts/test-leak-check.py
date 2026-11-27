@@ -56,6 +56,8 @@ whole root when the process ends. A deliberate use carries a
 `// leak-exempt: <reason>` comment on its line or the one above.
 """
 
+import contextlib
+import io
 import os
 import re
 import uuid as _uuid
@@ -371,6 +373,13 @@ def run(command, grace=GRACE_SECONDS):
             print(f"test-leak-check: note: ignored {len(passed)} entries as a build tool's scratch: {', '.join(passed[:40])}{' ...' if len(passed) > 40 else ''}")
         if temp or prefs or sys_new:
             report(temp, prefs, sys_new, folder)
+            if rc == 0:
+                # Last, so it is what a reader of a failed step sees: a FLAKY line above reads as the cause (ov-1517).
+                print(
+                    "test-leak-check: FAILED on leftovers alone: the command passed (exit 0). If a test above is "
+                    "marked FLAKY, its rerun passed and it did not fail this run.",
+                    file=sys.stderr,
+                )
             return rc or 1
         print("test-leak-check: the run left nothing in TMPDIR or the preferences folder.")
         return rc
@@ -396,6 +405,16 @@ def self_test():
         rc = run([sys.executable, "-c", script], grace=0.5)
         if (rc != 0) != (expect_rc != 0):
             failures.append(f"{name}: exit {rc}, wanted {'non-zero' if expect_rc else 'zero'}")
+
+    # The failure says when the leftovers are its only cause, and never when the command failed too (ov-1517).
+    leave_file = "import os; open(os.path.join(os.environ['TMPDIR'],'ov1517'),'w').close()"
+    for name, script, want in (("passes and leaks", leave_file, True),
+                               ("fails and leaks", leave_file + "; raise SystemExit(3)", False)):
+        said = io.StringIO()
+        with contextlib.redirect_stderr(said):
+            run([sys.executable, "-c", script], grace=0.5)
+        if ("FAILED on leftovers alone" in said.getvalue()) != want:
+            failures.append(f"a command that {name}: wrong leftovers-alone line in {said.getvalue()!r}")
 
     clean = "import os; d=os.path.join(os.environ['TMPDIR'],'farcooler-x'); os.mkdir(d); os.rmdir(d)"
     case("a run that cleans up", clean, 0)

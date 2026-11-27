@@ -12,6 +12,11 @@ The local lane gate and the landing gate run the Rust suite through `scripts/gat
   gate's own log directory (`GATE_FLAKY_LOG`). The orchestrator files one ticket per line from the summary's
   FLAKY lines or that file. Nothing in the gated tree is written: a gate that changes a tracked file fails
   (`tracked files unchanged` row, naming the file) (ov-1295).
+- A FLAKY line never fails a step, but a wrapper outside this one can. `scripts/test-leak-check.py` fails a
+  run that left files in its private `TMPDIR`, even when every test passed in the end. It then prints
+  `test-leak-check: FAILED on leftovers alone` after the FLAKY lines, and the step's Result column in the
+  gate summary says `failed by test-leak-check alone`. Fix the leftover. A test that fails may be the one
+  that leaves it, but the check doesn't say which test made a file (ov-1517).
 - The gate profile stops a hung test after 120 s (60 s period, terminate after 2) instead of 600 s. A test
   known to be slow keeps an explicit `[[profile.gate.overrides]]` in `.config/nextest.toml`; the live tmux
   stress tests in `live_tmux` have one (10 minutes).
