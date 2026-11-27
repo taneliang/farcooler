@@ -56,3 +56,16 @@ On macOS, through `scripts/landing-gate`: `web` passed at `77492dd13`; `rust` an
 With `CARGO_TARGET_DIR` shared across the whole gate, one `lane-gate.py --self-test` case failed because its fixture's `cargo test` didn't start in time. It passed without the variable.
 
 `scripts/landing-policy-test.py`, run by hand with `FARCOOLER_BASE` set, reports two failures and one error, on this branch and on the base alike. Under `lane-gate.py --self-test` it passes.
+
+## Rebase onto `edf1f42fa`
+
+Two files conflicted.
+
+- `crates/web/src/wire.rs`: only the `use` lines conflicted. ov-1513 added `link_ending` and this branch added `event::Payload`, so both stay. The rest merged on its own: ov-1513's foreground check and ending reasons run beside the writer-event listener.
+- `services/web/test/browser/csp-check.mjs`: ov-1507 rewrote how the workday walk finds the lost terminal. Main's version is kept. It replaces this branch's name fix.
+
+The idle request counts above still apply. These commits add no periodic request to the web client.
+
+On macOS with Node 24, these passed on the rebased code: both TypeScript checks, the 263 web unit tests, the 50 Needs You tests and the workflow tests; the chat, sent-files, plan, work and board Chromium suites; the canary bundle with its size gate and self-test, the CSP walk against the fake runner, the Chromium sleep walk and the two-runner workday walk; all `crates/web` tests; the client (423 passed, 2 ignored), protocol (73) and transport (23) library tests; the CLI event tests (10); the selected runner library tests (231 passed, 2 ignored); the `rpc_over_socket` (90), `stdio_transport` (13), `agent_rows_over_every_transport` (6 passed, 1 ignored) and relay hang-up (1) suites; the web-only `wasm32` check of the client core; `daemon-layers.py`, `shared-core-lint.py`, and `lane-gate.py` with `--quick-only` and with `--clippy-only`.
+
+The full Rust suite, the stable bundle, the Go wasm test and the Swift families weren't run.
