@@ -162,9 +162,11 @@ export async function joinWalk({ session, startRunner, stub, cli, me, shoot, ori
       assert(shown && (await code(page)) === shown, `the terminal says ${shown}, the page ${await code(page)}`)
       assert((await page.textContent('#compare-title')).includes('terminal'), 'the compare screen names the terminal')
       if (capture) await shot(page, `${capture}-compare`)
-      await new Promise(r => setTimeout(r, 4000))
-      assert(run.exitCode === null && stub.audit.at(-1) !== 'runner.registered', 'the command waits for the approval')
+      // The relay has recorded nothing new, over more than one of the
+      // command's polls: an earlier join's lines are already there.
       const before = stub.audit.length
+      await new Promise(r => setTimeout(r, 4000))
+      assert(run.exitCode === null && stub.audit.length === before, `the command waits for the approval: exit ${run.exitCode}, the relay saw ${stub.audit.slice(before)}`)
       await page.click('#compare-yes')
       const [status] = await exited
       assert(status === 0 && /Added\./.test(said), `farcooler join ended ${status}: ${said.replaceAll('\n', ' ').slice(-400)}`)

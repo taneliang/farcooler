@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { unreachable } from '../src/client/copy'
+import { connectFailure, unreachable } from '../src/client/copy'
 
 const CAUSES = ['too_old', 'no_passkeys', 'not_allowed', 'not_owner', 'read_only', 'not_connected', 'failed']
 
@@ -24,13 +24,21 @@ describe('unreachable', () => {
 
   it('tells a runner the phone couldn’t reach from one that refused', () => {
     expect(unreachable('pending', 'Cosmo', 'not_connected')).toContain('wasn’t connected')
-    expect(unreachable('pending', 'Cosmo', 'not_allowed')).toContain('didn’t let your phone add devices')
+    expect(unreachable('pending', 'Cosmo', 'not_allowed')).toContain('didn’t let the other device add this browser')
   })
 
   it('sends a member or a view-only phone to who can add the browser, not to an update', () => {
     for (const cause of ['not_owner', 'read_only']) expect(unreachable('pending', 'Cosmo', cause), cause).not.toContain('Update')
     expect(unreachable('pending', 'Cosmo', 'not_owner')).toContain('owner')
-    expect(unreachable('pending', 'Cosmo', 'read_only')).toContain('Mac')
+    expect(unreachable('pending', 'Cosmo', 'read_only')).toContain('Add Runner')
+  })
+
+  // ov-1490: there are no native apps to send anyone to.
+  it('sends nobody to a phone app or a Mac app', () => {
+    for (const cause of [...CAUSES, ''])
+      expect(unreachable('pending', 'Cosmo', cause), cause).not.toMatch(/your phone|your mac/i)
+    for (const word of ['host_key_changed', 'host_key_unknown', 'key_rejected'])
+      expect(connectFailure(word, 'Cosmo'), word).not.toMatch(/phone|mac app/i)
   })
 
   it('keeps the address-only sentence for a runner with no tunnel', () => {

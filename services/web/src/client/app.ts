@@ -208,11 +208,11 @@ function copyNote(saved: Saved): void {
 
 /// A browser with nothing kept, on an account with sealed copies: one touch
 /// of the passkey brings the runners back, with no enrollment. Make a New
-/// Passkey is the way to add the browser from the phone instead.
+/// Passkey is the way to add the browser afresh instead.
 function restoreScreen(session: Session, vaults: Vault[], migrated: boolean, notice = ''): void {
   status(
     'Reconnect with your passkey',
-    notice || 'Far Cooler keeps your runners sealed with your passkey. Touch your passkey once to use them in this browser, with no need to add it from your phone.',
+    notice || 'Far Cooler keeps your runners sealed with your passkey. Touch your passkey once to use them here, with no need to add this browser again.',
     { label: 'Use Passkey', run: () => void restoreWith(session, vaults, migrated) },
     () => passkeyScreen(session, migrated),
     'Make a New Passkey',

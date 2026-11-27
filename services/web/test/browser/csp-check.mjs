@@ -662,14 +662,14 @@ const enrolling = async page => {
   await page.waitForFunction(() => !document.getElementById('enroll')?.hidden && document.getElementById('offer-fingerprint')?.textContent?.includes('SHA256:'), null, { timeout: 120_000 })
 }
 
-/// Make Passkey, from the screen that asks for it, then from Add Runner to
-/// the screen that waits for another device (ov-1490).
+/// Make Passkey, from the screen that asks for it, then on to the screen that
+/// waits for another device (ov-1490): by way of Add Runner, except in a tab
+/// that was already waiting there. With `toDevice` false the browser is new,
+/// and Add Runner must be what it opens on.
 async function makePasskey(page, toDevice = true) {
   await statusSays(page, 'Make a passkey')
   await page.click('#status-action')
-  await page.waitForSelector('#runner-add:not([hidden])', { timeout: 120_000 })
-  if (!toDevice) return
-  await page.click('#join-from-device')
+  if (!toDevice) return void (await page.waitForSelector('#runner-add:not([hidden])', { timeout: 120_000 }))
   await enrolling(page)
 }
 

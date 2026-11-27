@@ -7,11 +7,11 @@
 export function connectFailure(word: string, runner: string): string {
   switch (word) {
     case 'host_key_changed':
-      return `${runner} isn’t the runner your phone vouched for: its host key has changed, so Far Cooler won’t connect. If you reinstalled it, add this browser again.`
+      return `${runner}’s host key has changed since this browser was added, so Far Cooler won’t connect. If you reinstalled it, add this browser again.`
     case 'host_key_unknown':
-      return `Your phone didn’t send a host key for ${runner}, so Far Cooler won’t connect to it. Add this browser again.`
+      return `This browser has no host key for ${runner}, so Far Cooler won’t connect to it. Add this browser again.`
     case 'key_rejected':
-      return `${runner} doesn’t recognize this browser’s key. Add this browser again from your phone.`
+      return `${runner} doesn’t recognize this browser’s key. To get back in, use Add Runner and run its command on ${runner}, or approve this browser from a device that opens it.`
     case 'no_answer':
       return `${runner} didn’t answer. Check that it’s on and online, then try again.`
     case 'derp':
@@ -47,49 +47,49 @@ export function replyRefusal(word: string): string {
     case 'version':
       return 'That code is from a newer Far Cooler. Reload this page, then scan it again.'
     case 'channel':
-      return 'That code is from a different edition of Far Cooler. Use the Far Cooler Canary app on your phone.'
+      return 'That code is from a different edition of Far Cooler. Use the same edition on both sides.'
     case 'wrong_ceremony':
     case 'wrong_target':
-      return 'That reply answers a different code. Scan the reply your phone shows for the code on this page.'
+      return 'That reply answers a different code. Use the reply to the code on this page.'
     case 'wrong_account':
-      return 'That reply belongs to a different account. Sign in to Far Cooler on your phone with the account this browser uses.'
+      return 'That reply belongs to a different account. Sign in on the other device with the account this browser uses.'
     case 'stale':
-      return 'That reply came after this browser’s code expired. Here’s a new code: scan it with your phone, then scan its reply within two minutes.'
+      return 'That reply came after this browser’s code expired. Here’s a new one: use it, and finish within two minutes.'
     case 'already_taken':
       return 'This browser already took a reply for this code. Select Start Over to add it again.'
     case 'no_tunnel':
-      return "Your phone granted a runner this browser can’t reach. Select Start Over and try again."
+      return "That reply names a runner this browser can’t reach. Try again with a new code."
     default:
-      return "That isn’t a Far Cooler reply. Scan the code your phone shows after you confirm."
+      return "That isn’t a Far Cooler reply. Copy the whole reply, then try again."
   }
 }
 
 /// Why a granted runner can't be opened here.
 ///
-/// `cause` is the phone's reason for a pending runner (crates/web's
-/// `enroll::CAUSES`), or empty from a phone that didn't say. Only
-/// `no_passkeys`, which the phone reads off the runner's own capabilities,
+/// `cause` is the approving device's reason for a pending runner (crates/web's
+/// `enroll::CAUSES`), or empty from one that didn't say. Only
+/// `no_passkeys`, which it reads off the runner's own capabilities,
 /// names OpenSSH: an empty cause is not a guess about the runner (ov-828).
 export function unreachable(why: string, runner: string, cause = ''): string {
   if (why !== 'pending')
     return `${runner} is only reachable at an address, and a browser can only reach runners through Far Cooler’s tunnel. Turn on the tunnel for ${runner}, then add this browser again.`
   switch (cause) {
     case 'no_passkeys':
-      return `${runner}’s OpenSSH is too old for passkeys, so your phone couldn’t add this browser to it. Update OpenSSH on ${runner} to 8.4 or later, then add this browser again.`
+      return `${runner}’s OpenSSH is too old for passkeys, so this browser couldn’t be added to it. Update OpenSSH on ${runner} to 8.4 or later, then add this browser again.`
     case 'too_old':
       return `Far Cooler on ${runner} is too old to add devices. Update it, then add this browser again.`
     case 'not_allowed':
-      return `${runner} didn’t let your phone add devices. Update Far Cooler on ${runner}, or add this browser from your Mac.`
+      return `${runner} didn’t let the other device add this browser. Update Far Cooler on ${runner}, or use Add Runner and run its command there.`
     case 'not_owner':
       return `Only ${runner}’s owner can add devices to it. Ask them to add this browser.`
     case 'read_only':
-      return `Your phone can only view ${runner}, so it can’t add devices there. Add this browser from your Mac.`
+      return `The other device can only view ${runner}, so it can’t add this browser there. Use Add Runner and run its command on ${runner}.`
     case 'not_connected':
-      return `Your phone wasn’t connected to ${runner}. Open Far Cooler on your phone and wait for ${runner} to connect, then add this browser again.`
+      return `The other device wasn’t connected to ${runner}. Connect it to ${runner} there, then add this browser again.`
     case 'failed':
-      return `${runner} didn’t take this browser’s passkey. Add this browser again from your phone.`
+      return `${runner} didn’t take this browser’s passkey. Add this browser again.`
     default:
-      return `Your phone couldn’t add this browser to ${runner}. Add this browser again while your phone is connected to ${runner}.`
+      return `The other device couldn’t add this browser to ${runner}. Add this browser again while that device is connected to ${runner}.`
   }
 }
 
@@ -162,7 +162,7 @@ export function answerRefusal(failure: { word: string; code?: string; what?: str
   }
 }
 
-/// Why a sealed reply from the phone was not used, by the ceremony's word.
+/// Why a sealed reply was not used, by the ceremony's word.
 /// Said above the code while the wait goes on, except for `stale`.
 export function sealedRefusal(word: string): string {
   switch (word) {
@@ -171,13 +171,13 @@ export function sealedRefusal(word: string): string {
     case 'wrong_ceremony':
     case 'wrong_account':
     case 'wrong_target':
-      return 'A reply arrived that this browser couldn’t open, so it was thrown away. If it wasn’t your phone’s, someone else posted it. Your phone’s reply can still arrive.'
+      return 'A reply arrived that this browser couldn’t open, so it was thrown away. If you didn’t send it, someone else posted it. Your reply can still arrive.'
     case 'stale':
       return replyRefusal('stale')
     case 'no_tunnel':
       return replyRefusal('no_tunnel')
     default:
-      return 'A reply arrived that Far Cooler couldn’t use, so it was thrown away. Your phone’s reply can still arrive.'
+      return 'A reply arrived that Far Cooler couldn’t use, so it was thrown away. Your reply can still arrive.'
   }
 }
 
@@ -232,7 +232,7 @@ export function registerFailure(word: string): string {
     case 'declined':
       return 'Far Cooler didn’t get your passkey. Select Register This Browser and follow your browser’s prompt.'
     case 'claimed':
-      return 'This passkey is already registered to another Far Cooler account. Sign out, then sign in with the account your phone uses.'
+      return 'This passkey is already registered to another Far Cooler account. Sign out, then sign in with that account.'
     case 'revoked':
       return 'This passkey was removed from your account, so it can’t be added again. Sign out and back in to make a new one.'
     case 'unreachable':
@@ -281,7 +281,7 @@ export function planRefusal(failure: { word: string; code?: string; what?: strin
 /// Why the relay didn't keep this browser's sealed copy (vault.ts `Saved`).
 /// Each says what it costs, since nothing breaks until the storage goes.
 export function saveFailure(word: string): string {
-  const cost = 'If this browser clears this site’s data, you’ll add it again from your phone.'
+  const cost = 'If this browser clears this site’s data, you’ll need to add it again.'
   switch (word) {
     case 'full':
       return `Your account already keeps runners for as many passkeys as it can, so this browser’s aren’t kept. Sign out of a browser you no longer use to make room. ${cost}`
@@ -297,13 +297,13 @@ export function restoreFailure(word: string): string {
     case 'declined':
       return 'Far Cooler didn’t get your passkey. Select Use Passkey and follow your browser’s prompt.'
     case 'no_prf':
-      return 'This browser or passkey can’t unlock saved runners. Select Make a New Passkey to add this browser from your phone.'
+      return 'This browser or passkey can’t unlock saved runners. Select Make a New Passkey, then add this browser again.'
     case 'other_account':
       return 'That passkey belongs to another Far Cooler account. Use the passkey for the account you’re signed in to, or make a new one.'
     case 'not_found':
       return 'Far Cooler has no runners saved for that passkey. Choose another passkey, or select Make a New Passkey.'
     case 'unopened':
-      return 'Far Cooler couldn’t unlock the runners saved for that passkey. Select Make a New Passkey to add this browser from your phone.'
+      return 'Far Cooler couldn’t unlock the runners saved for that passkey. Select Make a New Passkey, then add this browser again.'
     case 'unreachable':
       return 'Far Cooler couldn’t reach its service. Check your connection, then try again.'
     default:

@@ -1987,6 +1987,11 @@ jobs:
           TMPDIR="$RUNNER_TEMP" node test/browser/csp-check.mjs \
             --workday-runner "${CARGO_TARGET_DIR:-../../target}/debug/examples/web_workday_runner" \
             --workday-cli "${CARGO_TARGET_DIR:-../../target}/debug/farcooler"
+          # Joining with no app (ov-1490): `farcooler join` at the runner, a second
+          # browser approved and removed, and recovery, on the same binaries.
+          TMPDIR="$RUNNER_TEMP" node test/browser/csp-check.mjs --join \
+            --workday-runner "${CARGO_TARGET_DIR:-../../target}/debug/examples/web_workday_runner" \
+            --workday-cli "${CARGO_TARGET_DIR:-../../target}/debug/farcooler"
 
   # Keep the existing Web check green only when both jobs pass, or when
   # Changes explicitly skipped Web, as it did for the original job.

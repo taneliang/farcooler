@@ -446,6 +446,8 @@ button.danger { color: var(--danger); }
 .devices li { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .devices li span { min-width: 0; overflow-wrap: anywhere; }
 .devices li button { flex: none; }
+/* Confirm Remove: red words on the quiet fill, not on the blue one. */
+.devices li button.danger { background: var(--chip); }
 .devices .actions { margin-top: 8px; }
 .devices video { width: 100%; margin-top: 8px; border-radius: 12px; background: #000; }
 .devices label { display: block; margin-top: 12px; color: var(--text-2); font-size: 13px; }
