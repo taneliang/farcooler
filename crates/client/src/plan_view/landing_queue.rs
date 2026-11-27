@@ -26,19 +26,27 @@ fn ticket(plan: &input::Plan, context: &input::Context, key: &str) -> String {
     title.map_or_else(|| key.to_owned(), |t| format!("{key} · {t}"))
 }
 
-/// The runner's "Main is red" entry as a row: it comes in the plan's landings,
-/// not in the workflow's groups, and no numbered card draws it.
-fn main_red<'a>(plan: &'a input::Plan, context: &'a input::Context) -> impl Iterator<Item = LandingGroupView> + 'a {
-    plan.landings.iter().filter(|l| l.title == farcooler_core::MAIN_IS_RED).map(move |l| {
+/// The runner's own number-0 entries as rows, which no numbered card draws.
+/// "Main is red" isn't one of the workflow's groups, so it always gets one. The
+/// engine's groups get theirs here only without a workflow, which is what a
+/// read-only runner, or one with no workflow service, sends (ov-1520).
+fn runner_rows<'a>(plan: &'a input::Plan, context: &'a input::Context, workflow: bool) -> impl Iterator<Item = LandingGroupView> + 'a {
+    plan.landings.iter().filter_map(move |l| {
+        let main_red = l.title == farcooler_core::MAIN_IS_RED;
+        let live = l.number == 0 && l.state != "landed" && l.state != "dropped";
+        if !main_red && (workflow || !live) {
+            return None;
+        }
+        let phase = if main_red { LandingPhase::CiFailed } else { LandingPhase::of(l.phase.as_deref().unwrap_or_default()) };
         let since = l.phase_since.unwrap_or(l.state_since);
-        let mut lines = vec![LandingPhase::CiFailed.word(context.style), elapsed(plan, since)];
+        let mut lines = vec![phase.word(context.style), elapsed(plan, since)];
         lines.extend(l.tickets.iter().map(|t| ticket(plan, context, &t.key)));
-        LandingGroupView { id: l.id.clone(), title: l.title.clone(), lines }
+        Some(LandingGroupView { id: l.id.clone(), title: l.title.clone(), lines })
     })
 }
 
 pub(super) fn groups(plan: &input::Plan, context: &input::Context, workflow: Option<&Presentation>) -> Vec<LandingGroupView> {
-    main_red(plan, context).chain(workflow.into_iter().flat_map(|w| &w.landing_groups).map(|g| {
+    runner_rows(plan, context, workflow.is_some()).chain(workflow.into_iter().flat_map(|w| &w.landing_groups).map(|g| {
         let mut lines = vec![g.step.clone(), elapsed(plan, g.since)];
         if let Some(wait) = &g.heavy_lock_wait { lines.push(wait.clone()); }
         lines.extend(g.members.iter().map(|key| ticket(plan, context, key)));
@@ -85,5 +93,26 @@ mod tests {
         fixture["request"]["plan"]["now_ms"] = 1.into();
         let answer: serde_json::Value = serde_json::from_str(&super::super::json(&fixture["request"].to_string())).unwrap();
         assert_eq!(answer["view"]["landingGroups"][0]["lines"][1], "Less than a minute in this step");
+    }
+    /// A read-only runner, or one with no workflow service, sends the plan
+    /// without a workflow: its number-0 entries are all there is to draw (ov-1520).
+    #[test]
+    fn an_engine_landing_still_has_a_row_without_the_workflow() {
+        let mut fixture: serde_json::Value = serde_json::from_str(include_str!("../../../../test/fixtures/landing-queue.json")).unwrap();
+        let mut request = fixture["request"].take();
+        request["context"] = serde_json::json!({ "style": "apple" });
+        request["plan"]["landings"] = serde_json::json!([{ "id": "engine", "number": 0, "title": "Landing", "state": "gating",
+            "phase": "gating_locally", "phase_since": 1, "tickets": [] }]);
+        // With the workflow, its groups are the rows and the entry adds none.
+        let with: serde_json::Value = serde_json::from_str(&super::super::json(&request.to_string())).unwrap();
+        assert!(!with["view"]["landingGroups"].as_array().unwrap().iter().any(|g| g["id"] == "engine"), "{with}");
+        request["plan"].as_object_mut().unwrap().remove("workflow");
+        let without: serde_json::Value = serde_json::from_str(&super::super::json(&request.to_string())).unwrap();
+        let rows = without["view"]["landingGroups"].as_array().expect("a row");
+        assert_eq!(rows.len(), 1, "{without}");
+        assert_eq!((&rows[0]["title"], &rows[0]["lines"][0]), (&"Landing".into(), &"Checking Here".into()), "{without}");
+        let section = without["view"]["sections"].as_array().unwrap().iter().find(|s| s["kind"] == "landing").unwrap();
+        assert_eq!(section["count"], 1);
+        assert_eq!(without["view"]["landingGroupHeading"], "Landing");
     }
 }

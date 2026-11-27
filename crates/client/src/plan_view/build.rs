@@ -133,7 +133,7 @@ pub enum LandingPhase {
 }
 
 impl LandingPhase {
-    fn of(word: &str) -> LandingPhase {
+    pub(super) fn of(word: &str) -> LandingPhase {
         wire(word).unwrap_or(LandingPhase::Unknown)
     }
 
@@ -862,7 +862,8 @@ pub(super) fn build(plan: &Plan, context: &input::Context, workflow: Option<&Pre
     let landing_groups = super::landing_queue::groups(plan, context, workflow);
 
     // Landings, furthest along first; the plan's order breaks a tie.
-    // An engine group (number 0) gets no card: `landing_groups` draws it.
+    // An engine group (number 0) gets no card: `landing_groups` draws it,
+    // from the workflow or, without one, from the entry itself.
     let mut live: Vec<&Landing> =
         plan.landings.iter().filter(|l| l.number != 0 && l.state != "landed" && l.state != "dropped").collect();
     live.sort_by_key(|l| std::cmp::Reverse(r.phase(l).progress()));
