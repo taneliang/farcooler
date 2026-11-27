@@ -1355,7 +1355,10 @@ async function remoteWorkday({ context, page, passkeys }) {
   await page.click('#add-runner')
   await approve(second)
   await connectRunner(page, 'studio')
-  await page.getByLabel('Switch Runner').selectOption({ label: 'build-box' })
+  // The runner switcher is the same kind of select as the workspace picker.
+  await page.getByRole('combobox', { name: 'Switch Runner' }).click()
+  await page.getByRole('option', { name: 'build-box', exact: true }).click()
+  await page.getByRole('listbox').waitFor({ state: 'detached' })
   await connectRunner(page, 'build-box')
 
   const work = page.getByRole('dialog', { name: 'Start Work' })
