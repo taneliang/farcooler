@@ -162,6 +162,31 @@ describe('farcooler join (ov-1490)', () => {
     expect((await call('/v1/join/register', await proof(box, claim, t.team))).status).toBe(200)
   })
 
+  /// Recovery, and Set Up on another browser: the same runner joins again.
+  it('lets its owner join a listed runner again, with a new token, and lets no other account take it', async () => {
+    const box = await makeKey('runner')
+    const joinAs = async (user: string) => {
+      const t = await ticket(user)
+      const claim = (await call('/v1/join/reply', { ticket: t.ticket, sealed: fixture.sealed })).body.claim
+      expect((await call('/v1/join/approve', { ceremony: CEREMONY }, user)).status).toBe(200)
+      return await call('/v1/join/register', await proof(box, claim, t.team, user))
+    }
+    const first = await joinAs(ALICE)
+    const again = await joinAs(ALICE)
+    expect(again.status).toBe(200)
+    expect(again.body.runner).toBe(first.body.runner)
+    expect(again.body.token).not.toBe(first.body.token)
+    expect(await runners()).toEqual([{ name: 'studio' }])
+
+    // Each of these tickets shares the fixture's ceremony, so clear the first
+    // account's reply and tickets before another account answers it.
+    await env.DB.prepare(`DELETE FROM ceremony_replies`).run()
+    await env.DB.prepare(`DELETE FROM join_tickets`).run()
+    const taken = await joinAs('join-mallory')
+    expect([taken.status, taken.body.error]).toEqual([409, 'registered'])
+    expect(await runners()).toEqual([{ name: 'studio' }])
+  })
+
   it('keeps no ticket or claim in the clear', async () => {
     const t = await ticket()
     const claim = (await call('/v1/join/reply', { ticket: t.ticket, sealed: fixture.sealed })).body.claim
