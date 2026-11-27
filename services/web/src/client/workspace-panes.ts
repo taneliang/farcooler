@@ -169,6 +169,8 @@ export class WorkspacePanes {
   }
 
   disconnect(): void {
+    this.watching?.on_terminal_writer_change(undefined)
+    this.watching = null
     for (const mount of this.mounts.values()) mount.writer.show(null)
     this.set.disconnect()
   }
@@ -180,7 +182,7 @@ export class WorkspacePanes {
 
   dispose(): void {
     this.stopped = true
-    if (this.watching && this.watching === this.runner()) this.watching.on_terminal_writer_change(undefined)
+    this.watching?.on_terminal_writer_change(undefined)
     this.watching = null
     this.set.dispose()
     for (const mount of this.mounts.values()) {
@@ -192,6 +194,7 @@ export class WorkspacePanes {
 
   private showWriters(ids: string[], runner: WebRunner | null): void {
     if (this.watching !== runner) {
+      this.watching?.on_terminal_writer_change(undefined)
       this.watching = runner
       runner?.on_terminal_writer_change(terminal => {
         if (this.stopped || runner !== this.runner()) return

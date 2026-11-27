@@ -6,15 +6,16 @@ The runner records one `terminal.compose` outcome with elapsed milliseconds and 
 
 ## Idle requests per minute
 
-This is the configured steady-state rate for one connected runner with the Terminals page visible, a selected workspace, and no changes. The plan fits one response. Counts exclude initial reads, event-triggered reads, transcript follow requests, and connection probes.
+This is the configured steady-state rate on the landing base for one connected runner with the Terminals page visible, a selected workspace, and no changes. The plan fits one response. Counts exclude initial reads, event-triggered reads, transcript follow requests, and connection probes.
 
 | Runner RPCs | Before | After |
 | --- | ---: | ---: |
 | Needs You and work inventory | 60 | 60 |
+| `host.health` | 12 | 12 |
 | `plan.get` for orchestrator discovery | 12 | 0 |
 | `terminal.writer` status, per visible pane | 60 | 0 |
-| **Total with one pane** | **132** | **60** |
-| **Total with two panes** | **192** | **60** |
+| **Total with one pane** | **144** | **72** |
+| **Total with two panes** | **204** | **72** |
 
 The before rates come from the five-second page refresh and the one-second delay after each lease response. Round-trip time can lower the actual lease rate. On a runner with workflow support, discovery also made at least one workflow read per plan refresh, adding another 12 requests per minute before. The page now gets the orchestrator from its existing work inventory. Chromium advanced an idle pane through 60 seconds and observed zero lease status calls. A lease event triggers a status read for the pane it names.
 

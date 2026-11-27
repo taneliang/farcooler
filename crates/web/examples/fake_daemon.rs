@@ -353,6 +353,7 @@ fn main() {
                                 name: "Billing".into(),
                                 ordinal: 1,
                                 repository_id: id_bytes(REPOSITORY),
+                                orchestrator_terminal_id: Some(id_bytes(terminal(14))),
                                 ..Default::default()
                             },
                             farcooler_protocol::v1::Workspace {
