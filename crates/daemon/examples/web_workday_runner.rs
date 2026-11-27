@@ -225,12 +225,16 @@ async fn main() {
     assert!(root.is_dir());
     farcooler_daemon::service::stub_agents_in_this_process();
     farcooler_daemon::sshd_version::offer_passkey_keys().await;
-    let service = Arc::new(
-        Service::open_in(state.clone())
-            .await
-            .unwrap()
-            .enrolling_into(keys),
-    );
+    let mut service = Service::open_in(state.clone())
+        .await
+        .unwrap()
+        .enrolling_into(keys);
+    // The fixture's sshd has a host key of its own, which a browser's
+    // approval is signed for (ov-1490): `/etc/ssh` isn't it.
+    if let Some(dir) = std::env::var_os("FARCOOLER_FIXTURE_SSH_HOST_DIR") {
+        service = service.with_ssh_host_dir(PathBuf::from(dir));
+    }
+    let service = Arc::new(service);
     let watcher = Watcher::new(service.clone());
     let socket = state.join("farcoolerd.sock");
     let admin = UnixListenerServer::bind(&socket).unwrap();

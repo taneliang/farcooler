@@ -5,6 +5,11 @@
 //
 //   node test/browser/csp-check.mjs [--dist dist] [--fake-daemon BINARY] [--screenshots DIR] [--cpu-throttle N] [--tunnel-delay MS] [--max-sessions N]
 //
+// With --join (and the workday binaries), only the join walk runs: adding a
+// runner with `farcooler join`, approving a second browser from the first,
+// removing it, and getting back in with no device left (ov-1490,
+// join-walk.mjs).
+//
 // To run just the workspace walks, add --workstation-only with --fake-daemon.
 // --workstation-screenshots DIR saves the split at phone and desktop widths.
 //
@@ -77,6 +82,7 @@ import { chromium } from 'playwright-core'
 
 import { scrolling, typing } from './measure.mjs'
 import { filledButtons } from './shell-audit.mjs'
+import { joinWalk, startJoinStub } from './join-walk.mjs'
 
 const args = process.argv.slice(2)
 const flag = name => {
@@ -88,6 +94,8 @@ const fakeDaemon = flag('--fake-daemon') && resolve(flag('--fake-daemon'))
 // Use two actual Rust runner services and tmux, behind the same SSH splice.
 const workdayRunner = flag('--workday-runner') && resolve(flag('--workday-runner'))
 const workdayCli = flag('--workday-cli') && resolve(flag('--workday-cli'))
+const joining = args.includes('--join')
+if (joining && !workdayRunner) throw new Error('--join needs --workday-runner and --workday-cli')
 if (workdayRunner && !workdayCli) throw new Error('--workday-runner requires --workday-cli')
 // For a person judging the screens: each one at a desktop and a phone width.
 const shots = flag('--screenshots')
@@ -195,13 +203,16 @@ const read = path => {
 /// How long the stub relay holds `directory/me`, for the slow-start step.
 let meDelay = 0
 const handle = shellHandler(read, env, reports, { meDelay: () => meDelay })
+/// The relay's join, ceremony-reply and runner-list routes, for the join walk.
+const joinStub = joining ? await startJoinStub() : null
 
 /// Answer a routed request with the Worker's own handler.
 async function serve(route) {
   const request = route.request()
   const method = request.method()
   const body = method === 'GET' || method === 'HEAD' ? undefined : (request.postDataBuffer() ?? undefined)
-  let response = await handle(new Request(request.url(), { method, headers: request.headers(), body }))
+  const asked = new Request(request.url(), { method, headers: request.headers(), body })
+  let response = (joinStub && (await joinStub.page(asked.clone()))) || (await handle(asked))
   // Chromium takes a fulfilled redirect to the network, where these hosts
   // don't resolve, so the one redirect the shell makes (Sign Out's 303) is
   // followed here.
@@ -265,8 +276,17 @@ if [ "$5" = list-panes ] && [ -f "$WORKDAY_TMUX_INVENTORY_UNAVAILABLE" ]; then
 fi
 exec "$WORKDAY_REAL_TMUX" "$@"
 `, { mode: 0o700 })
+    // The join walk needs the runner to know which device is calling, so sshd
+    // runs the forced command the fence wrote, with HOME and the runtime the
+    // fixture's own: `~/.local/bin` is a link to the built daemon.
+    const hostDir = join(dir, 'etc-ssh')
+    if (joining) {
+      execFileSync('/bin/mkdir', ['-p', hostDir, join(dir, '.local', 'bin')])
+      writeFileSync(join(hostDir, 'ssh_host_ed25519_key.pub'), readFileSync(join(dir, 'host.pub')))
+      symlinkSync(join(dirname(workdayCli), 'farcoolerd'), join(dir, '.local', 'bin', built === 'stable' ? 'farcoolerd' : `farcoolerd-${built}`))
+    }
     core = spawn(workdayRunner, [dir, runtime, keys], {
-      env: { ...process.env, FARCOOLER_TUNNEL_HELPER: helper, PATH: `${dir}:${process.env.PATH}`,
+      env: { ...process.env, FARCOOLER_TUNNEL_HELPER: helper, PATH: `${dir}:${process.env.PATH}`, ...(joining ? { FARCOOLER_FIXTURE_SSH_HOST_DIR: hostDir } : {}),
         WORKDAY_REAL_TMUX: tmux, WORKDAY_TMUX_INVENTORY_UNAVAILABLE: inventoryUnavailable },
       stdio: ['ignore', 'pipe', 'inherit'],
     })
@@ -292,7 +312,8 @@ exec "$WORKDAY_REAL_TMUX" "$@"
       `AuthorizedKeysFile ${keys}`,
       `PidFile ${pidFile}`,
       'StrictModes no',
-      ...(workdayRunner ? [`ForceCommand env FARCOOLER_HOME='${runtime}' '${join(dirname(workdayCli), 'farcoolerd')}' --stdio --scope control`] : []),
+      ...(workdayRunner && !joining ? [`ForceCommand env FARCOOLER_HOME='${runtime}' '${join(dirname(workdayCli), 'farcoolerd')}' --stdio --scope control`] : []),
+      ...(joining ? [`SetEnv HOME=${join(dir)} FARCOOLER_HOME=${runtime}`] : []),
       'UsePAM no',
       'PasswordAuthentication no',
       'KbdInteractiveAuthentication no',
@@ -348,6 +369,9 @@ exec "$WORKDAY_REAL_TMUX" "$@"
 let runner = null
 /// The second runner, started by the every-runner step.
 let second = null
+/// The join walk's other browsers.
+const extraContexts = []
+const extraProfiles = []
 
 const failures = []
 const profile = mkdtempSync(join(tmpdir(), 'fc-csp-profile-'))
@@ -630,13 +654,22 @@ const statusSays = (page, text, timeout = 120_000) =>
     text,
     { timeout },
   )
-const enrolling = page =>
-  page.waitForFunction(() => !document.getElementById('enroll')?.hidden && document.getElementById('offer-fingerprint')?.textContent?.includes('SHA256:'), null, { timeout: 120_000 })
+/// The screen waiting for another device, by way of Add Runner when that is
+/// what's showing (ov-1490).
+const enrolling = async page => {
+  await page.waitForSelector('#enroll:not([hidden]), #runner-add:not([hidden])', { timeout: 120_000 })
+  if (await page.locator('#runner-add:not([hidden])').count()) await page.click('#join-from-device')
+  await page.waitForFunction(() => !document.getElementById('enroll')?.hidden && document.getElementById('offer-fingerprint')?.textContent?.includes('SHA256:'), null, { timeout: 120_000 })
+}
 
-/// Make Passkey, from the screen that asks for it.
-async function makePasskey(page) {
+/// Make Passkey, from the screen that asks for it, then from Add Runner to
+/// the screen that waits for another device (ov-1490).
+async function makePasskey(page, toDevice = true) {
   await statusSays(page, 'Make a passkey')
   await page.click('#status-action')
+  await page.waitForSelector('#runner-add:not([hidden])', { timeout: 120_000 })
+  if (!toDevice) return
+  await page.click('#join-from-device')
   await enrolling(page)
 }
 
@@ -1508,6 +1541,20 @@ try {
   // A step that times out stops the walk, and the violations it caused are
   // still reported: they are usually why it timed out.
   try {
+    if (joining) {
+      await joinWalk({
+        session, launch, startRunner: () => runner, stub: joinStub, cli: workdayCli, me, shoot, origin, device,
+        statusSays, makePasskey, failures, fresh: async () => {
+          const dir = mkdtempSync(join(tmpdir(), 'fc-join-profile-'))
+          extraProfiles.push(dir)
+          credential = null
+          const made = await launch(null, null, { dir })
+          extraContexts.push(made.context)
+          return made
+        },
+      })
+      throw new WalkDone()
+    }
     if (workdayRunner) {
       await remoteWorkday(session)
       throw new WalkDone()
@@ -1815,6 +1862,9 @@ try {
   for (const r of reports.csp) failures.push(`CSP report: ${r.slice(0, 300)}`)
   for (const e of errors) if (!/Failed to load resource/.test(e)) failures.push(e)
 } finally {
+  for (const context of extraContexts) await context.close().catch(() => {})
+  for (const dir of extraProfiles) rmSync(dir, { recursive: true, force: true })
+  joinStub?.close()
   await session?.context.close()
   // By pid, never by pattern: this machine may run other sshds.
   for (const r of [runner, second]) {
