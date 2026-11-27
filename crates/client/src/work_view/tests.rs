@@ -262,3 +262,10 @@ fn the_runners_refusal_travels_with_the_terminal() {
     };
     assert_eq!(terminal(listed).unwrap().restart_refusal.as_deref(), Some("not_lead"));
 }
+
+/// An old orchestrator restarted after another took its place.
+#[test]
+fn a_taken_seat_is_said_in_words_about_the_orchestrator() {
+    assert_eq!(failure("refused", "invalid-argument", "orchestrator_taken"),
+        "This workspace already has a running orchestrator, so this one can’t be restarted.");
+}

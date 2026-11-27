@@ -240,6 +240,7 @@ pub fn failure(word: &str, code: &str, what: &str) -> &'static str {
         (_, "not-found", _) => "The selected worktree or terminal is no longer on the runner.",
         (_, "branch-exists", _) => "That branch already exists. Pick a different branch name or select its worktree.",
         (_, "worktree-exists", _) => "A worktree already uses that name. Choose it from the list or enter another name.",
+        (_, _, "orchestrator_taken") => "This workspace already has a running orchestrator, so this one can’t be restarted.",
         (_, "invalid-argument", "worktree_name") => "Enter a worktree name between 1 and 60 characters that includes a letter or number.",
         (_, "invalid-argument", "branch_name") => "Enter a valid Git branch name, such as feature/fix-build.",
         (_, "invalid-argument", _) => "Check the name or branch and try again.",
