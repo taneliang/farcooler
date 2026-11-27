@@ -420,6 +420,10 @@ button.danger { color: var(--danger); }
    open, else Start Terminal. */
 #start-work:has(#work-create:not([hidden])) #work-start { background: var(--surface); border-color: var(--control-edge); color: var(--text); }
 
+/* A lost connection comes first: nothing recovers until it's back, so
+   Reconnect is the filled one (ov-1490: a removed browser showed both). */
+#work:has(#link-action:not([hidden])) #terminal-recover { background: var(--surface); border-color: var(--control-edge); color: var(--text); }
+
 /* Add Runner and Devices (ov-1490). */
 .runner-add h2, .devices h3 { font-size: 16px; font-weight: 600; margin: 24px 0 4px; }
 .command { margin: 0 0 8px; padding: 10px 14px; border-radius: 12px; background: var(--card); max-height: 6.5em; overflow-y: auto; }
@@ -436,7 +440,9 @@ button.danger { color: var(--danger); }
 .unenrolled li span { color: var(--text-2); font-size: 13px; }
 .runner-tools { display: flex; flex-wrap: wrap; gap: 0 var(--s4); }
 .side-unenrolled { margin-top: var(--s3); max-height: 9em; overflow-y: auto; }
-.side-unenrolled .meta { margin: 0 0 var(--s1); }
+/* Shown at phone width too, where the shell hides the other groups' headings:
+   without it, nothing says these aren't set up here. */
+.rail-group .side-unenrolled .meta { position: static; width: auto; height: auto; overflow: visible; clip-path: none; margin: 0 0 var(--s1); }
 .side-unenrolled li { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; }
 .side-unenrolled li strong { flex: 1; min-width: 0; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .side-unenrolled li span { display: none; }

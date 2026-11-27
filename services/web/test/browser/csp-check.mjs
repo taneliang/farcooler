@@ -149,7 +149,9 @@ const oneFilled = async (page, name) => {
   const filled = await filledButtons(page)
   if (filled.length > 1) failures.push(`${name} shows ${filled.length} filled buttons: ${JSON.stringify(filled)}`)
 }
-const shoot = async (page, name) => {
+// `focus` is a selector to keep in view at every width, for a sheet that
+// scrolls on a phone.
+const shoot = async (page, name, focus) => {
   await oneFilled(page, name)
   const directory = name.startsWith('workstation-') ? workstationShots ?? shots : shots
   if (!directory) return
@@ -159,6 +161,7 @@ const shoot = async (page, name) => {
     for (const [width, height] of [[1280, 800], [768, 1024], [320, 640]]) {
       await page.setViewportSize({ width, height })
       await page.waitForTimeout(300)
+      if (focus) await page.locator(focus).evaluate(el => el.scrollIntoView({ block: 'center' }))
       await oneFilled(page, `${name} at ${width} ${scheme}`)
       await page.screenshot({ path: join(directory, `${name}-${scheme}-${width}.png`) })
     }
@@ -1387,12 +1390,17 @@ async function remoteWorkday({ context, page, passkeys }) {
   second = await startRunner('build-box')
   await page.click('#add-runner')
   await approve(second)
-  await connectRunner(page, 'studio')
-  // The runner switcher is the same kind of select as the workspace picker.
-  await page.getByRole('combobox', { name: 'Switch Runner' }).click()
-  await page.getByRole('option', { name: 'build-box', exact: true }).click()
-  await page.getByRole('listbox').waitFor({ state: 'detached' })
+  // The runner just added is the one offered next (ov-1490).
   await connectRunner(page, 'build-box')
+  // The runner switcher is the same kind of select as the workspace picker.
+  async function switchRunner(label) {
+    await page.getByRole('combobox', { name: 'Switch Runner' }).click()
+    await page.getByRole('option', { name: label, exact: true }).click()
+    await page.getByRole('listbox').waitFor({ state: 'detached' })
+    await connectRunner(page, label)
+  }
+  await switchRunner('studio')
+  await switchRunner('build-box')
 
   const work = page.getByRole('dialog', { name: 'Start Work' })
   async function chooseCheckout() {

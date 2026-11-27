@@ -221,6 +221,8 @@ export class DevicesSheet {
       choices.append(note)
     }
     this.$('device-confirm').hidden = false
+    // What to compare, and Approve, are below the fold on a phone.
+    this.$('device-confirm').scrollIntoView({ block: 'nearest' })
   }
 
   private async approve(): Promise<void> {
@@ -263,6 +265,7 @@ export class DevicesSheet {
       this.$('device-compare').hidden = false
       this.say(say({ say: 'check_code', failed }))
       await this.list()
+      if (mine === this.generation) this.$('device-compare').scrollIntoView({ block: 'center' })
     } finally {
       this.busy = false
     }

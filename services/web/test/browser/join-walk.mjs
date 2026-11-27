@@ -122,13 +122,23 @@ export async function joinWalk({ session, startRunner, stub, cli, me, shoot, ori
   const env = { ...process.env, FARCOOLER_HOME: runner.runtime, USER: me }
   const keys = join(runner.dir, '.ssh', 'authorized_keys')
   const lines = () => (existsSync(keys) ? readFileSync(keys, 'utf8').split('\n').filter(l => l.includes('--client ')) : [])
-  const shot = (page, name) => shoot(page, `join-${name}`, 320)
+  const shot = (page, name, focus) => shoot(page, `join-${name}`, focus)
+  /// On the screen without scrolling to it by hand.
+  const onScreen = async (page, selector) => {
+    await page.waitForFunction(selector => {
+      const box = document.querySelector(selector)?.getBoundingClientRect()
+      return box && box.height > 0 && box.top >= 0 && box.bottom <= window.innerHeight
+    }, selector, { timeout: 5_000 }).catch(() => {
+      throw new Error(`${selector} is off a phone’s screen`)
+    })
+  }
   /// The page's width never grows past the window's.
   const fits = async (page, name) => {
     for (const width of [320, 1280]) {
       await page.setViewportSize({ width, height: 844 })
       await page.waitForTimeout(150)
-      const over = await page.evaluate(() => [document.documentElement.scrollWidth, ...[...document.querySelectorAll('dialog[open]')].map(d => d.scrollWidth - d.clientWidth)])
+      // The shell scrolls inside itself, so its own scrollers are measured too.
+      const over = await page.evaluate(() => [document.documentElement.scrollWidth, ...[...document.querySelectorAll('dialog[open], .app, .page-body, .rail-body, #side-unenrolled')].filter(e => e.checkVisibility()).map(e => e.scrollWidth - e.clientWidth)])
       assert(over[0] <= width && over.slice(1).every(n => n <= 0), `${name} is wider than ${width}px: ${over}`)
     }
     await page.setViewportSize({ width: 1280, height: 800 })
@@ -179,9 +189,9 @@ export async function joinWalk({ session, startRunner, stub, cli, me, shoot, ori
   async function open(page, label, capture) {
     await statusSays(page, `Connect to ${label}`)
     await page.click('#status-action')
-    await page.waitForSelector('#work:not([hidden]) .terminal-choice', wait)
+    await page.waitForSelector('.app[data-screen="work"] .terminal-choice', wait)
     await page.locator('#runner-health').filter({ hasText: /^Connected$/ }).waitFor(wait)
-    await page.locator('#space-picker option').first().waitFor({ state: 'attached', ...wait })
+    await page.waitForFunction(() => document.getElementById('space-picker')?.dataset.value, null, wait)
     if (capture) await shot(page, capture)
   }
 
@@ -196,13 +206,23 @@ export async function joinWalk({ session, startRunner, stub, cli, me, shoot, ori
   assert(lines().length === 1, `the runner has ${lines().length} device lines`)
   await open(a, 'studio', 'runner-added')
   assert(await a.evaluate(() => window.__sameDocument === true), 'the runner appeared without a reload')
-  assert((await a.locator('#space-picker option').allTextContents()).length > 0, 'its workspaces are listed')
+  await a.click('#space-picker')
+  await a.getByRole('option').first().waitFor(wait)
+  await a.keyboard.press('Escape')
+  await a.getByRole('listbox').waitFor({ state: 'detached' })
   console.log('join: a new browser’s first screen was Add Runner, and farcooler join added the runner and its workspaces with no reload')
 
   // 2. The account's other runner is listed here, with the step to add it.
   await a.locator('#side-unenrolled:not([hidden])').filter({ hasText: 'build-box' }).waitFor(wait)
   assert(!(await a.textContent('#side-unenrolled')).includes('studio'), 'a runner this browser opens isn’t listed')
   await fits(a, 'the work screen')
+  // A phone folds the runner and its list behind the button naming the runner.
+  await a.setViewportSize({ width: 320, height: 640 })
+  await a.click('#rail-more')
+  await a.getByRole('button', { name: 'Set Up build-box' }).waitFor({ state: 'visible', ...wait })
+  await fits(a, 'the work screen, unfolded')
+  const heading = await a.locator('#side-unenrolled .meta').boundingBox()
+  assert(heading && heading.height > 4, 'a phone says these runners aren’t set up in this browser')
   await shot(a, 'unenrolled-sidebar')
   await a.getByRole('button', { name: 'Set Up build-box' }).click()
   await a.locator('#unenrolled:not([hidden])').filter({ hasText: 'build-box' }).waitFor(wait)
@@ -234,20 +254,27 @@ export async function joinWalk({ session, startRunner, stub, cli, me, shoot, ori
   await sheet.locator('#device-check').click()
   await sheet.locator('#device-result').filter({ hasText: /couldn’t be read|newer Far Cooler/ }).waitFor(wait)
   await sheet.locator('#device-code').fill(offer)
+  // A phone must see what to compare, and then the code, as each appears.
+  await a.setViewportSize({ width: 320, height: 640 })
   await sheet.locator('#device-check').click()
   await sheet.locator('#device-confirm:not([hidden])').waitFor(wait)
+  await onScreen(a, '#device-fingerprint')
+  await onScreen(a, '#device-approve')
   assert((await sheet.locator('#device-fingerprint').textContent()) === bPasskey, 'the approver shows the new browser’s passkey')
   await fits(a, 'the approval')
-  await shot(a, 'approve-confirm')
+  await shot(a, 'approve-confirm', '#device-fingerprint')
   assert(lines().length === 1, 'nothing was added before Approve')
+  await a.setViewportSize({ width: 320, height: 640 })
   await sheet.locator('#device-approve').click()
   await sheet.locator('#device-compare:not([hidden])').waitFor(wait)
+  await onScreen(a, '#device-compare')
+  await a.setViewportSize({ width: 1280, height: 800 })
   await b.waitForSelector('#compare:not([hidden])', wait)
   const [onA, onB] = [await code(a, '#device-compare'), await code(b)]
   assert(onA === onB, `the two screens show ${onA} and ${onB}`)
   await fits(b, 'the new browser’s code')
   await shot(b, 'approve-new-device-compare')
-  await shot(a, 'approve-code')
+  await shot(a, 'approve-code', '#device-compare')
   assert(lines().length === 2, 'the runner holds the new browser’s line')
   await b.click('#compare-yes')
   await open(b, 'studio', 'approved-browser-open')

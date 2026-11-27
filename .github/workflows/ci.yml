@@ -1984,12 +1984,12 @@ jobs:
           fi
           cargo build --locked --manifest-path ../../Cargo.toml -p farcooler-daemon --features tailcat-helper --bin farcoolerd --example web_workday_runner
           cargo build --locked --manifest-path ../../Cargo.toml -p farcooler-cli --bin farcooler
-          TMPDIR="$RUNNER_TEMP" node test/browser/csp-check.mjs \
-            --workday-runner "${CARGO_TARGET_DIR:-../../target}/debug/examples/web_workday_runner" \
-            --workday-cli "${CARGO_TARGET_DIR:-../../target}/debug/farcooler"
           # Joining with no app (ov-1490): `farcooler join` at the runner, a second
           # browser approved and removed, and recovery, on the same binaries.
           TMPDIR="$RUNNER_TEMP" node test/browser/csp-check.mjs --join \
+            --workday-runner "${CARGO_TARGET_DIR:-../../target}/debug/examples/web_workday_runner" \
+            --workday-cli "${CARGO_TARGET_DIR:-../../target}/debug/farcooler"
+          TMPDIR="$RUNNER_TEMP" node test/browser/csp-check.mjs \
             --workday-runner "${CARGO_TARGET_DIR:-../../target}/debug/examples/web_workday_runner" \
             --workday-cli "${CARGO_TARGET_DIR:-../../target}/debug/farcooler"
 
