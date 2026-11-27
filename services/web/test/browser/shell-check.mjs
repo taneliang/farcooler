@@ -98,18 +98,35 @@ const ORDER = [
 
 for (const width of [1280, 320]) {
   await test(`focus follows the document through sidebar, header and account at ${width}`, async page => {
+    if (width < 681) {
+      // Folded: the runner and the tools wait behind one button, and Tab
+      // goes from it straight to the workspace.
+      await page.keyboard.press('Tab')
+      assert.equal(await focused(page), 'rail-more')
+      assert.ok(await ring(page), 'rail-more has no focus ring')
+      assert.equal(await page.getAttribute('#rail-more', 'aria-expanded'), 'false')
+      await page.keyboard.press('Tab')
+      assert.equal(await focused(page), 'space-picker')
+      await page.keyboard.press('Shift+Tab')
+      await page.keyboard.press('Enter')
+      assert.equal(await page.getAttribute('#rail-more', 'aria-expanded'), 'true')
+      assert.equal(await focused(page), 'rail-more')
+    }
     const seen = []
     for (let i = 0; i < 24; i++) {
       await page.keyboard.press('Tab')
       const id = await focused(page)
       seen.push(id)
-      if (id.startsWith('button:') || id.startsWith('a:') || /^(show|runner|space|add|workspace)-/.test(id)) {
+      if (id.startsWith('button:') || id.startsWith('a:') || /^(show|runner|space|add|workspace|rail)-/.test(id)) {
         assert.ok(await ring(page), `${id} has no focus ring`)
       }
     }
     const once = seen.slice(0, seen.findIndex(id => id.startsWith('body:')))
-    const stops = once.filter(id => ORDER.includes(id))
-    assert.deepEqual(stops, ORDER, `focus went ${JSON.stringify(seen)}`)
+    // At phone width the terminal strip shows only on Terminals, and this
+    // page is the board.
+    const order = width < 681 ? ORDER.filter(id => id !== 'workspace-link' && !id.startsWith('a:')) : ORDER
+    const stops = once.filter(id => order.includes(id))
+    assert.deepEqual(stops, order, `focus went ${JSON.stringify(seen)}`)
     // The page's own content comes after the header, and the account last.
     const after = once.slice(once.indexOf('show-start-work'))
     assert.ok(after.indexOf('bar-count') > after.indexOf('button:ov-1510 Web: React shell on'), `account before the page: ${JSON.stringify(after)}`)
@@ -199,6 +216,11 @@ for (const scheme of ['light', 'dark']) {
       if (width < 500) {
         const short = await page.$$eval('.view-link, .control', els => els.filter(el => el.getClientRects().length && el.getBoundingClientRect().height < 44).map(el => el.id || el.textContent))
         assert.deepEqual(short, [], 'phone targets under 44 px')
+        // The compact header leaves the page near the top, as ov-1483's
+        // phone board does: brand, workspace and the views, nothing more.
+        assert.equal(await page.getAttribute('.page-head', 'data-page'), 'board')
+        const top = await page.evaluate(() => document.querySelector('.page-head').getBoundingClientRect().top)
+        assert.ok(top <= 260, `the board's header starts ${top} px down`)
       }
       if (width === 1280) {
         for (const [what, value, minimum] of await contrastPairs(page)) {

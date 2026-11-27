@@ -1152,6 +1152,8 @@ async function workstationWalk(page) {
   await page.keyboard.press('Enter')
   await page.locator('#detail[open] .detail-note').waitFor()
   assert(await draft.inputValue() === 'Keep the invoice export draft here.', 'ticket hid the orchestrator draft')
+  // At phone width the tools fold behind the runner's button.
+  await page.click('#rail-more')
   await page.click('#show-workflow')
   await page.locator('#workflow-runs[open]').getByText('No workflow runs.').waitFor()
   assert(await draft.isVisible(), 'workflow hid the orchestrator')

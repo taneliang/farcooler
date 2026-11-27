@@ -16,7 +16,7 @@
 /// 'self'` intact. React Router supplies the navigation context; the routes
 /// themselves stay with WorkspaceHistory, which owns the URL.
 
-import { useLayoutEffect, useRef, useSyncExternalStore, type MouseEvent, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from 'react'
 import { flushSync } from 'react-dom'
 import { createRoot } from 'react-dom/client'
 import { Link, Route, Router, Routes, type Navigator } from 'react-router'
@@ -115,6 +115,9 @@ function Picker({ id, label, items, value, disabled, change }: {
 
 function Sidebar({ state, store }: { state: ShellState; store: ShellStore }) {
   const work = state.screen === 'work'
+  /// At phone width (shell.css) the runner and the tools fold behind one
+  /// button, so the page starts near the top; wider, both always show.
+  const [more, setMore] = useState(false)
   const go = (tab: ShellTab) => (event: MouseEvent) => {
     if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
     event.preventDefault()
@@ -124,9 +127,15 @@ function Sidebar({ state, store }: { state: ShellState; store: ShellStore }) {
     <div className="brand">
       {MARK ? <img className="brand-mark" src={MARK} alt="" width={28} height={28} /> : <span className="brand-mark" aria-hidden />}
       <span>Far Cooler</span>
+      {work && <button id="rail-more" className="control rail-more" type="button" aria-expanded={more}
+        aria-controls="rail-runner rail-tools" aria-label={`${state.runner.label}, Runner and Tools`}
+        onClick={() => setMore(open => !open)}>
+        <span className="picker-value">{state.runner.label}</span>
+        <span className="picker-icon" aria-hidden>⌄</span>
+      </button>}
     </div>
-    {work && <div className="rail-body">
-      <section className="rail-group">
+    {work && <div className="rail-body" data-more={more || undefined}>
+      <section className="rail-group" id="rail-runner">
         <h2 className="meta">Runner</h2>
         {state.runners.length > 1
           ? <Picker id="runner-picker" label="Switch Runner" items={state.runners} value={state.runner.id} change={id => store.handlers.pickRunner(id)} />
@@ -150,7 +159,7 @@ function Sidebar({ state, store }: { state: ShellState; store: ShellStore }) {
             aria-current={current ? 'page' : undefined} aria-keyshortcuts={item.keys} onClick={go(tab)}>{item.label}</Link>
         })}
       </nav>
-      <div className="tools" role="group" aria-label="Workspace tools">
+      <div className="tools" id="rail-tools" role="group" aria-label="Workspace tools">
         {TOOLS.map(tool => {
           const item = state.tools[tool]
           return <button key={tool} id={`show-${tool}`} className="quiet tool" type="button" disabled={item.disabled}

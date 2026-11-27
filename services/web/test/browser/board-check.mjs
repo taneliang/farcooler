@@ -128,6 +128,8 @@ async function layoutPage(width, openSplit = true) {
   await tab.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' })
   await tab.locator('#board-title').waitFor({ state: 'attached' })
   if (openSplit) {
+    // At phone width the tools fold behind the runner's button.
+    if (await tab.locator('#rail-more').isVisible()) await tab.locator('#rail-more').click()
     await tab.locator('#show-orchestrator').click()
     await tab.getByRole('region', { name: 'Orchestrator', exact: true }).waitFor()
   }

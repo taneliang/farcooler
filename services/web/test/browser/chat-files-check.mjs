@@ -26,6 +26,7 @@ import { deflateSync, crc32 } from 'node:zlib'
 
 import { build } from 'esbuild'
 import { chromium } from 'playwright-core'
+import { styles } from '../../scripts/styles.mjs'
 
 const args = process.argv.slice(2)
 const shots = args.includes('--screenshots') ? args[args.indexOf('--screenshots') + 1] : null
@@ -60,7 +61,7 @@ function png(width, height, hue = 0) {
 }
 
 const bundle = await build({ entryPoints: ['test/browser/chat-page.ts'], bundle: true, format: 'esm', target: 'es2022', write: false })
-const css = readFileSync('src/client/app.css', 'utf8') + readFileSync('src/client/chat.css', 'utf8')
+const css = styles().toString()
 const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Far Cooler</title>
 <link rel="stylesheet" href="/app.css"><script type="module" src="/app.js"></script></head><body>
 <header class="bar"><span class="title">Far Cooler</span><span class="who">owner@example.com</span></header>

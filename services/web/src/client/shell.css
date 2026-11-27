@@ -43,6 +43,7 @@ button.link:hover:not(:disabled) { background: none; color: var(--accent-hover);
 .picker { width: 100%; justify-content: space-between; text-align: left; }
 .picker-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .picker-icon { flex: none; color: var(--muted); }
+.rail-more { display: none; }
 .select-position { z-index: 30; outline: 0; }
 .select-popup { min-width: var(--anchor-width); max-width: min(420px, calc(100vw - 32px)); max-height: var(--available-height); overflow: auto; padding: var(--s1); background: var(--surface); color: var(--text); border: 1px solid var(--control-edge); border-radius: var(--radius-control); box-shadow: var(--shadow); outline: 0; }
 .select-item { display: flex; justify-content: space-between; align-items: center; gap: var(--s4); min-height: 36px; padding: var(--s2) var(--s3); border-radius: var(--radius-small); font: var(--type-label) var(--sans); cursor: default; overflow-wrap: anywhere; outline: 0; }
@@ -111,6 +112,13 @@ button.link:hover:not(:disabled) { background: none; color: var(--accent-hover);
   .app:not([data-screen="work"]) .page { height: auto; min-height: 80dvh; }
   .side-pane { flex: none; height: 88dvh; }
   .brand { padding: var(--s3) var(--s4); }
+  /* The runner and the tools fold behind the button in the brand row, which
+     names the runner; the terminal strip shows only on Terminals. So the
+     header is the brand, the workspace and the views, as in ov-1483. */
+  .rail-more { display: inline-flex; margin-left: auto; min-width: 0; max-width: 60%; font-weight: var(--medium); }
+  .rail-more[aria-expanded="true"] .picker-icon { transform: rotate(180deg); }
+  .rail-body:not([data-more]) > #rail-runner, .rail-body:not([data-more]) > .tools { display: none; }
+  .app:not([data-page="terminals"]) .rail-terminals { display: none; }
   .rail-body { flex: none; overflow: visible; gap: var(--s3); padding-bottom: var(--s3); }
   .rail-group .meta { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .views { grid-template-columns: 1fr 1fr; }
