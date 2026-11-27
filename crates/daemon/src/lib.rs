@@ -45,6 +45,7 @@ pub mod git_lfs;
 pub mod git_sandbox;
 pub mod hook_asks;
 pub mod hostwalk;
+pub mod join_relay;
 pub mod hook_ingress;
 pub mod hook_install;
 pub mod agent_panes;

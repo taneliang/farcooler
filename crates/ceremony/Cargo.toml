@@ -25,7 +25,8 @@ thiserror.workspace = true
 # The same version russh brings, so a fingerprint here is the one the
 # daemon's fence and the host-key check print. `alloc` is all the ceremony
 # asks of it: parsing an OpenSSH public key and printing its SHA256.
-ssh-key = { version = "0.7.0-rc.11", default-features = false, features = ["alloc", "ed25519"] }
+# `ecdsa` reads a browser's sk-ecdsa passkey line (ov-1490).
+ssh-key = { version = "0.7.0-rc.11", default-features = false, features = ["alloc", "ed25519", "ecdsa"] }
 # The ceremony id's 128 random bits, from the RNG russh itself uses.
 rand = "0.10"
 # Sealing the reply for the relay (ov-769): RFC 9180 HPKE, base mode, with

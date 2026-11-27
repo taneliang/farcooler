@@ -52,7 +52,7 @@ const CEREMONY = /^[0-9a-f]{32}$/
 
 /// The smallest sealed reply: a 32-byte encapsulated key, a 16-byte tag and at
 /// least one byte. Unpadded base64url only.
-const SEALED = /^[A-Za-z0-9_-]+$/
+export const SEALED = /^[A-Za-z0-9_-]+$/
 const SEALED_MIN_BYTES = 32 + 16 + 1
 
 /// What only a reply in the clear would hold: a host key's fingerprint, or
@@ -187,7 +187,7 @@ export async function sweepCeremonyReplies(env: Env): Promise<void> {
 }
 
 /// Long enough to be a sealed reply, and holding nothing only plaintext would.
-function looksSealed(sealed: string): boolean {
+export function looksSealed(sealed: string): boolean {
   let bytes: string
   try {
     const padded = sealed.replaceAll('-', '+').replaceAll('_', '/')

@@ -1,7 +1,7 @@
 //! Approve a browser from an existing SSH login on the runner.
 use std::io::{BufRead, Write};
 
-use farcooler_ceremony::{self as ceremony, Offer, Reach, RunnerEntry};
+use farcooler_ceremony::{self as ceremony, Offer, RunnerEntry};
 use farcooler_daemon_contracts::paths;
 use farcooler_protocol::v1::{self as pb, request, result};
 
@@ -35,8 +35,11 @@ pub async fn enroll(remote: Option<&str>, args: Args) -> Fallible {
         .next()
         .transpose()?
         .ok_or("No browser offer received.")?;
-    let offer = ceremony::accept_offer(encoded.trim(), &args.account)?;
-    let request = enrollment(&offer)?;
+    let offer = ceremony::accept_browser_offer(&encoded, &args.account)
+        .map_err(|e| match e {
+            ceremony::CeremonyError::NotABrowser => "Expected a browser offer with a passkey and a tunnel key.".into(),
+            other => Box::<dyn std::error::Error>::from(other),
+        })?;
     eprint!(
         "Grant {} control on {}? Compare {} with the browser first. Type yes to continue: ",
         offer.name.escape_default(),
@@ -49,6 +52,18 @@ pub async fn enroll(remote: Option<&str>, args: Args) -> Fallible {
     }
     drop(lines);
 
+    let (_, runner) = grant(&offer, &args.label, &args.user, &host_key).await?;
+    let (sealed, code) = ceremony::seal_reply(&offer, &ceremony::manifest(&offer, vec![runner]))?;
+    eprintln!("Paste the reply into the browser and compare this code: {code}");
+    println!("{sealed}");
+    Ok(())
+}
+
+/// Enroll the browser `offer` names on this runner, at Control, over this
+/// runner's own socket, and answer this runner's install id and the entry its
+/// sealed reply grants. `offer` is one `accept_browser_offer` took. The runner
+/// refuses this from a pane.
+pub(crate) async fn grant(offer: &Offer, label: &str, user: &str, host_key: &str) -> Result<(String, RunnerEntry), Box<dyn std::error::Error>> {
     let install = paths::load_or_create_install_id_in(&paths::ensure_runtime_dir()?)?;
     let mut link = connect_to(None).await?;
     if !link
@@ -58,44 +73,19 @@ pub async fn enroll(remote: Option<&str>, args: Args) -> Fallible {
     {
         return Err("This runner does not accept web passkeys. Check that the runner and OpenSSH are up to date.".into());
     }
-    let result::Value::ClientEnroll(grant) = expect_value(link.call(request).await?.value)? else {
+    let result::Value::ClientEnroll(done) = expect_value(link.call(enrollment(offer)?).await?.value)? else {
         return Err(crate::daemon_link::UNREADABLE.into());
     };
-    if grant.conn_blob.is_empty() {
+    if done.conn_blob.is_empty() {
         return Err(
             "This runner returned no tunnel token. Check runner tunnel setup and try again.".into(),
         );
     }
-    let runner = RunnerEntry {
-        id: farcooler_daemon::service::stable_host_id(&install).to_string(),
-        label: args.label.clone(),
-        alias: args.label,
-        user: args.user,
-        host_key,
-        reach: Reach::Tailcat {
-            token: grant.conn_blob,
-            client_key: String::new(),
-        },
-        alternative: None,
-        pending: false,
-        pending_why: None,
-    };
-    let (sealed, code) = ceremony::seal_reply(&offer, &ceremony::manifest(&offer, vec![runner]))?;
-    eprintln!("Paste the reply into the browser and compare this code: {code}");
-    println!("{sealed}");
-    Ok(())
+    let id = farcooler_daemon::service::stable_host_id(&install).to_string();
+    Ok((install, ceremony::tunneled_runner(&id, label, user, host_key, &done.conn_blob)))
 }
 
 fn enrollment(offer: &Offer) -> Result<pb::Request, Box<dyn std::error::Error>> {
-    if offer.key_b.is_some()
-        || !offer
-            .key_a
-            .starts_with("sk-ecdsa-sha2-nistp256@openssh.com ")
-        || offer.node_key.is_empty()
-        || offer.reply_key.is_none()
-    {
-        return Err("Expected a browser offer with a passkey and a tunnel key.".into());
-    }
     let client_id = ceremony::client_id(&offer.key_a).ok_or("Invalid browser passkey.")?;
     Ok(with(
         req("client.enroll"),

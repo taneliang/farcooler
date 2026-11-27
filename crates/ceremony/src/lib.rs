@@ -67,6 +67,9 @@ pub use fit::{Fitted, Reaches, fit_manifest, fit_manifest_from, reaches};
 mod teammate;
 pub use teammate::{HeldKey, Teammate, TeammateOffer, accept_teammate_offer, teammates};
 
+mod join;
+pub use join::{JoinCode, accept_browser_offer, join_command, tunneled_runner};
+
 mod route;
 use route::alternative_is_an_address_beside_a_tunnel;
 pub use route::usable_address;
@@ -303,6 +306,10 @@ pub enum CeremonyError {
     HeldKey,
     #[error("this sealed reply does not open with this device's key")]
     Unopened,
+    /// A code that isn't a browser's, where only a browser's is approved
+    /// (ov-1490).
+    #[error("this code isn't from a browser")]
+    NotABrowser,
 }
 
 impl CeremonyError {
@@ -328,6 +335,7 @@ impl CeremonyError {
             CeremonyError::UnregisteredKey => "unregistered_key",
             CeremonyError::HeldKey => "held_key",
             CeremonyError::Unopened => "unopened",
+            CeremonyError::NotABrowser => "not_a_browser",
         }
     }
 }

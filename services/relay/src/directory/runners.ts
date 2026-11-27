@@ -65,6 +65,18 @@ async function proven(request: Request, env: Env, action: 'register' | 'claim'):
   if (account instanceof Response) return account
   const body = await bodyOf(request)
   if (!body) return json({ error: 'body' }, 400)
+  return await proveRunner(request, env, action, account, body)
+}
+
+/// The runner's proof for `account`, whoever vouched for the account: a
+/// session (`proven`), or an approved `farcooler join` (`join.ts`).
+export async function proveRunner(
+  request: Request,
+  env: Env,
+  action: 'register' | 'claim',
+  account: string,
+  body: Record<string, unknown>,
+): Promise<Proven | Response> {
   const install = body.install
   if (typeof install !== 'string' || !INSTALL.test(install)) return json({ error: 'install' }, 400)
   const name = body.name === undefined ? 'Runner' : nameOf(body.name)
@@ -213,6 +225,11 @@ function newToken(): string {
 export async function registerRunner(request: Request, env: Env): Promise<Response> {
   const p = await proven(request, env, 'register')
   if (p instanceof Response) return p
+  return await register(env, p)
+}
+
+/// [`registerRunner`] once the proof is checked.
+export async function register(env: Env, p: Proven): Promise<Response> {
   const token = newToken()
   const daemonId = crypto.randomUUID()
 

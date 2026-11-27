@@ -22,6 +22,7 @@ mod agent_rows;
 mod conversation_check;
 mod app_update;
 mod browser;
+mod join;
 mod daemon_link;
 mod hook;
 mod hook_inbox;
@@ -302,6 +303,11 @@ enum Command {
     Client(clients::ClientCmd),
     /// Grant a browser control on this runner from an existing SSH login.
     EnrollBrowser(browser::Args),
+    /// Add this runner to your browser and account, from a terminal here.
+    ///
+    /// The browser's Add Runner screen shows the whole command. It's also how
+    /// to get back in when no device of yours opens this runner any more.
+    Join(join::Args),
     /// Report one agent lifecycle hook to the daemon. Not for humans.
     ///
     /// Registered as a lifecycle hook on claude, codex and cursor, so it runs
@@ -1285,6 +1291,7 @@ async fn run() -> Fallible {
         Command::Events => events(runner).await,
         Command::Push(c) => push(runner, c).await,
         Command::EnrollBrowser(args) => browser::enroll(runner, args).await,
+        Command::Join(args) => join::join(runner, args).await,
         Command::Client(c) => clients::client(runner, c, cli.json).await,
         Command::RunnerCmd(RunnerCmd::Install { target, from }) => {
             runner_install::install(&target, from.as_deref()).await

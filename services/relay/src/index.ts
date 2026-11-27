@@ -17,6 +17,7 @@ import { withinRate } from './auth-limit'
 import { cut, quietAfterMs, ROW_RETENTION_MS, WORKSPACE_BUDGET } from './bounds'
 import { listAccount, revokeOwned } from './account'
 import { ceremonyReply, sweepCeremonyReplies } from './ceremony-reply'
+import { join, JOIN_PREFIX } from './join'
 import { webVault } from './web-vault'
 import { directory, DIRECTORY_PREFIX } from './directory'
 import { forgetInstall } from './directory/notices'
@@ -126,6 +127,10 @@ export default {
       if (url.pathname.startsWith('/v1/auth/') && !(await withinRate(request, env))) {
         return json({ error: 'slow down' }, 429)
       }
+
+      // A runner joining its owner's account (ov-1490): `join.ts` says which
+      // of these need a session, and throttles the rest.
+      if (url.pathname.startsWith(JOIN_PREFIX)) return await join(request, env, url.pathname)
 
       switch (url.pathname) {
         case '/v1/auth/token':
