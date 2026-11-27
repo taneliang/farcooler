@@ -140,7 +140,9 @@ const panes = new PaneSet<WebRunner>(id => {
   root.append(content)
   stage.append(root)
   const pane = new PaneView(host, word => {
-    const note = document.getElementById('pane-note')!
+    // Apart from the work view's note below, as in the app: a redraw of the
+    // work view mustn't erase what a pane said.
+    const note = document.getElementById('work-status')!
     note.textContent = workFailure(word, '', '')
     note.hidden = false
   })

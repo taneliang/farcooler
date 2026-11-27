@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path'
 import { build } from 'esbuild'
 import { chromium } from 'playwright-core'
 import { harnessHtml, styles } from '../../scripts/styles.mjs'
+import { filledButtons } from './shell-audit.mjs'
 
 const out = process.argv[2]
 if (out) mkdirSync(out, { recursive: true })
@@ -182,6 +183,7 @@ try {
     await page.getByRole('button', { name: 'Restart Orchestrator', exact: true }).waitFor()
     await list.locator('a[data-terminal=ended]').click()
     await page.locator('#pane-note').filter({ hasText: 'This terminal’s process ended. Restart it to continue.' }).waitFor()
+    assert.deepEqual(await filledButtons(page), ['#terminal-recover Restart Terminal'])
     await page.getByRole('button', { name: 'Restart Terminal', exact: true }).click()
     await page.waitForURL('**terminal=recovered')
     assert.equal((await rpc(page, 'restart')).terminal, 'ended')
@@ -215,6 +217,7 @@ try {
       const reason = 'This browser has read-only access to the runner. A device with control access can open the terminal and make changes.'
       await page.locator('#terminal-list a[data-terminal=seat]').click()
       await disabledBecause(page, page.getByRole('button', { name: 'Restart Orchestrator', exact: true }), reason)
+      assert.deepEqual(await filledButtons(page), ['#show-start-work New Terminal'])
       assert.equal(await page.getByRole('button', { name: 'Recover orchestrator', exact: true }).isDisabled(), true)
       if (out) await page.screenshot({ path: join(out, `restart-read-only-${width}.png`) })
       const dialog = await work(page)
@@ -234,14 +237,21 @@ try {
         'Only this workspace’s lead or the runner’s owner can restart its orchestrator.')
       if (out) await page.screenshot({ path: join(out, `restart-not-lead-${width}.png`) })
       // The command palette doesn't offer what the button won't do.
+      // At phone width the tools fold behind the runner's button.
+      if (await page.locator('#rail-more').isVisible()) await page.locator('#rail-more').click()
       await page.locator('#show-commands').click()
       assert.equal(await page.locator('#workspace-commands').getByRole('button', { name: /Restart Orchestrator/ }).count(), 0)
     }, { width, query: '?sidebar&member' })
 
     await test(`new terminal and restart controls at ${width}px`, async page => {
       await page.locator('#terminal-list a[data-terminal=seat]').click()
-      await page.getByText('Writer', { exact: true }).waitFor()
+      await page.getByText('Writer', { exact: true }).filter({ visible: true }).waitFor()
       await page.getByRole('button', { name: 'Restart Orchestrator', exact: true }).waitFor()
+      assert.deepEqual(await filledButtons(page), ['#show-start-work New Terminal'])
+      // Nothing is wrong, so the strip matches the terminal's header: not the
+      // warning's color, and not the dark terminal behind it.
+      const surface = id => page.locator(id).evaluate(el => getComputedStyle(el).backgroundColor)
+      assert.equal(await surface('#terminal-recovery'), await surface('#terminal-manage'))
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), width)
       if (out) await page.screenshot({ path: join(out, `restart-orchestrator-${width}.png`) })
       const dialog = await work(page)
@@ -252,7 +262,7 @@ try {
 
     await test(`a viewer who isn’t the writer can’t restart the orchestrator at ${width}px`, async (first, context) => {
       await first.locator('#terminal-list a[data-terminal=seat]').click()
-      await first.getByText('Writer', { exact: true }).waitFor()
+      await first.getByText('Writer', { exact: true }).filter({ visible: true }).waitFor()
       const second = await context.newPage()
       second.setDefaultTimeout(5000)
       try {
@@ -262,7 +272,7 @@ try {
         await disabledBecause(second, restart, 'Another client is writing to this terminal. Only the writer can restart it.')
         if (out) await second.screenshot({ path: join(out, `restart-viewer-${width}.png`) })
         await second.getByRole('button', { name: 'Take Over' }).click()
-        await second.getByText('Writer', { exact: true }).waitFor()
+        await second.getByText('Writer', { exact: true }).filter({ visible: true }).waitFor()
         await second.waitForFunction(() => !document.getElementById('terminal-recover').disabled)
         await first.waitForFunction(() => document.getElementById('terminal-recover').disabled)
       } finally {
