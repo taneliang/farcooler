@@ -16,9 +16,9 @@ use bytes::Bytes;
 use farcooler_core::DomainError;
 use farcooler_protocol::v1::{
     ClientHello, Error as WireErrorMsg, ErrorCode, Event, Request, Response, Scope, ServerHello, WireEnvelope,
-    response, wire_envelope,
+    request, response, wire_envelope,
 };
-use farcooler_protocol::{MAX_QUEUED_CONTROL_BYTES, PROTOCOL_VERSION, ids};
+use farcooler_protocol::{MAX_QUEUED_CONTROL_BYTES, PROTOCOL_VERSION, ids, link_ending};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Notify, mpsc, watch};
 use tokio::time::Instant as TokioInstant;
@@ -107,6 +107,20 @@ pub struct Connection<R> {
     written: Arc<Notify>,
     too_slow: watch::Receiver<bool>,
     too_slow_after: Duration,
+    /// When `serve_connection` last read a request to serve.
+    last_received: TokioInstant,
+    /// What the client said before ending the link, if it said anything.
+    client_ending: Option<ClientEnding>,
+}
+
+/// Why a client said it was about to end the link (`link.ending`, ov-1513).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClientEnding {
+    /// One of `farcooler_protocol::link_ending`'s words, never the client's
+    /// own text.
+    pub cause: &'static str,
+    /// How long the client had heard nothing when it decided.
+    pub idle_ms: u64,
 }
 
 impl<R> Connection<R> {
@@ -114,6 +128,24 @@ impl<R> Connection<R> {
     /// metric the watchdog compares against the ceiling).
     pub fn queued_bytes(&self) -> u64 {
         self.queued_bytes.load(Ordering::SeqCst)
+    }
+
+    /// How long since the client last sent a request.
+    pub fn idle_for(&self) -> Duration {
+        self.last_received.elapsed()
+    }
+
+    pub fn client_ending(&self) -> Option<ClientEnding> {
+        self.client_ending
+    }
+
+    /// File a `link.ending` notice. One with no payload, or a word this build
+    /// doesn't know, is dropped: the log takes none of a client's own text.
+    fn note_ending(&mut self, request: &Request) {
+        let Some(request::Payload::LinkEnding(ending)) = &request.payload else { return };
+        if let Some(cause) = link_ending::known(&ending.cause) {
+            self.client_ending = Some(ClientEnding { cause, idle_ms: ending.idle_ms });
+        }
     }
 
     pub async fn send(&mut self, envelope: &WireEnvelope) -> Result<(), ConnectionError> {
@@ -222,6 +254,8 @@ impl<R: AsyncRead + Unpin> Connection<R> {
             written,
             too_slow: too_slow_rx,
             too_slow_after,
+            last_received: TokioInstant::now(),
+            client_ending: None,
         }
     }
 
@@ -410,6 +444,13 @@ pub const PUSH_HIGH_WATER: u64 = farcooler_protocol::MAX_UNACKED_TERMINAL_BYTES 
 /// client is slowed, not refused.
 pub const MAX_REQUESTS_IN_FLIGHT: usize = 32;
 
+/// How many `daemon.version` calls may run past that limit (ov-1513). A client
+/// has one or two out at a time; the bound is for one that does not stop.
+const MAX_PROBES_PAST_THE_LIMIT: usize = 4;
+
+/// The liveness probe: every client's "does this link still answer?".
+const PROBE_METHOD: &str = "daemon.version";
+
 /// Which requests on one connection must run in the order they arrived: those
 /// naming the same target. See `serve_connection`.
 type Lane = Option<Bytes>;
@@ -422,14 +463,109 @@ type Lane = Option<Bytes>;
 /// held follow stalled every other pane's page and every untargeted call
 /// behind it (ov-372 review: 4.9 s against 0.8 ms). Read-only, so nothing
 /// depends on their order, and each runs alongside everything else.
+///
+/// `daemon.version` is the same, and the reason is the link itself (ov-1513).
+/// A client gives its probe a few seconds and ends the link on silence, so a
+/// probe waiting its turn behind a plan, workflow or task call made a healthy
+/// link look dead. The daemon answers it from memory.
 fn lane_of(request: &Request) -> Lane {
     match request.method.as_str() {
-        "agent.rows" | "agent.rows_follow" => {
+        "agent.rows" | "agent.rows_follow" | PROBE_METHOD => {
             let mut own = b"\0unordered:".to_vec();
             own.extend_from_slice(&request.request_id);
             Some(Bytes::from(own))
         }
         _ => request.target_resource_id.clone(),
+    }
+}
+
+/// The requests one connection has read: what runs, what waits for its lane,
+/// and what waits for room.
+///
+/// **Past the limit, read and park.** The loop used to stop reading at
+/// `MAX_REQUESTS_IN_FLIGHT`, which left a probe unread in the socket behind a
+/// page's polling (ov-1513). Now requests past the limit are read and parked,
+/// unstarted and in arrival order, and a probe among them is started at once.
+/// Reading stops when as many are parked as may be in flight, so a client that
+/// never stops sending is still slowed.
+struct Requests<F> {
+    /// The requests running now, at most one per lane.
+    running: Vec<std::pin::Pin<Box<F>>>,
+    /// Every lane with a request running, and what is waiting behind it.
+    lanes: HashMap<Lane, VecDeque<Request>>,
+    /// Read past the limit, not yet in a lane.
+    parked: VecDeque<Request>,
+    /// In a lane, running or waiting.
+    in_flight: usize,
+    /// The lanes of the probes running past the limit, which don't count.
+    probes: Vec<Lane>,
+}
+
+impl<F: std::future::Future> Requests<F> {
+    fn new() -> Self {
+        Self { running: Vec::new(), lanes: HashMap::new(), parked: VecDeque::new(), in_flight: 0, probes: Vec::new() }
+    }
+
+    fn can_read(&self) -> bool {
+        self.parked.len() < MAX_REQUESTS_IN_FLIGHT
+    }
+
+    /// Started and not yet finished, or waiting to be.
+    fn unfinished(&self) -> usize {
+        self.in_flight + self.probes.len() + self.parked.len()
+    }
+
+    fn take_in(&mut self, request: Request, start: impl Fn(Lane, Request) -> F) {
+        if self.in_flight < MAX_REQUESTS_IN_FLIGHT {
+            self.in_flight += 1;
+            self.queue(request, start);
+        } else if request.method == PROBE_METHOD && self.probes.len() < MAX_PROBES_PAST_THE_LIMIT {
+            let lane = lane_of(&request);
+            self.probes.push(lane.clone());
+            self.queue(request, start);
+        } else {
+            self.parked.push_back(request);
+        }
+    }
+
+    fn queue(&mut self, request: Request, start: impl Fn(Lane, Request) -> F) {
+        let lane = lane_of(&request);
+        match self.lanes.get_mut(&lane) {
+            Some(waiting) => waiting.push_back(request),
+            None => {
+                self.lanes.insert(lane.clone(), VecDeque::new());
+                self.running.push(Box::pin(start(lane, request)));
+            }
+        }
+    }
+
+    /// The request in `lane` finished: start the next one behind it, and give
+    /// its place to whatever is parked.
+    fn finished(&mut self, lane: Lane, start: impl Fn(Lane, Request) -> F) {
+        match self.lanes.get_mut(&lane).and_then(VecDeque::pop_front) {
+            Some(request) => self.running.push(Box::pin(start(lane.clone(), request))),
+            None => {
+                self.lanes.remove(&lane);
+            }
+        }
+        match self.probes.iter().position(|probe| *probe == lane) {
+            Some(at) => drop(self.probes.swap_remove(at)),
+            None => {
+                self.in_flight -= 1;
+                if let Some(request) = self.parked.pop_front() {
+                    self.in_flight += 1;
+                    self.queue(request, start);
+                }
+            }
+        }
+    }
+
+    /// Drop everything not yet started, and say how many that was.
+    fn drop_unstarted(&mut self) -> usize {
+        let dropped = self.parked.len() + self.lanes.values().map(VecDeque::len).sum::<usize>();
+        self.parked.clear();
+        self.lanes.clear();
+        dropped
     }
 }
 
@@ -512,11 +648,9 @@ where
     let mut pushes = handler.pushes();
     let written = conn.written.clone();
 
-    // The requests running now, at most one per lane.
-    let mut running = Vec::new();
-    // Every lane with a request running, and what is waiting behind it.
-    let mut lanes: HashMap<Lane, VecDeque<Request>> = HashMap::new();
-    let mut in_flight = 0usize;
+    // The requests read and not yet finished.
+    let start = |lane, request| dispatch(handler, lane, request);
+    let mut requests = Requests::new();
 
     let (outcome, ending) = loop {
         // Read before the `select!`, because `conn.recv()` below holds `conn`.
@@ -540,27 +674,20 @@ where
                 break (Ok(()), Ending::Revoked);
             }
 
-            (lane, request_id, mut response) = next_finished(&mut running) => {
+            (lane, request_id, mut response) = next_finished(&mut requests.running) => {
                 response.request_id = request_id;
-                in_flight -= 1;
                 let sent = conn.send_response(response).await;
 
                 // The next request in this lane, now that the one ahead of it
                 // has finished.
-                let next = lanes.get_mut(&lane).and_then(VecDeque::pop_front);
-                match next {
-                    Some(request) => running.push(Box::pin(dispatch(handler, lane, request))),
-                    None => {
-                        lanes.remove(&lane);
-                    }
-                }
+                requests.finished(lane, start);
                 if let Err(err) = sent {
                     tracing::warn!(error = %err, "request response could not be sent");
                     break (Err(err), Ending::Unanswerable);
                 }
             }
 
-            incoming = conn.recv(), if in_flight < MAX_REQUESTS_IN_FLIGHT => {
+            incoming = conn.recv(), if requests.can_read() => {
                 let envelope = match incoming {
                     Ok(envelope) => envelope,
                     Err(err) => break (Err(err), Ending::NoMoreRequests),
@@ -569,15 +696,16 @@ where
                     Some(wire_envelope::Body::Request(req)) => req,
                     _ => break (Err(ConnectionError::UnexpectedFrame), Ending::NoMoreRequests),
                 };
-                in_flight += 1;
-                let lane = lane_of(&request);
-                match lanes.get_mut(&lane) {
-                    Some(waiting) => waiting.push_back(request),
-                    None => {
-                        lanes.insert(lane.clone(), VecDeque::new());
-                        running.push(Box::pin(dispatch(handler, lane, request)));
-                    }
+                // The client saying why it is about to end the link: kept for
+                // the log, answered by nothing, and never dispatched. It does
+                // not count as the client being heard from, so the logged
+                // idle time is the quiet before it left.
+                if request.method == link_ending::METHOD {
+                    conn.note_ending(&request);
+                    continue;
                 }
+                conn.last_received = TokioInstant::now();
+                requests.take_in(request, start);
             }
 
             event = next_event(&mut events) => {
@@ -637,20 +765,20 @@ where
     // rather than cancelled — see `Ending` for why, and for which of it.
     drop(pushes);
     drop(events);
+    let in_flight = requests.unfinished();
     if in_flight > 0 && ending != Ending::NoMoreRequests {
         tracing::warn!(in_flight, reason = ?ending, error = ?outcome.as_ref().err(), "requests cannot be answered after the connection ended");
     }
     let drain = async {
         let mut answering = ending == Ending::NoMoreRequests;
         if ending == Ending::Revoked {
-            let queued: usize = lanes.values().map(VecDeque::len).sum();
+            let queued = requests.drop_unstarted();
             if queued > 0 {
                 tracing::warn!(queued, "queued requests dropped because the connection was revoked");
             }
-            lanes.clear();
         }
-        while !running.is_empty() {
-            let (lane, request_id, mut response) = next_finished(&mut running).await;
+        while !requests.running.is_empty() {
+            let (lane, request_id, mut response) = next_finished(&mut requests.running).await;
             if answering {
                 response.request_id = request_id;
                 if let Err(err) = conn.send_response(response).await {
@@ -658,9 +786,7 @@ where
                     answering = false;
                 }
             }
-            if let Some(request) = lanes.get_mut(&lane).and_then(VecDeque::pop_front) {
-                running.push(Box::pin(dispatch(handler, lane, request)));
-            }
+            requests.finished(lane, start);
         }
     };
     let finished = tokio::time::timeout(DRAIN_DEADLINE, drain).await;

@@ -346,6 +346,10 @@ message Request {
     // Fixed, owner-authorized workspace check-ins (ov-892).
     CheckInEnable check_in_enable = 620;
     CheckInHoldResolve check_in_hold_resolve = 621;
+    // `link.ending` (ov-1513): why a client is about to end the link, for the
+    // runner's log. The transport files it and answers nothing. 671-679 are
+    // its block.
+    LinkEnding link_ending = 670;
   }
   reserved 170 to 179;
   reserved "page_list", "page_get", "page_set", "page_remove", "page_stats";
@@ -405,6 +409,8 @@ message Request {
   reserved 605, 606, 607 to 609;
   // The rest of `agent.stop`'s block (ov-872).
   reserved 611 to 619;
+  // The rest of `link.ending`'s block (ov-1513).
+  reserved 671 to 679;
 }
 
 // Closed JSON v1 contract: crates/protocol/src/workflow_commands.rs.
@@ -2152,6 +2158,14 @@ message DaemonVersion {
 message Empty {}
 
 message TypedConfirmation { string typed_confirmation = 1; }
+
+// `cause` is one of "probe-timeout", "silence", "socket-close", "sign-out"
+// (`farcooler_protocol::link_ending`); a runner drops any other word.
+// `idle_ms` is how long the client had heard nothing when it decided.
+message LinkEnding {
+  string cause = 1;
+  uint64 idle_ms = 2;
+}
 
 message RepositoryRootAdd {
   string absolute_path = 1;

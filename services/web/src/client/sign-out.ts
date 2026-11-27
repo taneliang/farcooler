@@ -14,6 +14,8 @@ interface Deps {
   call: VaultCall
   forget(): Promise<unknown>
   dropSecret(): void
+  /// Told as Sign Out is chosen, while the page still has its connections.
+  leaving(): void
 }
 
 async function settled(work: Promise<unknown>, waitMs: number): Promise<boolean> {
@@ -43,6 +45,7 @@ export function installSignOut(form: HTMLFormElement, dialog: HTMLDialogElement,
     event.preventDefault()
     if (running) return
     running = true
+    deps.leaving()
     deps.dropSecret()
     const active = deps.session()
     if (active) active.signingOut = true

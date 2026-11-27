@@ -51,6 +51,12 @@ pub const ORDINARY: Duration = Duration::from_secs(30);
 /// `LinkRevival.PROBE_DEADLINE_MS` on Android are this number.
 pub const PROBE: Duration = Duration::from_millis(2500);
 
+/// The browser's foreground probe (ov-1513): long enough for a runner that is
+/// busy, over a tunnel whose round trip alone is a third of a second or more,
+/// and given a second try before the link is ended. A page that is wrong costs
+/// the person a passkey touch, so it waits longer than a phone does.
+pub const WEB_PROBE: Duration = Duration::from_millis(7000);
+
 /// The method name an app sends for the probe. Not a wire method: the FFI
 /// sends `daemon.version` for it, on `probe()`'s terms.
 pub const PROBE_METHOD: &str = "probe";

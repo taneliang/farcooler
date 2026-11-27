@@ -49,7 +49,7 @@ import { readLocal, WorkspaceLayout, writeLocal, type Tab } from './workspace-la
 import { WorkspacePanes } from './workspace-panes'
 import { workspaceUrl, WorkspaceHistory, type Route } from './workspace-history'
 import { comparisonButtons, type Opened, registerDevice, waitForReply } from './sealed'
-import { type LinkView, Reconnector } from './reconnect'
+import { type LinkView, Reconnector, recheckOnReturn } from './reconnect'
 import { installSignOut } from './sign-out'
 import { mountWebPush, stopWebPush } from './web-push'
 import { relayCopy, relayRaw as requestRelay } from './relay-client'
@@ -752,6 +752,8 @@ function signIn(session: Session, label: string): (challenge: Uint8Array) => Pro
   }
 }
 
+const logLine = (line: string) => console.info(line)
+
 /// The connection on the page, so a tab coming back or the browser coming
 /// online can ask whether it still answers (ov-772).
 let link: Reconnector<WebRunner, TunnelConn> | null = null
@@ -800,6 +802,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
       } else mineFleet?.unreachable(target.id, needsYouFailure('closed', target.label))
     },
     now: () => Date.now(),
+    log: logLine,
   })
   const runtimeStatus = $('runtime-health')
   let checkingHealth: WebRunner | null = null
@@ -1273,6 +1276,7 @@ function joinRunner(session: Session, target: Granted, into: Fleet, automaticall
       else into.unreachable(target.id, runnerStopped(target.label), 'Reconnect')
     },
     now: () => Date.now(),
+    log: logLine,
   })
   into.add(target.id, target.label, depsOf(rec))
   others.push(rec)
@@ -1292,7 +1296,7 @@ function joinRunner(session: Session, target: Granted, into: Fleet, automaticall
   else into.unreachable(target.id, runnerDeferred(target.label), 'Connect')
 }
 
-/// The tab is visible again or the browser is online: ask the runner now
+/// The tab is back or the browser is online: ask the runner now
 /// rather than wait out the probe interval.
 function recheckLink(): void {
   void link?.recheck()
@@ -1327,6 +1331,10 @@ function signOutForgets(session: () => Session | null): void {
     call: relayCopy,
     forget: () => Promise.allSettled([forgetDevice(), stopWebPush()]),
     dropSecret,
+    leaving: () => {
+      link?.signingOut()
+      for (const rec of others) rec.signingOut()
+    },
   })
 }
 
@@ -1350,17 +1358,13 @@ async function boot(): Promise<void> {
   $('show-board').addEventListener('click', () => showTab('board'))
   $('show-plan').addEventListener('click', () => showTab('plan'))
   $('bar-count').addEventListener('click', () => showTab('needs'))
-  window.addEventListener('focus', () => { void checkVersion(); recheckLink() })
-  window.addEventListener('pageshow', recheckLink)
+  window.addEventListener('focus', () => void checkVersion())
   document.addEventListener('keydown', event => {
     if ($('work').hidden || event.key !== 'Escape' || event.defaultPrevented || document.querySelector('dialog:modal') ||
         event.target instanceof Element && event.target.closest('.xterm, .chat-input')) return
     layout?.run('close_page')
   })
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') recheckLink()
-  })
-  window.addEventListener('online', recheckLink)
+  recheckOnReturn(window, document, recheckLink)
   const presentRecovery: RecoveryPresenter = async (count, current) => {
     await loadWeb()
     return JSON.parse(recoveryView(count, current)) as RecoveryView

@@ -23,12 +23,13 @@
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
 use farcooler_ceremony::Liveness;
+use farcooler_protocol::link_ending;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 /// What a link should do next.
@@ -115,36 +116,97 @@ impl Clock for PageClock {
     }
 }
 
+/// Why a link was given up on (ov-1513), and how long it had been quiet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ended {
+    /// One of `farcooler_protocol::link_ending`'s words.
+    pub cause: &'static str,
+    /// Milliseconds since the last byte from the runner.
+    pub idle_ms: u64,
+}
+
 /// The liveness of one connection: what the page has heard from the runner,
 /// and whether it has given up on it.
 pub struct Link {
     clock: Arc<dyn Clock>,
     watch: Mutex<Watch>,
-    lost: AtomicBool,
+    /// When the last byte arrived, or when the link opened.
+    heard_at: AtomicU64,
+    /// How many times something has arrived.
+    heard: AtomicU64,
+    /// Set once, by whoever gives the link up first.
+    ended: OnceLock<Ended>,
+    /// Foreground checks under way (`Link::checking`).
+    checks: AtomicUsize,
     lost_tx: tokio::sync::watch::Sender<bool>,
+}
+
+/// A foreground check under way: see [`Link::checking`].
+pub struct Checking<'a>(&'a Link);
+
+impl Drop for Checking<'_> {
+    fn drop(&mut self) {
+        self.0.checks.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 impl Link {
     pub fn new(clock: Arc<dyn Clock>, liveness: Liveness) -> Arc<Self> {
         let now = clock.now_ms();
         let (lost_tx, _) = tokio::sync::watch::channel(false);
-        Arc::new(Self { clock, watch: Mutex::new(Watch::new(liveness, now)), lost: AtomicBool::new(false), lost_tx })
+        Arc::new(Self {
+            clock,
+            watch: Mutex::new(Watch::new(liveness, now)),
+            heard_at: AtomicU64::new(now),
+            heard: AtomicU64::new(0),
+            ended: OnceLock::new(),
+            checks: AtomicUsize::new(0),
+            lost_tx,
+        })
     }
 
     /// Something arrived from the runner.
     pub fn heard(&self) {
         let now = self.clock.now_ms();
+        self.heard_at.store(now, Ordering::SeqCst);
+        self.heard.fetch_add(1, Ordering::SeqCst);
         self.watch.lock().unwrap_or_else(|p| p.into_inner()).heard(now);
+    }
+
+    /// How many times something has arrived: a change means the runner has
+    /// been heard from since.
+    pub fn heard_count(&self) -> u64 {
+        self.heard.load(Ordering::SeqCst)
+    }
+
+    /// Milliseconds since the last byte from the runner.
+    pub fn idle_ms(&self) -> u64 {
+        self.clock.now_ms().saturating_sub(self.heard_at.load(Ordering::SeqCst))
+    }
+
+    /// Say that a foreground check is asking the runner. While one is, the
+    /// quiet-link rule probes but does not give the link up: the check is
+    /// waiting longer, on purpose, and will try again before it decides
+    /// (`Runner::check`). A connection that closes still ends it at once.
+    pub fn checking(&self) -> Checking<'_> {
+        self.checks.fetch_add(1, Ordering::SeqCst);
+        Checking(self)
     }
 
     /// Whether the link has been given up on.
     pub fn is_lost(&self) -> bool {
-        self.lost.load(Ordering::SeqCst)
+        self.ended.get().is_some()
     }
 
-    /// Give up on the link. True for the call that did, false for any later.
-    pub fn lose(&self) -> bool {
-        let first = !self.lost.swap(true, Ordering::SeqCst);
+    /// Why the link was given up on, once it has been.
+    pub fn ended(&self) -> Option<Ended> {
+        self.ended.get().copied()
+    }
+
+    /// Give up on the link, for `cause`. True for the call that did, false for
+    /// any later one, whose cause is dropped.
+    pub fn lose(&self, cause: &'static str) -> bool {
+        let first = self.ended.set(Ended { cause, idle_ms: self.idle_ms() }).is_ok();
         if first {
             self.lost_tx.send_replace(true);
         }
@@ -169,16 +231,19 @@ impl Link {
     pub async fn run(self: &Arc<Self>, probe: impl Fn(), ended: impl Fn() -> bool) {
         while !self.is_lost() {
             if ended() {
-                self.lose();
+                self.lose(link_ending::SOCKET_CLOSE);
                 return;
             }
             let now = self.clock.now_ms();
             let step = self.watch.lock().unwrap_or_else(|p| p.into_inner()).step(now);
             match step {
-                Step::Dead => {
-                    self.lose();
+                Step::Dead if self.checks.load(Ordering::SeqCst) == 0 => {
+                    self.lose(link_ending::SILENCE);
                     return;
                 }
+                // A check is under way, and its verdict is the one that
+                // counts. The rule is looked at again an interval on.
+                Step::Dead => {}
                 Step::Probe => {
                     probe();
                     // The next look is a probe interval on, never later than

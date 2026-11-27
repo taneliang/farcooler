@@ -23,16 +23,26 @@ function setup(call: () => Promise<{ status: number; body: any }>, copyWork?: Pr
     showModal() { this.open = true },
   })
   const forget = vi.fn(async () => {})
+  const leaving = vi.fn()
   const isSigningOut = installSignOut(form as unknown as HTMLFormElement, dialog as unknown as HTMLDialogElement,
-    { session: () => active, call, forget, dropSecret: vi.fn() })
+    { session: () => active, call, forget, dropSecret: vi.fn(), leaving })
   const submit = () => form.dispatchEvent(new Event('submit', { cancelable: true }))
   if (start) submit()
-  return { form, forget, active, dialog, title, detail, retry, anyway, submit, isSigningOut }
+  return { form, forget, active, dialog, title, detail, retry, anyway, submit, isSigningOut, leaving }
 }
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
 describe('Sign Out recovery deletion', () => {
+  it('says the page is leaving as Sign Out is chosen, once (ov-1513)', () => {
+    const { leaving, submit, form } = setup(async () => ({ status: 200, body: {} }), new Promise<void>(() => {}), false)
+    expect(leaving).not.toHaveBeenCalled()
+    submit()
+    submit()
+    expect(leaving).toHaveBeenCalledTimes(1)
+    expect(form.submit).not.toHaveBeenCalled()
+  })
+
   it('reports deletion failure when an in-flight copy read expires during Sign Out', async () => {
     vi.useFakeTimers()
     const assign = vi.fn()

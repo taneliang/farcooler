@@ -36,6 +36,10 @@
 //! appends its text to `composed` and each image's type and size to `images`.
 //! An agent's conversation is one turn and a reply.
 //!
+//! **A busy runner** (ov-1513): a file called `slow` beside the typed log holds
+//! a number of milliseconds each `daemon.version` waits before it is answered,
+//! with everything behind it, as on a runner that queues its probe.
+//!
 //!   fake_daemon <typed-log> [runner]
 
 #[path = "../tests/support/mod.rs"]
@@ -281,6 +285,8 @@ fn main() {
                 }))]
             }
             Some(wire_envelope::Body::Request(req)) => match (req.method.as_str(), req.payload.clone()) {
+                // Filed by the real transport and answered by nothing.
+                ("link.ending", _) => vec![],
                 ("terminal.list", _) => vec![support::answer(
                     &req,
                     result::Value::TerminalList(TerminalList {
@@ -506,10 +512,16 @@ fn main() {
                 ("terminal.writer", _) => vec![support::refusal(&req, ErrorCode::CapabilityUnsupported, "a newer Far Cooler")],
                 // The page's liveness probe (ov-772): a link that never
                 // answers it is given up on after nine quiet seconds.
-                ("daemon.version", _) => vec![support::answer(
-                    &req,
-                    result::Value::DaemonVersion(farcooler_protocol::v1::DaemonVersion { daemon_version: "fake".into(), ..Default::default() }),
-                )],
+                ("daemon.version", _) => {
+                    let slow = std::fs::read_to_string(typed_log.with_file_name("slow")).ok();
+                    if let Some(ms) = slow.and_then(|ms| ms.trim().parse().ok()) {
+                        std::thread::sleep(std::time::Duration::from_millis(ms));
+                    }
+                    vec![support::answer(
+                        &req,
+                        result::Value::DaemonVersion(farcooler_protocol::v1::DaemonVersion { daemon_version: "fake".into(), ..Default::default() }),
+                    )]
+                }
                 (other, _) => panic!("the fake daemon doesn't know {other}"),
             },
             _ => continue,

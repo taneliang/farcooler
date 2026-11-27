@@ -58,6 +58,12 @@ impl Handler for Handlers {
                 "slow" => {
                     let _ = this.slow.acquire().await;
                 }
+                // The board calls a page makes, each held open for 15 s, and
+                // the probe, which the daemon answers from memory.
+                "plan.get" | "workflow.retry" | "task.create" => {
+                    tokio::time::sleep(Duration::from_secs(15)).await;
+                }
+                "daemon.version" => {}
                 "terminal.write" => {
                     let Some(v1::request::Payload::TerminalWrite(write)) = req.payload else {
                         panic!("a write with no payload");
@@ -348,4 +354,46 @@ async fn the_thirty_third_request_waits_for_one_of_the_thirty_two() {
     while !answered_ids.contains(&keystroke) {
         answered_ids.push(answered(&mut client).await);
     }
+}
+
+/// How long `daemon.version` takes to be answered, sent after `ahead`.
+async fn probe_behind(ahead: Vec<(Bytes, WireEnvelope)>) -> Duration {
+    let mut client = connect(Handlers::default()).await;
+    for (_, frame) in &ahead {
+        client.send(frame).await.unwrap();
+    }
+    let (probe, frame) = envelope("daemon.version", None, v1::request::Payload::Empty(v1::Empty {}));
+    let sent = tokio::time::Instant::now();
+    client.send(&frame).await.unwrap();
+    loop {
+        let frame = tokio::time::timeout(Duration::from_secs(60), client.recv()).await.expect("the probe was never answered").unwrap();
+        match frame.body {
+            Some(wire_envelope::Body::Response(r)) if r.request_id == probe => return sent.elapsed(),
+            _ => continue,
+        }
+    }
+}
+
+/// ov-1513: the liveness probe is never queued behind plan, workflow or task
+/// calls. Each of these is held open for 15 s on tokio's paused clock, so a
+/// probe queued behind one measures 15 s here whatever the machine is doing.
+#[tokio::test(start_paused = true)]
+async fn the_probe_is_answered_while_a_slow_call_is_held_open() {
+    for method in ["plan.get", "workflow.retry", "task.create"] {
+        let slow = envelope(method, None, v1::request::Payload::Empty(v1::Empty {}));
+        let took = probe_behind(vec![slow]).await;
+        assert!(took < Duration::from_millis(100), "the probe waited {took:?} behind {method}");
+    }
+}
+
+/// ov-1513: and not by the limit on requests in flight either, which stops the
+/// connection reading. A page polling for 15 s behind one slow call can queue
+/// that many.
+#[tokio::test(start_paused = true)]
+async fn the_probe_is_read_when_the_requests_in_flight_are_at_their_limit() {
+    let ahead = (0..farcooler_transport::connection::MAX_REQUESTS_IN_FLIGHT)
+        .map(|_| envelope("plan.get", None, v1::request::Payload::Empty(v1::Empty {})))
+        .collect();
+    let took = probe_behind(ahead).await;
+    assert!(took < Duration::from_millis(100), "the probe waited {took:?} behind a full connection");
 }

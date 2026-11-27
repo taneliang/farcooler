@@ -113,6 +113,10 @@ pub struct Seen {
     pub resized: Mutex<Option<(u32, u32)>>,
     /// `daemon.version` calls answered: the liveness probe (ov-772).
     pub probes: AtomicUsize,
+    /// How many of the next probes the runner takes and never answers.
+    pub swallow_probes: AtomicUsize,
+    /// Every `link.ending` notice as `(cause, idle_ms)` (ov-1513).
+    pub endings: Mutex<Vec<(String, u64)>>,
     /// The `client_name` of every hello, one per channel.
     pub hellos: Mutex<Vec<String>>,
     /// Set, the runner takes each hello and never answers it: a daemon that
@@ -420,8 +424,16 @@ async fn fake_daemon(channel: Channel<Msg>, seen: Arc<Seen>) {
                         seen.interrupts.fetch_add(1, Ordering::SeqCst);
                         answer(&req, result::Value::Terminal(Terminal::default()))
                     }
+                    // Filed and answered by nothing, as the transport does.
+                    ("link.ending", Some(request::Payload::LinkEnding(e))) => {
+                        seen.endings.lock().await.push((e.cause, e.idle_ms));
+                        continue;
+                    }
                     ("daemon.version", _) => {
                         seen.probes.fetch_add(1, Ordering::SeqCst);
+                        if seen.swallow_probes.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1)).is_ok() {
+                            continue;
+                        }
                         answer(
                             &req,
                             result::Value::DaemonVersion(farcooler_protocol::v1::DaemonVersion {

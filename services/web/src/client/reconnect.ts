@@ -17,12 +17,42 @@
 ///   whose SSH never starts.
 /// - **It never hangs.** A refused or unanswered dial or login ends in a
 ///   `failed` state with the dial's own word, and Reconnect tries again.
-/// - **A tab that comes back asks.** `recheck` (visibility, the browser's
-///   `online`) probes the runner right away rather than waiting out the
-///   interval; a laptop that slept finds out the moment it wakes.
+/// - **A tab that comes back asks.** `recheck` (visibility, `pageshow`, the
+///   browser's `online`) probes the runner right away rather than waiting out
+///   the interval; a laptop that slept finds out soon after it wakes. Window
+///   focus asks nothing (ov-1513): it fires on every switch back from another
+///   app, with the tab never gone, and the watch already has the link.
+/// - **It says why.** Each link that ends logs one line, with the cause and
+///   how long nothing had arrived (`link.ending`'s words, ov-1513).
 
 /// How long a tunnel dialed ahead of the click is kept.
 export const PREDIAL_MAX_AGE_MS = 30_000
+
+/// How long a link the page gave up on is left open, so that the wasm
+/// client's last word to the runner (why it gave up) can leave. A connection
+/// that closed by itself is let go at once.
+export const GOODBYE_MS = 250
+
+/// The one line a link's end is logged as. `cause` is the wasm client's word:
+/// `probe-timeout`, `silence`, `socket-close` or `sign-out`.
+export function endedLine(cause: string, idleMs: number): string {
+  return `far cooler: link ended cause=${cause} idle_ms=${Math.round(idleMs)}` // platform copy: a browser console line, never on the page
+}
+
+/// Ask whether the link still answers when the page comes back: it is visible
+/// again, it was restored from the back-forward cache, or the browser is
+/// online. Not on window focus (see the top of this file).
+export function recheckOnReturn(
+  window: Pick<EventTarget, 'addEventListener'>,
+  document: Pick<EventTarget, 'addEventListener'> & { visibilityState: string },
+  recheck: () => void,
+): void {
+  window.addEventListener('pageshow', recheck)
+  window.addEventListener('online', recheck)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') recheck()
+  })
+}
 
 /// What the page is showing about the connection.
 export type LinkView =
@@ -38,6 +68,9 @@ export type LinkView =
 export interface Linked {
   check(): Promise<boolean>
   free(): void
+  /// Tell the runner this is a sign-out, and answer how many milliseconds
+  /// nothing had arrived.
+  signing_out(): number
 }
 
 export interface Deps<R extends Linked, C> {
@@ -46,8 +79,11 @@ export interface Deps<R extends Linked, C> {
   /// Close a dialed tunnel.
   discard(conn: C): void
   /// SSH in over `conn`, signing with the passkey (a touch). `onLost` is
-  /// passed to the wasm client, which calls it once if this connection dies.
-  connect(conn: C, onLost: () => void): Promise<R>
+  /// passed to the wasm client, which calls it once if this connection dies,
+  /// with why and how long nothing had arrived.
+  connect(conn: C, onLost: (cause: string, idleMs: number) => void): Promise<R>
+  /// The page's log: one line for each link that ends.
+  log(line: string): void
   /// Put the pane the person was in back on `runner`.
   resume(runner: R): Promise<void>
   show(view: LinkView): void
@@ -63,6 +99,7 @@ export class Reconnector<R extends Linked, C> {
   /// Runners whose connection was lost.
   private readonly gone = new WeakSet<object>()
   private view: LinkView = { kind: 'up' }
+  private signedOut = false
   private ahead: { at: number; conn: Promise<C | null> } | null = null
 
   constructor(private readonly deps: Deps<R, C>) {}
@@ -71,7 +108,7 @@ export class Reconnector<R extends Linked, C> {
   async open(conn: C): Promise<R> {
     if (this.stopped) throw new Error('closed')
     const generation = ++this.generation
-    const runner = await this.deps.connect(conn, () => this.lost(generation))
+    const runner = await this.deps.connect(conn, (cause, idleMs) => this.lost(generation, cause, idleMs))
     if (generation !== this.generation) {
       runner.free()
       throw new Error('closed')
@@ -89,11 +126,23 @@ export class Reconnector<R extends Linked, C> {
     this.release()
   }
 
-  private release(): void {
+  /// The person is signing out: say so in the page's log and the runner's.
+  /// The connection is left for leaving the page to close, so the notice gets
+  /// out, and its end after this is not a loss.
+  signingOut(): void {
+    if (!this.runner || this.signedOut) return
+    this.signedOut = true
+    this.deps.log(endedLine('sign-out', this.runner.signing_out()))
+  }
+
+  private release(goodbyeMs = 0): void {
     const tunnel = this.activeTunnel
     this.runner = null
     this.activeTunnel = null
-    if (tunnel !== null) this.deps.discard(tunnel)
+    if (tunnel !== null) {
+      if (goodbyeMs > 0) setTimeout(() => this.deps.discard(tunnel), goodbyeMs)
+      else this.deps.discard(tunnel)
+    }
     // Views and pending calls may still hold the WASM wrapper. Its finalizer
     // frees it when those references go away.
   }
@@ -112,11 +161,12 @@ export class Reconnector<R extends Linked, C> {
     return this.view.kind === 'up'
   }
 
-  private lost(generation: number): void {
-    if (generation !== this.generation) return
+  private lost(generation: number, cause: string, idleMs: number): void {
+    if (generation !== this.generation || this.signedOut) return
     this.generation++
+    this.deps.log(endedLine(cause, idleMs))
     if (this.runner) this.gone.add(this.runner)
-    this.release()
+    this.release(cause === 'socket-close' ? 0 : GOODBYE_MS)
     this.dialAhead()
     this.set({ kind: 'reconnecting', tunnel: 'dialing' })
   }
@@ -143,7 +193,7 @@ export class Reconnector<R extends Linked, C> {
     void ahead?.conn.then(conn => conn && this.deps.discard(conn))
   }
 
-  /// The tab is visible again, or the browser says it is online.
+  /// The tab is visible again, restored, or the browser says it is online.
   async recheck(): Promise<void> {
     const runner = this.runner
     if (!runner || !this.up) return

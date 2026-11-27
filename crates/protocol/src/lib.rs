@@ -239,6 +239,31 @@ pub mod accepts {
     pub const WORKFLOW_FULL: &str = "workflow_full_v1";
 }
 
+/// `link.ending` (ov-1513): the one thing a client says as it gives up on a
+/// link, so the runner's log can say why a session ended. A runner on its own
+/// only ever sees the far end close.
+///
+/// The transport files it and answers nothing; it is never dispatched, and it
+/// changes nothing but a log line. Best effort: over a link that really is
+/// dead it never arrives. A runner that predates it refuses it as an unknown
+/// method, which costs the client nothing as it is leaving.
+pub mod link_ending {
+    pub const METHOD: &str = "link.ending";
+    /// A probe, and its retry, went unanswered.
+    pub const PROBE_TIMEOUT: &str = "probe-timeout";
+    /// Nothing at all was heard for the liveness allowance.
+    pub const SILENCE: &str = "silence";
+    /// The connection itself closed.
+    pub const SOCKET_CLOSE: &str = "socket-close";
+    /// The person signed out.
+    pub const SIGN_OUT: &str = "sign-out";
+
+    /// This build's own spelling of `cause`, or `None` for any other text.
+    pub fn known(cause: &str) -> Option<&'static str> {
+        [PROBE_TIMEOUT, SILENCE, SOCKET_CLOSE, SIGN_OUT].into_iter().find(|w| *w == cause)
+    }
+}
+
 pub mod workflow_commands;
 pub mod workflow_cutover;
 

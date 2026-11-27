@@ -275,9 +275,11 @@ pub fn new_writer_key() -> String {
 /// `host_key`, signing in with the passkey `key_a` through `assert` (one
 /// touch), and start its control session.
 ///
-/// The connection is watched from the moment it is up (ov-772): `on_lost()` is
-/// called once if the tunnel goes quiet for `Liveness::TUNNEL`'s allowance
-/// (nine seconds), or the connection closes. Dropping the runner stops the
+/// The connection is watched from the moment it is up (ov-772):
+/// `on_lost(cause, idle_ms)` is called once if the tunnel goes quiet for
+/// `Liveness::TUNNEL`'s allowance (nine seconds), the connection closes, or a
+/// `check` finds it dead. `cause` is `farcooler_protocol::link_ending`'s word
+/// and `idle_ms` how long nothing had arrived. Dropping the runner stops the
 /// watching without calling it.
 #[wasm_bindgen]
 pub async fn connect(
@@ -294,8 +296,10 @@ pub async fn connect(
     let stream = link.tap(bridge(conn)?);
     let signer = PasskeySigner(JsAuthenticator(assert));
     let writer_instance = writer_key.and_then(|key| Uuid::parse_str(&key).ok());
+    let watched = link.clone();
     let runner = handshake::sign_in(clock, handshake::HANDSHAKE, stream, &host_key, &user, &key_a, signer, link, writer_instance, move || {
-        let _ = on_lost.call0(&JsValue::NULL);
+        let (cause, idle_ms) = watched.ended().map_or(("", 0), |e| (e.cause, e.idle_ms));
+        let _ = on_lost.call2(&JsValue::NULL, &cause.into(), &(idle_ms as f64).into());
     })
     .await
     .map_err(web_failure)?;
@@ -314,6 +318,12 @@ impl WebRunner {
     pub fn check(&self) -> Promise {
         let runner = self.0.clone();
         wasm_bindgen_futures::future_to_promise(async move { Ok(JsValue::from_bool(runner.check().await)) })
+    }
+
+    /// Say that the person is signing out: the runner is told, and the answer
+    /// is how many milliseconds this link had been quiet, for the page's log.
+    pub fn signing_out(&self) -> f64 {
+        self.0.signing_out() as f64
     }
 
     /// Whether the connection has been given up on.

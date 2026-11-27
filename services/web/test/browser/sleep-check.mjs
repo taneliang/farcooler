@@ -31,6 +31,10 @@
 // - Lid closed: a freeze and a dead tunnel and the browser offline for the
 //   whole sleep, then `online`. An approximation: a real lid close also stops
 //   the network stack and the radio, and the OS's TCP timers.
+// - A busy runner (ov-1513): the fake daemon answers each probe 5 s late, with
+//   everything behind it, while the tab comes back. The link must be kept.
+//
+// Every case that ends a link also expects the page's line saying why.
 
 import { execFileSync, spawnSync } from 'node:child_process'
 import { webcrypto } from 'node:crypto'
@@ -260,6 +264,9 @@ async function open(engine) {
   const errors = []
   const page = await context.newPage()
   page.on('pageerror', e => errors.push(`page error: ${e.message}`))
+  /// The page's own account of each link that ended (reconnect.ts).
+  const endings = []
+  page.on('console', m => m.text().includes('link ended') && endings.push(m.text()))
   if (process.env.SLEEP_DEBUG) page.on('console', m => console.log(`  [${engine} console ${m.type()}] ${m.text()}`))
   await context.addInitScript(softPasskey, { spki, pkcs8, id: credentialId, origin, rpId: HOST })
   if (process.env.SLEEP_DEBUG) await context.addInitScript(() => (globalThis.__debugWs = true))
@@ -270,6 +277,7 @@ async function open(engine) {
     context,
     page,
     errors,
+    endings,
     /// Every tunnel open now goes silent; ones dialed after are fine.
     blackhole() {
       for (const t of tunnels) t.dead = true
@@ -333,6 +341,11 @@ async function typesThrough(page, tag, pane = LIVE) {
   return false
 }
 
+// A woken tab asks at once (reconnect.ts `recheck`) and gives a dead tunnel
+// two tries of 7 s before saying so (wire.rs `check`, ov-1513): 14 s and some
+// slack.
+const NOTICE_WITHIN_MS = 17_000
+
 const T1 = 60_000
 const T10 = 600_000
 
@@ -340,6 +353,9 @@ const T10 = 600_000
 const CASES = [
   { name: 'idle-20s', ms: 0, dead: false, idle: 20000 },
   { name: 'bg-quick-alive', ms: 0, dead: false },
+  // Longer than the phones' 2.5 s probe, and longer than the page watched the
+  // link for: 20 s covers the page's whole check (two tries of 7 s).
+  { name: 'busy-runner-5s', ms: 0, dead: false, slow: 5000, watch: 20_000 },
   { name: 'bg-1min-alive', ms: T1, dead: false },
   { name: 'bg-1min-dead', ms: T1, dead: true },
   { name: 'bg-10min-alive', ms: T10, dead: false },
@@ -359,6 +375,8 @@ async function run(engine, s, c, n) {
   await connected(s, false)
   const out = { engine, case: c.name }
   const touches = (await state(page)).touches
+  const endings = s.endings.length
+  if (c.slow) writeFileSync(join(dir, 'slow'), String(c.slow))
   const cdp = engine === 'chromium' ? await context.newCDPSession(page) : null
   await sleepMs(c.idle ?? Number(process.env.SLEEP_SETTLE ?? 0))
   if (c.idle) return { ...out, result: (await state(page)).link === 'up' ? 'reconnected without help' : 'lost the pane', detail: `idle ${c.idle} ms: ${(await state(page)).link}` }
@@ -394,12 +412,20 @@ async function run(engine, s, c, n) {
   await setVisible(page, true)
   out.slept = `${((woke - start) / 1000).toFixed(1)} s real, ${c.ms / 60000} min on the page's clock`
   // What it settles to without a touch, within a few seconds past the probes.
+  // A dead tunnel is waited on until the page says so, past both of its
+  // check's tries; a live one is watched for `watch` and must stay up.
+  const watch = c.dead ? NOTICE_WITHIN_MS + 2000 : (c.watch ?? 10_000)
   let after
-  for (let i = 0; i < 60; i++) {
+  do {
     await sleepMs(250)
     after = await state(page)
-    if (after.link !== 'up' || i >= 40) break
-  }
+  } while (after.link === 'up' && Date.now() - woke < watch)
+  if (c.slow) rmSync(join(dir, 'slow'))
+  const said = s.endings.slice(endings)
+  const whys = /link ended cause=(probe-timeout|silence|socket-close) idle_ms=\d+/
+  if (c.dead && !said.some(line => whys.test(line))) return { ...out, result: 'lost the pane', detail: `no line saying why the link ended: ${JSON.stringify(said)}` }
+  if (!c.dead && said.length) return { ...out, result: 'lost the pane', detail: `a live link was ended: ${said.join('; ')}` }
+  if (c.slow && after.link !== 'up') return { ...out, result: 'lost the pane', detail: `a busy runner's link was given up: ${after.link}` }
   out.notice = after.link
   out.noticedMs = after.link === 'up' ? null : Date.now() - woke
   if (after.link === 'up') {
@@ -469,10 +495,6 @@ try {
   rmSync(scratch, { recursive: true, force: true })
 }
 if (jsonOut) writeFileSync(jsonOut, JSON.stringify(results, null, 2))
-// A woken tab asks at once (reconnect.ts `recheck`), so a dead tunnel shows
-// within the probe's 2.5 s deadline and some slack, not after the watch's nine
-// quiet seconds.
-const NOTICE_WITHIN_MS = 5000
 for (const r of results) if (r.noticedMs > NOTICE_WITHIN_MS) Object.assign(r, { result: 'slow to notice', detail: `${r.detail}; the notice took ${r.noticedMs} ms, over ${NOTICE_WITHIN_MS}` })
 const bad = results.filter(r => r.result === 'lost the pane' || r.result === 'slow to notice' || r.result === 'harness error')
 for (const f of failures) console.error(`sleep-check: ${f}`)

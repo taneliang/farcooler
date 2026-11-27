@@ -1259,10 +1259,29 @@ impl Session {
     /// link. Sent ahead of anything queued, so a diff in flight cannot make a
     /// healthy link look dead.
     pub async fn probe(&self) -> Result<(), SessionError> {
+        self.probe_within(crate::deadlines::PROBE).await
+    }
+
+    /// `probe`, with the caller's own allowance (the page's, `WEB_PROBE`).
+    pub async fn probe_within(&self, deadline: std::time::Duration) -> Result<(), SessionError> {
         let request = farcooler_transport::request("daemon.version");
-        let answer = self.client.send(request, crate::deadlines::for_probe())?;
+        let how = farcooler_transport::CallOptions { deadline: Some(deadline), ..crate::deadlines::for_probe() };
+        let answer = self.client.send(request, how)?;
         answer.answer().await?;
         Ok(())
+    }
+
+    /// Tell the runner why this client is about to end the link (`link.ending`,
+    /// ov-1513), for its log. Queued and not waited on: the transport answers
+    /// nothing, and over a dead link it never arrives. Sent urgent, which is
+    /// what keeps a request nobody is waiting for in the queue.
+    pub fn say_ending(&self, cause: &str, idle_ms: u64) {
+        let mut request = farcooler_transport::request(farcooler_protocol::link_ending::METHOD);
+        request.payload = Some(request::Payload::LinkEnding(farcooler_protocol::v1::LinkEnding {
+            cause: cause.to_string(),
+            idle_ms,
+        }));
+        let _ = self.client.send(request, farcooler_transport::CallOptions { deadline: None, urgent: true });
     }
 
     // ---- device enrollment ----

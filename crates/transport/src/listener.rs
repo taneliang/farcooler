@@ -217,7 +217,7 @@ impl UnixListenerServer {
                     tracing::debug!(error = %err, "connection closed");
                 }
                 if let Some((client, _)) = &device {
-                    log_session_end(client, &served);
+                    log_session_end(client, &served, conn.idle_for(), conn.client_ending());
                 }
             }
         }).await
@@ -257,12 +257,31 @@ impl UnixListenerServer {
 /// reason word, never a message, a key or a token. A browser's failed sign-in
 /// and a phone's reach this the same way, so this is where the next
 /// "the connection didn't work" gets its cause (ov-852).
-fn log_session_end(client: &str, served: &Result<(), crate::ConnectionError>) {
+///
+/// `idle_ms` is how long since the client last sent a request. `cause` is what
+/// ended the link (ov-1513): the client's own word if it said one on its way
+/// out (`link.ending`: "probe-timeout", "silence", "sign-out"), with how long
+/// it had heard nothing as `client_idle_ms`; else what this end saw, which for
+/// a far end that just went away is "socket-close".
+fn log_session_end(
+    client: &str,
+    served: &Result<(), crate::ConnectionError>,
+    idle: std::time::Duration,
+    said: Option<crate::connection::ClientEnding>,
+) {
     let reason = match served {
         Ok(()) => "ended",
         Err(err) => err.word(),
     };
-    tracing::info!(%client, %reason, "a device session ended");
+    let cause = match (said, served) {
+        (Some(said), _) => said.cause,
+        (None, Ok(())) => "revoked",
+        (None, Err(crate::ConnectionError::Closed)) => farcooler_protocol::link_ending::SOCKET_CLOSE,
+        (None, Err(err)) => err.word(),
+    };
+    let idle_ms = idle.as_millis() as u64;
+    let client_idle_ms = said.map(|s| s.idle_ms);
+    tracing::info!(%client, %reason, %cause, idle_ms, client_idle_ms, "a device session ended");
 }
 
 /// The process on the other end of a local connection, as the kernel says.
@@ -427,6 +446,98 @@ mod tests {
         assert!(ended.contains("INFO") && ended.contains("browser-7"), "{ended}");
         assert!(ended.contains("reason=") && !ended.contains("reason=ended"), "{ended}");
         assert!(log.contains("a device session began"), "{log:?}");
+    }
+
+    /// The log of one device session: handshake, then what `after` sends, then
+    /// the client goes away.
+    async fn a_device_session_that_ends(notices: &[(&str, u64)]) -> String {
+        use tokio::io::AsyncWriteExt;
+        let capture = Capture::default();
+        let _log = tracing::subscriber::set_default(
+            tracing_subscriber::fmt().with_writer(capture.clone()).with_ansi(false).with_max_level(tracing::Level::INFO).finish(),
+        );
+        let dir = tempdir().unwrap();
+        let sock_path = dir.path().join("farcooler.sock");
+        let server = UnixListenerServer::bind(&sock_path).unwrap();
+        let serving = tokio::spawn(async move {
+            server.serve(|_| Some((HandshakeConfig { daemon_version: "t".into() }, NoHandler))).await
+        });
+        let mut stream = tokio::net::UnixStream::connect(&sock_path).await.unwrap();
+        stream.write_all(b"farcooler-session control browser-7\n").await.unwrap();
+        let (r, w) = stream.into_split();
+        let mut client = Connection::new(r, w);
+        client.client_handshake("itest", "0").await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+        for (cause, idle_ms) in notices {
+            use farcooler_protocol::v1;
+            let notice = v1::Request {
+                request_id: farcooler_protocol::ids::new_id(),
+                method: farcooler_protocol::link_ending::METHOD.into(),
+                payload: Some(v1::request::Payload::LinkEnding(v1::LinkEnding { cause: cause.to_string(), idle_ms: *idle_ms })),
+                ..Default::default()
+            };
+            client
+                .send(&v1::WireEnvelope {
+                    protocol_version: farcooler_protocol::PROTOCOL_VERSION,
+                    message_id: farcooler_protocol::ids::new_id(),
+                    body: Some(v1::wire_envelope::Body::Request(notice)),
+                })
+                .await
+                .unwrap();
+        }
+        while client.queued_bytes() > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        drop(client);
+        let read = || String::from_utf8_lossy(&capture.0.lock().unwrap()).to_string();
+        for _ in 0..300 {
+            if read().contains("a device session ended") {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        serving.abort();
+        let log = read();
+        log.lines().find(|l| l.contains("a device session ended")).unwrap_or_else(|| panic!("no end line in {log:?}")).to_string()
+    }
+
+    fn field(line: &str, name: &str) -> u64 {
+        let at = line.find(&format!(" {name}=")).unwrap_or_else(|| panic!("no {name} in {line}"));
+        line[at + name.len() + 2..].split_whitespace().next().unwrap().parse().unwrap()
+    }
+
+    /// ov-1513: a far end that just goes away is a closed socket, with how
+    /// long it had been quiet.
+    #[tokio::test]
+    async fn a_session_that_just_closes_logs_socket_close_and_its_idle_time() {
+        let ended = a_device_session_that_ends(&[]).await;
+        assert!(ended.contains("cause=socket-close"), "{ended}");
+        // The client waited 120 ms before going.
+        assert!(field(&ended, "idle_ms") >= 100, "{ended}");
+        assert!(!ended.contains("client_idle_ms"), "{ended}");
+    }
+
+    /// ov-1513: what the client says on its way out is what the log gives as
+    /// the cause, for each word it has. `NoHandler` panics if a notice is ever
+    /// dispatched.
+    #[tokio::test]
+    async fn a_client_that_says_why_it_is_leaving_is_logged_in_its_word() {
+        for cause in ["probe-timeout", "silence", "socket-close", "sign-out"] {
+            let ended = a_device_session_that_ends(&[(cause, 9_001)]).await;
+            assert!(ended.contains(&format!("cause={cause} ")), "{ended}");
+            assert_eq!(field(&ended, "client_idle_ms"), 9_001, "{ended}");
+            // The notice itself doesn't count as the client being heard from.
+            assert!(field(&ended, "idle_ms") >= 100, "{ended}");
+        }
+    }
+
+    /// And only its words: nothing else a client writes reaches the log.
+    #[tokio::test]
+    async fn a_cause_the_runner_does_not_know_is_not_logged() {
+        let ended = a_device_session_that_ends(&[("sk-secret\nforged line", 4)]).await;
+        assert!(ended.contains("cause=socket-close"), "{ended}");
+        assert!(!ended.contains("sk-secret") && !ended.contains("forged"), "{ended}");
     }
 
     /// A daemon that cannot serve says why to whoever connects, with a

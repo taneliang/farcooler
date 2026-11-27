@@ -45,9 +45,11 @@ declare module 'fc-web' {
     /// `navigator.credentials.get` over the login's data; rejects with
     /// `declined` when the person or the browser said no.
     assert: (challenge: Uint8Array) => Promise<import('./device').Signed>,
-    /// Called once if this connection goes silent for nine seconds or closes
-    /// (crates/web/src/liveness.rs). Not called when the runner is freed.
-    onLost: () => void,
+    /// Called once if this connection goes silent for nine seconds, closes, or
+    /// fails a check (crates/web/src/liveness.rs), with why (`probe-timeout`,
+    /// `silence`, `socket-close`) and how long nothing had arrived. Not called
+    /// when the runner is freed.
+    onLost: (cause: string, idleMs: number) => void,
     writerKey?: string,
   ): Promise<WebRunner>
   export function build(): string
@@ -69,6 +71,8 @@ declare module 'fc-web' {
   export function ticketForm(): string
   export function workFailure(word: string, code: string, what: string): string
   export class WebRunner {
+    /// Tell the runner this is a sign-out; how long nothing had arrived, ms.
+    signing_out(): number
     terminal_writer_supported(): boolean
     terminal_writer(terminal: string, action: string): Promise<string>
     web_review(workspace: string, ticket: string, request: string): Promise<string>

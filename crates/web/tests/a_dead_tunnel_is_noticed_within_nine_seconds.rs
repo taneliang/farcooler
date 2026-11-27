@@ -109,6 +109,10 @@ struct Rig {
 
 impl Rig {
     async fn up() -> Rig {
+        Rig::up_with_link().await.0
+    }
+
+    async fn up_with_link() -> (Rig, Arc<Link>) {
         let (browser_side, runner_side) = tokio::io::duplex(1 << 16);
         let seen = Arc::new(Seen::default());
         support::serve(runner_side, HOST_KEY, Some(key(BROWSER_KEY).public_key().clone()), seen.clone());
@@ -122,14 +126,14 @@ impl Rig {
             .expect("connects");
         let lost = Arc::new(AtomicUsize::new(0));
         let counted = lost.clone();
-        let runner = Runner::start_watched(conn, link, None, move || {
+        let runner = Runner::start_watched(conn, link.clone(), None, move || {
             counted.fetch_add(1, Ordering::SeqCst);
         })
         .await
         .expect("starts");
         let rig = Rig { runner, clock, tunnel, seen, lost };
         rig.settle().await;
-        rig
+        (rig, link)
     }
 
     /// Let every task run until all are waiting. Tokio's clock is paused, so
@@ -187,12 +191,14 @@ async fn a_tunnel_that_dies_is_given_up_on_at_the_ninth_second_after_two_probes(
         rig.second().await;
         assert_eq!(rig.lost.load(Ordering::SeqCst), 1, "the ninth second ends it, once");
         assert!(rig.runner.lost());
-        assert_eq!(rig.probes_sent_into_the_dark(), second, "the verdict is not another probe");
+        let told = rig.probes_sent_into_the_dark();
+        assert_eq!(told, second + 1, "the verdict is not another probe: it writes only its `link.ending` notice");
 
         for _ in 0..30 {
             rig.second().await;
         }
         assert_eq!(rig.lost.load(Ordering::SeqCst), 1, "told once");
+        assert_eq!(rig.probes_sent_into_the_dark(), told, "and nothing after it");
     })
     .await;
 }
@@ -257,6 +263,119 @@ async fn checking_a_dead_link_says_so_without_waiting_for_the_interval() {
         assert!(!rig.runner.check().await, "and a lost link stays lost");
     })
     .await;
+}
+
+/// ov-1513: a check on a silent link asks twice, on the page's longer
+/// allowance, and only then gives up, saying it was the probe and how long the
+/// link had been quiet. The quiet-link rule holds off while it decides: the
+/// page's clock runs far past the nine seconds here.
+#[tokio::test(start_paused = true)]
+async fn a_check_retries_once_before_it_ends_the_link_and_says_why() {
+    local(async {
+        let rig = Rig::up().await;
+        rig.kill();
+        let probes = rig.probes_sent_into_the_dark();
+        let started = tokio::time::Instant::now();
+        let clock = rig.clock.clone();
+        let ticking = async {
+            loop {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                clock.advance(1_000);
+            }
+        };
+        let answered = tokio::select! {
+            answered = rig.runner.check() => answered,
+            _ = ticking => unreachable!(),
+        };
+        assert!(!answered);
+        let allowance = farcooler_client::deadlines::WEB_PROBE;
+        assert!(started.elapsed() >= 2 * allowance, "gave up after {:?}, before the second try ran out", started.elapsed());
+        assert!(rig.probes_sent_into_the_dark() >= probes + 2, "two probes at least");
+        let ended = rig.runner.ended().expect("ended");
+        assert_eq!(ended.cause, "probe-timeout");
+        assert!(ended.idle_ms >= 13_000, "{ended:?}");
+        rig.settle().await;
+        assert_eq!(rig.lost.load(Ordering::SeqCst), 1);
+    })
+    .await;
+}
+
+/// ov-1513: one unanswered probe is not the end. The second is asked, and an
+/// answer to it keeps the link; two unanswered is the verdict, and there is no
+/// third.
+#[tokio::test(start_paused = true)]
+async fn a_link_that_answers_the_second_try_is_kept() {
+    local(async {
+        let rig = Rig::up().await;
+        rig.seen.swallow_probes.store(1, Ordering::SeqCst);
+        assert!(rig.runner.check().await, "the second try was answered");
+        assert_eq!(rig.seen.probes.load(Ordering::SeqCst), 2);
+        assert!(rig.runner.ended().is_none());
+
+        rig.seen.swallow_probes.store(2, Ordering::SeqCst);
+        assert!(!rig.runner.check().await);
+        assert_eq!(rig.seen.probes.load(Ordering::SeqCst), 4, "two tries, not three");
+        assert_eq!(rig.runner.ended().map(|e| e.cause), Some("probe-timeout"));
+        rig.settle().await;
+        assert_eq!(*rig.seen.endings.lock().await, vec![("probe-timeout".to_string(), 0)], "and the runner is told");
+    })
+    .await;
+}
+
+/// ov-1513: a link that delivered anything while the tries waited is not
+/// silent, whatever became of the probes.
+#[tokio::test(start_paused = true)]
+async fn a_link_that_delivered_bytes_during_the_check_is_kept() {
+    local(async {
+        let (rig, link) = Rig::up_with_link().await;
+        rig.kill();
+        let (answered, ()) = tokio::join!(rig.runner.check(), async {
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            link.heard();
+        });
+        assert!(answered);
+        assert!(rig.runner.ended().is_none());
+    })
+    .await;
+}
+
+/// ov-1513: the silence rule says it was the silence rule, with the idle time,
+/// and the runner is told when it can still hear.
+#[tokio::test(start_paused = true)]
+async fn the_silence_rule_logs_its_cause_and_idle_time() {
+    local(async {
+        let rig = Rig::up().await;
+        rig.kill();
+        for _ in 0..9 {
+            rig.second().await;
+        }
+        assert_eq!(rig.runner.ended().map(|e| (e.cause, e.idle_ms)), Some(("silence", 9_000)));
+    })
+    .await;
+}
+
+/// ov-1513: signing out tells the runner, which can't see it for itself.
+#[tokio::test(start_paused = true)]
+async fn signing_out_tells_the_runner_with_the_idle_time() {
+    local(async {
+        let rig = Rig::up().await;
+        rig.clock.advance(1_234);
+        assert_eq!(rig.runner.signing_out(), 1_234);
+        rig.settle().await;
+        assert_eq!(*rig.seen.endings.lock().await, vec![("sign-out".to_string(), 1_234)]);
+    })
+    .await;
+}
+
+/// ov-1513: and a connection that closes is a closed socket, not silence or a
+/// probe's fault.
+#[tokio::test(start_paused = true)]
+async fn a_closed_connection_is_a_socket_close() {
+    let clock = Arc::new(ManualClock::default());
+    let link = Link::new(clock.clone(), Liveness::TUNNEL);
+    clock.advance(700);
+    link.run(|| {}, || true).await;
+    assert_eq!(link.ended().map(|e| (e.cause, e.idle_ms)), Some(("socket-close", 700)));
 }
 
 /// A runner the page let go of is not a loss: reconnecting drops the old one

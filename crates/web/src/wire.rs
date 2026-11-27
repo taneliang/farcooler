@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 use farcooler_client::session::{Session, SessionError};
 use farcooler_client::ssh::SshError;
-use farcooler_protocol::capability;
+use farcooler_protocol::{capability, link_ending};
 use farcooler_protocol::v1::{ErrorCode, TerminalResize, TerminalWrite, request, terminal_writer_request::Action};
 use tokio::io::AsyncReadExt;
 use uuid::Uuid;
@@ -130,6 +130,13 @@ impl Runner {
             // Only the link's own verdict calls `on_lost`: a runner dropped
             // by the page (the sender going away) is not a loss.
             if let futures::future::Either::Left(_) = futures::future::select(run, stopped).await {
+                // The runner is told why, if it can still be reached; over a
+                // closed connection there is nothing to tell it with.
+                if let Some(ended) = watching.ended()
+                    && ended.cause != link_ending::SOCKET_CLOSE
+                {
+                    watched.say_ending(ended.cause, ended.idle_ms);
+                }
                 on_lost();
             }
         });
@@ -137,24 +144,63 @@ impl Runner {
     }
 
     /// Whether the connection answers, right now: the foreground probe
-    /// (`Session::probe`, ov-613) and the verdict the phones give it. Silence
-    /// within its deadline ends the link, and so does a closed connection.
-    /// Called when the tab comes back and when the browser says it is online.
+    /// (`Session::probe`, ov-613), on the page's own allowance. Called when the
+    /// tab comes back and when the browser says it is online.
+    ///
+    /// A closed connection ends the link at once. Silence ends it only after
+    /// [`WEB_PROBE`] and one more try of the same length (ov-1513): a busy
+    /// runner or a slow tunnel is not a dead link, and a page that decides
+    /// wrongly costs a passkey touch. And a link that delivered anything at all
+    /// while the two tries waited is not silent, whatever their answers did.
+    /// The quiet-link rule holds off while this decides (`Link::checking`).
+    ///
+    /// [`WEB_PROBE`]: farcooler_client::deadlines::WEB_PROBE
     pub async fn check(&self) -> bool {
-        if self.lost() || self.session.link_ended() {
+        if self.lost() {
             return false;
         }
-        match self.session.probe().await {
-            Ok(()) => true,
-            Err(e) if farcooler_client::deadlines::ends_the_link(farcooler_client::deadlines::PROBE_METHOD, &e) => {
-                if let Some(link) = &self.link {
-                    link.lose();
-                }
-                false
+        let _checking = self.link.as_ref().map(|link| link.checking());
+        let heard = || self.link.as_ref().map_or(0, |link| link.heard_count());
+        let heard_before = heard();
+        for _ in 0..2 {
+            if self.lost() {
+                return false;
             }
-            // A refusal is an answer.
-            Err(_) => true,
+            if self.session.link_ended() {
+                return self.give_up(link_ending::SOCKET_CLOSE);
+            }
+            match self.session.probe_within(farcooler_client::deadlines::WEB_PROBE).await {
+                Ok(()) => return true,
+                Err(SessionError::TimedOut { .. }) => {}
+                Err(e) if e.is_disconnect() => return self.give_up(link_ending::SOCKET_CLOSE),
+                // A refusal is an answer.
+                Err(_) => return true,
+            }
         }
+        if heard() != heard_before {
+            return true;
+        }
+        self.give_up(link_ending::PROBE_TIMEOUT)
+    }
+
+    fn give_up(&self, cause: &'static str) -> bool {
+        if let Some(link) = &self.link {
+            link.lose(cause);
+        }
+        false
+    }
+
+    /// Why this connection was given up on, once it has been.
+    pub fn ended(&self) -> Option<crate::liveness::Ended> {
+        self.link.as_ref().and_then(|l| l.ended())
+    }
+
+    /// Tell the runner the person is signing out, so its log says so, and
+    /// answer with how long this link had been quiet (ov-1513).
+    pub fn signing_out(&self) -> u64 {
+        let idle_ms = self.link.as_ref().map_or(0, |l| l.idle_ms());
+        self.session.say_ending(link_ending::SIGN_OUT, idle_ms);
+        idle_ms
     }
 
     /// Whether the watch has given up on this connection.
