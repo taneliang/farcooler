@@ -10,16 +10,24 @@ Commit `71b0ba9a2` (ov-1470) added the exact-name click and the two-runner CI st
 
 Lost terminals appear under the live terminals with a visible **Lost** badge. The link keeps the terminal title as its accessible name and exposes the state as its accessible description. A **Recover** button beside the link uses the existing restart action for browsers with Control access. Recovering directly from the sidebar selects the returned terminal and lets Back return to the previous selection. The terminal link can still open the lost terminal's details. Ended terminals remain under the disclosure.
 
+In the narrow desktop sidebar, the first version of the row broke the title into one word per line. Recover now moves below the title when the row is too narrow for both. At 320 px the two stay on one line.
+
+The walk's locator is now scoped to the sidebar, and its recovery click uses the sidebar's Recover button. It has the same timeouts and steps as before.
+
 ## Verification
 
 The unmodified `bedde8580` bundle reproduced the 30-second timeout at `csp-check.mjs:1320` in local Chromium with two isolated Rust runners. The checkout, Codex launch and tmux health checks had already completed.
 
-The fixed Canary bundle passed three consecutive runs of the same two-runner workday command with no CSP violations. A fourth run captured the lost terminal and the Recover button before the walk selected the lost terminal. [320 px capture](workday-lost-terminal-320.png) · [1280 px capture](workday-lost-terminal-1280.png)
+Everything below ran on this branch rebased onto `29c41d4de`.
 
-The Work browser suite passed 18 cases. At both 320 and 1280 px it verified the lost row was visible with the disclosure closed, clicked Recover while another terminal was selected, checked which terminal the runner restarted, and verified that Back restored the previous selection. It also checked that a read-only browser could see the lost row and had no Recover button.
+On the final Canary bundle (built at `b88d65e0b`), the two-runner workday walk passed three times in a row with no CSP violations. The third run saved the captures, taken before the walk selected the lost terminal. [320 px capture](workday-lost-terminal-320.png) · [1280 px capture](workday-lost-terminal-1280.png)
 
-The Board, Conversation and Plan browser checks passed. All 304 web tests, the web workflow tests and both TypeScript checks passed. The Canary bundle passed the size gate at 5,091,790 compressed bytes.
+The Work browser suite passed 18 cases. At both 320 and 1280 px it checks that the lost row is visible with the disclosure closed, clicks Recover while another terminal is selected, checks which terminal the runner restarted, and checks that Back restores the previous selection. It also checks that a read-only browser sees the lost row and has no Recover button.
 
-The full CSP walk with the fake daemon and CI's 100 ms tunnel delay passed without violations. Its workload keystroke echo was 21.3 ms at p95 against a 100 ms limit. The four-session CSP walk and all seven split-pane sleep scenarios also passed.
+On the final bundle, these also passed: the Board, Conversation and Plan browser checks; the CSP walk with the fake daemon and CI's 100 ms tunnel delay (keystroke echo under load 19.6 ms at p95, limit 100 ms); the four-session CSP walk; and all seven split-pane sleep scenarios. The Canary bundle passed the size gate at 5,095,136 compressed bytes. The stable bundle was not built locally.
 
-GitHub Actions has no CI run for fix candidate `d93cf090ca46d03b656d32d2f32baf5076093c22`. The failed run above checked `bedde8580`, so rerunning it would test the same revision. The CI workflow triggers on pushes to `landing/**`. The approval system blocked the candidate push because it would publish the code and report to the public origin without explicit authorization. The two-runner CI result remains pending that authorization.
+All 304 web tests, the web workflow tests and both TypeScript checks passed after the rebase, before the CSS-only row change.
+
+## CI
+
+**Not yet verified.** No CI run exists for this branch. The CI workflow runs on pushes to `main` and `landing/**`. In an earlier session, the approval system blocked a candidate push because it would publish the code and report to the public origin without explicit authorization. Nothing has been pushed. The failed run ([job log](https://github.com/taneliang/farcooler/actions/runs/45911805928/job/140229562752)) checked `bedde8580`, so rerunning it would test the old code. The acceptance item "passes on CI" stays open until this branch is pushed or landed.
