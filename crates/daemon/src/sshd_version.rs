@@ -87,6 +87,11 @@ async fn probe(path: &Path) -> Option<String> {
     Some(line.chars().take(200).collect())
 }
 
+/// `passkey_keys` is process-wide, so tests that offer or withhold it take
+/// turns on this.
+#[cfg(test)]
+pub(crate) static OFFER_TESTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,6 +127,7 @@ mod tests {
     async fn a_passkey_enrolls_only_while_passkeys_are_offered() {
         use farcooler_core::DomainError;
         use farcooler_protocol::v1::{ClientEnroll, Scope};
+        let _turn = OFFER_TESTS.lock().await;
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path().join("state");
         std::fs::create_dir_all(&state).unwrap();

@@ -1040,7 +1040,7 @@ impl Rpc {
                 // agent is `host_admin`, and could otherwise revoke the owner's phone and every device it added.
                 crate::person_access::refuse_admin_from_pane(svc, self.caller_pid).await?;
                 tracing::info!(by = self.who(), client = %p.client_id, with_added = p.with_added, "revoking a device");
-                Ok(result::Value::ClientList(crate::person_access::revoke(svc, self.peer.client_id.as_deref(), &p).await?))
+                Ok(result::Value::ClientList(crate::person_access::revoke_logged(svc, &self.peer, self.caller_pid, &p).await?))
             }
 
             // A device registers its own node key over the access it already

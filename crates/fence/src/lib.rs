@@ -34,7 +34,7 @@ pub use scope::with_scope;
 mod then;
 pub use then::update_then;
 mod passkey;
-pub use passkey::{admits_as_key_a, app_host, app_host_for, holds_ed25519};
+pub use passkey::{admits_as_key_a, app_host, app_host_for, holds_ed25519, is_passkey_line, passkey_point};
 mod names;
 pub use names::names_client;
 

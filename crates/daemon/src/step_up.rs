@@ -31,6 +31,10 @@
 //!   flags.
 //! - **Only a trusted key signs** (B3), and a browser's key (WebAuthn) only
 //!   for the defensive actions in [`DEFENSIVE`] (owner's decision 2).
+//! - **A browser may approve a browser** (ov-1490), the one exception to the
+//!   line above: `client.enroll` signed with the passkey on its own line
+//!   ([`ALG_PASSKEY_LINE`]), person verified, and only for another passkey at
+//!   `control` or below. The same signature serves `client.revoke`.
 //! - **A key must be asked for.** A device that holds a trusted key and is the
 //!   owner's or an Admin's must step up for the methods in [`METHODS`]
 //!   ([`needs_step_up`]); one with no trusted key keeps what it had, and
@@ -59,6 +63,11 @@ use crate::sessions::Session;
 pub const ALG_DEVICE: &str = "p256-sha256";
 /// A browser's passkey (WebAuthn, ES256).
 pub const ALG_WEBAUTHN: &str = "webauthn-es256";
+/// A browser's assertion checked against the passkey on its own
+/// `authorized_keys` line, not against a step-up key it registered: it can
+/// register none. It is good for one thing, approving another browser
+/// (ov-1490), and for nothing else.
+pub const ALG_PASSKEY_LINE: &str = "webauthn-line-es256";
 
 /// The methods that take a step-up from a remote device. `step_up` on any
 /// other is refused (S9).
@@ -303,7 +312,7 @@ pub fn verify(alg: &str, public_key: &[u8], step_up: &StepUp, context: &Context)
             key.verify_prehash(&Sha256::digest(&statement), &signature).map_err(|_| failed())?;
             Ok(None)
         }
-        ALG_WEBAUTHN => {
+        ALG_WEBAUTHN | ALG_PASSKEY_LINE => {
             let count = webauthn_checks(step_up, &statement, context.app_host)?;
             let mut signed = step_up.authenticator_data.to_vec();
             signed.extend_from_slice(&Sha256::digest(&step_up.client_data_json));
@@ -400,6 +409,9 @@ pub async fn admit(svc: &Service, peer: &Peer, session: &Session, req: Request, 
         if OPTIONAL.contains(&req.method.as_str()) { return Err(DomainError::Conflict { what: "step_up_unneeded" }); }
         return admit_approved(svc, peer, req, device, now_ms);
     }
+    if step_up.alg == ALG_PASSKEY_LINE {
+        return admit_passkey_line(svc, peer, session, req, device, now_ms);
+    }
     // A device approving its own key signs with that key while it is still a
     // proposal: the first-key code's route (ov-988). What it may do with the
     // signature is `first_key::trust`'s to say, and nothing else reads it.
@@ -428,6 +440,52 @@ pub async fn admit(svc: &Service, peer: &Peer, session: &Session, req: Request, 
     }
     let digest: [u8; 32] = Sha256::digest(&step_up.action_bytes).into();
     let stepped = Stepped { method: req.method.clone(), digest, device: device.to_string(), browser, key: key.public_key.clone() };
+    if !may_admin(&svc.store, peer, Some(&stepped), &req.method)? {
+        return Err(DomainError::NotYours { what: "not_admin" });
+    }
+    Ok((executed, Some(stepped)))
+}
+
+/// What a browser may sign with the passkey on its own line (ov-1490):
+/// approving a browser, and removing a device.
+pub const PASSKEY_LINE_METHODS: [&str; 2] = ["client.enroll", "client.revoke"];
+
+/// A browser approving another browser, or removing a device (ov-1490):
+/// `client.enroll` or `client.revoke` signed by
+/// the passkey on this browser's own line, with the person verified (a
+/// fingerprint, face or PIN, not only a touch). The passkey is the browser's
+/// only key (ov-767), so this is the person at a device this runner already
+/// trusts. Removing is a [`DEFENSIVE`] action a browser was always meant to
+/// have, and had no way to sign. Nothing else may be signed this way, and what
+/// such a request may enroll is `person_access::enroll`'s to hold narrow.
+fn admit_passkey_line(svc: &Service, peer: &Peer, session: &Session, req: Request, device: &str, now_ms: i64) -> Result<(Request, Option<Stepped>)> {
+    let step_up = req.step_up.as_ref().expect("the caller saw a step_up");
+    if !PASSKEY_LINE_METHODS.contains(&req.method.as_str()) {
+        tracing::warn!(device, method = %req.method, "refused: a browser's passkey for something other than approving or removing a device");
+        return Err(DomainError::Conflict { what: "defensive_only" });
+    }
+    let entries = farcooler_fence::read(svc.authorized_keys(), farcooler_fence::AUTHORIZED_KEYS).map_err(|_| DomainError::OperationFailed)?;
+    let point = entries
+        .iter()
+        .filter(|e| e.client_id == device && !e.shell_access)
+        .find_map(farcooler_fence::passkey_point)
+        .ok_or(DomainError::Conflict { what: "key_untrusted" })?;
+    // The nonce is spent before the signature is looked at, and stays spent.
+    if !session.challenges().take(&step_up.nonce, now_ms) {
+        tracing::info!(device, "refused: an approval with a challenge that is spent, expired or not this session's");
+        return Err(DomainError::Conflict { what: "challenge_expired" });
+    }
+    let executed = signed_request(&req, &step_up.action_bytes)?;
+    let pins = host_pins(&svc.ssh_host_dir);
+    if pins.is_empty() {
+        return Err(DomainError::Conflict { what: "step_up_unavailable" });
+    }
+    let context = Context { client_id: device, host_pins: &pins, app_host: farcooler_fence::app_host() };
+    // The counter isn't kept: a synced passkey sends none, sshd keeps none for
+    // this line, and the spent nonce is what refuses a replay.
+    verify(ALG_PASSKEY_LINE, &point, step_up, &context).inspect_err(|_| tracing::warn!(device, "refused: a browser's approval that didn't verify"))?;
+    let digest: [u8; 32] = Sha256::digest(&step_up.action_bytes).into();
+    let stepped = Stepped { method: req.method.clone(), digest, device: device.to_string(), browser: true, key: point };
     if !may_admin(&svc.store, peer, Some(&stepped), &req.method)? {
         return Err(DomainError::NotYours { what: "not_admin" });
     }
@@ -480,3 +538,6 @@ fn admit_approved(svc: &Service, peer: &Peer, req: Request, device: &str, now_ms
 #[cfg(test)]
 #[path = "step_up_tests.rs"]
 pub(crate) mod tests;
+#[cfg(test)]
+#[path = "browser_approval_tests.rs"]
+mod browser_approval_tests;

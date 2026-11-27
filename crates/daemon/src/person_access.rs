@@ -196,6 +196,13 @@ pub async fn enroll(
     if let Some(key) = &p.step_up_key {
         crate::step_up::check_key(&key.alg, &key.public_key)?;
     }
+    // A browser's approval adds a browser and nothing else (ov-1490): another
+    // passkey, to look or to control, bound as its approver's own device is.
+    // No shell line, no `host_admin`, no teammate and no step-up key.
+    if stepped.is_some_and(|s| s.browser && s.method == "client.enroll") && !browser_may_approve(&p) {
+        tracing::warn!(by = ?peer.client_id, "refused: a browser approving something other than a browser at control or below");
+        return Err(DomainError::Conflict { what: "defensive_only" });
+    }
     let authority = Authority::read(&svc.store, peer.client_id.as_deref())?;
     let person = authority.person.clone();
     // Add Teammate in one write: the owner's, or an Admin's stepped up for
@@ -262,6 +269,8 @@ pub async fn enroll(
         }
         _ => None,
     };
+    let approver = crate::caller_person::log_actor(svc, peer, caller_pid)?;
+    let line = (p.client_id.clone(), p.label.clone(), asked);
     let caller = crate::enrollment::Caller::new(session.clone(), peer.scope).with_authority(authority).with_stepped_up(stepped.cloned())
         .with_via_app(peer.client_id.is_none() && caller_pid.is_some_and(crate::caller_seat::is_own_app_or_its_child));
     if let Some(binding) = binding {
@@ -270,15 +279,70 @@ pub async fn enroll(
         let pending = by_member.ok_or(DomainError::InvalidArgument { what: "teammate" })?;
         let (store, who) = (svc.store.clone(), person.clone());
         let bind: crate::enrollment::MemberEnrolled = Box::new(move |id: &str| binding.bind(&store, &who, id));
-        return Ok(result::Value::ClientEnroll(crate::enrollment::enroll_bound(svc, &p, pending, bind, Some(caller)).await?));
+        let done = crate::enrollment::enroll_bound(svc, &p, pending, bind, Some(caller)).await?;
+        log_approval(svc, &approver, peer, &line, done.already_enrolled);
+        return Ok(result::Value::ClientEnroll(done));
     }
-    Ok(result::Value::ClientEnroll(crate::enrollment::enroll_as(svc, &p, by_member, Some(caller)).await?))
+    let done = crate::enrollment::enroll_as(svc, &p, by_member, Some(caller)).await?;
+    log_approval(svc, &approver, peer, &line, done.already_enrolled);
+    Ok(result::Value::ClientEnroll(done))
+}
+
+/// What a browser's approval may enroll (ov-1490).
+fn browser_may_approve(p: &ClientEnroll) -> bool {
+    matches!(Scope::try_from(p.scope), Ok(Scope::Read | Scope::Control))
+        && !p.shell_access
+        && !p.for_teammate
+        && p.teammate.is_none()
+        && p.step_up_key.is_none()
+        && fence::is_passkey_line(&p.public_key)
+}
+
+/// The kinds an approval and a removal take in the people log (ov-1490).
+pub const DEVICE_ADDED: &str = "device_added";
+pub const DEVICE_REMOVED: &str = "device_removed";
+
+/// Every approval, in the runner's audit log (`member.events`): which device
+/// was added, at what scope, and the device that approved it, or empty for
+/// this runner's own socket. A line already there approved nothing. A log
+/// that can't be written is said and doesn't undo the grant, which the file
+/// already holds.
+fn log_approval(svc: &Service, actor: &str, peer: &Peer, line: &(String, String, Scope), already: bool) {
+    if already {
+        return;
+    }
+    let (device, label, scope) = line;
+    let by = peer.client_id.clone().unwrap_or_default();
+    let detail = serde_json::json!({ "device": device, "label": label, "scope": scope.as_str_name(), "by": by });
+    log_device(svc, actor, DEVICE_ADDED, &detail);
+}
+
+fn log_device(svc: &Service, actor: &str, kind: &str, detail: &serde_json::Value) {
+    let written = svc.store.record_people_event(farcooler_store::member_roles::NewPeopleEvent { actor, handle: "", workspace: None, kind, detail });
+    if let Err(e) = written {
+        tracing::warn!(kind, error = %e.what(), "a change to the devices here wasn't logged");
+    }
 }
 
 /// `client.revoke`: the device, and with `with_added` what it added, that the
 /// caller's person manages ([`may_manage`]), by a caller still who they were.
 pub async fn revoke(svc: &Service, device: Option<&str>, request: &pb::ClientRevoke) -> Result<pb::ClientList> {
     revoke_held(svc, device, request, || ()).await
+}
+
+/// [`revoke`], and every device it took in the audit log, as
+/// [`log_approval`] writes each one added: `client.revoke` from a connection.
+pub async fn revoke_logged(svc: &Service, peer: &Peer, caller_pid: Option<i32>, request: &pb::ClientRevoke) -> Result<pb::ClientList> {
+    let actor = crate::caller_person::log_actor(svc, peer, caller_pid)?;
+    let before = crate::enrollment::list(svc).await?;
+    let after = revoke(svc, peer.client_id.as_deref(), request).await?;
+    let kept: BTreeSet<&str> = after.items.iter().map(|i| i.client_id.as_str()).collect();
+    let gone: BTreeSet<&str> = before.items.iter().map(|i| i.client_id.as_str()).filter(|id| !id.is_empty() && !kept.contains(id)).collect();
+    let by = peer.client_id.clone().unwrap_or_default();
+    for device in gone {
+        log_device(svc, &actor, DEVICE_REMOVED, &serde_json::json!({ "device": device, "by": by }));
+    }
+    Ok(after)
 }
 
 /// [`revoke`], running `held` just before the fence lock is taken.

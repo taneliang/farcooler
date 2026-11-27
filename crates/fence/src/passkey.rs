@@ -87,6 +87,32 @@ pub fn holds_ed25519(entry: &crate::Entry) -> bool {
     PublicKey::from_openssh(key).is_ok_and(|key| key.algorithm() == Algorithm::Ed25519)
 }
 
+/// The P-256 point of the passkey `entry`'s line holds, uncompressed, or
+/// `None` for a line that isn't this channel's passkey. What a runner checks
+/// a browser's assertion against (ov-1490): the passkey is the browser's key,
+/// so the line sshd logs it in with is the one that says whose touch counts.
+pub fn passkey_point(entry: &crate::Entry) -> Option<Vec<u8>> {
+    let key = match crate::split_options(&entry.line) {
+        Some((_, rest)) => rest,
+        None => entry.line.as_str(),
+    };
+    let key = PublicKey::from_openssh(key).ok()?;
+    if !is_passkey_key(&key) {
+        return None;
+    }
+    Some(key.key_data().sk_ecdsa_p256()?.ec_point().as_bytes().to_vec())
+}
+
+fn is_passkey_key(key: &PublicKey) -> bool {
+    key.algorithm() == Algorithm::SkEcdsaSha2NistP256 && admits(key, Grant::FarCooler)
+}
+
+/// Whether the OpenSSH line `key` is a browser's passkey that this build
+/// would write a Key A line for.
+pub fn is_passkey_line(key: &str) -> bool {
+    PublicKey::from_openssh(key.trim()).is_ok_and(|key| is_passkey_key(&key))
+}
+
 /// Whether the fence would write a Key A line for `key`: what a phone may
 /// certify as another device's Key A (`farcooler_client::device_keys`).
 pub fn admits_as_key_a(key: &PublicKey) -> bool {

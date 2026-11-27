@@ -76,7 +76,7 @@ impl Device {
 
     /// `req`, carrying a passkey's assertion: `flags` the authenticator's,
     /// `count` its counter, `origin` the page's.
-    fn assert(&self, pin: &str, req: Request, nonce: &[u8], flags: u8, count: u32, origin: &str) -> Request {
+    pub(crate) fn assert(&self, pin: &str, req: Request, nonce: &[u8], flags: u8, count: u32, origin: &str) -> Request {
         let bytes = action_bytes(&req);
         let statement = farcooler_protocol::step_up_statement(pin, self.id, &Sha256::digest(&bytes).into(), nonce);
         let challenge = Base64UrlUnpadded::encode_string(&Sha256::digest(&statement));
