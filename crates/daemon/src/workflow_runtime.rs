@@ -801,8 +801,7 @@ impl Runtime {
                 }
                 Event::Finished(index, result) => {
                     let job = running.remove(index);
-                    // Keep any startup confirmation visible until the result replaces the old refusal.
-                    let _activity = self.activities.lock().unwrap().remove(&(job.workspace.clone(), job.effect.id.clone()));
+                    self.activities.lock().unwrap().remove(&(job.workspace.clone(), job.effect.id.clone()));
                     futures.remove(index);
                     self.note_holding(running);
                     if job.reconciling {

@@ -432,7 +432,13 @@ async fn workflow_service_admitted_ci_recovers_original_bundle_after_reconfigura
             // Earlier effects can briefly be Uncertain before a candidate exists.
             // Wait for the admitted CI effect itself to become uncertain.
             let effects=host.service.store.workflow_outbox(&workspace.to_string()).unwrap();
-            if item["phase"]=="Uncertain" && item["candidate"].as_str().is_some() && effects.iter().any(|e|
+            // Get runs beside the writer and reads the state before the live activities. As CI
+            // settles, a reply can call it Uncertain at the revision before that was stored,
+            // and a publish at that revision is Stale (ov-1511). Require the stored one.
+            let stored=host.service.store.workflow_state(&workspace.to_string()).unwrap().unwrap();
+            let committed=snapshot["state"]["revision"].as_u64()==Some(stored.revision)
+                && stored.items["recover"].phase==farcooler_workflow::Phase::Uncertain;
+            if committed && item["phase"]=="Uncertain" && item["candidate"].as_str().is_some() && effects.iter().any(|e|
                 e.dispatch_state=="uncertain" && item["pending"].as_str()==Some(e.effect.id.as_str()) &&
                 matches!(e.effect.kind,farcooler_workflow::EffectKind::Execute(farcooler_workflow::StageKind::Ci))) {break snapshot;}
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
