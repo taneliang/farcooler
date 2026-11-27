@@ -3,6 +3,7 @@ import { PaneSet } from '../../src/client/panes'
 import { PaneView } from '../../src/client/terminal'
 import { TerminalWriter } from '../../src/client/terminal-writer'
 import { mountWork } from '../../src/client/work-screen'
+import { harnessShell, runnerNamed } from './harness-shell'
 
 const runner = 'paired-runner'
 const repository = 'platform'
@@ -135,12 +136,9 @@ const panes = new PaneSet<WebRunner>(id => {
   })
   return pane
 })
+harnessShell({ runner: runnerNamed('Production macOS runner for Continuous Delivery and release verification', runner) })
 document.getElementById('status')!.hidden = true
 document.getElementById('work')!.hidden = false
-document.getElementById('runner-name')!.textContent = 'Production macOS runner for Continuous Delivery and release verification'
-document.getElementById('show-board')!.textContent = 'Board'
-document.getElementById('show-orchestrator')!.textContent = 'Orchestrator'
-document.getElementById('show-commands')!.textContent = 'Commands'
 const screen = mountWork({
   runner,
   current: () => fake,

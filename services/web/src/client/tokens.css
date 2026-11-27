@@ -1,0 +1,125 @@
+/* The design tokens (ov-1483's report, ov-1510): the one source of type,
+   color, spacing and corners for the signed-in web app. The shell (shell.css)
+   uses them directly; the views that are not rewritten yet read them through
+   the older names mapped at the bottom, so nothing looks half-old.
+
+   Light is the default; dark follows the system, and `data-theme` on <html>
+   overrides either way (the captures use it). Chrome and terminal colors are
+   separate: the terminal is dark in both themes. Contrast pairs are measured
+   by scripts/contrast.mjs (4.5:1 text, 3:1 controls and focus). */
+
+:root {
+  color-scheme: light;
+  --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --type-meta: 0.75rem / 1rem;
+  --type-small: 0.8125rem / 1.125rem;
+  --type-label: 0.875rem / 1.25rem;
+  --type-body: 0.9375rem / 1.375rem;
+  --type-section: 1.125rem / 1.5rem;
+  --type-title: 2rem / 2.25rem;
+  --normal: 400;
+  --medium: 500;
+  --semibold: 600;
+  --bold: 700;
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 20px;
+  --s6: 24px;
+  --s8: 32px;
+  --s10: 40px;
+  --s12: 48px;
+  --radius-small: 5px;
+  --radius-control: 8px;
+  --radius-panel: 12px;
+  --radius-pill: 999px;
+  --canvas: #f6f5f1;
+  --surface: #fffefa;
+  --rail: #eeede8;
+  --text: #20241f;
+  --muted: #575f54;
+  --rule: #d9dcd2;
+  --control-edge: #767f72;
+  --accent: #284fc3;
+  --accent-hover: #203e9e;
+  --on-accent: #ffffff;
+  --selected: #e3eaff;
+  --selected-text: #233e94;
+  --focus: #284fc3;
+  --good: #286246;
+  --good-bg: #e3f1e8;
+  --attention: #795020;
+  --attention-bg: #f8ecda;
+  --danger: #a3261d;
+  --terminal: #151b1c;
+  --terminal-text: #e1e9e3;
+  --terminal-positive: #98dfb0;
+  --shadow: 0 10px 40px #151b1c40;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --canvas: #171a18;
+    --surface: #212622;
+    --rail: #1c201d;
+    --text: #eef1eb;
+    --muted: #b0b9ad;
+    --rule: #3a443b;
+    --control-edge: #7e8d7f;
+    --accent: #b1c3ff;
+    --accent-hover: #cbd6ff;
+    --on-accent: #151f45;
+    --selected: #2b375c;
+    --selected-text: #dce4ff;
+    --focus: #b1c3ff;
+    --good: #a4e1bc;
+    --good-bg: #24372d;
+    --attention: #f2ca92;
+    --attention-bg: #3b3021;
+    --danger: #ffb4a9;
+    --shadow: 0 10px 40px #00000080;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #171a18;
+  --surface: #212622;
+  --rail: #1c201d;
+  --text: #eef1eb;
+  --muted: #b0b9ad;
+  --rule: #3a443b;
+  --control-edge: #7e8d7f;
+  --accent: #b1c3ff;
+  --accent-hover: #cbd6ff;
+  --on-accent: #151f45;
+  --selected: #2b375c;
+  --selected-text: #dce4ff;
+  --focus: #b1c3ff;
+  --good: #a4e1bc;
+  --good-bg: #24372d;
+  --attention: #f2ca92;
+  --attention-bg: #3b3021;
+  --danger: #ffb4a9;
+  --shadow: 0 10px 40px #00000080;
+}
+
+/* The older names the legacy views (app.css, chat.css) use, read from the
+   tokens. app.css no longer sets its own palette. */
+:root {
+  --bg: var(--canvas);
+  --bg-alt: var(--rail);
+  --card: var(--surface);
+  --chip: var(--surface);
+  --chip-hover: var(--selected);
+  --text-2: var(--muted);
+  --button-bg: var(--accent);
+  --button-text: var(--on-accent);
+  --term-bg: var(--terminal);
+  --amber: var(--attention);
+  --ok: var(--good);
+  --seg-on: var(--surface);
+}

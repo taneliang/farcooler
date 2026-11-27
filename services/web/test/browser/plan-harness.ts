@@ -10,6 +10,7 @@ import { renderPlan } from '../../src/client/plan-view'
 import longPlan from '../../../../test/fixtures/plan-android-long.json'
 import runsPlan from '../../../../test/fixtures/plan-runs.json'
 import runsBefore from '../../../../test/fixtures/plan-runs-before.json'
+import { harnessShell, runnerNamed } from './harness-shell'
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement
 const NOW = 1_800_000_000_000
@@ -141,7 +142,7 @@ const board: PlanBoard = new PlanBoard({
   },
 })
 
-$('runner-name').textContent = 'studio'
+harnessShell({ runner: runnerNamed('studio'), page: 'plan' })
 $('who').textContent = 'owner@example.com'
 $('work').hidden = false
 $('status').hidden = true
@@ -149,8 +150,6 @@ $('plan').hidden = false
 $('needs').hidden = true
 $('pane').hidden = true
 $('terminal-list').hidden = true
-$('show-terminals').setAttribute('aria-pressed', 'false')
-$('show-plan').setAttribute('aria-pressed', 'true')
 await board.refresh()
 if (refuse) {
   board.edit('theme-1')

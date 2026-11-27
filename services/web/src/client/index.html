@@ -5,19 +5,26 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <title>Far Cooler</title>
+<meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#171a18" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="{{app-icon-32.png}}" sizes="32x32" type="image/png">
+<link rel="icon" href="{{app-icon-192.png}}" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="{{app-icon-180.png}}">
+<link rel="manifest" href="{{app.webmanifest}}">
 <link rel="stylesheet" href="{{app.css}}">
 <script type="module" src="{{app.js}}"></script>
 </head>
 <body>
-<header class="bar">
-  <span class="title">Far Cooler</span>
-  <button class="quiet" id="web-push" type="button" aria-pressed="false" hidden>Web Push</button>
-  <span id="web-push-note" role="status" hidden>Couldn’t change browser notifications. Check browser permissions and try again.</span>
-  <button class="count" id="bar-count" type="button" aria-live="polite" hidden></button>
-  <span class="who" id="who"></span>
-  <button class="quiet" id="show-saved-copies" type="button">Saved Copies</button>
-  <form method="post" action="/sign-out"><button class="quiet" type="submit">Sign Out</button></form>
-</header>
+<!-- The React shell (shell/shell.tsx) renders here, and mounts the parked
+     nodes below into itself by id: they are the views not rewritten yet. -->
+<div id="shell"></div>
+<div id="legacy" hidden>
+<button class="count" id="bar-count" type="button" aria-live="polite" hidden></button>
+<span class="who" id="who"></span>
+<button class="quiet" id="web-push" type="button" aria-pressed="false" hidden>Web Push</button>
+<span class="note-line" id="web-push-note" role="status" hidden>Couldn’t change browser notifications. Check browser permissions and try again.</span>
+<button class="quiet" id="show-saved-copies" type="button">Saved Copies</button>
+<form id="sign-out-form" method="post" action="/sign-out"><button class="quiet" type="submit">Sign Out</button></form>
 <div class="update" id="update" hidden>
   <span>A newer version of Far Cooler is ready.</span>
   <button id="reload" type="button">Reload</button>
@@ -26,12 +33,11 @@
   <span id="copy-note-text"></span>
   <button id="copy-note-close" type="button">OK</button>
 </div>
-<main>
   <section class="empty" id="status">
     <h1 id="status-title">Starting Far Cooler…</h1>
     <p id="status-detail"></p>
     <div class="actions centered">
-      <button id="status-action" type="button" hidden></button>
+      <button class="primary" id="status-action" type="button" hidden></button>
       <button class="quiet" id="status-cancel" type="button" hidden>Cancel</button>
     </div>
   </section>
@@ -74,7 +80,7 @@
     <p id="compare-detail">Your phone sent its answer. Check that the code on its screen is the one below before you continue.</p>
     <p class="compare-code" id="compare-code" aria-live="polite"></p>
     <div class="actions centered">
-      <button id="compare-yes" type="button">They Match</button>
+      <button class="primary" id="compare-yes" type="button">They Match</button>
       <button class="quiet" id="compare-no" type="button">They Don’t Match</button>
     </div>
   </section>
@@ -84,48 +90,17 @@
     <p id="join-detail"></p>
     <ul class="join-runners" id="join-runners"></ul>
     <div class="actions centered">
-      <button id="join-yes" type="button">Join</button>
+      <button class="primary" id="join-yes" type="button">Join</button>
       <button class="quiet" id="join-no" type="button">Cancel</button>
     </div>
   </section>
 
   <section class="work" id="work" hidden>
-    <nav class="sidebar" aria-label="Runner">
-      <span class="runner" id="runner-name"></span>
-      <select class="space" id="runner-picker" aria-label="Switch Runner" hidden></select>
-      <button class="quiet" id="add-runner" type="button">Add Runner</button>
-      <span class="runner" id="runner-health" role="status"></span>
-      <span class="runner" id="runtime-health"></span>
-      <select class="space" id="space-picker" aria-label="Workspace" hidden></select>
-      <div class="work-tabs" role="group" aria-label="Show">
-        <button type="button" id="show-terminals" aria-pressed="true">Terminals</button>
-        <button type="button" id="show-needs" aria-pressed="false">Needs You</button>
-        <button type="button" id="show-board" aria-pressed="false" disabled></button>
-        <button type="button" id="show-plan" aria-pressed="false">Plan</button>
-      </div>
-      <div class="workspace-tools">
-        <button class="quiet" type="button" id="show-orchestrator"></button>
-        <button class="quiet" type="button" id="show-workflow">Workflow Runs</button>
-        <button class="quiet" type="button" id="show-commands" aria-haspopup="dialog"></button>
-      </div>
-      <div class="work-launch">
-        <button type="button" id="show-start-work" aria-haspopup="dialog" hidden></button>
-        <a id="workspace-link" hidden></a>
-      </div>
-      <div class="terminal-sidebar" id="terminal-list">
-        <div class="terminal-list" id="live-terminals"></div>
-        <div class="terminal-list lost-terminals" id="lost-terminals" hidden></div>
-        <details class="unavailable-terminals" id="unavailable-terminals" hidden>
-          <summary>Unavailable Terminals</summary>
-          <div class="terminal-list" id="unavailable-terminal-list"></div>
-        </details>
-      </div>
-    </nav>
     <div class="workspace-main-area">
       <div class="note link-note" id="link-note" role="status" hidden>
         <p class="link-title" id="link-title"></p>
         <p class="link-detail" id="link-detail"></p>
-        <button id="link-action" type="button" hidden>Reconnect</button>
+        <button class="primary" id="link-action" type="button" hidden>Reconnect</button>
       </div>
       <p class="note" id="work-status" role="status" hidden></p>
       <div class="workspace-panes">
@@ -144,10 +119,13 @@
               <div class="terminal-actions">
                 <button class="quiet" type="button" id="terminal-rename" hidden></button>
                 <button class="quiet" type="button" id="terminal-close" hidden></button>
-                <button type="button" id="terminal-recover" hidden></button>
               </div>
             </header>
-            <p class="note" id="pane-note" hidden></p>
+            <!-- A lost terminal's message and its recovery, side by side. -->
+            <div class="recovery" id="terminal-recovery">
+              <p class="recovery-text" id="pane-note" hidden></p>
+              <button class="primary" type="button" id="terminal-recover" hidden></button>
+            </div>
             <div class="pane-bar" id="pane-bar" hidden>
               <span class="pane-title" id="pane-title"></span>
               <div class="view-switch" role="group" aria-label="View">
@@ -175,22 +153,31 @@
             </form>
           </dialog>
         </section>
-        <section class="workspace-leaf pane" id="workspace-side" tabindex="0" hidden>
-          <div class="pane-bar">
-            <span class="pane-title" id="side-title"></span>
-            <div class="view-switch" id="side-switch" role="group" aria-label="View" hidden>
-              <button type="button" id="side-conversation"></button>
-              <button type="button" id="side-terminal"></button>
-            </div>
-            <button class="quiet" type="button" id="close-split"></button>
-          </div>
-          <p class="note" id="side-note" hidden></p>
-          <div class="terminal" id="side-stage"></div>
-        </section>
       </div>
     </div>
   </section>
-</main>
+<a class="workspace-link" id="workspace-link" hidden></a>
+<div class="terminal-sidebar" id="terminal-list">
+  <div class="terminal-list" id="live-terminals"></div>
+  <div class="terminal-list lost-terminals" id="lost-terminals" hidden></div>
+  <details class="unavailable-terminals" id="unavailable-terminals" hidden>
+    <summary>Unavailable Terminals</summary>
+    <div class="terminal-list" id="unavailable-terminal-list"></div>
+  </details>
+</div>
+<section class="workspace-leaf pane" id="workspace-side" tabindex="0" hidden>
+  <div class="pane-bar">
+    <span class="pane-title" id="side-title"></span>
+    <div class="view-switch" id="side-switch" role="group" aria-label="View" hidden>
+      <button type="button" id="side-conversation"></button>
+      <button type="button" id="side-terminal"></button>
+    </div>
+    <button class="quiet" type="button" id="close-split"></button>
+  </div>
+  <p class="note" id="side-note" hidden></p>
+  <div class="terminal" id="side-stage"></div>
+</section>
+</div>
 <dialog class="start-work" id="start-work" aria-labelledby="work-title">
   <header>
     <h2 id="work-title"></h2>
@@ -207,11 +194,11 @@
   <form id="work-create" hidden>
     <label><span id="work-name-label"></span><input id="work-name" required></label>
     <label><span id="work-branch-label"></span><input id="work-branch" required autocapitalize="none" spellcheck="false"></label>
-    <button type="submit" id="work-create-submit"></button>
+    <button class="primary" type="submit" id="work-create-submit"></button>
   </form>
   <div id="work-start-fields" hidden>
     <label><span id="work-preset-label"></span><select id="work-preset" aria-labelledby="work-preset-label"></select></label>
-    <button type="button" id="work-start"></button>
+    <button class="primary" type="button" id="work-start"></button>
   </div>
 </dialog>
 <dialog class="workspace-commands" id="workspace-commands"></dialog>
@@ -220,7 +207,7 @@
   <h2 id="sign-out-title"></h2>
   <p id="sign-out-detail" role="status"></p>
   <div class="actions">
-    <button id="sign-out-retry" type="button" hidden></button>
+    <button class="primary" id="sign-out-retry" type="button" hidden></button>
     <button class="quiet" id="sign-out-anyway" type="button" hidden></button>
   </div>
 </dialog>

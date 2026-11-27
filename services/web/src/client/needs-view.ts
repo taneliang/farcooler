@@ -69,7 +69,7 @@ function card(item: Item, view: BoardView, now: number, on: Handlers): HTMLEleme
     }
   }
   for (const { action, press } of buttonsFor(item, on.canOpen)) {
-    const button = make('button', action.destructive ? 'quiet danger' : action.primary ? '' : 'quiet', action.title)
+    const button = make('button', action.destructive ? 'quiet danger' : action.primary ? 'prominent' : 'quiet', action.title)
     button.type = 'button'
     button.disabled = busy
     button.onclick = () => on.press(item, press)

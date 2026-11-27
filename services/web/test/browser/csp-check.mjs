@@ -75,6 +75,9 @@ import { brotliDecompressSync } from 'node:zlib'
 import { build } from 'esbuild'
 import { chromium } from 'playwright-core'
 
+import { scrolling, typing } from './measure.mjs'
+import { filledButtons } from './shell-audit.mjs'
+
 const args = process.argv.slice(2)
 const flag = name => {
   const at = args.indexOf(name)
@@ -90,6 +93,10 @@ if (workdayRunner && !workdayCli) throw new Error('--workday-runner requires --w
 const shots = flag('--screenshots')
 const workstationShots = flag('--workstation-screenshots')
 const workstationOnly = args.includes('--workstation-only')
+// Typing and scrolling in the orchestrator chat and a terminal (measure.mjs),
+// written to this file as JSON, for comparing two builds (ov-1510).
+const measureFile = flag('--measure')
+const measured = {}
 if (workstationOnly && !fakeDaemon) throw new Error('--workstation-only needs --fake-daemon')
 // Slow the page's CPU by this factor (Chromium's own throttling), to run the
 // walk on a slow machine. A slow link is --tunnel-delay, which CI uses.
@@ -100,15 +107,56 @@ const delay = Number(flag('--tunnel-delay') ?? 0)
 // alone (ov-846): panes learn the limit from the first refusal.
 const maxSessions = Number(flag('--max-sessions') ?? 10)
 const later = send => (delay > 0 ? setTimeout(send, delay) : send())
-const shoot = async (page, name, phoneWidth = 390) => {
+// The sidebar's workspace picker is a Base UI select (ov-1510): its options
+// exist only while its list is open, and the picked workspace's id is on the
+// trigger as data-value.
+const pickedSpace = page => page.getAttribute('#space-picker', 'data-value')
+async function spaceOptions(page) {
+  await page.click('#space-picker')
+  const list = page.getByRole('listbox')
+  await list.getByRole('option').first().waitFor()
+  const options = await list.getByRole('option').allTextContents()
+  await page.keyboard.press('Escape')
+  await list.waitFor({ state: 'detached' })
+  return options.map(o => o.replace(/✓$/, ''))
+}
+async function waitForOptions(page, ok, timeout = 60_000) {
+  const until = Date.now() + timeout
+  for (;;) {
+    const options = await spaceOptions(page)
+    if (ok(options)) return options
+    if (Date.now() > until) throw new Error(`the workspace picker offers ${JSON.stringify(options)}`)
+    await page.waitForTimeout(500)
+  }
+}
+async function pickSpace(page, label) {
+  await page.click('#space-picker')
+  await page.getByRole('option', { name: label, exact: true }).click()
+  await page.getByRole('listbox').waitFor({ state: 'detached' })
+}
+// Every screen the walk shows holds at most one filled button (ov-1510). With
+// a screenshot directory, each is also saved at phone, tablet and desktop
+// widths in both themes, checked the same way at each.
+const oneFilled = async (page, name) => {
+  const filled = await filledButtons(page)
+  if (filled.length > 1) failures.push(`${name} shows ${filled.length} filled buttons: ${JSON.stringify(filled)}`)
+}
+const shoot = async (page, name) => {
+  await oneFilled(page, name)
   const directory = name.startsWith('workstation-') ? workstationShots ?? shots : shots
   if (!directory) return
-  for (const [width, height] of [[1280, 800], [phoneWidth, 844]]) {
-    await page.setViewportSize({ width, height })
-    await page.waitForTimeout(300)
-    await page.screenshot({ path: join(directory, `${name}-${width}.png`) })
+  const size = page.viewportSize()
+  for (const scheme of ['light', 'dark']) {
+    await page.emulateMedia({ colorScheme: scheme })
+    for (const [width, height] of [[1280, 800], [768, 1024], [320, 640]]) {
+      await page.setViewportSize({ width, height })
+      await page.waitForTimeout(300)
+      await oneFilled(page, `${name} at ${width} ${scheme}`)
+      await page.screenshot({ path: join(directory, `${name}-${scheme}-${width}.png`) })
+    }
   }
-  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.emulateMedia({ colorScheme: null })
+  await page.setViewportSize(size)
 }
 
 // The canary channel's DERP settings, from wrangler.toml.
@@ -622,7 +670,7 @@ const LIVE = '#terminal .terminal-host:not([hidden])[data-attached="true"]'
 async function connect(page, live = true) {
   await statusSays(page, 'Connect to studio')
   await page.click('#status-action')
-  await page.waitForSelector('#work:not([hidden]) .terminal-choice', { timeout: 120_000 })
+  await page.waitForSelector('.app[data-screen="work"] .terminal-choice', { timeout: 120_000 })
   await page.waitForFunction(() => document.activeElement?.closest('#terminal .xterm'), null, { timeout: 30_000 })
   if (live) await page.waitForSelector(LIVE, { timeout: 60_000 })
 }
@@ -892,19 +940,19 @@ async function workspaceWalk(page) {
   await page.goto(origin)
   await statusSays(page, 'Connect to studio')
   await page.click('#status-action')
-  await page.waitForSelector('#work:not([hidden]) .terminal-choice', { timeout: 120_000 })
+  await page.waitForSelector('.app[data-screen="work"] .terminal-choice', { timeout: 120_000 })
   const titles = () => page.$$eval('.terminal-choice', b => b.map(x => x.textContent))
-  const picker = () => page.$$eval('#space-picker option', o => o.map(x => x.textContent))
+  const picker = () => spaceOptions(page)
   const rows = () => page.$$eval('#needs .need-question', r => r.map(x => x.textContent))
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 
   // Main is showing: its twelve shells, and nothing of Billing's.
-  await page.waitForFunction(() => document.querySelector('#space-picker')?.textContent?.includes('Billing · Studio (2)'), null, { timeout: 60_000 })
+  await waitForOptions(page, options => options.includes('Billing · Studio (2)'))
   if (!same(await picker(), ['Main · Studio (1)', 'Billing · Studio (2)', 'Sandbox · Studio'])) failures.push(`the picker says ${JSON.stringify(await picker())}`)
   const main = await titles()
   if (main.length !== 12 || main.some(t => /billing/.test(t))) failures.push(`Main lists ${JSON.stringify(main)}`)
 
-  await page.selectOption('#space-picker', { label: 'Sandbox · Studio' })
+  await pickSpace(page, 'Sandbox · Studio')
   await page.waitForSelector('#pane-note:not([hidden])')
   const notice = await page.textContent('#pane-note')
   if (notice !== 'Sandbox has no terminals yet. Use Start Work to open one.' || (await titles()).length) {
@@ -915,7 +963,7 @@ async function workspaceWalk(page) {
   await page.locator('#start-work[open]').getByRole('button', { name: 'New Worktree' }).waitFor()
   await page.click('#work-done')
 
-  await page.selectOption('#space-picker', { label: 'Main · Studio (1)' })
+  await pickSpace(page, 'Main · Studio (1)')
   await page.click('#show-needs')
   await page.waitForFunction(() => document.querySelectorAll('#needs .need').length === 1, null, { timeout: 30_000 })
   if (!same(await rows(), ['Run the tests on studio?'])) failures.push(`Main's Needs You lists ${JSON.stringify(await rows())}`)
@@ -929,7 +977,7 @@ async function workspaceWalk(page) {
   await shoot(page, 'workspace-main')
 
   // Billing: its own terminals, Needs You and plan.
-  await page.selectOption('#space-picker', { label: 'Billing · Studio (2)' })
+  await pickSpace(page, 'Billing · Studio (2)')
   await page.waitForFunction(() => document.querySelector('#plan')?.textContent?.includes('PDF export'), null, { timeout: 30_000 })
   const plan = await page.textContent('#plan')
   if (plan.includes('Visual language') || !plan.includes('Invoice export') || (await page.$('.plan-board'))) failures.push(`Billing's plan reads ${JSON.stringify(plan.slice(0, 200))}`)
@@ -950,8 +998,8 @@ async function workspaceWalk(page) {
   await page.goto(origin)
   await statusSays(page, 'Connect to studio')
   await page.click('#status-action')
-  await page.waitForSelector('#work:not([hidden]) .terminal-choice', { timeout: 120_000 })
-  if ((await page.inputValue('#space-picker')) === '' || !same(await titles(), ['billing shell', 'billing agent'])) failures.push('the pick was not remembered')
+  await page.waitForSelector('.app[data-screen="work"] .terminal-choice', { timeout: 120_000 })
+  if (!(await pickedSpace(page)) || !same(await titles(), ['billing shell', 'billing agent'])) failures.push('the pick was not remembered')
   else console.log('csp-check: the pick survived a reload')
 }
 
@@ -1028,6 +1076,18 @@ async function workstationWalk(page) {
   await side.locator('.xterm').waitFor()
   await page.waitForSelector('#side-stage [data-attached="true"]:not([hidden])')
   assert(await main.locator('.xterm').isVisible(), 'the main terminal disappeared after splitting')
+  if (measureFile) {
+    // Echoed lines give the terminal scrollback to scroll through.
+    const keys = main.locator('.xterm-helper-textarea')
+    await keys.focus()
+    for (let i = 0; i < 80; i++) {
+      await page.keyboard.type(`line ${i}`)
+      await page.keyboard.press('Enter')
+    }
+    await page.waitForTimeout(500)
+    measured.terminalTyping = await typing(page, keys, 'the quick brown fox jumps over the lazy dog 0123456789')
+    measured.terminalScroll = await scrolling(page, main.locator('.xterm'))
+  }
 
   await main.locator('.xterm').click()
   await focus('main')
@@ -1051,16 +1111,24 @@ async function workstationWalk(page) {
   await page.locator('#plan .plan-ticket').waitFor()
   await page.click('#show-orchestrator')
   await side.getByRole('button', { name: 'Chat', exact: true }).click()
+  if (measureFile) {
+    measured.chatTyping = await typing(page, draft, 'the quick brown fox jumps over the lazy dog 0123456789')
+    await draft.fill('')
+    writeFileSync(measureFile, JSON.stringify(measured, null, 2) + '\n')
+    console.log(`csp-check: measured typing and scrolling into ${measureFile}`)
+  }
   await draft.fill('Keep the invoice export draft here.')
   await side.locator('.bubble').first().waitFor()
   await shoot(page, 'workstation-plan')
   await page.click('#show-board')
   const board = page.locator('#board')
+  await board.getByRole('link', { name: /Invoice export/ }).waitFor()
+  await shoot(page, 'workstation-board')
   await board.getByRole('link', { name: /Invoice export/ }).click()
   await board.getByRole('heading', { name: 'Invoice export', exact: true }).waitFor()
   assert(await draft.inputValue() === 'Keep the invoice export draft here.', 'the board ticket hid the orchestrator draft')
   await page.goBack()
-  await board.getByRole('heading', { name: 'Board', exact: true }).waitFor()
+  await board.locator('#board-title').waitFor({ state: 'attached' })
   await page.goBack()
   await page.locator('#plan .plan-ticket').waitFor()
   await page.setViewportSize({ width: 390, height: 560 })
@@ -1087,6 +1155,7 @@ async function workstationWalk(page) {
   await page.click('#show-workflow')
   await page.locator('#workflow-runs[open]').getByText('No workflow runs.').waitFor()
   assert(await draft.isVisible(), 'workflow hid the orchestrator')
+  await oneFilled(page, 'workflow runs')
   await page.goBack()
   await page.locator('#detail[open]').waitFor()
   await page.goBack()
@@ -1112,13 +1181,12 @@ async function workstationWalk(page) {
   await focus('side')
   await page.click('#close-split')
   await page.click('#show-terminals')
-  const picker = page.locator('#space-picker')
-  const billing = await picker.inputValue()
-  await picker.selectOption({ index: 0 })
+  const billing = await pickedSpace(page)
+  await pickSpace(page, (await spaceOptions(page))[0])
   await page.goBack()
-  assert(await picker.inputValue() === billing, 'Back did not restore the workspace')
+  await page.waitForFunction(id => document.getElementById('space-picker')?.dataset.value === id, billing)
   await page.goForward()
-  assert(await picker.inputValue() !== billing, 'Forward did not restore the switched workspace')
+  await page.waitForFunction(id => document.getElementById('space-picker')?.dataset.value !== id, billing)
   await page.goBack()
   await page.setViewportSize({ width: 1280, height: 800 })
   console.log('csp-check: split, pane focus, palette and remapping, history and draft restoration passed')
@@ -1320,7 +1388,7 @@ async function remoteWorkday({ context, page, passkeys }) {
   const lost = sidebar.getByRole('link', { name: 'Lost workday agent', exact: true })
   if (shots) {
     await lost.waitFor(wait)
-    await shoot(page, 'workday-lost-terminal', 320)
+    await shoot(page, 'workday-lost-terminal')
   }
   await lost.click()
   await page.locator('#terminal-state').filter({ hasText: /^Lost$/ }).waitFor(wait)

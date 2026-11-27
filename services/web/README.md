@@ -3,6 +3,31 @@
 The Worker behind app.farcooler.com (and app.canary.farcooler.com). Its shell's
 Content-Security-Policy is built from `wrangler.toml` (`src/headers.ts`).
 
+## The signed-in app
+
+`scripts/build.mjs` bundles `src/client/app.ts` with Vite into one script and
+one stylesheet, both served from `/a/` under the strict CSP.
+
+- **Styling.** `src/client/tokens.css` is the one source of type, color (light,
+  plus dark by `prefers-color-scheme` or `data-theme`), spacing and corners.
+  Other stylesheets use its variables, not literal values (`scripts/styles.mjs`
+  lists them in order).
+- **Shell.** `src/client/shell/` renders the sidebar, page header and
+  orchestrator pane with React, Base UI and React Router. It shows
+  `ShellStore` (`store.ts`), which `app.ts` and `work-screen.ts` write; feature
+  logic stays in the Rust core.
+- **Views.** The board, plan, chat and terminals are still DOM code in
+  `index.html`'s `#legacy` holder. The shell mounts each into place through a
+  `LegacyView` (mount, update, dispose).
+- **Actions.** A plain button is outlined, and `.primary` is the filled accent.
+  Each view has at most one filled button; lists use `.prominent`.
+- **Icon.** `src/client/icons/app-icon-1024.png` is the master of the app icon.
+  The sizes beside it feed the favicon, the sidebar, the touch icon and
+  `app.webmanifest`.
+
+`test/browser/shell-check.mjs` covers keyboard focus order, the pickers and
+dialogs, filled buttons and contrast at 320, 768 and 1280 px in both themes.
+
 ## Adding a Tailcat relay host
 
 The CSP names Tailcat's relays one by one, not as `*.ipn.dev`, so a relay that

@@ -167,7 +167,7 @@ function initiativeCard(i: Initiative, view: PlanBoardView, on: PlanHandlers): H
       if (e.key === 'Escape') on.cancel()
     }
     const actions = make('div', 'plan-actions')
-    const save = make('button', '', 'Save')
+    const save = make('button', 'primary', 'Save')
     save.type = 'submit'
     save.disabled = busy
     actions.append(save, button('Cancel', 'quiet', on.cancel, busy))

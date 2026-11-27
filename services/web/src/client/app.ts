@@ -32,11 +32,13 @@ import { type BoardView, buttonsFor, countLabel, countOf, isCounted, pageTitle }
 import { renderNeeds } from './needs-view'
 import { type PlanTab, startPlanTab } from './plan-tab'
 import { PlanList } from './plan-list'
-import { scopeBoard, type Space, waitingIn } from './scope'
+import { optionLabel, scopeBoard, type Space, waitingIn } from './scope'
 import { destination, linkedRunner, mountWork, type WorkView } from './work-screen'
 import { mountBoard } from './board-screen'
 import { openChanges } from './changes-view'
-import { drawPicker, saveSpace, savedSpace } from './space-picker'
+import { saveSpace, savedSpace } from './space-picker'
+import { mountShell } from './shell/shell'
+import { shell } from './shell/store'
 import { DetailBoard, type Subject } from './detail'
 import { type Answer, DetailSheet } from './detail-view'
 import { corePhrases } from './core-phrases'
@@ -79,10 +81,11 @@ async function checkVersion(): Promise<void> {
   $('update').removeAttribute('hidden')
 }
 
-const SCREENS = ['status', 'enroll', 'compare', 'join', 'work']
+const SCREENS = ['status', 'enroll', 'compare', 'join', 'work'] as const
 
-function show(screen: string): void {
+function show(screen: typeof SCREENS[number]): void {
   for (const id of SCREENS) $(id).toggleAttribute('hidden', id !== screen)
+  shell.set({ screen })
 }
 
 /// A full-page message, with at most one button, and a quiet second one
@@ -583,7 +586,12 @@ let spaces: Space[] = []
 let chosenSpace: string | null = null
 let frontRunner = ''
 let lastView: BoardView | null = null
-let pickerDrawn = ''
+
+/// The sidebar's workspace picker (shell.tsx): each workspace by name, with
+/// how many items wait in it.
+function drawSpaces(waiting: Map<string, number>): void {
+  shell.set({ spaces: spaces.map(space => ({ id: space.id, label: optionLabel(space, waiting.get(space.id) ?? 0) })), space: chosenSpace })
+}
 
 /// Put the board's view on the page: the list for the workspace showing, the
 /// count on the button, the bar and the tab's title. The bar and the title
@@ -595,13 +603,13 @@ function drawNeeds(view: BoardView): void {
   const scoped = scopeBoard(view, spaces, chosenSpace, frontRunner)
   planTab?.setNeeds(scoped.items.filter(i => isCounted(i) && !i.elsewhere))
   const total = countOf(view.items)
-  $('show-needs').textContent = countLabel(countOf(scoped.items))
+  shell.command('nav', 'needs', { label: countLabel(countOf(scoped.items)) })
   const bar = $<HTMLButtonElement>('bar-count')
   bar.hidden = total === 0
   const attention = needsAttention(total) ?? ''
   if (bar.textContent !== attention) bar.textContent = attention
   document.title = pageTitle(total)
-  pickerDrawn = drawPicker($<HTMLSelectElement>('space-picker'), spaces, chosenSpace, waitingIn(view, spaces, frontRunner), pickerDrawn)
+  drawSpaces(waitingIn(view, spaces, frontRunner))
   drawn = renderNeeds(
     $('needs'),
     scoped,
@@ -683,12 +691,13 @@ function stopNeeds(): void {
   others = []
   retries.clear()
   drawn = ''
-  pickerDrawn = ''
   lastView = null
   spaces = []
   chosenSpace = null
   document.title = pageTitle(0)
   $('bar-count').hidden = true
+  shell.reset()
+  installShellHandlers()
 }
 
 async function work(session: Session): Promise<void> {
@@ -765,8 +774,7 @@ function showLink(view: LinkView, label: string): void {
   if (view.kind !== 'up' || panes) show('work')
   const health: { state: string; title: string | null; detail: string | null; action: string | null } =
     JSON.parse(runnerHealth(label, JSON.stringify(view)))
-  if (view.kind !== 'up') $('runtime-health').textContent = ''
-  if ($('runner-health').textContent !== health.state) $('runner-health').textContent = health.state
+  shell.set({ runner: { ...shell.read().runner, health: health.state, ...(view.kind !== 'up' ? { runtime: '' } : {}) }, linkLost: !!health.action })
   $('link-note').hidden = !health.title
   if (!health.title) return
   $('link-title').textContent = health.title
@@ -804,7 +812,6 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     now: () => Date.now(),
     log: logLine,
   })
-  const runtimeStatus = $('runtime-health')
   let checkingHealth: WebRunner | null = null
   async function refreshRuntimeHealth(): Promise<void> {
     const runner = reconnector.current
@@ -812,9 +819,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     checkingHealth = runner
     try {
       const health = await runner.runtime_health().catch(() => '')
-      if (reconnector.current === runner && runtimeStatus.textContent !== health) {
-        runtimeStatus.textContent = health
-      }
+      if (reconnector.current === runner) shell.set({ runner: { ...shell.read().runner, runtime: health } })
     } finally {
       if (checkingHealth === runner) checkingHealth = null
     }
@@ -861,26 +866,24 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     return
   }
 
-  $('runner-name').textContent = target.label
-  const picker = $<HTMLSelectElement>('runner-picker')
-  picker.replaceChildren(...(session.device.runners ?? []).map(r => {
-    const option = new Option(r.label, r.id, false, r.id === target.id)
-    option.disabled = Boolean(r.why)
-    return option
-  }))
-  picker.hidden = picker.options.length < 2
-  picker.onchange = () => location.assign(destination(picker.value, null))
-  $('add-runner').onclick = () => {
-    reconnector.stop()
-    panes?.dispose()
-    panes = null
-    stopNeeds()
-    void enroll(session)
-  }
   const list = $('terminal-list')
   show('work')
 
   stopNeeds()
+  shell.set({
+    runner: { ...shell.read().runner, id: target.id, label: target.label },
+    runners: (session.device.runners ?? []).map(r => ({ id: r.id, label: r.label, disabled: Boolean(r.why) })),
+  })
+  shell.handle({
+    pickRunner: id => location.assign(destination(id, null)),
+    addRunner: () => {
+      reconnector.stop()
+      panes?.dispose()
+      panes = null
+      stopNeeds()
+      void enroll(session)
+    },
+  })
   installWorkflowPort(id => id === target.id && reconnector.current ? workflowPort : null)
   frontRunner = target.id
   spaces = initial.workspaces
@@ -1003,15 +1006,20 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
 
   const controller = new WorkspaceLayout(scope, target.label, workspaceLayout, (view, intent) => {
     mounted.render(view, intent === 'open' || view.effect.kind === 'refresh_pane')
+    const keys = (command: { key?: string | null }) => command.key ? view.shortcut_prefix + command.key.toUpperCase() : undefined
+    const board = view.actions.find(a => a.id === 'board')!
+    shell.command('nav', 'board', { label: board.label, disabled: !board.enabled, keys: keys(board) })
+    for (const tool of ['orchestrator', 'workflow', 'commands'] as const) {
+      const command = view.actions.find(a => a.id === tool)!
+      shell.command('tools', tool, { label: command.label, disabled: !command.enabled, keys: keys(command) })
+    }
     for (const [id, action] of [
-      ['show-board', 'board'], ['show-orchestrator', 'orchestrator'], ['show-workflow', 'workflow'], ['show-commands', 'commands'],
       ['view-conversation', 'conversation'], ['side-conversation', 'conversation'],
       ['view-terminal', 'raw_terminal'], ['side-terminal', 'raw_terminal'], ['close-split', 'close_split'],
     ] as const) {
       const command = view.actions.find(a => a.id === action)!
       const button = $<HTMLButtonElement>(id)
       button.textContent = command.label
-      if (id.startsWith('show-')) button.disabled = !command.enabled
       if (command.key) button.setAttribute('aria-keyshortcuts', view.shortcut_prefix + command.key.toUpperCase())
       else button.removeAttribute('aria-keyshortcuts')
     }
@@ -1029,15 +1037,13 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
         }
       } else showTab(effect.page)
     } else if (effect.kind === 'close_page') navigation?.leave()
-    else if (effect.kind === 'work') $({
-      start_work: 'show-start-work', rename_terminal: 'terminal-rename',
-      close_terminal: 'terminal-close', recover_terminal: 'terminal-recover',
-    }[effect.command]).click()
+    else if (effect.kind === 'work' && effect.command === 'start_work') shell.handlers.startWork()
+    else if (effect.kind === 'work') $(({
+      rename_terminal: 'terminal-rename', close_terminal: 'terminal-close', recover_terminal: 'terminal-recover',
+    } as const)[effect.command as 'rename_terminal' | 'close_terminal' | 'recover_terminal']).click()
   })
   layout = controller
-  $('show-orchestrator').onclick = () => controller.run('orchestrator')
-  $('show-workflow').onclick = () => controller.run('workflow')
-  $('show-commands').onclick = () => controller.run('commands')
+  shell.handle({ tool: tool => controller.run(tool) })
   $('close-split').onclick = () => controller.run('close_split')
   for (const [id, action, slot] of [
     ['view-conversation', 'conversation', 'main'], ['view-terminal', 'raw_terminal', 'main'],
@@ -1060,6 +1066,12 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     return true
   }
   paneControls = { open: id => openTerminal(id, true) }
+
+  /// The page header's breadcrumb names the workspace's repository.
+  const presentRepository = () => {
+    const repository = currentWork.repositories.find(r => r.id === currentWork.repository)
+    shell.set({ repository: currentWork.workspace === chosenSpace ? repository?.label ?? '' : '' })
+  }
 
   const presentLayout = (page: Route['page']) => {
     controller.contextFor(chosenSpace, page, currentWork, orchestrator)
@@ -1103,6 +1115,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
         return
       }
       inventoryWorkspace = route.space
+      presentRepository()
       board.show(route.page === 'board', view.workspace, view.repository, route.boardTask, route.review)
       presentLayout(route.page)
       const pending = pendingTerminal
@@ -1116,7 +1129,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
         if (route.page === 'terminals') mounted.restoreFocus(true)
       }
       if (lastView) drawNeeds(lastView)
-      else pickerDrawn = drawPicker($<HTMLSelectElement>('space-picker'), spaces, chosenSpace, new Map())
+      else drawSpaces(new Map())
     },
   })
   workScreen = screen
@@ -1177,15 +1190,18 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     $('board').hidden = route.page !== 'board'
     $('pane').hidden = route.page !== 'terminals'
     if (scrollPage && scrollPage !== 'ticket') $(scrollIds[scrollPage]).scrollTop = 0
-    for (const tab of ['terminals', 'needs', 'board', 'plan'] as const) {
-      $(`show-${tab}`).setAttribute('aria-pressed', String(tab === route.page))
-    }
+    shell.set({
+      page: route.page,
+      hrefs: Object.fromEntries((['terminals', 'needs', 'board', 'plan'] as const).map(tab =>
+        [tab, workspaceUrl(target.id, { space: chosenSpace, page: tab, tab }).href])),
+    })
+    presentRepository()
     board.show(route.page === 'board', changedSpace ? null : currentWork.workspace, currentWork.repository, route.boardTask, route.review)
     if (changedSpace || pendingTerminal || changedWorktree) void screen?.show(route.space, pendingTerminal?.id, route.worktree)
     else if (inventoryWorkspace === route.space) presentLayout(route.page)
     planTab?.show(route.page === 'plan')
     if (lastView) drawNeeds(lastView)
-    else pickerDrawn = drawPicker($<HTMLSelectElement>('space-picker'), spaces, chosenSpace, new Map())
+    else drawSpaces(new Map())
     if (route.page === 'needs') void mine.refresh()
     if (route.page === 'workflow' && chosenSpace) {
       workflowSheet = openWorkflow($<HTMLDialogElement>('workflow-runs'), target.id, chosenSpace,
@@ -1204,10 +1220,12 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   }
   navigation = new WorkspaceHistory(scope, target.id, { space: fallbackSpace, page: 'terminals', tab: 'terminals', terminal: linkedTerminal }, resolve, renderRoute)
   renderRoute(navigation.route)
-  $<HTMLSelectElement>('space-picker').onchange = event => {
-    const tab = navigation?.route.tab ?? 'terminals'
-    navigation?.navigate({ space: (event.target as HTMLSelectElement).value, page: tab, tab })
-  }
+  shell.handle({
+    pickSpace: space => {
+      const tab = navigation?.route.tab ?? 'terminals'
+      navigation?.navigate({ space, page: tab, tab })
+    },
+  })
   mine.up(target.id)
   boardTimer = window.setInterval(() => {
     if (document.visibilityState !== 'visible') return
@@ -1351,17 +1369,21 @@ const reload = { label: 'Reload', run: () => location.reload() }
 let webLoading: ReturnType<typeof init> | undefined
 const loadWeb = () => webLoading ??= init({ module_or_path: __WASM__.web })
 
+/// What the shell's controls do before a runner is connected and after one
+/// goes: show a view, nothing else.
+function installShellHandlers(): void {
+  shell.handle({ showTab })
+}
+
 async function boot(): Promise<void> {
+  mountShell($('shell'))
+  installShellHandlers()
   $('reload').addEventListener('click', () => location.reload())
-  $('show-terminals').addEventListener('click', () => showTab('terminals'))
-  $('show-needs').addEventListener('click', () => showTab('needs'))
-  $('show-board').addEventListener('click', () => showTab('board'))
-  $('show-plan').addEventListener('click', () => showTab('plan'))
   $('bar-count').addEventListener('click', () => showTab('needs'))
   window.addEventListener('focus', () => void checkVersion())
   document.addEventListener('keydown', event => {
     if ($('work').hidden || event.key !== 'Escape' || event.defaultPrevented || document.querySelector('dialog:modal') ||
-        event.target instanceof Element && event.target.closest('.xterm, .chat-input')) return
+        event.target instanceof Element && event.target.closest('.xterm, .chat-input, .select-popup, .picker')) return
     layout?.run('close_page')
   })
   recheckOnReturn(window, document, recheckLink)

@@ -302,7 +302,7 @@ export function mountBoard(options: Options) {
       fields.append(label)
     }
     const actions = el('div', undefined, 'board-actions')
-    const submit = el('button', view.submit)
+    const submit = el('button', view.submit, 'primary')
     submit.type = 'submit'
     const cancel = button(view.cancel, () => dialog.close(), true)
     actions.append(submit, cancel)

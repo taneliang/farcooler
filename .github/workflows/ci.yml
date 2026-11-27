@@ -1956,6 +1956,7 @@ jobs:
       - run: node test/browser/chat-check.mjs
       - run: node test/browser/chat-files-check.mjs
       - run: node test/browser/plan-render-check.mjs
+      - run: node test/browser/shell-check.mjs
       - name: Check work and board actions in Chrome
         shell: bash
         run: |

@@ -5,6 +5,7 @@ import { mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { build } from 'esbuild'
 import { chromium } from 'playwright-core'
+import { harnessHtml, styles } from '../../scripts/styles.mjs'
 
 const fixture = JSON.parse(readFileSync(join(process.env.REVIEW_BROWSER_BRIDGE, 'ready.json'), 'utf8'))
 const origin = 'https://review.test'
@@ -12,9 +13,9 @@ const destination = new URL(origin)
 destination.search = new URLSearchParams({
   runner: 'canary', workspace: fixture.workspace, repo: fixture.repo, view: 'board', ticket: fixture.ticket,
 })
-const html = readFileSync('src/client/index.html', 'utf8')
+const html = harnessHtml()
   .replaceAll('{{app.css}}', '/app.css').replaceAll('{{app.js}}', '/board.js')
-const css = readFileSync('src/client/app.css', 'utf8')
+const css = styles().toString()
 const bundle = await build({ entryPoints: ['test/browser/board-harness.ts'], bundle: true, write: false, format: 'esm' })
 const output = process.argv[2]
 if (output) mkdirSync(output, { recursive: true })

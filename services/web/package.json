@@ -14,19 +14,26 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.8.71",
     "@cloudflare/workers-types": "^4.20250110.0",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
     "esbuild": "0.28.2",
     "playwright-core": "1.64.1",
     "typescript": "^5.7.0",
+    "vite": "7.3.8",
     "vitest": "^3.2.7",
     "wrangler": "^3.100.0",
     "ws": "8.18.3"
   },
   "dependencies": {
+    "@base-ui/react": "1.9.0",
     "@xterm/addon-canvas": "0.7.0",
     "@xterm/addon-fit": "0.10.0",
     "@xterm/xterm": "5.5.0",
     "jsqr": "1.4.0",
     "markdown-it": "15.0.3",
-    "qrcode-generator": "2.0.4"
+    "qrcode-generator": "2.0.4",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "react-router": "7.18.0"
   }
 }

@@ -1,7 +1,6 @@
 /* An agent's conversation (ov-776, src/client/chat.ts). Colors come from
    app.css's tokens; this file adds only what a conversation needs. */
-.chat-host { --chat-w: 760px; --bubble: var(--button-bg); --bubble-text: var(--button-text); --code-bg: var(--card); --ok: #32d74b; --bad: #ff6961; --run: #0a84ff; position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--bg); color: var(--text); }
-@media (prefers-color-scheme: light) { .chat-host { --ok: #1f8a3a; --bad: #d70015; --run: #0071e3; --code-bg: #ececf0; } }
+.chat-host { --chat-w: 760px; --bubble: var(--button-bg); --bubble-text: var(--button-text); --code-bg: var(--card); --ok: var(--good); --bad: var(--danger); --run: var(--accent); position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--bg); color: var(--text); }
 .terminal { position: relative; }
 .chat-host[hidden] { display: none; }
 .chat-host[data-stale="true"] .chat-list { opacity: 0.6; }

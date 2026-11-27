@@ -140,7 +140,7 @@ export class DetailSheet {
         row.append(make('span', 'plan-label', this.waitingOnYou()))
         const buttons = make('div', 'need-actions')
         for (const answer of answers) {
-          const button = make('button', answer.destructive ? 'quiet danger' : answer.primary ? '' : 'quiet', answer.label)
+          const button = make('button', answer.destructive ? 'quiet danger' : answer.primary ? 'primary' : 'quiet', answer.label)
           button.type = 'button'
           button.onclick = () => answer.run()
           buttons.append(button)

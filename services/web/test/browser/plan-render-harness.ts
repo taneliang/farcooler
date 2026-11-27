@@ -13,6 +13,9 @@ import type { WebRunner } from 'fc-web'
 import { parsePlan } from '../../src/client/plan'
 import type { PlanPresenter } from '../../src/client/plan-present'
 import { renderPlan } from '../../src/client/plan-view'
+import { harnessShell, runnerNamed } from './harness-shell'
+
+harnessShell({ runner: runnerNamed('Mac mini'), page: 'plan' })
 
 const present: PlanPresenter = () => JSON.stringify(golden.answer)
 const plan = parsePlan(JSON.stringify(golden.request.plan))!
@@ -29,8 +32,6 @@ renderPlan(
 )
 for (const id of ['work', 'plan']) document.getElementById(id)!.hidden = false
 for (const id of ['status', 'needs', 'pane', 'terminal-list']) document.getElementById(id)!.hidden = true
-document.getElementById('show-terminals')!.setAttribute('aria-pressed', 'false')
-document.getElementById('show-plan')!.setAttribute('aria-pressed', 'true')
 ;(window as any).golden = golden.answer.view
 // A queue without themes, line tickets or pipeline agents must still reach the
 // current Plan screen. Its complete words come from the Rust queue golden.

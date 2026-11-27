@@ -13,7 +13,7 @@ import { withHeaders } from './headers'
 /// A hashed file: a name, a hash of 8 or more hex digits, and a known type.
 /// Nothing else under /a/ is served, so no path can reach index.html or
 /// version.json or climb out of a/.
-const HASHED = /^\/a\/[A-Za-z0-9_-]+\.[0-9a-f]{8,64}\.(js|css|wasm|woff2|svg|png)$/
+const HASHED = /^\/a\/[A-Za-z0-9_-]+\.[0-9a-f]{8,64}\.(js|css|wasm|woff2|svg|png|webp|webmanifest)$/
 
 const TYPES: Record<string, string> = {
   js: 'text/javascript; charset=utf-8',
@@ -22,6 +22,8 @@ const TYPES: Record<string, string> = {
   woff2: 'font/woff2',
   svg: 'image/svg+xml',
   png: 'image/png',
+  webp: 'image/webp',
+  webmanifest: 'application/manifest+json',
 }
 
 const IMMUTABLE = 'public, max-age=31536000, immutable'

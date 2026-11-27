@@ -15,6 +15,7 @@ import { join, resolve } from 'node:path'
 
 import { build } from 'esbuild'
 import { chromium } from 'playwright-core'
+import { harnessHtml, styles } from '../../scripts/styles.mjs'
 
 const out = resolve(process.argv[2] ?? 'needs-shots')
 mkdirSync(out, { recursive: true })
@@ -22,11 +23,12 @@ const wasmDir = process.env.WEB_WASM_DIR
 if (!wasmDir) throw new Error('Set WEB_WASM_DIR to the built crates/web wasm directory')
 const wasm = readFileSync(join(wasmDir, 'farcooler_web.wasm'))
 const bundle = await build({ alias: { 'fc-web': resolve(wasmDir, 'farcooler_web.js') }, define: { __NEEDS_WASM__: JSON.stringify(`data:application/wasm;base64,${wasm.toString('base64')}`) }, entryPoints: ['test/browser/needs-harness.ts'], bundle: true, write: false, format: 'esm', target: 'es2022', logLevel: 'error' })
-const css = readFileSync('src/client/app.css', 'utf8')
-const html = readFileSync('src/client/index.html', 'utf8')
-  .replace('<link rel="stylesheet" href="{{app.css}}">', `<style>${css}</style>`)
+const css = styles().toString()
+const html = harnessHtml()
+  .replace('<link rel="stylesheet" href="{{app.css}}">', () => `<style>${css}</style>`)
   .replace('<script type="module" src="{{app.js}}"></script>', '')
-  .replace('</body>', `<script type="module">${bundle.outputFiles[0].text}</script></body>`)
+  // A function, so the bundle's own `$&` and `$'` stay as written.
+  .replace('</body>', () => `<script type="module">${bundle.outputFiles[0].text}</script></body>`)
 
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH })
 async function shoot(name, { colorScheme, metrics }) {

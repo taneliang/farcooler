@@ -2,7 +2,7 @@
 // The conversation view in headless Chromium (ov-776), under the CSP the shell
 // is served with (Trusted Types included), against a scripted runner.
 //
-//   node test/browser/chat-check.mjs [--screenshots DIR]
+//   node test/browser/chat-check.mjs [--screenshots DIR] [--measure FILE]
 //
 // It checks, in a real browser:
 // - the rows of a long conversation are drawn as the Mac's kinds: the person's
@@ -21,18 +21,20 @@
 // with mobile=true), since headless --window-size can't go below about 500 px.
 
 import { createServer } from 'node:http'
-import { mkdirSync, readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { build } from 'esbuild'
 import { chromium } from 'playwright-core'
+import { scrolling } from './measure.mjs'
+import { styles } from '../../scripts/styles.mjs'
 
 const args = process.argv.slice(2)
 const shots = args.includes('--screenshots') ? args[args.indexOf('--screenshots') + 1] : null
 if (shots) mkdirSync(shots, { recursive: true })
 
 const bundle = await build({ entryPoints: ['test/browser/chat-page.ts'], bundle: true, format: 'esm', target: 'es2022', write: false })
-const css = readFileSync('src/client/app.css', 'utf8') + readFileSync('src/client/chat.css', 'utf8')
+const css = styles().toString()
 const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Far Cooler</title>
 <link rel="stylesheet" href="/app.css"><script type="module" src="/app.js"></script></head><body>
 <header class="bar"><span class="title">Far Cooler</span><span class="who">owner@example.com</span><button class="quiet" type="button">Sign Out</button></header>
@@ -72,6 +74,17 @@ async function open(options) {
 
 const desktop = { viewport: { width: 1280, height: 800 }, colorScheme: 'light' }
 const phone = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, colorScheme: 'dark' }
+
+// --measure FILE (ov-1510): wheel through the long conversation and record
+// wheel-to-frame and frame lengths (measure.mjs), before any other check.
+if (args.includes('--measure')) {
+  const { context, page } = await open(desktop)
+  const log = page.getByRole('log', { name: 'Conversation' })
+  await log.evaluate(node => { node.scrollTop = node.scrollHeight })
+  const result = { chatScroll: await scrolling(page, log, 60) }
+  writeFileSync(args[args.indexOf('--measure') + 1], JSON.stringify(result, null, 2))
+  await context.close()
+}
 
 // The behavior, on the desktop.
 {

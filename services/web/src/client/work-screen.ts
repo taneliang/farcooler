@@ -1,6 +1,7 @@
 /// Browser navigation and rendering for the shared Rust work view.
 import { type Space } from './scope'
-import { drawPicker } from './space-picker'
+import { shell } from './shell/store'
+import { optionLabel } from './scope'
 
 interface Choice { id: string; label: string }
 interface Prompt { label: string; prompt: string }
@@ -128,7 +129,6 @@ function action(button: HTMLButtonElement, label?: string, run?: () => void): vo
 }
 
 export function mountWork(options: Options) {
-  const picker = get<HTMLSelectElement>('space-picker')
   const list = get('terminal-list')
   const liveList = get('live-terminals')
   const lostList = get('lost-terminals')
@@ -141,7 +141,6 @@ export function mountWork(options: Options) {
   const preset = get<HTMLSelectElement>('work-preset')
   const workspaceLink = get<HTMLAnchorElement>('workspace-link')
   const workNote = get('work-note')
-  const openWork = get<HTMLButtonElement>('show-start-work')
   const start = get<HTMLButtonElement>('work-start')
   const newTree = get<HTMLButtonElement>('work-new')
   const create = get<HTMLButtonElement>('work-create-submit')
@@ -150,7 +149,7 @@ export function mountWork(options: Options) {
   const close = get<HTMLButtonElement>('terminal-close')
   const recover = get<HTMLButtonElement>('terminal-recover')
   const manage = get('terminal-manage')
-  const mutationControls = [picker, repo, tree, preset, create, start, newTree, refreshButton, rename, close, recover]
+  const mutationControls = [repo, tree, preset, create, start, newTree, refreshButton, rename, close, recover]
   let inventory = options.inventory
   let selection: Selection = { preferredWorkspace: options.prefer(), ...fromUrl() }
   let view: WorkView | undefined
@@ -160,7 +159,6 @@ export function mountWork(options: Options) {
   let navigationId = 0
   let busy = false
   let disposed = false
-  let pickerDrawn = ''
   let drawnWorkspace: string | null | undefined
   let drawnTerminal: string | null = null
   let replaced: string | undefined
@@ -176,6 +174,7 @@ export function mountWork(options: Options) {
     busy = on
     for (const control of mutationControls) control.disabled = on
     for (const button of lostList.querySelectorAll('button')) button.disabled = on
+    shell.set({ busy: on })
     dialog.setAttribute('aria-busy', String(on))
   }
 
@@ -219,7 +218,7 @@ export function mountWork(options: Options) {
 
   function draw(view: WorkView, terminal: WorkTerminal | undefined): void {
     if (!options.navigation) {
-      pickerDrawn = drawPicker(picker, view.workspaces, view.workspace, new Map(), pickerDrawn)
+      shell.set({ spaces: view.workspaces.map(space => ({ id: space.id, label: optionLabel(space, 0) })), space: view.workspace })
     }
     workspaceLink.hidden = !view.workspace
     workspaceLink.textContent = view.labels.link
@@ -233,9 +232,14 @@ export function mountWork(options: Options) {
     get('work-title').textContent = view.labels.open
     get('work-repository-label').textContent = view.labels.repository
     get('work-worktree-label').textContent = view.labels.worktree
-    action(openWork, view.labels.open, () => {
-      dialog.showModal()
-      workNote.hidden = !workNote.textContent
+    // The page header's filled action (shell.tsx).
+    shell.set({ startWork: view.labels.open })
+    shell.handle({
+      startWork: () => {
+        if (disposed || dialog.open) return
+        dialog.showModal()
+        workNote.hidden = !workNote.textContent
+      },
     })
     action(get('work-review'), options.review ? view.labels.review ?? undefined : undefined, () => {
       if (view.worktree) options.review?.(view.worktree)
@@ -342,6 +346,7 @@ export function mountWork(options: Options) {
     action(close, terminal?.close?.label, () => {
       if (terminal?.close && window.confirm(terminal.close.prompt)) void send({ action: 'close', terminal: terminal.id })
     })
+    shell.set({ terminalLost: !!terminal?.recover })
     action(recover, terminal?.recover?.label, () => {
       if (!terminal?.recover) return
       if (terminal.recover.action === 'restart') void send({ action: 'restart', terminal: terminal.id })
@@ -413,7 +418,7 @@ export function mountWork(options: Options) {
     }
   }
 
-  if (!options.navigation) picker.onchange = () => navigate({ workspace: picker.value })
+  if (!options.navigation) shell.handle({ pickSpace: workspace => navigate({ workspace }) })
   repo.onchange = () => navigate({ repository: repo.value })
   tree.onchange = () => {
     selection = { ...selection, worktree: tree.value }
@@ -471,10 +476,10 @@ export function mountWork(options: Options) {
       unavailable.hidden = true
       unavailable.open = false
       workspaceLink.hidden = true
-      openWork.hidden = true
       manage.hidden = true
-      picker.hidden = true
       lock(false)
+      shell.set({ startWork: null, terminalLost: false, busy: false })
+      shell.handle({ startWork: () => {} })
     },
   }
 }

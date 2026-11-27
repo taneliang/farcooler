@@ -9,21 +9,24 @@ import { join, resolve } from 'node:path'
 
 import { build } from 'esbuild'
 import { chromium } from 'playwright-core'
+import { harnessHtml, styles } from '../../scripts/styles.mjs'
 
 const out = resolve(process.argv[2] ?? 'workflow-cancelled-shots')
 mkdirSync(out, { recursive: true })
 const bundle = await build({ entryPoints: ['test/browser/workflow-cancelled-harness.ts'], bundle: true, write: false, format: 'esm', target: 'es2022', logLevel: 'error' })
-const css = readFileSync('src/client/app.css', 'utf8')
-const html = readFileSync('src/client/index.html', 'utf8')
-  .replace('<link rel="stylesheet" href="{{app.css}}">', `<style>${css}</style>`)
+const css = styles().toString()
+const html = harnessHtml()
+  .replace('<link rel="stylesheet" href="{{app.css}}">', () => `<style>${css}</style>`)
   .replace('<script type="module" src="{{app.js}}"></script>', '')
-  .replace('</body>', `<script type="module">${bundle.outputFiles[0].text}</script></body>`)
+  // A function, so the bundle's own `$&` and `$'` stay as written.
+  .replace('</body>', () => `<script type="module">${bundle.outputFiles[0].text}</script></body>`)
 
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH })
 let failed = false
 async function shoot(name, { colorScheme, width, height, mobile, card = 'cancelled', open = false, phrase = 'cancelled because its board' }) {
   const context = await browser.newContext({ colorScheme, viewport: { width, height } })
   const page = await context.newPage()
+  page.on('pageerror', e => console.error(name, 'page error:', e.message))
   if (mobile) {
     const cdp = await context.newCDPSession(page)
     await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 3, mobile: true })

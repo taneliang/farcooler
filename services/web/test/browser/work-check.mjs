@@ -7,14 +7,14 @@ import { mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { build } from 'esbuild'
 import { chromium } from 'playwright-core'
+import { harnessHtml, styles } from '../../scripts/styles.mjs'
 
 const out = process.argv[2]
 if (out) mkdirSync(out, { recursive: true })
 const bundle = await build({ entryPoints: ['test/browser/work-harness.ts'], bundle: true, write: false, format: 'esm' })
-const html = readFileSync('src/client/index.html', 'utf8')
+const html = harnessHtml()
   .replaceAll('{{app.css}}', '/app.css').replaceAll('{{app.js}}', '/harness.js')
-const css = ['node_modules/@xterm/xterm/css/xterm.css', 'src/client/app.css', 'src/client/chat.css']
-  .map(p => readFileSync(p, 'utf8')).join('\n')
+const css = styles().toString()
 const origin = 'https://work.test'
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH })
 const failures = []
@@ -71,9 +71,24 @@ const work = async page => {
   return page.getByRole('dialog', { name: 'Start Work' })
 }
 const rpc = async (page, action) => page.evaluate(a => window.calls.filter(c => c.action === a).at(-1), action)
+// The sidebar's workspace picker is a Base UI select (ov-1510): its options
+// exist only while its list is open.
+async function spaceOptions(page) {
+  await page.getByRole('combobox', { name: 'Workspace', exact: true }).click()
+  await page.getByRole('option').first().waitFor()
+  const options = await page.getByRole('listbox').getByRole('option').allTextContents()
+  await page.keyboard.press('Escape')
+  await page.getByRole('listbox').waitFor({ state: 'detached' })
+  return options.map(o => o.replace(/✓$/, ''))
+}
+async function pickSpace(page, label) {
+  await page.getByRole('combobox', { name: 'Workspace', exact: true }).click()
+  await page.getByRole('option', { name: label, exact: true }).click()
+  await page.getByRole('listbox').waitFor({ state: 'detached' })
+}
+
 try {
   for (const width of [320, 1280]) await test(`workspace terminal sidebar at ${width}px`, async page => {
-    const picker = page.getByLabel('Workspace', { exact: true })
     const list = page.locator('#terminal-list')
     const visibleIds = () => list.locator('a:visible').evaluateAll(links => links.map(link => link.dataset.terminal))
     await list.locator('a[data-terminal=seat]').waitFor()
@@ -84,7 +99,7 @@ try {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), width)
     assert.deepEqual(await visibleIds(), ['seat', 'shell', 'lost-seat'])
     assert.equal(await list.locator('a[data-terminal=seat]').innerText(), 'Orchestrator')
-    assert.deepEqual(await picker.locator('option').allTextContents(), ['Main · overnight', 'Main · Verdela'])
+    assert.deepEqual(await spaceOptions(page), ['Main · overnight', 'Main · Verdela'])
     const lost = list.getByRole('link', { name: 'orchestrator', exact: true })
     assert.equal(await lost.getAttribute('aria-description'), 'Lost')
     const recover = list.getByRole('button', { name: 'Recover orchestrator', exact: true })
@@ -101,14 +116,14 @@ try {
     await page.goBack()
     await page.waitForURL('**terminal=shell')
     await page.locator('a[data-terminal=shell][aria-current=true]').waitFor()
-    await picker.selectOption('next')
+    await pickSpace(page, 'Main · Verdela')
     await list.locator('a[data-terminal=other-seat]').waitFor()
     assert.deepEqual(await visibleIds(), ['other-seat'])
     assert.equal(await list.locator('a[data-terminal=other-seat]').innerText(), 'Orchestrator')
   }, { width, query: '?sidebar' })
 
   await test('pick workspace and repository, then create and start a shell', async page => {
-    await page.getByLabel('Workspace', { exact: true }).selectOption('next')
+    await pickSpace(page, 'Cross-platform application delivery and release coordination · Cross-platform Far Cooler Client Applications')
     await page.waitForURL('**workspace=next')
     const dialog = await work(page)
     await dialog.getByLabel('Repository').selectOption('platform')
@@ -234,13 +249,13 @@ try {
     await tab.getByRole('button', { name: 'Recover Terminal' }).waitFor()
     await tab.reload()
     await tab.getByRole('button', { name: 'Recover Terminal' }).waitFor()
-    await page.getByLabel('Workspace', { exact: true }).selectOption('next')
+    await pickSpace(page, 'Cross-platform application delivery and release coordination · Cross-platform Far Cooler Client Applications')
     await page.waitForURL('**workspace=next')
     const workspace = await page.getByRole('link', { name: 'Workspace Link' }).getAttribute('href')
     await tab.goto(new URL(workspace, origin).href)
-    await tab.waitForFunction(() => document.getElementById('space-picker').value === 'next')
+    await tab.waitForFunction(() => document.getElementById('space-picker')?.dataset.value === 'next')
     await page.goBack()
-    await page.waitForFunction(() => document.getElementById('space-picker').value === 'delivery')
+    await page.waitForFunction(() => document.getElementById('space-picker')?.dataset.value === 'delivery')
   })
 
   await test('a worktree link opens the exact checkout without selecting a different terminal', async page => {

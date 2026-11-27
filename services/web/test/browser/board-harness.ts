@@ -3,6 +3,8 @@ import { mountBoard } from '../../src/client/board-screen'
 import { workspaceUrl, WorkspaceHistory, type Route } from '../../src/client/workspace-history'
 import { WorkspaceLayout } from '../../src/client/workspace-layout'
 import type { WorkView } from '../../src/client/work-screen'
+import { harnessShell, runnerNamed } from './harness-shell'
+import { shell } from '../../src/client/shell/store'
 
 const get = (id: string) => document.getElementById(id)!
 const runnerName = 'Far Cooler Canary'
@@ -31,10 +33,12 @@ function projectLayout(request: string): string {
 
 function mountLayout(work: WorkView): WorkspaceLayout {
   const layout = new WorkspaceLayout('board-check', runnerName, projectLayout, view => {
+    const label = (id: string) => view.actions.find(item => item.id === id)!.label
+    shell.command('nav', 'board', { label: label('board'), disabled: false })
+    for (const tool of ['orchestrator', 'workflow', 'commands'] as const) shell.command('tools', tool, { label: label(tool) })
+    shell.set({ startWork: !work.create && !work.start ? null : label('start_work') })
     for (const [id, command] of [
-      ['show-board', 'board'], ['show-orchestrator', 'orchestrator'], ['show-workflow', 'workflow'],
-      ['show-commands', 'commands'], ['show-start-work', 'start_work'], ['close-split', 'close_split'],
-      ['side-conversation', 'conversation'], ['side-terminal', 'raw_terminal'],
+      ['close-split', 'close_split'], ['side-conversation', 'conversation'], ['side-terminal', 'raw_terminal'],
     ] as const) {
       const action = view.actions.find(item => item.id === command)!
       get(id).textContent = action.label
@@ -50,13 +54,13 @@ function mountLayout(work: WorkView): WorkspaceLayout {
   }, effect => {
     if (effect.kind === 'focus') get(`workspace-${effect.slot}`).focus({ preventScroll: true })
   })
-  get('show-orchestrator').onclick = () => layout.run('orchestrator')
+  shell.handle({ tool: tool => layout.run(tool) })
   get('close-split').onclick = () => layout.run('close_split')
-  get('show-start-work').hidden = !work.create && !work.start
   return layout
 }
 
 async function main(): Promise<void> {
+  harnessShell()
   const form = await call({ method: 'form' })
   const current = {
     web_review: (workspace: string, task: string, request: string) =>
@@ -99,24 +103,22 @@ async function main(): Promise<void> {
       storageKey: 'fixture-review:',
     },
   })
-  get('runner-name').textContent = runnerName
-  get('space-picker').replaceChildren(new Option('Web first · Far Cooler development', workspace))
-  get('space-picker').hidden = false
+  shell.set({
+    runner: runnerNamed(runnerName, runner),
+    spaces: [{ id: workspace, label: 'Web first · Far Cooler development' }],
+    space: workspace,
+  })
+  shell.command('nav', 'board', { label: 'Board', disabled: false })
+  if (layout) shell.command('nav', 'needs', { label: 'Needs You (123)' })
+  shell.handle({ showTab: tab => { if (tab === 'board') history.navigate(boardRoute()) } })
   get('status').hidden = true
   get('work').hidden = false
   get('terminal-list').hidden = true
-  get('show-orchestrator').textContent = 'Orchestrator'
-  get('show-commands').textContent = 'Commands'
-  get('show-board').textContent = 'Board'
-  get('show-board').removeAttribute('disabled')
-  get('show-board').onclick = () => history.navigate(boardRoute())
-  if (layout) get('show-needs').textContent = 'Needs You (123)'
   const render = (route: Route) => {
     const board = route.page === 'board'
     get('pane').hidden = board
     get('board').hidden = !board
-    get('show-terminals').setAttribute('aria-pressed', String(!board))
-    get('show-board').setAttribute('aria-pressed', String(board))
+    shell.set({ page: board ? 'board' : 'terminals' })
     if (work) layout?.contextFor(route.space, route.page, work, 'seat')
     screen.show(board, route.space, repo, route.boardTask, route.review)
   }

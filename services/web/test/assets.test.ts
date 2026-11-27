@@ -23,6 +23,16 @@ describe('the client files', () => {
     expect(new Uint8Array(await res.arrayBuffer())).toEqual(WASM)
   })
 
+  it('serves the app icon and the web app manifest with their types (ov-1510)', async () => {
+    const icon = await get('/a/app-icon-512.0123456789abcdef.webp', envWith())
+    expect(icon.status).toBe(200)
+    expect(icon.headers.get('content-type')).toBe('image/webp')
+    const manifest = await get('/a/app.0123456789abcdef.webmanifest', envWith())
+    expect(manifest.status).toBe(200)
+    expect(manifest.headers.get('content-type')).toBe('application/manifest+json')
+    expect(await manifest.json()).toEqual({ name: 'Far Cooler' })
+  })
+
   it('serves nothing under /a/ that is not a hashed file of a known type', async () => {
     for (const path of ['/a/tailcat.0123456789abcdef.wasm.br', '/a/app.js', '/a/app.0123.js', '/a/app.0123456789abcdef.html', '/a/', '/a/x/../../index.html']) {
       expect((await get(path, envWith())).status, path).toBe(404)

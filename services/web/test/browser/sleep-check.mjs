@@ -302,7 +302,7 @@ async function connected(s, first) {
   }
   await statusSays(page, 'Connect to studio')
   await page.click('#status-action')
-  await page.waitForSelector('#work:not([hidden]) .terminal-choice', { timeout: 90_000 })
+  await page.waitForSelector('.app[data-screen="work"] .terminal-choice', { timeout: 90_000 })
   await page.waitForSelector(LIVE, { timeout: 60_000 })
   if (!split) return
   if (first) {

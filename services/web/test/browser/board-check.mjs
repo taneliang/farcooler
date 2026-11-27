@@ -5,14 +5,16 @@ import { mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { build } from 'esbuild'
 import { chromium } from 'playwright-core'
+import { harnessHtml, styles } from '../../scripts/styles.mjs'
+import { filledButtons } from './shell-audit.mjs'
 
 const origin = 'https://board.test'
 const destination = origin + '/?runner=canary&workspace=delivery&view=board'
 const output = process.argv[2]
 if (output) mkdirSync(output, { recursive: true })
-const html = readFileSync('src/client/index.html', 'utf8')
+const html = harnessHtml()
   .replaceAll('{{app.css}}', '/app.css').replaceAll('{{app.js}}', '/board.js')
-const css = readFileSync('src/client/app.css', 'utf8')
+const css = styles().toString()
 const bundle = await build({ entryPoints: ['test/browser/board-harness.ts'], bundle: true, write: false, format: 'esm' })
 const project = (path, args) => execFileSync(process.env.WORK_VIEW_BIN, [path], {
   input: JSON.stringify(args), encoding: 'utf8',
@@ -124,7 +126,7 @@ async function page(scope, width = 1280, query = '') {
 async function layoutPage(width, openSplit = true) {
   const tab = await page('control', width, '&layout')
   await tab.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' })
-  await tab.getByRole('heading', { name: 'Board', exact: true }).waitFor()
+  await tab.locator('#board-title').waitFor({ state: 'attached' })
   if (openSplit) {
     await tab.locator('#show-orchestrator').click()
     await tab.getByRole('region', { name: 'Orchestrator', exact: true }).waitFor()
@@ -144,8 +146,7 @@ try {
 
   for (const width of [320, 641, 1280]) {
     const tab = await layoutPage(width)
-    const sidebar = tab.getByRole('navigation', { name: 'Runner' })
-    const tabs = sidebar.getByRole('group', { name: 'Show' }).getByRole('button')
+    const tabs = tab.getByRole('navigation', { name: 'Views' }).getByRole('link')
     assert.deepEqual(await tabs.allTextContents(), ['Terminals', 'Needs You (123)', 'Board', 'Plan'])
     assert.deepEqual(await tabs.evaluateAll(buttons => buttons.filter(button => {
       const range = document.createRange()
@@ -157,16 +158,10 @@ try {
         label.top < bounds.top || label.bottom > bounds.bottom ||
         label.left < sidebar.left || label.right > sidebar.right || button.scrollWidth > button.clientWidth
     }).map(button => button.textContent)), [], `section labels fit at ${width}px`)
-    assert.deepEqual(await sidebar.getByRole('button').evaluateAll(buttons => {
-      const primary = document.createElement('button')
-      document.body.append(primary)
-      const fill = getComputedStyle(primary).backgroundColor
-      primary.remove()
-      return buttons.filter(button => getComputedStyle(button).backgroundColor === fill).map(button => button.textContent)
-    }), ['Start Work'], `sidebar primary actions at ${width}px`)
+    assert.deepEqual(await filledButtons(tab), ['#show-start-work Start Work'], `filled actions at ${width}px`)
     await tab.context().close()
   }
-  console.log('PASS full section labels and one primary sidebar action at 320, 641 and 1280px')
+  console.log('PASS full view labels and one filled action at 320, 641 and 1280px')
 
   for (const width of [1280, 1440]) {
     const tab = await layoutPage(width)
@@ -204,7 +199,7 @@ try {
     await pane.waitFor()
     await tab.locator('#close-split').click()
     await tab.reload()
-    await tab.getByRole('heading', { name: 'Board', exact: true }).waitFor()
+    await tab.locator('#board-title').waitFor({ state: 'attached' })
     assert.equal(await pane.isVisible(), false)
     await tab.context().close()
   }
@@ -251,7 +246,7 @@ try {
   await editor.reload()
   await editor.getByRole('link', { name: 'Open Worktree' }).waitFor()
   await editor.getByRole('link', { name: 'Back to Board' }).click()
-  await editor.getByRole('heading', { name: 'Board', exact: true }).waitFor()
+  await editor.locator('#board-title').waitFor({ state: 'attached' })
   await editor.goBack()
   await editor.getByRole('link', { name: 'Open Agent' }).waitFor()
   await editor.getByRole('link', { name: 'Back to Board' }).click()

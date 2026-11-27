@@ -4,6 +4,9 @@
 import golden from '../../../../crates/client/src/testdata/workflow-presentation.json'
 import { renderWorkflow } from '../../src/client/workflow-view'
 import type { WorkflowBoard, WorkflowView } from '../../src/client/workflow'
+import { harnessShell } from './harness-shell'
+
+harnessShell()
 
 const card = (golden as any[]).find(c => c.name === ((window as any).__card ?? 'cancelled')).response.card
 const view: WorkflowView = { presentation: card, selected: card.runs[0].item, ready: true, busy: false, notice: '', inspection: '' }

@@ -25,6 +25,8 @@ export const FILES: Record<string, BodyInit> = {
   '/a/app.0123456789abcdef.js': JS,
   '/a/tailcat.0123456789abcdef.wasm.br': WASM,
   '/a/icon.0123456789abcdef.svg': '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
+  '/a/app-icon-512.0123456789abcdef.webp': 'RIFF',
+  '/a/app.0123456789abcdef.webmanifest': '{"name":"Far Cooler"}',
 }
 
 export const ASSETS = {

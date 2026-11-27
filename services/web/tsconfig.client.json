@@ -3,10 +3,11 @@
     "target": "es2022",
     "lib": ["es2022", "dom", "dom.iterable"],
     "module": "es2022",
+    "jsx": "react-jsx",
     "moduleResolution": "bundler",
     "types": [],
     "strict": true,
     "noEmit": true
   },
-  "include": ["src/client/**/*.ts"]
+  "include": ["src/client/**/*.ts", "src/client/**/*.tsx"]
 }
