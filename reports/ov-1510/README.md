@@ -218,6 +218,26 @@ Four capture scripts spliced the bundle into HTML with `String.replace`. With
 React in the bundle, its `$&` sequences were read as replacement patterns, so
 the scripts now insert the bundle with a replacer function.
 
+### Rebased onto edf1f42fa (ov-1507's lost terminals)
+
+ov-1507 added a lost-terminal list (`#lost-terminals`) with a Recover button to
+the old static sidebar. Here the sidebar is React, and the terminal list is a
+parked legacy node, so the new list joins it in `#legacy` and mounts with it.
+`lock()` disables the Recover buttons and tells the shell it is busy. In
+`work-check.mjs`, ov-1507's recovery and Back assertions now use the Base UI
+picker helpers. `csp-check.mjs` already captures every screen at 320 px, so
+ov-1507's per-call phone width is no longer needed.
+
+After the rebase, these all passed: `tsc` for both configs, vitest (30 files,
+268 tests), the stable build (40 s) and the size gate (5,267,981 bytes as
+brotli), `shell-check`, `chat-check`, `chat-files-check`, `plan-render-check`,
+`work-check` (18 of 18), `board-check`, and `sleep-check` in Chromium.
+`csp-check --fake-daemon` failed once on keystroke echo (p95 159 ms) while the
+machine's load average was 44 from other builds. On a rerun at load 11 it
+passed: p95 44.6 ms, no CSP violations. The two-runner workday walk did not run
+locally. Its only change was dropping the phone-width argument from the
+screenshot call, which runs only when a capture directory is given.
+
 ## 5. Typing and scrolling
 
 `test/browser/measure.mjs` times each key or wheel event from its own
