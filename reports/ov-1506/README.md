@@ -1,89 +1,124 @@
 # ov-1506 macOS native test failures
 
-## Archived CI evidence
+Three tests failed in the job "Rust native tests (macOS 2/2)". Both cleanup failures came from one fixture defect. The native hold failure was a race in the test, and the hold behaved correctly. Neither cause came from the ov-1482 module split.
 
-| Failure | Evidence |
-| --- | --- |
-| Cancelled Gradle cleanup | At 20:56:14 UTC, Nextest reported 14.222 seconds and `one: Failed at build attempt 2`. The outbox listed one Provision and two Build effects as settled and inactive. `gradle_reports_cleanup` was still waiting for Check, so it had yet to seed the Gradle output or issue Cancel. [Run 45891805388 attempt 1](https://github.com/taneliang/farcooler/actions/runs/45891805388/job/140162695172) |
-| Published group folders | At 16:34:13 UTC, Nextest reported 8.909 seconds and the same two Build settlements for `one`. `building_group` was still waiting for the member to reach Join, so it had yet to queue the group. Two five-second command deadlines exceed the entire test duration. [Run 45853106520 attempt 2](https://github.com/taneliang/farcooler/actions/runs/45853106520/job/140042012042) |
-| Orphaned stray | The first `end` returned `unsettled` while the stray was alive. At the second `end`, after the test killed the stray, the panic reported `Gone` instead of `Said("ended")`. The hold's autonomous exit loop can reap the leader and unlink the socket before the second client gets its reply. The fixed test accepts either terminal response and checks both socket removal and the agent's exit status. The fixture publishes the stray's PID after its parent subshell exits. [Run 45891805388 attempt 2](https://github.com/taneliang/farcooler/actions/runs/45891805388/job/140168813834) |
+## Causes
 
-Both cleanup failures exhausted the landing fixture's two Build attempts. The adapter ran Python, created a file, then ran `git add` and `git commit` within a five-second deadline. A retry reused the checkout and received a new run ID, which the fixture used in the filename. The Build can settle as a safe failure after a timeout or nonzero exit, or after a zero exit with a dirty tree or no new commit. The test runtime supplies a fixed free-space value, which rules out its low-disk admission check. [Original fixture](../../crates/daemon/src/workflow_runtime/coding_tests.rs) · [Process supervision](../../crates/daemon/src/effect_runner.rs) · [Build settlement](../../crates/daemon/src/workflow_runtime/coding_execute.rs) · [Retry transition](../../crates/workflow/src/reducer.rs)
+### Cleanup tests: a first Build that overran its deadline left a file the retry never committed
 
-The archived panic printed the state and dispatch statuses with `FETCH []`. The formatter only read verb receipts and fetch output, so the Build outcomes, process exits and adapter output were absent. The failed test's temporary directory also disappeared before the leak check. Both runs' artifact inventories contain prebuilt test archives and test lists. Establishing the historical process-level trigger would require the Build receipts or a matching reproduction.
+The CI panics for these two tests match:
 
-## Cleanup fixture replay and repair
+| Test | Run | Duration | Panic |
+| --- | --- | ---: | --- |
+| `build_cleanup_cancelled_releases_gradle_reports_and_target` | [45891805388 attempt 1](https://github.com/taneliang/farcooler/actions/runs/45891805388/job/140162695172) | 14.222 s | `one: Failed at build attempt 2`, with one Provision and two Build effects settled |
+| `build_cleanup_group_inherits_published_folder_list` | [45853106520 attempt 2](https://github.com/taneliang/farcooler/actions/runs/45853106520/job/140042012042) (82d082f1f) | 8.909 s | the same |
 
-The original fixture passed 30/30 per case with 16 simultaneous test processes and 12 CPU workers on arm64 macOS. A second round passed 20/20 per case with 16 test processes at nice +5 and 10 CPU workers. A watcher observed 60 Build receipts during that round, all with exit 0 and an empty output tail. These replays used the original adapter without a filter or a deliberately held index lock.
+Each test failed in its setup, before it reached the cleanup it checks. The ticket never got to Check (Gradle case) or Join (group case).
 
-Both historical cleanup failures overlapped the same SwiftPM cleanup test. That test took 20.741 seconds in the Gradle failure run and 17.446 seconds in the group failure run. It took 8.499 seconds in attempt 2, when both cleanup cases passed. To test the overlap, a fresh macOS replay used the original cleanup fixtures with the expanded failure output, 12 test workers and 10 CPU-load workers. It passed 30/30 per cleanup case and 8/8 SwiftPM invocations.
+The old setup ran the landing fixture's Python adapter as the Build. That adapter writes `result-<run id>.txt`, then runs `git add` and `git commit`, all within a 5-second deadline (`coding_tests.rs`, `timeout_ms: 5000`). The cause comes from three facts in the code:
 
-A prior controlled replay used a slow Git clean filter to stop the original `git add` while it held the index lock. In both cases the first build had a null exit, the second failed with Git exit 128 and Python exit 1, and the run reached `Failed at build attempt 2`. This shows that supervised interruption can contaminate the same checkout used for the retry. The CI logs contain no evidence that this happened on the hosted runners.
+1. **The first Build was killed at its deadline.** On a busy runner, Python plus two Git commands can take longer than 5 seconds. Both historical runs overlapped the slow SwiftPM cleanup test, which took 20.7 s and 17.4 s in those runs. Killing the Build is a safe failure, so the engine retries.
+2. **The retry runs in the same checkout without resetting it.** `settle_run_tree` runs only for Run stages (`coding_execute.rs:719`). A retried Build carries on from what its earlier attempt left, which is intended behavior for agents.
+3. **The retry cannot clean up after attempt 1.** Attempt 2 has a new run ID, so it writes and commits `result-<run2>.txt` only. Attempt 1's `result-<run1>.txt` stays untracked. `unfinished_build` (`coding_execute.rs:914`) then fails the build with "changes it hadn't committed". Two failed attempts is `Failed at build attempt 2`. If attempt 1 was killed while `git add` held `index.lock`, attempt 2 fails sooner: Git exits with 128.
 
-The replacement `git commit --allow-empty` still needs the index lock. In a scratch Git repository, an existing `index.lock` blocked that command. `git commit-tree HEAD^{tree} -p HEAD` followed by `git update-ref HEAD <candidate>` created the candidate while leaving the lock alone. The cleanup fixture now uses those two commands in setup and reports the successful Build result through the runtime. This removes the Python adapter, the five-second build deadline and the index write from the prerequisite. Worktree provisioning, group construction, Check execution, cancellation, and cleanup still use the runtime. The landing fixture's panic now prints the retained Build outcomes alongside exits and output tails. [Fixture and assertions](../../crates/daemon/src/workflow_runtime/build_cleanup_tests.rs) · [Diagnostics](../../crates/daemon/src/workflow_runtime/coding_verbs_tests.rs)
+The timing fits. In the group case the whole test took 8.909 s, which is less than two 5-second deadlines. So only attempt 1 timed out, and attempt 2 failed quickly, as point 3 predicts.
 
-## Related tickets
+**Replay.** A temporary test used the original fixture (`lander("pass")`, `at_join`) and made only the first Build sleep for 6 s after writing its file. It reproduced the CI signature in 7.45 s:
 
-The ov-1482 split moved the background-task code and native receipt types without changing the code that runs the command Build or the native hold. The published group failure already occurred on 82d082f1f, before that split.
+```
+one: Failed at build attempt 2: Some("The build ended its turn with changes it hadn't committed: result-wf1:f0b9.txt. …")
+Execute(Provision) settled false Some(Passed(…))
+Execute(Build) settled false Some(SafeFailure)          ← attempt 1, exit null (killed at the deadline)
+Execute(Build) settled false Some(SafeFailureBecause("…hadn't committed: result-wf1:f0b9.txt…"))
+```
 
-The ov-1475 holds observed their leaders' exit and retained their sockets while detached descendants were alive. The failing hold test also saw its hold account for a live stray. Here the test had already killed the stray, and the hold was able to finish before answering the client. See `git show ac8644bab:reports/ov-1475/README.md`.
+An earlier replay with a slow Git clean filter covered the `index.lock` variant. The first Build had no exit code. The second ended with Git exit 128 and Python exit 1, and the run reached `Failed at build attempt 2`.
+
+The CI panic could not show this. The old `until` formatter printed only verb receipts and fetch output (`FETCH []`). It now also prints each item's failure reason, each effect's journal outcome, and the process logs, which is how the replay output above was read.
+
+**Fix.** These tests check cleanup, not the Build process. Setup now builds the candidate with Git plumbing: `commit-tree HEAD^{tree} -p HEAD`, then `update-ref HEAD`. Neither touches the index. Setup then reports a passed Build through `runtime.observe`, and settling that Build triggers the cleanup under test. The configured build command is `/usr/bin/false`, so a sweep that launches it by mistake fails the test. Checks are `/usr/bin/true` or `/usr/bin/false`. Provisioning, group construction, Check, cancellation and cleanup still run through the runtime. Other `building_group` callers use the same setup through `review_built_group`. ([build_cleanup_tests.rs](../../crates/daemon/src/workflow_runtime/build_cleanup_tests.rs), [coding_verbs_tests.rs](../../crates/daemon/src/workflow_runtime/coding_verbs_tests.rs), [fold_trees_tests.rs](../../crates/daemon/src/workflow_runtime/fold_trees_tests.rs))
+
+### Native hold: the hold finished on its own before the test's second `end` got its reply
+
+The CI panic was in [45891805388 attempt 2](https://github.com/taneliang/farcooler/actions/runs/45891805388/job/140168813834) at `native_hold_tests.rs:216`, with `left: Gone`, `right: Said("ended")`.
+
+The first `end` correctly answered `unsettled` while the stray was alive. That `end` had already sent SIGTERM to the group, so the leader had exited. From then on, the hold's main loop in `serve` calls `end(…, Duration::ZERO)` every 250 ms. Once the test kills the stray, two things race:
+
+- If the test's `end` request is served first, it gets `ended`.
+- If the main loop's check wins, `finish` removes the socket and exits. The request then finds no socket, or a connection closed with no reply, and `ask_blocking` returns `Gone`.
+
+Pausing 600 ms between killing the stray and asking makes the main loop win every time. With the old assertion, that pause reproduces the CI panic exactly (`left: Gone`, `right: Said("ended")`).
+
+This is a defect in the test, not the hold. `Answer::Gone` is documented as "the hold ended its group and exited". Production treats it as ended: `coding_native_quiesce.rs:53` closes the native session on `Gone`, as on `ended`. The test now accepts either answer and still requires all of the following:
+
+- the socket is gone
+- the agent's exit status is `128 + SIGTERM`
+- the first `end` answered `unsettled`, kept the socket and left the hold running while the stray worked
+
+The fixture now writes the stray's PID file only after the subshell that started the stray has exited (`mv forked stray`). This replaces the separate `orphaned` marker and its 5-second polling loop.
+
+**ov-1475 comparison.** This is not the ov-1475 defect. In ov-1475, a hold failed to notice that its leader had exited. Here the hold noticed the exit and finished on its own as soon as the stray was gone, which is the opposite. The hold's refusal to settle while a live stray existed was correct, and that is what the first `end` checks.
+
+### ov-1482
+
+ov-1482 (a901cacee) changed none of `native_hold*.rs`, `build_cleanup*.rs`, `coding_execute.rs`, `coding_tests.rs`, `coding_verbs_tests.rs` or `effect_runner.rs`. The group-folder failure also happened on 82d082f1f, which is before the split. The split did not cause either failure.
 
 ## Verification on macOS
 
-The fresh stress loop used 12 test workers and four CPU-load workers on macOS 27.2.1 arm64 with 10 logical CPUs. Each invocation selected one exact test in a fresh process. Cargo and test build output went under `$FARCOOLER_SCRATCH`. Set `binary` to the unit-test executable from `cargo test -p farcooler-daemon --lib --no-run` after building the daemon with `cargo build -p farcooler-daemon --bins`. Use `FARCOOLER_TEST_SHELL=/bin/sh` when running the binary directly.
+The machine was macOS 27.2 arm64 with 10 logical CPUs, already loaded (load average 15–20) by other work. The stress loop added 4 `yes` burners and ran 12 test processes at once. Each run was one exact test in a fresh process of the daemon unit-test binary, built under `$FARCOOLER_SCRATCH/target`.
 
 ```python
+import os, subprocess, sys, time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from itertools import product
-import subprocess
-
+binary = sys.argv[1]
 tests = (
     'workflow_runtime::build_cleanup_tests::build_cleanup_cancelled_releases_gradle_reports_and_target',
     'workflow_runtime::build_cleanup_tests::build_cleanup_group_inherits_published_folder_list',
     'native_hold::tests::a_stray_whose_parent_exited_first_is_still_accounted_for',
 )
-
+env = dict(os.environ, FARCOOLER_TEST_SHELL='/bin/sh')
 def run(case):
-    round_number, test = case
-    result = subprocess.run([binary, test, '--exact', '--nocapture'],
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    return round_number, test, result
-
-passed = Counter()
-load = []
+    r, t = case
+    res = subprocess.run([binary, t, '--exact', '--nocapture'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
+    return r, t, res
+passed, failed = Counter(), Counter()
+load = [subprocess.Popen(['/usr/bin/yes'], stdout=subprocess.DEVNULL) for _ in range(4)]
+start = time.time()
 try:
-    for _ in range(4):
-        load.append(subprocess.Popen(['/usr/bin/yes'], stdout=subprocess.DEVNULL))
     with ThreadPoolExecutor(max_workers=12) as pool:
-        for round_number, test, result in pool.map(run, product(range(1, 101), tests)):
-            ok = result.returncode == 0 and '1 passed' in result.stdout
-            passed[test] += ok
-            print(f'{"PASS" if ok else "FAIL"} {round_number}/100 {test}')
-            if not ok:
-                print(result.stdout)
+        for r, t, res in pool.map(run, product(range(1, 101), tests)):
+            ok = res.returncode == 0 and '1 passed' in res.stdout
+            (passed if ok else failed)[t] += 1
+            print(f'{"PASS" if ok else "FAIL"} {r}/100 {t.split("::")[-1]}', flush=True)
+            if not ok: print(res.stdout[-3000:], flush=True)
 finally:
-    for child in load:
-        child.terminate()
-    for child in load:
-        child.wait()
-assert all(passed[test] == 100 for test in tests), passed
+    for c in load: c.terminate()
+    for c in load: c.wait()
+print(f'elapsed {time.time()-start:.0f}s; load {os.getloadavg()}')
+for t in tests: print(f'{t}: {passed[t]}/100 passed, {failed[t]} failed')
+sys.exit(0 if not failed else 1)
 ```
 
-| Test | Consecutive passes |
-| --- | ---: |
-| `build_cleanup_cancelled_releases_gradle_reports_and_target` | 100/100 |
-| `build_cleanup_group_inherits_published_folder_list` | 100/100 |
-| `a_stray_whose_parent_exited_first_is_still_accounted_for` | 100/100 |
+Result, after rebasing onto 29c41d4de:
 
-Each ticket test failed at its behavior assertion with a temporary production-code mutation:
+```
+PASS 100/100 a_stray_whose_parent_exited_first_is_still_accounted_for
+elapsed 103s; load (30.60, 24.56, 21.26)
+workflow_runtime::build_cleanup_tests::build_cleanup_cancelled_releases_gradle_reports_and_target: 100/100 passed, 0 failed
+workflow_runtime::build_cleanup_tests::build_cleanup_group_inherits_published_folder_list: 100/100 passed, 0 failed
+native_hold::tests::a_stray_whose_parent_exited_first_is_still_accounted_for: 100/100 passed, 0 failed
+```
 
-| Test | Mutation and observed failure |
-| --- | --- |
-| Gradle cancellation | Skipping deletion of `apps/android/` build folders caused the assertion for `apps/android/build` in phase `Cancelled` to fail. |
-| Published group folders | Dropping `build_folders` when constructing the group definition used the defaults and deleted `target/output`. The test failed at the assertion that this unselected output remained. |
-| Orphaned stray | Allowing `native_hold::end` to settle when the process group was empty while a stray worked returned `Said("ended")` at the first request. The test expected `Said("unsettled")`. |
+There were 300 PASS lines and no FAIL lines.
 
-The six-worker run of the affected daemon modules passed 123 of 125 tests on the first pass. The heavy-lock case resolved an Intel-only Python from PATH and passed in isolation with ARM-native Python first on PATH. The pane-echo test measured 150.26 ms against its 100 ms latency limit during the parallel run. In isolation it passed at 86.63 ms and observed overlap with both the simulated lsof probe and the folder walk.
+### Each test still fails without its behavior
 
-After rebuilding the restored production code, a four-worker run with the CI Nextest profile passed all 125 selected tests in 194.50 seconds. The selection covered cleanup, fold trees, coding verbs, command-build timeout and restart, the process supervisor, and native hold. The daemon layer and file-size checks passed.
+For each test, a temporary change to production code removed the behavior it checks. All three changes went into one build, and each test failed at its behavior assertion. The changes were then reverted.
+
+| Test | Change to production code | Failure |
+| --- | --- | --- |
+| Gradle cancellation | `build_cleanup.rs`: skip folders under `apps/android` | `build_cleanup_tests.rs:598`, the assertion that `apps/android/build` is removed in phase `Cancelled` |
+| Published group folders | `definition.rs`: a group definition gets `build_folders: None` instead of the published list | `build_cleanup_tests.rs:464`: `assertion failed: tree.join("target/output").exists()`. The defaults deleted output the published list leaves alone. |
+| Orphaned stray | `native_hold.rs`: `end` settles once the group is empty, whether or not a stray is alive | `native_hold_tests.rs:210`: `left: Said("ended")`, `right: Said("unsettled")` |
