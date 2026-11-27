@@ -26,9 +26,11 @@ async fn landing(h: &Harness, repo: &Repo, args: &[&str]) -> Value {
 
 #[tokio::test]
 async fn list_and_show_distinguish_engine_groups() {
-    let h = start(Scope::Read).await;
+    let h = start_legacy(Scope::Read).await;
     let repo = a_repository(&h);
     let store = &h.service.store;
+    let historical = store.create_task(repo.workspace, "Historical landing", Actor::Manager).unwrap();
+    let historical_id = old_landing(store, repo.workspace, 373, "landed", Some("abcdef0"), &[historical.id], now_millis());
     let mut state = State::empty(repo.workspace.to_string(), 1);
     state.revision = 3;
     let archived = store.create_task(repo.workspace, "Archived landing", Actor::Manager).unwrap();
@@ -84,11 +86,20 @@ async fn list_and_show_distinguish_engine_groups() {
     ));
     std::os::unix::fs::symlink(&h.socket, h.socket.with_file_name("farcoolerd.sock")).unwrap();
 
+    let plan = store.plan(repo.workspace, i64::MIN).unwrap();
+    assert_eq!(plan.landings.len(), 2);
+    assert!(plan.landings.iter().all(|view| view.landing.number == 0));
+
     let list = landing(&h, &repo, &["list"]).await;
-    let [first, second] = list["landings"].as_array().unwrap().as_slice() else { panic!("{list}") };
+    let [first, second, history] = list["landings"].as_array().unwrap().as_slice() else { panic!("{list}") };
     assert_eq!(first["title"], "Landing");
     assert_eq!(second["title"], first["title"]);
     assert_ne!(first["id"], second["id"]);
+    assert_eq!(history["number"], 373);
+    assert_eq!(history["id"], historical_id.to_string());
+    let mut shown_history = landing(&h, &repo, &["show", "373"]).await;
+    assert!(shown_history.as_object_mut().unwrap().remove("events").unwrap().is_array());
+    assert_eq!(&shown_history, history);
     let listed_for = |key: &str| [first, second].into_iter().find(|l| l["tickets"][0]["key"] == key).unwrap();
     let text = run_landing(&h, &repo, &["list"]).await;
     assert!(text.status.success(), "{}", String::from_utf8_lossy(&text.stderr));
@@ -125,7 +136,7 @@ async fn list_and_show_distinguish_engine_groups() {
     ));
     let archived_list = landing(&h, &repo, &["list"]).await;
     let archived_groups = archived_list["landings"].as_array().unwrap();
-    assert_eq!(archived_groups.len(), 2);
+    assert_eq!(archived_groups.len(), 3);
     for (key, pushed_sha) in [(&archived.key, "abcdef1"), (&live.key, "abcdef2")] {
         let id = listed_for(key)["id"].as_str().unwrap();
         let listed = archived_groups.iter().find(|l| l["id"] == id).unwrap();
