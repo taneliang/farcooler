@@ -3,7 +3,7 @@
 // Chromium under the shell's image policy (blob: and data: only), against a
 // scripted runner that hands over real PNG bytes.
 //
-//   node test/browser/chat-files-check.mjs [--screenshots DIR]
+//   WEB_WASM_DIR=<built wasm directory> node test/browser/chat-files-check.mjs [--screenshots DIR]
 //
 // It checks:
 // - an image sent with SendUserFile is drawn inline, inside the column, out of
@@ -21,7 +21,7 @@
 
 import { createServer } from 'node:http'
 import { mkdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { deflateSync, crc32 } from 'node:zlib'
 
 import { build } from 'esbuild'
@@ -60,7 +60,10 @@ function png(width, height, hue = 0) {
   return Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', head), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))])
 }
 
-const bundle = await build({ entryPoints: ['test/browser/chat-page.ts'], bundle: true, format: 'esm', target: 'es2022', write: false })
+const wasmDir = process.env.WEB_WASM_DIR
+if (!wasmDir) throw new Error('Set WEB_WASM_DIR to the built crates/web wasm directory')
+const wasm = readFileSync(join(wasmDir, 'farcooler_web.wasm'))
+const bundle = await build({ alias: { 'fc-web': resolve(wasmDir, 'farcooler_web.js') }, entryPoints: ['test/browser/chat-page.ts'], bundle: true, format: 'esm', target: 'es2022', write: false })
 const css = styles().toString()
 const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Far Cooler</title>
 <link rel="stylesheet" href="/app.css"><script type="module" src="/app.js"></script></head><body>
@@ -68,9 +71,9 @@ const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta n
 <main><section class="work" id="work"><nav class="sidebar" aria-label="Terminals"><span class="runner">studio</span><div class="terminal-list">
 <button class="terminal-choice" aria-current="true" type="button">Design review</button></div></nav>
 <div class="pane"><div class="terminal" id="terminal"></div></div></section></main></body></html>`
-const files = { '/': [html, 'text/html'], '/app.js': [bundle.outputFiles[0].text, 'text/javascript'], '/app.css': [css, 'text/css'] }
+const files = { '/': [html, 'text/html'], '/app.js': [bundle.outputFiles[0].text, 'text/javascript'], '/app.css': [css, 'text/css'], '/farcooler_web.wasm': [wasm, 'application/wasm'] }
 // img-src as the shell's own policy has it (src/headers.ts), and no more.
-const csp = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; require-trusted-types-for 'script'; trusted-types fc"
+const csp = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; require-trusted-types-for 'script'; trusted-types fc"
 const server = createServer((req, res) => {
   const hit = files[req.url]
   if (!hit) return void res.writeHead(404).end()

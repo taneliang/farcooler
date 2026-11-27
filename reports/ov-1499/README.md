@@ -37,3 +37,6 @@ On macOS the five live daemon cases for lease takeover, input admission, the sha
 
 On the same macOS machine, the full page walk through a scratch sshd, the Chromium sleep and reconnect walk, and the two-runner workday walk passed against the canary bundle. The workday walk covers a native input pipe taking over from the browser on a real runner. Two expectations in those walks were out of date. Billing’s fixture now names its orchestrator, so that pane leads its sidebar. The lost agent’s link name includes its state badge, which was already true on the landing base.
 
+## Rebase onto `d9c0306c2`
+
+The only textual conflict was in `.github/workflows/ci.yml`, where ov-1509 added `chat-files-check.mjs` after the chat check. Both steps are kept. The new check also bundles `chat-page.ts`, which loads the WebAssembly bridge on this branch, so it failed to bundle after the rebase (`Could not resolve "fc-web"`). It now loads the bridge the same way `chat-check.mjs` does, and its CI step gets `WEB_WASM_DIR`.
