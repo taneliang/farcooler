@@ -144,6 +144,7 @@ impl Exec {
                     }
                 }
                 if failed_steps.is_empty() { return None; }
+                let only_one = failed_steps.len() == 1;
                 let (exit, log) = self.ci_gh_cancel(binding, "test-log", &["run", "view", &run.id.to_string(),
                     "--attempt", &run.attempt.to_string(), "--repo", repo, "--job", &job.id.to_string(), "--log-failed"],
                     cancel.clone()).await.ok()?;
@@ -157,7 +158,7 @@ impl Exec {
                     {
                         return None;
                     }
-                    for test in nextest_failures(&plain, &job.name, &step.name)? {
+                    for test in nextest_failures(&plain, &job.name, &step.name, only_one)? {
                         failures.insert(Failure {
                             workflow: check.workflow.clone(), job: job.name.clone(), step: step.name.clone(), test,
                         });
@@ -172,12 +173,25 @@ impl Exec {
 
 /// Use nextest's final summary so a test that recovered on retry is never
 /// counted. Every failure in that summary must have an ordinary FAIL line.
-fn nextest_failures(log: &str, job: &str, step: &str) -> Option<BTreeSet<String>> {
-    let lines: Vec<_> = log.lines().filter_map(|line| {
+///
+/// `gh` doesn't always know which step printed a line: it then calls every line
+/// `UNKNOWN STEP` and prints the whole job. That log speaks for a step only when
+/// it's the job's `only_failed` one and the process that ran these tests is the
+/// one that exited.
+fn nextest_failures(log: &str, job: &str, step: &str, only_failed: bool) -> Option<BTreeSet<String>> {
+    const UNKNOWN: &str = "UNKNOWN STEP";
+    const EXITED: &str = "##[error]Process completed with exit code ";
+    let read: Vec<_> = log.lines().filter_map(|line| {
         let mut fields = line.splitn(3, '\t');
-        if fields.next()? != job || fields.next()? != step { return None; }
-        Some(fields.next()?.split_once(' ')?.1.trim())
+        if fields.next()? != job { return None; }
+        let column = fields.next()?;
+        Some((column, fields.next()?.split_once(' ')?.1.trim()))
     }).collect();
+    let unsplit = !read.is_empty() && read.iter().all(|(column, _)| *column == UNKNOWN);
+    if unsplit && (!only_failed || read.iter().filter(|(_, line)| line.starts_with(EXITED)).count() != 1) {
+        return None;
+    }
+    let lines: Vec<_> = read.into_iter().filter(|(column, _)| unsplit || *column == step).map(|(_, line)| line).collect();
     let summary = lines.iter().rposition(|line| line.starts_with("Summary ["))?;
     let (_, counts) = lines[summary].split_once(" tests run: ")
         .or_else(|| lines[summary].split_once(" test run: "))?;
@@ -194,6 +208,9 @@ fn nextest_failures(log: &str, job: &str, step: &str) -> Option<BTreeSet<String>
         }
     }
     if lines.next()? != "error: test run failed" { return None; }
+    // The next step to start or exit must be this one exiting.
+    if unsplit && !lines.clone().find(|line| line.starts_with(EXITED) || line.starts_with("##[group]Run "))
+        .is_some_and(|line| line.starts_with(EXITED)) { return None; }
     // The leak wrappers can fail independently of nextest.
     if lines.any(|line| line.contains("LEAKED") || (line.starts_with("test-leak-check:")
         && !line.contains("left nothing") && !line.starts_with("test-leak-check: note:"))) {
@@ -246,8 +263,13 @@ else:
         lines = [f'Summary [ 1.000s] {test_count} {noun} run: {test_count - len(tests)} passed, {len(tests)} failed, 0 skipped']
         lines += [f'^[[31;1mFAIL^[[0m [ 0.113s] ({i}/{test_count}) {binary} {test}' for i, test in enumerate(tests, 1)]
         lines += ['error: test run failed']
+        # With one failed step, print it as gh does when it can't split the job's log.
+        column = step
+        if len(steps) == 1:
+            column = 'UNKNOWN STEP'
+            lines.append('##[error]Process completed with exit code 100.')
         for line in lines:
-            print(job + '\t' + step + '\t2026-11-25T00:11:00Z     ' + line)
+            print(job + '\t' + column + '\t2026-11-25T00:11:00Z     ' + line)
 "#;
 
     type TestStep = (&'static str, &'static str, usize);
@@ -349,6 +371,33 @@ else:
         exercise(None, "Rust (ubuntu-24.04)", &[TAILCAT, TAILCAT_INTEGRATION, SINGLE_TEST]).await;
     }
 
+    /// Lines `gh run view --log-failed` (2.106.0) printed for job 139928161060, escapes and all: it
+    /// could not tell the steps apart, so it printed the whole job under `UNKNOWN STEP`.
+    #[test]
+    fn a_log_gh_cannot_split_into_steps_is_read_only_when_one_step_failed() {
+        let line = |text: &str| format!("Rust tests (4/4)\tUNKNOWN STEP\t2026-11-26T13:15:01.6934959Z {text}\n");
+        let run = "\u{1b}[36;1m##[group]Run ./scripts/test-leak-check.py -- cargo nextest run\u{1b}[0m";
+        let next = "##[group]Run actions/upload-artifact@v4";
+        let summary = "\u{1b}[31;1m     Summary\u{1b}[0m [ 238.211s] \u{1b}[1m1915\u{1b}[0m tests run: \u{1b}[1m1914\u{1b}[0m \u{1b}[32;1mpassed\u{1b}[0m (\u{1b}[1m1\u{1b}[0m \u{1b}[33;1mleaky\u{1b}[0m), \u{1b}[1m1\u{1b}[0m \u{1b}[31;1mfailed\u{1b}[0m, \u{1b}[1m5645\u{1b}[0m \u{1b}[33;1mskipped\u{1b}[0m";
+        let fail = "\u{1b}[31;1m        FAIL\u{1b}[0m [  92.565s] (1915/1915) \u{1b}[35;1mfarcooler-daemon::engine_flow_per_skill\u{1b}[0m \u{1b}[34;1ma_ticket_goes_from_draft_to_landed_on_the_commands_the_skill_teaches\u{1b}[0m";
+        let error = "\u{1b}[31;1merror\u{1b}[0m: test run failed";
+        let clean = "test-leak-check: the run left nothing in TMPDIR or the preferences folder.";
+        let exit = "##[error]Process completed with exit code 100.";
+        let read = |lines: &[&str], alone| nextest_failures(&lines.iter().map(|l| line(l)).collect::<String>(), "Rust tests (4/4)", "Full Rust workspace shard", alone)
+            .map(|names| names.into_iter().collect::<Vec<_>>());
+        let strip = |lines: &[&str]| lines.iter().map(|l| farcooler_core::activity::strip_ansi(l)).collect::<Vec<_>>();
+        let whole = strip(&[run, summary, fail, error, clean, exit, next]);
+        let whole: Vec<&str> = whole.iter().map(String::as_str).collect();
+        assert_eq!(read(&whole, true).unwrap(), ["farcooler-daemon::engine_flow_per_skill a_ticket_goes_from_draft_to_landed_on_the_commands_the_skill_teaches"]);
+        // With two failed steps, nothing says which one these tests failed in.
+        assert!(read(&whole, false).is_none());
+        // The step that exited isn't the one that ran these tests.
+        let (summary, fail, error) = (whole[1], whole[2], whole[3]);
+        assert!(read(&[summary, fail, error, next, exit], true).is_none());
+        assert!(read(&[summary, fail, error, clean, exit, next, exit], true).is_none());
+        assert!(read(&[summary, fail, error, clean], true).is_none());
+    }
+
     #[test]
     fn incomplete_and_mixed_failed_logs_do_not_prove_inheritance() {
         let prefix = "rust\tshard\t2026-11-25T00:11:00Z ";
@@ -357,9 +406,9 @@ else:
         let one = "FAIL [ 0.113s] (1/20) farcooler-daemon pause_hold::one";
         let two = "FAIL [ 0.125s] (2/20) farcooler-daemon pause_hold::two";
         let end = "error: test run failed";
-        assert_eq!(nextest_failures(&log(&[summary, one, two, end]), "rust", "shard").unwrap().len(), 2);
-        assert!(nextest_failures(&log(&[summary, one, end]), "rust", "shard").is_none());
-        assert!(nextest_failures(&log(&[summary, one, two, end, summary, one, end]), "rust", "shard").is_none());
-        assert!(nextest_failures(&log(&[summary, one, two, end, "tmux-leak-check: LEAKED farcoolerd"]), "rust", "shard").is_none());
+        assert_eq!(nextest_failures(&log(&[summary, one, two, end]), "rust", "shard", false).unwrap().len(), 2);
+        assert!(nextest_failures(&log(&[summary, one, end]), "rust", "shard", false).is_none());
+        assert!(nextest_failures(&log(&[summary, one, two, end, summary, one, end]), "rust", "shard", false).is_none());
+        assert!(nextest_failures(&log(&[summary, one, two, end, "tmux-leak-check: LEAKED farcoolerd"]), "rust", "shard", false).is_none());
     }
 }
