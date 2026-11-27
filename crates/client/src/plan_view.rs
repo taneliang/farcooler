@@ -479,9 +479,10 @@ struct WordsStyle {
 /// workspace's workflow presentation.
 pub fn view(plan: &input::Plan, context: &input::Context, workflow: Option<&Presentation>) -> PlanView {
     // Older runners still send numbered pre-engine landings. They belong to
-    // history, not the Plan; engine landing groups arrive in the workflow.
+    // history, not the Plan. Engine landing groups come in `landings` too, as
+    // number 0: they feed the column, and the workflow draws their rows.
     let mut presented = plan.clone();
-    presented.landings.clear();
+    presented.landings.retain(|l| l.number == 0);
     for line in &mut presented.lines {
         line.landing = None;
     }

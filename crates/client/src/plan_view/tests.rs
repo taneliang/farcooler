@@ -285,6 +285,17 @@ fn old_landing_rows_do_not_affect_the_plan() {
     assert!(!view.column.pipeline[0].unattended[0].detail.as_deref().unwrap().contains("Landing:"));
 }
 
+/// An engine group is a number-0 entry beside the old rows. It draws as a
+/// group view only, never as a "Landing 0" card.
+#[test]
+fn an_engine_group_entry_draws_no_landing_card() {
+    let plan = json!({ "lines": [{ "task": "t1", "key": "ov-1", "stage": "landing" }],
+        "landings": [{ "id": "g", "number": 0, "state": "gating", "phase": "waiting_for_ci", "title": "Landing", "tickets": [{ "task": "t1" }] }] });
+    let view = view_of(json!({ "schema": SCHEMA, "plan": plan, "context": {} }));
+    assert!(view.landings.is_empty());
+    assert_eq!(view.in_review.len(), 1, "the ticket stays on the Plan");
+}
+
 /// Android draws a working ticket's agent as a line of its own, and its second
 /// line says only the stage and key; the Apple apps and the web say the agent
 /// and the time in stage in the second line.

@@ -862,7 +862,9 @@ pub(super) fn build(plan: &Plan, context: &input::Context, workflow: Option<&Pre
     let landing_groups = super::landing_queue::groups(plan, context, workflow);
 
     // Landings, furthest along first; the plan's order breaks a tie.
-    let mut live: Vec<&Landing> = plan.landings.iter().filter(|l| l.state != "landed" && l.state != "dropped").collect();
+    // An engine group (number 0) gets no card: `landing_groups` draws it.
+    let mut live: Vec<&Landing> =
+        plan.landings.iter().filter(|l| l.number != 0 && l.state != "landed" && l.state != "dropped").collect();
     live.sort_by_key(|l| std::cmp::Reverse(r.phase(l).progress()));
     let mut on_live: BTreeSet<&str> = BTreeSet::new();
     let landings: Vec<LandingCard> = live

@@ -231,25 +231,39 @@ fn ov895_shared_assignment_does_not_duplicate_a_ticket_and_keeps_its_initiative(
 
 #[test]
 fn ov895_landing_facts_and_agent_identity_survive_the_projection() {
+    // An engine landing group: number 0, and no line names it (ov-960).
     let c = column(json!({
-        "lines": [with(line("t1", "landing"), json!({ "landing": 9 })), line("t2", "building")],
-        "landings": [landing(9, "gating", &["t1", "t2"], "waiting_for_ci", NOW - 14 * MINUTE)],
+        "lines": [line("t1", "landing"), line("t2", "building")],
+        "landings": [landing(0, "gating", &["t1", "t2"], "waiting_for_ci", NOW - 14 * MINUTE)],
         "agents": [with(agent("l", "lander", &["t1"], "Watching source checks", 20),
             json!({ "terminal": "term-l", "title": "Land the mobile fixes" }))],
         "board_counts": { "done": 8, "in_progress": 2 },
     }), json!({}));
-    assert_eq!(facts(&c), ["8 of 10 done"]);
+    assert_eq!(facts(&c), ["Next landing: 1 ticket, 14 min", "8 of 10 done"]);
     assert_eq!(c.roster[0].terminal.as_deref(), Some("term-l"));
     assert_eq!(c.roster[0].title, "Land the mobile fixes");
     assert_eq!(c.roster[0].doing, "Watching source checks");
-    assert!(!c.pipeline[1].assigned[0].detail.as_ref().unwrap().contains("Landing:"));
+    assert!(c.pipeline[1].assigned[0].detail.as_ref().unwrap().contains("Landing: checking on CI"));
     let red = column(json!({
-        "lines": [with(line("t1", "landing"), json!({ "landing": 9 }))],
-        "landings": [landing(9, "red", &["t1"], "ci_failed", NOW - 5 * MINUTE)],
+        "lines": [line("t1", "landing")],
+        "landings": [landing(0, "red", &["t1"], "ci_failed", NOW - 5 * MINUTE)],
     }), json!({}));
     assert!(!red.facts.iter().any(|f| f.kind == FactKind::NextLanding));
     assert_eq!(red.pipeline[0].stage, PipeStage::Landing);
-    assert!(!red.pipeline[0].unattended[0].detail.as_ref().unwrap().contains("CI failed"));
+    assert!(red.pipeline[0].unattended[0].detail.as_ref().unwrap().contains("CI failed"));
+}
+
+/// A ticket's detail names its own engine group, not the first of them.
+#[test]
+fn each_ticket_names_its_own_engine_group() {
+    let c = column(json!({
+        "lines": [line("t1", "landing"), line("t2", "landing")],
+        "landings": [landing(0, "gating", &["t1"], "gating_locally", NOW - MINUTE),
+            landing(0, "red", &["t2"], "ci_failed", NOW - MINUTE)],
+    }), json!({}));
+    let details: Vec<&str> = c.pipeline[0].unattended.iter().map(|t| t.detail.as_deref().unwrap()).collect();
+    assert!(details[0].contains("Landing: checking here"), "{details:?}");
+    assert!(details[1].contains("Landing: CI failed"), "{details:?}");
 }
 
 /// The actual Rust answer drives the focused DOM and screenshot check on every UI edge.
@@ -283,13 +297,13 @@ fn ov895_ui_fixture_is_current() {
 
 #[test]
 fn ov895_next_landing_and_pipeline_share_status_eligibility() {
-    let on = |t: &str| with(line(t, "landing"), json!({ "landing": 9 }));
+    let on = |t: &str| line(t, "landing");
     let c = column(json!({
         "lines": [on("t1"), on("t2"), on("t3")],
-        "landings": [landing(9, "gating", &["t1", "t2", "t3"], "waiting_for_ci", NOW - MINUTE)],
+        "landings": [landing(0, "gating", &["t1", "t2", "t3"], "waiting_for_ci", NOW - MINUTE)],
     }), json!({ "statuses": { "t2": "done", "t3": "cancelled" } }));
     assert_eq!(c.pipeline[0].count, 1);
-    assert!(facts(&c).is_empty());
+    assert_eq!(facts(&c), ["Next landing: 1 ticket, 1 min"]);
 }
 
 /// A ticket's engine run is said under it in the pipeline (ov-1040), in the plan's words, and a ticket with none says nothing.

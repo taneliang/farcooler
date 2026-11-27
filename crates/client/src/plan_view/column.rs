@@ -528,7 +528,8 @@ fn pipeline(r: &Reader) -> (Vec<Group>, Vec<ColumnAgent>) {
         }
         // An explicit landing phase is ticket context. The producer may derive
         // Stalled from age, so that phase must not diagnose agent activity.
-        if let Some(landing) = line.landing.and_then(|n| plan.landings.iter().find(|l| l.number == n))
+        // Engine groups name their tickets; no line names a group.
+        if let Some(landing) = plan.landings.iter().find(|l| l.tickets.iter().any(|t| t.task == line.task))
             && let Some(phase) = landing.phase.as_deref().and_then(super::build::wire::<LandingPhase>)
             && !matches!(phase, LandingPhase::Stalled | LandingPhase::Unknown)
         {
