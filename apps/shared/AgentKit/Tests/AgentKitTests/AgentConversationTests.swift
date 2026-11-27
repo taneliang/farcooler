@@ -121,7 +121,7 @@ import Testing
         #expect(AgentConversation.short(ms: 7_384_000) == "2:03:04")
         #expect(AgentConversation.toolsLabel(14) == "14 tools" && AgentConversation.toolsLabel(1) == "1 tool")
         #expect(AgentConversation.toolsLabel(0) == nil, "an unknown count is hidden, not '0 tools'")
-        #expect(AgentConversation.queuedLabel("Waiting") == "Queued")
+        #expect(AgentConversation.queuedLabel("Waiting") == "Message received and queued.")
     }
 
     /// The field takes a draft set from outside (a send clearing it, a

@@ -226,7 +226,7 @@ class AgentConversationTest {
         assertEquals("Some of this session couldn’t be read.", AgentConversation.gap(AgentRow.Gap("Unparsed", 2)))
         assertEquals("A line of this session couldn’t be read.", AgentConversation.gap(AgentRow.Gap("Unparsed", 1)))
         assertEquals("Sent mid-turn", AgentConversation.queuedLabel("Sent"))
-        assertEquals("Queued", AgentConversation.queuedLabel("Waiting"))
+        assertEquals("Message received and queued.", AgentConversation.queuedLabel("Waiting"))
         assertEquals("ov-827: in the box until the turn ends", "Waiting to send", AgentConversation.queuedLabel("InBox"))
     }
 

@@ -155,6 +155,7 @@ pub fn words(style: Style, agent: &str) -> Words {
         ("scheduled_task", "Scheduled task".into()),
         // A queued message, by its state.
         ("queued_Withdrawn", "Withdrawn".into()),
+        ("queued_Waiting", "Message received and queued.".into()),
         ("queued_InBox", "Waiting to send".into()),
         ("queued_Sent", "Sent mid-turn".into()),
         ("queued", "Queued".into()),

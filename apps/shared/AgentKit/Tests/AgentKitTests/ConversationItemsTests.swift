@@ -76,7 +76,7 @@ struct ConversationItemsTests {
         #expect(AgentConversation.isScheduled(turn("Scheduled")))
         #expect(AgentConversation.queuedLabel("Sent") == "Sent mid-turn")
         #expect(AgentConversation.queuedLabel("InBox") == "Waiting to send", "ov-827: in the box until the turn ends")
-        #expect(AgentConversation.queuedLabel("Waiting") == "Queued")
+        #expect(AgentConversation.queuedLabel("Waiting") == "Message received and queued.")
     }
 
     @Test("The polish fixture decodes a scheduled turn, a tool's input and result, and a checklist")
