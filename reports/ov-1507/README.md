@@ -33,6 +33,8 @@ The last full `scripts/landing-gate` run passed. Three earlier runs in this sess
 - Two failed because of how I set up build output (`CARGO_TARGET_DIR`, then a symlinked `target/`). The gate needs a real `target/` directory.
 - One failed on a single AgentKit test, `aBoardTickRedrawsOnTheClockAlone`, which waits 5 seconds for a main-actor redraw. It then passed three times alone and in the next full Swift run. This branch changes no Swift. I left the test as it was; it can fail again on a busy Mac.
 
+A later landing gate run, started by the engine, failed in the Rust job. 7,621 tests passed and one failed: `script_hooks_restart_mid_call_recovers_receipt_or_spends_one_retry`, which this branch does not touch. It passed when rerun alone. The leak check also reported one temp entry left in `TMPDIR`, `.tmpkryjQj`. I did not find which test left it, or whether it is connected to the failed test. The orchestrator said ov-1517 covers the flaky test, and asked for no change to it and no full gate rerun. I made neither.
+
 ## CI
 
 **Not yet verified.** No CI run exists for this branch. The CI workflow runs on pull requests and on pushes to branches including `main` and `landing/**`. In an earlier session, the approval system blocked a candidate push because it would publish the code and report to the public origin without explicit authorization. Nothing has been pushed. The failed run ([job log](https://github.com/taneliang/farcooler/actions/runs/45911805928/job/140229562752)) checked `bedde8580`, so rerunning it would test the old code. The acceptance item "passes on CI" stays open until this branch is pushed or landed.
