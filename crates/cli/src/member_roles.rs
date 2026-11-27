@@ -109,6 +109,24 @@ pub(crate) fn event_line(e: &pb::PeopleEvent, now: i64) -> String {
             "" => "took back a workspace's lead".to_string(),
             lead => format!("made {lead} a workspace's lead"),
         },
+        // Every part of these came off a wire, and the name is the new
+        // device's own: no control character reaches the terminal.
+        "device_added" | "device_removed" => {
+            let said = |field: &str| detail[field].as_str().unwrap_or_default().chars().filter(|c| !c.is_control()).collect::<String>();
+            let (device, by) = (said("device"), said("by"));
+            if e.kind == "device_removed" {
+                let from = if by.is_empty() { "this runner itself".to_string() } else { by };
+                format!("removed the device {device}, from {from}")
+            } else {
+                let scope = match said("scope").as_str() {
+                    "SCOPE_READ" => "View",
+                    "SCOPE_CONTROL" => "Control",
+                    _ => "full access",
+                };
+                let from = if by.is_empty() { "from this runner itself".to_string() } else { format!("approved from {by}") };
+                format!("added the device {device} ({}) with {scope}, {from}", said("label"))
+            }
+        }
         other => format!("{other} {}", e.handle),
     };
     format!("{when}  {who} {what}")
@@ -164,5 +182,16 @@ mod tests {
         assert_eq!(line(e("member:carol", "", "prefix", r#"{"from":"OV","to":"PL"}"#)), "carol changed a workspace's prefix from OV to PL");
         assert_eq!(line(e("user", "bob", "lead", r#"{"from":"owner","to":"bob"}"#)), "the owner made bob a workspace's lead");
         assert_eq!(line(e("user", "", "lead", r#"{"from":"bob","to":"owner"}"#)), "the owner took back a workspace's lead");
+        // A device's approval and removal (ov-1490): which one, and by which.
+        // Its name is the new device's own, so it can't write to the terminal.
+        assert_eq!(
+            line(e("user", "", "device_added", "{\"device\":\"web-2\",\"label\":\"Chrome on Mac\\u001b[2J\",\"scope\":\"SCOPE_CONTROL\",\"by\":\"web-1\"}")),
+            "the owner added the device web-2 (Chrome on Mac[2J) with Control, approved from web-1"
+        );
+        assert_eq!(
+            line(e("user", "", "device_added", r#"{"device":"web-2","label":"Safari","scope":"SCOPE_READ","by":""}"#)),
+            "the owner added the device web-2 (Safari) with View, from this runner itself"
+        );
+        assert_eq!(line(e("user", "", "device_removed", r#"{"device":"web-2","by":"web-1"}"#)), "the owner removed the device web-2, from web-1");
     }
 }
