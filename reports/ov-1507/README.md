@@ -14,19 +14,24 @@ In the narrow desktop sidebar, the first version of the row broke the title into
 
 The walk's locator is now scoped to the sidebar, and its recovery click uses the sidebar's Recover button. It has the same timeouts and steps as before.
 
+## Landing gate repair
+
+The first landing gate failed `shared-core-lint.py` (R-112): my Recover button wrote its accessible name, `Recover <title>`, in `work-screen.ts`. The Rust work view now sends the button's label and accessible name. It also sends a `lost` flag, so the page no longer picks lost rows by the display word "Lost". The ratchet baseline is unchanged. The fix is commit `245035172`.
+
 ## Verification
 
 The unmodified `bedde8580` bundle reproduced the 30-second timeout at `csp-check.mjs:1320` in local Chromium with two isolated Rust runners. The checkout, Codex launch and tmux health checks had already completed.
 
-Everything below ran on this branch rebased onto `29c41d4de`.
+Everything below ran at `245035172`, on base `29c41d4de`.
 
-On the final Canary bundle (built at `b88d65e0b`), the two-runner workday walk passed three times in a row with no CSP violations. The third run saved the captures, taken before the walk selected the lost terminal. [320 px capture](workday-lost-terminal-320.png) · [1280 px capture](workday-lost-terminal-1280.png)
+On the Canary bundle, the two-runner workday walk passed three times in a row with no CSP violations. The third run saved the captures, taken before the walk selected the lost terminal. [320 px capture](workday-lost-terminal-320.png) · [1280 px capture](workday-lost-terminal-1280.png)
 
-The Work browser suite passed 18 cases. At both 320 and 1280 px it checks that the lost row is visible with the disclosure closed, clicks Recover while another terminal is selected, checks which terminal the runner restarted, and checks that Back restores the previous selection. It also checks that a read-only browser sees the lost row and has no Recover button.
+These also passed: the Work browser suite (including the lost row and one-click Recover at 320 and 1280 px, and a read-only browser with no Recover button), the Board, Conversation and Plan browser checks, the CSP walk with CI's 100 ms tunnel delay, the four-session CSP walk, the split-pane sleep scenarios, the web tests and web workflow tests, both TypeScript checks, the `farcooler-client` library tests (420 passed, 2 ignored) and its Clippy check, and the shared-core lint with its self-test and baseline check. The Canary bundle passed the size gate at 5,097,217 compressed bytes. The stable bundle was not built locally.
 
-On the final bundle, these also passed: the Board, Conversation and Plan browser checks; the CSP walk with the fake daemon and CI's 100 ms tunnel delay (keystroke echo under load 19.6 ms at p95, limit 100 ms); the four-session CSP walk; and all seven split-pane sleep scenarios. The Canary bundle passed the size gate at 5,095,136 compressed bytes. The stable bundle was not built locally.
+The last full `scripts/landing-gate` run passed. Three earlier runs in this session failed:
 
-All 304 web tests, the web workflow tests and both TypeScript checks passed after the rebase, before the CSS-only row change.
+- Two failed because of how I set up build output (`CARGO_TARGET_DIR`, then a symlinked `target/`). The gate needs a real `target/` directory.
+- One failed on a single AgentKit test, `aBoardTickRedrawsOnTheClockAlone`, which waits 5 seconds for a main-actor redraw. It then passed three times alone and in the next full Swift run. This branch changes no Swift. I left the test as it was; it can fail again on a busy Mac.
 
 ## CI
 
