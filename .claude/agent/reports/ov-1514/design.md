@@ -6,7 +6,7 @@ Security design and threat model only. No product code. Written Nov 27, against 
 
 **Recommended: design B, a quiet key.** After a passkey touch, the page makes a WebCrypto Ed25519 key it cannot export. The runner then adds a second, restricted line for that key next to the browser's passkey line, and the line expires on its own.
 
-- The key works for **12 hours after the touch**. It also dies after **2 hours with no connection** made with it. A new key always needs a new touch.
+- The key works for **12 hours after the touch**. It also dies once this browser has had **no Far Cooler connection open for 2 hours**, by passkey or by the quiet key. A new key always needs a new touch.
 - The key is gone when you **sign out**, **revoke the device**, or **press End** on its row in the device list. Signing in with the passkey again replaces it.
 - **What you would be accepting:** for up to 12 hours after your last touch, someone who has your unlocked laptop, or a copy of your Chrome profile folder, can open Far Cooler on that runner without touching anything. Far Cooler would let them do what the browser can do, terminals included, and a terminal is a shell on your runner.
 - **What they still couldn't do:** anything that needs a step-up, such as enrolling a device, adding a person or raising access. Those still ask for the passkey with your fingerprint or PIN.
@@ -81,7 +81,7 @@ Threat model:
   - It cannot export the key. It can, though, relay signatures: copy out the node key (raw bytes), dial the runner from its own machine, and have the page sign that SSH handshake. That gives it a session the owner's tab knows nothing about.
   - The daemon ends that session at `--quiet-until`, so its reach is the same 12 hours.
   - The CSP's `connect-src` makes the round trip this needs harder for injected script. An extension is not bound by it.
-- **The window:** at most 12 h from the touch. It ends sooner after 2 h with no connection, and at sign-out, revoke or End.
+- **The window:** at most 12 h from the touch. It ends sooner once the device has had no session open for 2 h (the idle rule in section 4), and at sign-out, revoke or End.
 - **Revoking:** removing a line, which the fence already does. Section 4 has the rules.
 - **Cost:** the moderate amount of work in section 7. It reuses the fence, the forced command, `mark_revoked` and the real-sshd tests.
 
@@ -127,12 +127,17 @@ Revoking:
 
 **Window length:**
 - **Absolute: 12 hours from the passkey touch.** That covers a working day with lunch, meetings and Wi-Fi changes. A laptop that sleeps overnight asks for one touch in the morning.
-- **Idle: 2 hours.** If no connection has been made with the quiet key, or none has been open, for 2 hours, the daemon deletes the line. A laptop left at a café over lunch is still covered; one left closed all afternoon is not. The daemon tracks this from the sessions it sees. The idle limit is the daemon's alone: sshd's `expiry-time` carries only the 12-hour end.
+- **Idle: 2 hours with nothing open from that device.** The device is idle while it has no session open on this runner by either line, its passkey line or its quiet line. The idle clock starts when the device's last open session closes, and resets to zero whenever a session from the device is open. When it reaches 2 hours, the daemon deletes the quiet line.
+  - Both lines carry the same client id, so the daemon counts every session for that id, whichever key opened it.
+  - The usual case this has to keep working: touch at 9:00, the page stays connected on the passkey connection all morning, the laptop sleeps at 12:30 and wakes at 13:00. The idle clock ran for 30 minutes, not 4 hours, so the wake reconnects with no touch.
+  - A laptop left closed over lunch is still covered; one left closed all afternoon is not.
+  - A tab left open keeps the line alive, but never past the 12-hour end.
+  - The idle limit is the daemon's alone: sshd's `expiry-time` carries only the 12-hour end. The daemon keeps the last-close time in memory. After a restart it starts every device's idle clock at the restart, so a restart can delay an idle removal by at most 2 hours, and never past the 12-hour end.
 - **Never extended without a touch.** Each touch mints a new key with a new 12 hours. Using the key does not push back its end.
 
 **Revocation rules:**
 1. **Expiry.** sshd refuses the line after `expiry-time`. The daemon refuses after `--quiet-until`, ends open quiet sessions at that time, and deletes expired lines when it starts and every minute after.
-2. **Idle.** The daemon deletes the line after 2 h with no quiet session open.
+2. **Idle.** The daemon deletes the quiet line once the device has had no session open, by either line, for 2 h, counted from when its last session closed.
 3. **Sign out on the page.** First, over the live connection, `client.quiet_key.end` for every runner connected. Then the page deletes the key with the rest of IndexedDB (Clear-Site-Data already covers that). If a runner can't be reached, the page says that runner still accepts the key until its end time and names the time. With the local copy deleted, only a copy taken earlier could still use it.
 4. **Revoke the device.** `client.revoke` removes the device's quiet line with its passkey line, under the same fence lock, and `mark_revoked` ends its sessions. Removing a member covers their browser devices the same way.
 5. **End, in the device list.** A control that removes only the quiet line and ends its sessions, and keeps the passkey line. On the web and Mac device lists. It needs the same rights as revoking that device.
@@ -154,7 +159,7 @@ Revoking:
 For you to accept or refuse:
 
 - **Today:** someone at your unlocked laptop, with no Far Cooler tab connected, needs your fingerprint or your Mac password (or a tap on your security key) to open your runners. Someone with a copy of your Chrome profile folder gets a route to the runner and no login.
-- **With this design:** for up to 12 hours after your last passkey touch, and only while the browser has connected within the last 2 hours:
+- **With this design:** for up to 12 hours after your last passkey touch, and only until this browser has gone 2 hours with no Far Cooler connection open (a tab left connected keeps it going; a laptop closed for more than 2 hours loses it):
   - Someone at your unlocked laptop opens Far Cooler on your runners with **no fingerprint and no password**.
   - Someone with **a copy of your Chrome profile folder** can do the same **from their own computer**, until the same end time. That copy can be taken by malware on the Mac, or from the disk if FileVault is off.
   - A **malicious browser extension** allowed on the Far Cooler site can open a session in the background, without your page open, until the same end time.
@@ -196,7 +201,9 @@ If that trade is refused, A remains: ov-1513's fixes plus a SharedWorker, which 
 | sshd refuses an expired line by itself | Real sshd. Write a quiet line with `expiry-time` one minute in the past; the quiet key's login is refused and the passkey line's still succeeds | Drop `expiry-time` from `key_a_options`, and the login succeeds |
 | The daemon refuses after `--quiet-until` even if sshd admitted it | Daemon. Start a session as a quiet line whose `--quiet-until` has passed on a fake clock; the handshake is refused | Remove the check, and the session opens |
 | An open quiet session ends at its deadline | Daemon, fake clock. Open a quiet session, move the clock past the deadline; the connection closes within one sweep | Remove the deadline from the session loop, and it stays open |
-| Idle for 2 h removes the line | Daemon, fake clock. Mint, open no session for 2 h plus one sweep; the line is gone from `authorized_keys` | Remove the idle sweep, and the line stays |
+| Idle for 2 h removes the line | Daemon, fake clock. Mint, close the passkey session, open nothing for 2 h plus one sweep; the line is gone from `authorized_keys` | Remove the idle sweep, and the line stays |
+| A long passkey connection does not count as idle | Daemon, fake clock. Mint, keep the passkey session open for 4 h, close it, wait 30 min plus one sweep; the line is still there and a quiet login succeeds. Then open nothing for 2 h plus one sweep; the line is gone | Count only quiet sessions as activity, and the line is gone at the first sweep after the close |
+| A long quiet connection does not count as idle | Daemon, fake clock. Open a quiet session and keep it open for 3 h; the line is still there; close it, and it goes 2 h plus one sweep later | Start the idle clock at the last quiet login instead of the last close, and the line goes while the session is open |
 | Only a fresh passkey login can mint | Daemon. `set` over a quiet session is refused; `set` 61 s after a passkey login is refused; `set` 5 s after one succeeds | Remove each check in turn, and the matching call succeeds |
 | A quiet key can never extend itself | Daemon. Use the quiet key repeatedly for 11 h on a fake clock; `--quiet-until` and `expiry-time` are unchanged | Re-mint on use, and the deadline moves |
 | One quiet key per device | Fence. Mint twice; one quiet line for that client id, holding the second key | Append instead of replace, and there are two lines |
@@ -211,6 +218,7 @@ If that trade is refused, A remains: ov-1513's fixes plus a SharedWorker, which 
 | The device list shows it, and it goes away | `client.list` reports `quiet_until` while the line exists and not after End or expiry; a web view test renders the line and the End button | — |
 
 **Acceptance for that ticket:**
-- The owner can sleep the laptop for 30 minutes, wake it, and see the page reconnect with no click and no touch.
+- The owner can sleep the laptop for 30 minutes, wake it, and see the page reconnect with no click and no touch. This holds after a morning connected for 3 hours or more on the passkey connection, not only just after the touch.
+- With the laptop closed for more than 2 hours, a reconnect asks for a touch again.
 - After 12 hours, and after End or Sign Out, a reconnect asks for a touch again.
 - Every row of the table above has a test that has been seen to fail.
