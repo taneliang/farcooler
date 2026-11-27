@@ -17,18 +17,20 @@ so the views pick them up unchanged.
 
 The size gate is `node scripts/size-gate.mjs dist`, with a limit of
 5,500,000 B. "Before" is main at 29c41d4de, built from a clean copy in
-scratch.
+scratch. "After" is this branch rebased onto fb383745f, so it also carries
+what landed on main in between (ov-1509's chat images among it); the change
+overstates this ticket's share slightly.
 
 | | Before | After | Change |
 |---|---:|---:|---:|
-| Size gate, whole build (Brotli) | 5,095,327 B | 5,251,039 B | +155,712 B (+3.1%) |
-| `app.js` raw | 848,078 B | 1,203,332 B | +355,254 B |
-| `app.js` Brotli q11 | 197,671 B | 299,007 B | +101,336 B |
-| `app.css` raw | 51,827 B | 63,783 B | +11,956 B |
-| `app.css` Brotli q11 | 9,650 B | 11,998 B | +2,348 B |
+| Size gate, whole build (Brotli) | 5,095,327 B | 5,254,900 B | +159,573 B (+3.1%) |
+| `app.js` raw | 848,078 B | 1,209,487 B | +361,409 B |
+| `app.js` Brotli q11 | 197,671 B | 300,372 B | +102,701 B |
+| `app.css` raw | 51,827 B | 67,565 B | +15,738 B |
+| `app.css` Brotli q11 | 9,650 B | 12,629 B | +2,979 B |
 | Icons and manifest (Brotli) | — | 51,841 B | new |
 
-- **Headroom.** 248,961 B remains under the gate.
+- **Headroom.** 245,100 B remains under the gate.
 - **The script.** It is still one chunk, and the build asserts that, so a
   deploy can never strand a lazy chunk. React, React DOM, Base UI and the
   router account for the JS growth.
@@ -39,6 +41,9 @@ scratch.
   |---|---:|---:|
   | Pair 1 | 112.8 s | 80.2 s |
   | Pair 2 | 113.8 s | 130.1 s |
+
+  After the rebase, one more build of the branch took 148 s at a load
+  average of about 20.
 
   Brotli of the Tailcat wasm dominates the build; the Vite step is a few
   seconds of it.
@@ -83,6 +88,22 @@ widths. They are not copied here, to keep the repository small. Run it with
 | 681–1079 px | sidebar and page; the pane sits under the page |
 | 680 px and under | one column: the sidebar is a compact header, the views a 2×2 grid; the page and pane are each a screen tall |
 
+**The compact header.** At 680 px and under, the header is the brand, the
+workspace picker and the views, as in ov-1483's phone board:
+
+- The runner block (picker or name, health, Add Runner) and the tools
+  (Orchestrator, Workflow Runs, Commands) fold behind one button in the brand
+  row. The button shows the runner's name, and its accessible name adds
+  "Runner and Tools".
+- A lost connection still shows: Reconnect sits on every view, with its
+  message, whether or not the runner block is open.
+- The terminal strip shows only on Terminals. Elsewhere the Terminals view is
+  one tap away.
+
+At 320 px the board's page header now starts 226 px down; before this it was
+426 px. `shell-check` asserts at most 260 px, and both the bound and the
+folded focus order go red when the fold is removed.
+
 Every control is at least 44 px tall at phone width. The audited pages have
 no sideways scroll at any of the three widths.
 
@@ -123,6 +144,13 @@ control edges and the focus ring need 3:1.
 
 Each row is the worst case over the surfaces listed.
 
+**ov-1509's images and files in the shell.** `chat-files-check` serves the
+conversation with the full stylesheet, tokens included. It frames the view in
+its own stand-in sidebar, not the shell, so its 320 capture is narrower than
+the app's. Sent images and file cards take the token surfaces in both themes:
+[light 1280](views/agent-files-light-1280.png) ·
+[dark 320](views/agent-files-dark-320.png).
+
 ## 3. App icon
 
 `services/web/src/client/icons/app-icon-1024.png` is the master, copied from
@@ -149,6 +177,7 @@ All of these ran on this branch, in the foreground:
 | `work-check.mjs` | 18 of 18 passed |
 | `board-check.mjs` | passed |
 | `chat-check.mjs` | passed |
+| `chat-files-check.mjs` (ov-1509, from main) | passed, after the rebase |
 | `plan-render-check.mjs` | passed |
 | `review-check.mjs` (with the `web_review_browser_bridge` fixture) | passed |
 | `needs-capture`, `plan-capture`, `workflow-cancelled-capture` | passed, no overflow |
@@ -164,6 +193,9 @@ shell:
   Orchestrator, Workflow Runs, Commands, Workspace Link, each terminal, Start
   Work, the page's content, then the account (attention count, Saved Copies,
   Sign Out).
+  At 320 px the first stop is the runner's button, and Tab goes from it
+  straight to the workspace picker; once it is open, the walk is the one
+  above, without the terminal strip, since the page is the board.
 - **Pickers.** Both open from the keyboard, move and choose with the arrow
   keys and Enter, and return focus to their trigger. Escape closes one without
   choosing. A runner this browser can't use is disabled and can't be chosen.
@@ -226,6 +258,24 @@ machine. Each value is the median over the five runs, in ms:
 The shell re-renders only when its view model changes. A write that changes
 nothing notifies no one, so terminal output and chat rows never re-render
 React.
+
+### Review round
+
+The first review found two things, both fixed on this branch:
+
+1. **ov-1509's check broke on the rebase.** `chat-files-check.mjs` built its
+   page CSS from `app.css` and `chat.css` only. On this branch the colors
+   live in `tokens.css`, so every run timed out waiting for an image. It now
+   uses `styles()`, like `chat-check`. No other check on main splices CSS, or
+   splices the bundle as a replacement string.
+2. **The phone header was too tall.** It is now folded, as described under
+   "The compact header".
+
+Re-run after these changes, in the foreground: `shell-check`, `chat-check`,
+`chat-files-check`, `board-check`, `work-check` (18 of 18), `tsc` for both
+configs, and the `csp-check` walk over the fake daemon, which passed with no
+CSP violations in 4 min 23 s. The 320 px captures under `shell/` and
+`views/` come from these runs.
 
 ## Decisions taken without asking
 
