@@ -49,4 +49,24 @@ struct PlanLandingTests {
         #expect(agents(plan) == [], "a finished agent stayed in the sidebar: \(agents(plan))")
     }
 
+    // The Plan no longer draws a runner's stored landings, but the app still
+    // decodes them, so a reply that carries them must keep reading.
+    @Test("a newer runner's unknown landing phase reads as unknown, and no phase as none")
+    func unknownPhase() throws {
+        func phase(_ value: String?) throws -> LandingPhase? {
+            try PlanModelTests.plan(themes: [], lines: [], landings: [PlanModelTests.landing(9, "red", phase: value)])
+                .landings[0].phase
+        }
+        #expect(try phase("from_the_future") == .unknown)
+        #expect(try phase("stalled") == .stalled)
+        #expect(try phase(nil) == nil)
+    }
+
+    @Test("a newer runner's unknown landing state and route read as unknown")
+    func unknownStateAndRoute() throws {
+        var row = PlanModelTests.landing(9, "from_the_future")
+        row["route"] = "by_carrier_pigeon"
+        let landing = try #require(try PlanModelTests.plan(themes: [], lines: [], landings: [row]).landings.first)
+        #expect(landing.state == .unknown && landing.route == .unknown)
+    }
 }
