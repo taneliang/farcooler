@@ -468,7 +468,7 @@ impl Projection {
             row_id = format!("{row_id}:{}", self.next_seq());
         }
         let turn = self.turn;
-        self.push(row_id, turn, false, RowKind::Prose(Prose { text: text.to_string(), conclusion, at_ms: at }));
+        self.push(row_id, turn, false, RowKind::Prose(Prose { text: text.to_string(), conclusion, at_ms: at, images: Vec::new() }));
     }
 
     fn codex_thinking(&mut self, id: &str, started: Option<i64>, ended: Option<i64>) {
@@ -542,6 +542,7 @@ impl Projection {
             file_path,
             input: super::detail::input_text(args),
             result: None,
+            sent: None,
         };
         self.push(row_id, Some(turn), provisional, RowKind::Tool(tool));
         self.link_tool(None, call, &name, &summary, !provisional);

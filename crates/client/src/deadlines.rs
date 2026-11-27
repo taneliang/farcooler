@@ -96,6 +96,8 @@ const WORK_METHODS: &[&str] = &[
     // The first piece of a prompt's image may read the transcript back the
     // same way, and then a line of up to 8 MB (ov-454).
     "agent.image",
+    // As an image's first piece, for a file the agent sent (ov-1509).
+    "agent.file",
     // A send waits out the spacing after the last, a paste's read-back and,
     // mid-turn, the queue's confirmation: give up early and the person sends
     // again what the runner then types anyway (ov-372 review).

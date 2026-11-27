@@ -15,6 +15,7 @@ use std::hash::{Hash, Hasher};
 
 use super::record::{decode, Block, Content, Input, Record, SubagentMeta, ToolUseResult};
 use super::rows::*;
+pub(super) use super::fold_text::{clip, squeeze, summarize};
 use crate::session_log::claude::parse_iso8601_millis;
 use crate::session_log::SubagentStatus;
 
@@ -160,6 +161,8 @@ pub struct Projection {
     stats: FoldStats,
     /// What only a codex rollout's fold keeps (`codex.rs`).
     pub(super) codex: super::codex::CodexState,
+    /// The files sent, and the Markdown that may name them (`sent_files.rs`).
+    pub(super) sent: super::sent_files::SentState,
     /// The agent's task list, and its calls waiting on results (`tasks.rs`).
     pub(super) tasks: super::tasks::TaskState,
     /// Where the main transcript's line being folded is, when the reader
@@ -173,54 +176,6 @@ pub struct Projection {
     /// Rows the per-turn walks covered, for `follow_tests.rs`.
     #[cfg(test)]
     pub(super) walked: std::sync::atomic::AtomicU64,
-}
-
-/// Collapses whitespace, and cuts to `max` characters.
-pub(super) fn squeeze(text: &str, max: usize) -> String {
-    let mut out = String::with_capacity(text.len().min(max.saturating_mul(4)));
-    for (n, word) in text.split_whitespace().enumerate() {
-        if n > 0 {
-            out.push(' ');
-        }
-        out.push_str(word);
-        if out.len() > max.saturating_mul(4) {
-            break;
-        }
-    }
-    match out.char_indices().nth(max) {
-        Some((cut, _)) => {
-            out.truncate(cut);
-            out.push('…');
-            out
-        }
-        None => out,
-    }
-}
-
-/// Cuts to `max` characters, keeping line breaks.
-pub(super) fn clip(text: &str, max: usize) -> String {
-    let text = text.trim();
-    match text.char_indices().nth(max) {
-        Some((cut, _)) => format!("{}…", &text[..cut]),
-        None => text.to_string(),
-    }
-}
-
-/// The one input field a person reads first, in the spike's order.
-pub(super) fn summarize(input: &Input<'_>) -> String {
-    let first = [
-        &input.description,
-        &input.command,
-        &input.file_path,
-        &input.pattern,
-        &input.path,
-        &input.subject,
-        &input.url,
-        &input.query,
-    ]
-    .into_iter()
-    .find_map(|field| field.get());
-    first.map(|s| squeeze(s, SUMMARY_CHARS)).unwrap_or_default()
 }
 
 /// The text between `<name>` and `</name>`.
@@ -297,6 +252,7 @@ impl Projection {
 
     pub(super) fn touch(&mut self, i: usize) {
         super::words::fill(&mut self.rows[i].kind);
+        self.images_changed(i);
         self.revision += 1;
         self.rows[i].rev = self.revision;
         if !self.marked[i] {
@@ -917,7 +873,7 @@ impl Projection {
                 && row.turn.as_deref() == Some(&turn_id)
                 && matches!(&row.kind, RowKind::Prose(p) if !p.text.is_empty() && words.starts_with(&squeeze(&p.text, usize::MAX)))
         });
-        let prose = Prose { text: text.to_string(), conclusion, at_ms: at };
+        let prose = Prose { text: text.to_string(), conclusion, at_ms: at, images: Vec::new() };
         match waiting {
             Some(i) => {
                 self.rows[i].provisional = false;
@@ -994,7 +950,11 @@ impl Projection {
                     file_path: input.file_path.get().map(str::to_string),
                     input: block.input.raw.as_deref().and_then(super::detail::input_text_of),
                     result: None,
+                    sent: None,
                 };
+                if name == super::sent_files::TOOL {
+                    self.send_asked(id, block.input.raw.as_deref());
+                }
                 (format!("tool:{id}"), RowKind::Tool(tool))
             }
         };
@@ -1005,6 +965,7 @@ impl Projection {
                 self.rows[i].provisional = false;
                 let keep_status = std::mem::replace(&mut self.rows[i].kind, kind);
                 if let (RowKind::Tool(old), RowKind::Tool(new)) = (&keep_status, &mut self.rows[i].kind) {
+                    new.sent = old.sent.clone();
                     if old.status != ToolStatus::Running {
                         new.status = old.status;
                         new.ended_ms = clamp_end(new.started_ms, old.ended_ms);
@@ -1073,6 +1034,9 @@ impl Projection {
                 }
             }
             self.rows[i].provisional = false;
+            if let Some(result) = result.filter(|_| is_tool) {
+                self.send_answered(i, id, result);
+            }
             self.touch(i);
             if is_tool {
                 self.tool_confirmed(id);

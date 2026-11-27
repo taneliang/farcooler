@@ -143,6 +143,18 @@ pub fn words(style: Style, agent: &str) -> Words {
         ("transcript_open", style.label("open transcript")),
         ("transcript_close", style.label("close transcript")),
         ("transcript_empty", "No transcript available yet.".into()),
+        // The files an agent sends, and a message's images (ov-1509).
+        ("file_download", "Download".into()),
+        ("file_too_large", "Too large to download here".into()),
+        ("file_failed", "Couldn’t load this file. It may have moved or changed since it was sent.".into()),
+        ("file_retry", "Try Again".into()),
+        ("image_load", "Load Image ({size})".into()),
+        ("image_loading", "Loading…".into()),
+        ("image_open", "Open {name} at full size".into()),
+        ("image_actual", "Actual Size".into()),
+        ("image_fit", "Fit to Window".into()),
+        ("image_close", "Close".into()),
+        ("image_attached", "Attached image {n}".into()),
         // A turn's ending.
         ("outcome_done", "Done".into()),
         ("outcome_took", "Took {time}".into()),

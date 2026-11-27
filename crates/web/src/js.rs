@@ -495,6 +495,23 @@ impl WebRunner {
         Ok(changes.to_string())
     }
 
+    /// File `index` of the send on tool row `row`, as a `Uint8Array`
+    /// (`agent.file`). With `agent`, a subagent's own row.
+    #[wasm_bindgen(js_name = agentFile)]
+    pub async fn agent_file(&self, terminal: String, row: String, index: u32, agent: Option<String>) -> Result<Uint8Array, JsValue> {
+        let id = Uuid::parse_str(&terminal).map_err(|e| failure("protocol", &e.to_string()))?;
+        let bytes = self.0.agent_file(id, &row, index, agent.as_deref()).await.map_err(web_failure)?;
+        Ok(Uint8Array::from(&bytes[..]))
+    }
+
+    /// Image `index` of the prompt on turn row `row`, as a `Uint8Array`.
+    #[wasm_bindgen(js_name = agentImage)]
+    pub async fn agent_image(&self, terminal: String, row: String, index: u32) -> Result<Uint8Array, JsValue> {
+        let id = Uuid::parse_str(&terminal).map_err(|e| failure("protocol", &e.to_string()))?;
+        let bytes = self.0.agent_image(id, &row, index).await.map_err(web_failure)?;
+        Ok(Uint8Array::from(&bytes[..]))
+    }
+
     /// Send `text` to an agent as the person's message. True when the agent
     /// was busy and the message waits in its queue.
     pub async fn compose(&self, terminal: String, text: String) -> Result<bool, JsValue> {

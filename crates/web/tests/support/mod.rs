@@ -124,6 +124,8 @@ pub struct Seen {
     /// Every `terminal.agent_answer` as `(terminal, request id, option id,
     /// actor)`, in arrival order.
     pub answers: Mutex<Vec<(Vec<u8>, String, String, String)>>,
+    /// The files the agent sent, by tool row and place (`agent.file`).
+    pub files: Mutex<std::collections::HashMap<(String, u32), Vec<u8>>>,
     /// Every `task.note` as `(task, kind, body)`.
     pub notes: Mutex<Vec<(Vec<u8>, i32, String)>>,
     /// Set, the runner refuses every answer with this code and `what`: a
@@ -294,6 +296,18 @@ pub fn output_for(id: Uuid, bytes: &[u8]) -> Vec<u8> {
     }))
 }
 
+/// A piece of `bytes` from `offset`, as the runner cuts them.
+pub fn file_piece(bytes: &[u8], offset: u64) -> farcooler_protocol::v1::AgentImage {
+    let start = (offset as usize).min(bytes.len());
+    let end = (start + farcooler_protocol::MAX_AGENT_IMAGE_CHUNK).min(bytes.len());
+    farcooler_protocol::v1::AgentImage {
+        mime_type: "image/png".into(),
+        total_size: bytes.len() as u64,
+        offset: start as u64,
+        chunk: Bytes::copy_from_slice(&bytes[start..end]),
+    }
+}
+
 /// Enough of `farcoolerd --stdio` for one pane.
 async fn fake_daemon(channel: Channel<Msg>, seen: Arc<Seen>) {
     let id = channel.id();
@@ -329,6 +343,8 @@ async fn fake_daemon(channel: Channel<Msg>, seen: Arc<Seen>) {
                     capability::BOARD_RULING_ACTIONS.to_string(),
                     capability::AGENT_ROWS.to_string(),
                     capability::SUBAGENT_ROWS.to_string(),
+                    capability::AGENT_FILES.to_string(),
+                    capability::AGENT_IMAGES.to_string(),
                     capability::AGENT_COMPOSE.to_string(),
                     capability::COMPOSE.to_string(),
                     capability::TERMINAL_INTERRUPT.to_string(),
@@ -374,6 +390,10 @@ async fn fake_daemon(channel: Channel<Msg>, seen: Arc<Seen>) {
                         }
                         answer(&req, result::Value::Empty(Empty {}))
                     }
+                    ("agent.file", Some(request::Payload::AgentFile(p))) => match seen.files.lock().await.get(&(p.row_id.clone(), p.index)) {
+                        Some(bytes) => answer(&req, result::Value::AgentFile(file_piece(bytes, p.offset))),
+                        None => refusal(&req, ErrorCode::NotFound, ""),
+                    },
                     ("agent.rows", Some(request::Payload::AgentRowsPage(p))) => {
                         seen.row_agents.lock().await.push(p.agent_id);
                         answer(&req, result::Value::AgentRowPage(seen.chat.lock().await.page()))

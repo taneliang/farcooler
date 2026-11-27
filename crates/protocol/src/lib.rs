@@ -671,6 +671,9 @@ pub mod capability {
     /// A prompt's images (ov-454): `images` on a `Turn` row, and `agent.image`
     /// serving one a piece at a time. A client asks only a runner offering it.
     pub const AGENT_IMAGES: &str = "agent_images";
+    /// The files an agent sends (ov-1509): `sent` on a `SendUserFile` row,
+    /// `images` on a reply that names one in Markdown, and `agent.file`.
+    pub const AGENT_FILES: &str = "agent_files";
     /// `terminal.compose`'s `staged_file` (ov-454): any file, written on the
     /// runner, its path typed before the text. An older runner drops the block.
     pub const COMPOSE_FILES: &str = "compose_files";
@@ -826,7 +829,7 @@ pub mod capability {
             BOARD_LINE, BOARD_COST, LANDING, BOARD_RULING_ACTIONS, AGENT_ROWS, DRAFT_HOLD,
             PROJECTOR_SETTING, AGENT_COMPOSE,
             COMPOSE, COMPOSE_UPLOAD, TERMINAL_INTERRUPT, CODEX_VIEW, BRING_DRAFT, WEB_PANE,
-            AGENT_IMAGES, COMPOSE_FILES,
+            AGENT_IMAGES, AGENT_FILES, COMPOSE_FILES,
             AGENT_MESSAGES,
             SUBAGENT_ROWS, REPRESENTATIVES,
             REPO_SURVEY, MEMBER_ACCOUNTS, REP_SEARCH, REKEY,
@@ -1133,6 +1136,7 @@ pub mod method {
         AgentRows = "agent.rows" => AGENT_ROWS,
         AgentRowsFollow = "agent.rows_follow" => AGENT_ROWS,
         AgentImage = "agent.image" => AGENT_IMAGES,
+        AgentFile = "agent.file" => AGENT_FILES,
         MessageSend = "message.send" => AGENT_MESSAGES,
         MemberList = "member.list" => REPRESENTATIVES,
         MemberSet = "member.set" => REPRESENTATIVES,

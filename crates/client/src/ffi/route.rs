@@ -18,6 +18,8 @@ use farcooler_protocol::method::Method;
 pub(super) fn route(method: Method) -> Option<&'static str> {
     match method {
         Method::WorkspaceSetWorkflow | Method::WorkflowEnqueue | Method::WorkflowGet | Method::WorkflowApprove | Method::WorkflowResolveCancellation | Method::WorkflowCancel | Method::WorkflowResolve | Method::WorkflowRetry | Method::WorkflowQueue | Method::WorkflowLeave | Method::WorkflowSettle | Method::WorkflowTrack | Method::WorkflowMove | Method::WorkflowStart | Method::WorkflowSendBack | Method::WorkflowClose | Method::WorkflowLanded | Method::WorkflowReopen | Method::WorkflowPropose | Method::WorkflowDrafts | Method::WorkflowCutover | Method::WorkflowReview | Method::WorkflowWatch | Method::WorkflowPause | Method::WorkflowResume => None,
+        // The files an agent sends (ov-1509): only the browser draws them yet.
+        Method::AgentFile => None,
         // An arm under its own wire name.
         Method::HostHealth
         | Method::DaemonVersion

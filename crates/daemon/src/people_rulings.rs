@@ -174,6 +174,7 @@ pub fn member_ruling(method: M) -> Ruling {
         | M::AgentRows
         | M::AgentRowsFollow
         | M::AgentImage
+        | M::AgentFile
         | M::ChangesChangeSet
         | M::ChangesCommitFiles
         | M::ChangesFileDiff

@@ -83,6 +83,37 @@ impl Session {
         }
     }
 
+    /// File `index` of the send on tool row `row` (`agent.file`, ov-1509),
+    /// its MIME type and bytes, asked for a piece at a time until whole. With
+    /// `agent`, a row of that subagent's own.
+    pub async fn agent_file(&self, terminal: Uuid, row: &str, index: u32, agent: Option<&str>) -> Result<(String, Vec<u8>), SessionError> {
+        require(self.capabilities(), farcooler_protocol::capability::AGENT_FILES, "agent.file")?;
+        let mut bytes = Vec::new();
+        loop {
+            let payload = request::Payload::AgentFile(farcooler_protocol::v1::AgentFileRequest {
+                terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
+                row_id: row.to_string(),
+                index,
+                offset: bytes.len() as u64,
+                agent_id: agent.unwrap_or_default().to_string(),
+            });
+            let piece = match self.value("agent.file", None, Some(payload)).await? {
+                result::Value::AgentFile(piece) => piece,
+                other => return Err(wrong("agent_file", &other)),
+            };
+            // As `agent_image`, and no larger than a sent file may be: a
+            // runner can't grow this device's memory without end.
+            let stalled = piece.chunk.is_empty() && (bytes.len() as u64) < piece.total_size;
+            if piece.offset != bytes.len() as u64 || stalled || piece.total_size > farcooler_core::session_log::projector::sent_files::MAX_SENT_FILE_BYTES {
+                return Err(SessionError::Protocol("agent.file answered out of order".into()));
+            }
+            bytes.extend_from_slice(&piece.chunk);
+            if bytes.len() as u64 >= piece.total_size {
+                return Ok((piece.mime_type, bytes));
+            }
+        }
+    }
+
     /// What a rows call needs the runner to have: `agent_rows`, and for a
     /// subagent's own rows `subagent_rows` too, named on the request as well,
     /// since a runner without it would drop the id and answer with the

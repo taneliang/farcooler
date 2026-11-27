@@ -141,3 +141,37 @@
 .chat-child > button { align-self: flex-end; flex: none; }
 .chat-child .chat-child-body { position: relative; inset: auto; flex: 1; min-height: 0; }
 .chat-child::backdrop { background: #0008; }
+
+/* What an agent sends, and a message's images (ov-1509): a picture fits the
+   column at its own shape, never taller than most of the window. */
+.chat-sent { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.chat-sent > *, .bubble-images > * { max-width: 100%; }
+.chat-sent-caption { margin: 0; color: var(--text-2); font-size: 13px; overflow-wrap: anywhere; }
+.chat-image { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; max-width: 100%; }
+/* Room held until the picture is in, so little moves when it comes. */
+.chat-image:not([data-state="shown"]) { box-sizing: border-box; justify-content: center; align-items: center; width: 360px; min-height: 180px; padding: 12px; border-radius: 12px; background: var(--card); color: var(--text-2); font-size: 13px; text-align: center; overflow-wrap: anywhere; }
+.chat-image-name { max-width: 100%; color: var(--text); }
+.chat-image-open { display: block; max-width: 100%; padding: 0; border: 1px solid var(--rule); border-radius: 12px; overflow: hidden; background: var(--card); cursor: zoom-in; line-height: 0; }
+.chat-image-open:hover:not(:disabled) { filter: none; }
+.chat-image-open img { display: block; width: auto; height: auto; max-width: 100%; max-height: min(520px, 70vh); }
+.bubble-images { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: min(82%, 560px); margin-top: 4px; }
+.bubble-images .chat-image:not([data-state="shown"]) { width: 160px; min-height: 120px; }
+.bubble-images .chat-image-open img { max-height: 200px; }
+.prose .chat-image { margin: 4px 0; }
+.chat-file { display: flex; align-items: center; gap: 12px; box-sizing: border-box; width: 100%; max-width: 480px; padding: 10px 12px 10px 14px; border-radius: 12px; background: var(--card); }
+.chat-file-about { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.chat-file-name { font-weight: 600; overflow-wrap: anywhere; }
+.chat-file-size, .chat-file-said { color: var(--text-2); font-size: 13px; }
+.chat-file-said:empty { display: none; }
+.chat-file-save { flex: none; font-size: 13px; }
+
+.chat-viewer { box-sizing: border-box; width: calc(100vw - 16px); height: calc(100dvh - 16px); max-width: none; max-height: none; margin: auto; padding: 10px; color: var(--text); background: var(--bg); border: 1px solid var(--rule); border-radius: 14px; }
+.chat-viewer[open] { display: flex; flex-direction: column; gap: 10px; }
+.chat-viewer::backdrop { background: #000c; }
+.chat-viewer-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; font-size: 13px; }
+.chat-viewer-name { flex: 1 1 10ch; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.chat-viewer-stage { flex: 1; min-height: 0; overflow: auto; display: flex; }
+/* `margin: auto` centers it and still lets a larger one scroll to its edges. */
+.chat-viewer-stage img { margin: auto; max-width: 100%; max-height: 100%; cursor: zoom-in; }
+.chat-viewer.full .chat-viewer-stage img { max-width: none; max-height: none; cursor: zoom-out; }
+@media (max-width: 640px) { .bubble-images { max-width: 88%; } }

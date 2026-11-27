@@ -513,3 +513,67 @@ async fn a_prompts_image_comes_back_whole_in_pieces_on_every_transport() {
     let client = socket(dir.path()).await;
     assert!(whole(&client, &terminal).await.1 == png, "after a restart");
 }
+
+/// A file the agent sent (ov-1509): named on its `SendUserFile` row without
+/// its path, and served by `agent.file` a piece at a time, over the socket
+/// and relayed `--stdio` alike. Only what was sent: nothing for a row that
+/// sent nothing, an index past its files, or a file changed since.
+#[tokio::test]
+async fn a_sent_file_comes_back_whole_in_pieces_and_nothing_else_does() {
+    let dir = tempfile::tempdir().unwrap();
+    let _daemon = daemon(dir.path()).await;
+    let mut client = socket(dir.path()).await;
+    assert!(client.server_hello().capabilities.iter().any(|c| c == "agent_files"), "offered where served");
+    let worktree = a_worktree(&mut client, dir.path()).await;
+    let terminal = a_claude_pane(&mut client, &worktree).await;
+    let path = transcript(dir.path(), &worktree, &terminal);
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    png.extend((0..(farcooler_protocol::MAX_AGENT_IMAGE_CHUNK * 2 + 1234)).map(|i| (i % 251) as u8));
+    let capture = std::fs::canonicalize(dir.path()).unwrap().join("capture.png");
+    std::fs::write(&capture, &png).unwrap();
+    append(&path, prompt("p1", "Show me."));
+    append(&path, json!({"type":"assistant","uuid":"a1","timestamp":"2026-11-27T10:00:01.000Z","message":{"id":"m1","role":"assistant","content":[{"type":"tool_use","id":"t1","name":"SendUserFile","input":{"files":[capture]}}]}}));
+    append(&path, json!({"type":"user","uuid":"r1","timestamp":"2026-11-27T10:00:02.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"1 file delivered to user."}]},
+        "toolUseResult":{"attachments":[{"path":capture,"size":png.len(),"isImage":true}]}}));
+
+    fn ask(terminal: &pb::Terminal, row: &str, index: u32, offset: u64) -> pb::Request {
+        let mut req = call_named("agent.file");
+        req.payload = Some(request::Payload::AgentFile(pb::AgentFileRequest { terminal_id: terminal.id.clone(), row_id: row.into(), index, offset, agent_id: String::new() }));
+        req
+    }
+    async fn whole<R, W>(client: &Client<R, W>, terminal: &pb::Terminal) -> (String, Vec<u8>, usize)
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+        W: AsyncWrite + Unpin + Send + 'static,
+    {
+        let page = page(client, terminal, None, 100).await;
+        let row = page.rows.iter().find(|r| r.id == "tool:t1").expect("the send");
+        let row: serde_json::Value = serde_json::from_str(&row.row_json).unwrap();
+        assert_eq!(row["kind"]["Tool"]["sent"]["files"][0]["name"], "capture.png", "{row}");
+        assert!(row["kind"]["Tool"]["sent"]["files"][0].get("path").is_none(), "{row}");
+        let (mut bytes, mut pieces) = (Vec::new(), 0);
+        loop {
+            let answer = client.call_with(ask(terminal, "tool:t1", 0, bytes.len() as u64), Default::default()).await.expect("agent.file");
+            let Some(result::Value::AgentFile(piece)) = answer.value else { panic!("agent.file") };
+            assert_eq!(piece.offset, bytes.len() as u64);
+            assert!(piece.chunk.len() <= farcooler_protocol::MAX_AGENT_IMAGE_CHUNK);
+            bytes.extend_from_slice(&piece.chunk);
+            pieces += 1;
+            if bytes.len() as u64 >= piece.total_size {
+                return (piece.mime_type, bytes, pieces);
+            }
+        }
+    }
+
+    let (mime, bytes, pieces) = whole(&client, &terminal).await;
+    assert_eq!((mime.as_str(), pieces), ("image/png", 3));
+    assert!(bytes == png, "the same bytes");
+    let (_relay, relayed) = spawn(dir.path()).await;
+    assert!(whole(&relayed, &terminal).await.1 == png, "relayed");
+
+    for (row, index) in [("tool:t1", 1), ("turn:p1", 0), ("tool:nothing", 0), ("/etc/passwd", 0)] {
+        assert!(client.call_with(ask(&terminal, row, index, 0), Default::default()).await.is_err(), "{row} {index}");
+    }
+    std::fs::write(&capture, b"something else now").unwrap();
+    assert!(client.call_with(ask(&terminal, "tool:t1", 0, 0), Default::default()).await.is_err(), "changed since it was sent");
+}

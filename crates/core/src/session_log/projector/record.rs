@@ -549,9 +549,23 @@ pub(super) struct ToolUseResult<'a> {
     #[serde(rename = "totalDurationMs")]
     pub total_duration_ms: Num,
     pub interrupted: Bool,
+    /// A `SendUserFile`'s delivered files, and the words sent with them.
+    #[serde(borrow)]
+    pub attachments: List<Obj<SentAttachment<'a>>>,
+    #[serde(borrow)]
+    pub caption: Str<'a>,
     /// A `TaskCreate`'s new task: its `id` is what `TaskUpdate` names.
     #[serde(borrow)]
     pub task: Obj<TaskRef<'a>>,
+}
+
+/// One delivered file: its path resolved by claude, and its size.
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(default)]
+pub(super) struct SentAttachment<'a> {
+    #[serde(borrow)]
+    pub path: Str<'a>,
+    pub size: Num,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]

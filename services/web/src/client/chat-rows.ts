@@ -214,7 +214,9 @@ type Role = 'tool' | 'thinking' | 'other'
 function roleOf(row: Row | undefined): Role {
   switch (row ? kindOf(row) : '') {
     case 'Tool':
-      return 'tool'
+      // A call that sent files is what the agent is showing the person: it is
+      // never folded into a run of calls (ov-1509).
+      return row && bodyOf(row).sent ? 'other' : 'tool'
     case 'Thinking':
       return 'thinking'
     default:

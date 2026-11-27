@@ -43,6 +43,16 @@ export const transcriptWords = () => ({
   close: phrase('transcript_close'), empty: phrase('transcript_empty'),
 })
 
+/// What a sent file, and a picture, say (ov-1509).
+export const fileWords = () => ({
+  download: phrase('file_download'), tooLarge: phrase('file_too_large'), failed: phrase('file_failed'),
+  retry: phrase('file_retry'), loading: phrase('image_loading'), actual: phrase('image_actual'),
+  fit: phrase('image_fit'), close: phrase('image_close'),
+  load: (size: string) => phrase('image_load', { size }),
+  open: (name: string) => phrase('image_open', { name }),
+  attached: (n: number) => phrase('image_attached', { n }),
+})
+
 /// How a finished turn ended, or null while it is open (`outcome`).
 export function outcomeLine(turn: any): string | null {
   const outcome = turn.outcome

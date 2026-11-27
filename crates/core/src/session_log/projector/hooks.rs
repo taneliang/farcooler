@@ -269,7 +269,7 @@ impl Projection {
             None if closed => return,
             None => {
                 let id = format!("hprose:{message}");
-                let prose = Prose { text: delta.to_string(), conclusion: false, at_ms: Some(now) };
+                let prose = Prose { text: delta.to_string(), conclusion: false, at_ms: Some(now), images: Vec::new() };
                 self.push(id, Some(turn), true, RowKind::Prose(prose))
             }
         };

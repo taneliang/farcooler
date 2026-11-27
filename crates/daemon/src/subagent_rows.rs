@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
 use farcooler_core::session_log::projector::SessionProjector;
+use farcooler_core::session_log::projector::sent_files::SentFile;
 use uuid::Uuid;
 
 use crate::session_projectors::{Follow, Page, next_epoch, owned};
@@ -77,6 +78,18 @@ impl SubagentProjectors {
         let rows: Vec<_> = p.page(before, limit).into_iter().cloned().collect();
         let more_before = rows.first().is_some_and(|r| p.any_before(r.ord));
         Page { epoch: open.epoch, rev: p.revision(), rows, more_before }
+    }
+
+    /// File `index` of the send on the agent's tool row `row`, read up to
+    /// now. Blocking, as `page` is.
+    pub fn sent_file(&self, terminal: Uuid, agent: &str, path: PathBuf, parent: PathBuf, row: &str, index: usize) -> Option<SentFile> {
+        let open = self.get(terminal, agent, path, parent);
+        let mut session = open.lock();
+        session.poll();
+        if session.binding_refused() {
+            return None;
+        }
+        session.projection().sent_file(row, index).cloned()
     }
 
     /// What changed after revision `after` of projection `epoch` (`since`),

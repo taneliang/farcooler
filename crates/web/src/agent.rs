@@ -46,6 +46,17 @@ impl Runner {
         Ok(farcooler_client::rows_json::changes_json(&changes))
     }
 
+    /// File `index` of the send on tool row `row` (`agent.file`, ov-1509),
+    /// whole, over this connection. With `agent`, a subagent's own row.
+    pub async fn agent_file(&self, terminal: Uuid, row: &str, index: u32, agent: Option<&str>) -> Result<Vec<u8>, WebError> {
+        Ok(self.session.agent_file(terminal, row, index, agent).await?.1)
+    }
+
+    /// Image `index` of the prompt on turn row `row` (`agent.image`).
+    pub async fn agent_image(&self, terminal: Uuid, row: &str, index: u32) -> Result<Vec<u8>, WebError> {
+        Ok(self.session.agent_image(terminal, row, index).await?.1)
+    }
+
     /// Send `text` to the agent as the person's message. True when the agent
     /// was busy and the message waits in its queue.
     pub async fn compose(&self, terminal: Uuid, text: &str) -> Result<bool, WebError> {

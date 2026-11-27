@@ -262,6 +262,9 @@ message Request {
     // `agent.image` (ov-454), behind `agent_images`. 451-459 are held by
     // `reserved` below.
     AgentImageRequest agent_image = 450;
+    // `agent.file` (ov-1509), behind `agent_files`. 661-669 are held by
+    // `reserved` below.
+    AgentFileRequest agent_file = 660;
     // People and their reps (ov-494), behind `representatives`. 463-469 are
     // held by `reserved` below. `member.list` takes no payload.
     MemberSet member_set = 460;
@@ -367,6 +370,8 @@ message Request {
   reserved 431 to 439;
   // The rest of prompt images' block (ov-454).
   reserved 451 to 459;
+  // The rest of sent files' block (ov-1509).
+  reserved 661 to 669;
   // The rest of people's block (ov-494).
   reserved 463 to 469;
   // The rest of the repository survey's block (ov-519).
@@ -535,6 +540,9 @@ message Result {
     MessageSent message_sent = 430;
     // `agent.image` (ov-454), behind `agent_images`: a piece of one image.
     AgentImage agent_image = 450;
+    // `agent.file` (ov-1509), behind `agent_files`: a piece of one sent file,
+    // in the shape of an image's piece. `mime_type` is by its extension.
+    AgentImage agent_file = 660;
     // `member.list`, `member.set` and `member.remove` (ov-494), behind
     // `representatives`: everyone on the runner. `rep.start`: the rep.
     MemberList member_list = 460;
@@ -611,6 +619,7 @@ message Result {
   reserved 431 to 439;
   // The rest of prompt images' block (ov-454).
   reserved 451 to 459;
+  reserved 661 to 669;
   // The rest of people's block (ov-494).
   reserved 462 to 469;
   // The rest of the repository survey's block (ov-519).
@@ -682,6 +691,21 @@ message AgentImageRequest {
   // Which of the row's `images`, from 0.
   uint32 index = 3;
   uint64 offset = 4;
+}
+
+// `agent.file` (ov-1509): one file the agent sent with `SendUserFile`, from
+// its tool row's `sent.files`, a piece at a time like `agent.image`. It is
+// named by row and place only: a request carries no path, and the runner
+// reads none but what the transcript says was delivered.
+message AgentFileRequest {
+  bytes terminal_id = 1;
+  // The `Tool` row's id, `tool:<tool_use_id>`.
+  string row_id = 2;
+  // Which of the row's `sent.files`, from 0.
+  uint32 index = 3;
+  uint64 offset = 4;
+  // A subagent's own row, as `AgentRowsPage.agent_id`.
+  string agent_id = 5;
 }
 
 // A piece of one image, at most `MAX_AGENT_IMAGE_CHUNK` bytes.

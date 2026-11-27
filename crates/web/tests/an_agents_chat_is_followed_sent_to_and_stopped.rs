@@ -136,3 +136,23 @@ async fn a_childs_native_id_is_sent_on_every_rows_request() {
         assert_eq!(*seen.row_agents.lock().await, [id, id, ""]);
     }).await;
 }
+
+/// A file the agent sent (ov-1509) comes over the same connection, a piece at
+/// a time, by its row and place: the request names no path.
+#[tokio::test]
+async fn a_sent_files_bytes_come_whole_over_the_connection() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (runner, seen) = connect().await;
+            let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+            png.extend((0..1_200_000).map(|i| (i % 251) as u8));
+            seen.files.lock().await.insert(("tool:t1".into(), 1), png.clone());
+
+            let bytes = runner.agent_file(TERMINAL, "tool:t1", 1, None).await.expect("agent.file");
+            assert!(bytes == png, "the same bytes");
+            let asked = seen.requests.lock().await.iter().filter(|(_, m)| m == "agent.file").count();
+            assert_eq!(asked, 3, "in pieces");
+            assert!(runner.agent_file(TERMINAL, "tool:t1", 0, None).await.is_err(), "nothing was sent there");
+        })
+        .await;
+}

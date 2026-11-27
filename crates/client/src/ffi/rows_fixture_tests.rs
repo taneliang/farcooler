@@ -40,7 +40,7 @@ fn rows() -> Vec<Row> {
             notice: false,
             took: Some("1:00".into()),
         })),
-        row(1, 2, "prose:1", t, RowKind::Prose(Prose { text: "Looking at **main.rs**.".into(), conclusion: false, at_ms: Some(2_000) })),
+        row(1, 2, "prose:1", t, RowKind::Prose(Prose { text: "Looking at **main.rs**.".into(), conclusion: false, at_ms: Some(2_000), images: Vec::new() })),
         row(2, 3, "think:1", t, RowKind::Thinking(Thinking { started_ms: Some(2_500), ended_ms: Some(4_500) })),
         row(3, 4, "tool:toolu_1", t, RowKind::Tool(Tool {
             name: "Edit".into(),
@@ -53,6 +53,7 @@ fn rows() -> Vec<Row> {
             input: None,
             result: None,
             operation: None,
+            sent: None,
         })),
         row(4, 8, "sub:toolu_2", t, RowKind::Subagent(Subagent {
             tool_use_id: "toolu_2".into(),
@@ -111,7 +112,7 @@ fn written() -> Value {
         tool.status = ToolStatus::Running;
         tool.ended_ms = None;
     }
-    let fresh = row(10, 10, "prose:2", Some("turn:p1"), RowKind::Prose(Prose { text: "Done.".into(), conclusion: true, at_ms: Some(10_000) }));
+    let fresh = row(10, 10, "prose:2", Some("turn:p1"), RowKind::Prose(Prose { text: "Done.".into(), conclusion: true, at_ms: Some(10_000), images: Vec::new() }));
     let change = |kind: AgentRowChangeKind, row: Option<&Row>, id: &str, rev: u64| AgentRowChange {
         kind: kind as i32,
         id: id.into(),
@@ -215,6 +216,7 @@ fn polish_written() -> Value {
             input: Some("cron: 4 15 3 10 *\nrecurring: false".into()),
             result: Some("Scheduled f56f5668".into()),
             operation: None,
+            sent: None,
         })),
         row(2, 4, "tasks:turn:p2", t, RowKind::Tasks(Tasks {
             items: vec![

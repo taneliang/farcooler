@@ -34,6 +34,7 @@ pub mod detail;
 pub mod held;
 pub mod files;
 pub mod fold;
+mod fold_text;
 pub mod harness;
 mod follow;
 pub mod hooks;
@@ -43,6 +44,7 @@ pub mod prompt_images;
 pub mod record;
 mod record_types;
 pub mod rows;
+pub mod sent_files;
 mod tasks;
 pub mod words;
 
@@ -87,6 +89,8 @@ mod suggestion_tests;
 mod polish_tests;
 #[cfg(test)]
 mod prompt_images_tests;
+#[cfg(test)]
+mod sent_files_tests;
 #[cfg(test)]
 mod tray_tests;
 #[cfg(test)]

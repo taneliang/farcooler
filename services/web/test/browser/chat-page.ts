@@ -27,6 +27,13 @@ export class FakeRunner {
   composedImages: string[][] = []
   limits = { images: true, each: 1_000_000, total: 3_000_000 }
   interrupts = 0
+  /// The bytes of what the agent sent and what prompts carried, by
+  /// `row#index`; `fetched` says what was asked for, and the most at once.
+  bytes = new Map<string, Uint8Array>()
+  fetched: string[] = []
+  fetching = 0
+  mostAtOnce = 0
+  fetchDelay = 0
   failing: string | null = null
   failingWhat = ''
   private parked: (() => void)[] = []
@@ -67,6 +74,24 @@ export class FakeRunner {
     // The Mac would show it as the person's turn, at once.
     this.put(turn(`turn:${this.rev + 1}`, 0, 0, text, { activity: 'Busy' }) as any)
     return false
+  }
+
+  agentFile(_t: string, row: string, index: number, _agent?: string): Promise<Uint8Array> {
+    return this.give(`file ${row}#${index}`, `${row}#${index}`)
+  }
+
+  agentImage(_t: string, row: string, index: number): Promise<Uint8Array> {
+    return this.give(`image ${row}#${index}`, `${row}#${index}`)
+  }
+
+  private async give(asked: string, key: string): Promise<Uint8Array> {
+    this.fetched.push(asked)
+    this.mostAtOnce = Math.max(this.mostAtOnce, ++this.fetching)
+    await new Promise(done => setTimeout(done, this.fetchDelay))
+    this.fetching--
+    const bytes = this.bytes.get(key)
+    if (!bytes) throw new Error('refused')
+    return bytes.slice()
   }
 
   composeLimits(): string {

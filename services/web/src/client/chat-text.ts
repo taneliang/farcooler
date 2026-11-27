@@ -4,6 +4,28 @@ import MarkdownIt, { type Token } from 'markdown-it'
 // Only this DOM renderer sees the tokens. It never uses markdown-it's HTML renderer.
 const markdown = MarkdownIt({ html: true })
 
+// markdown-it drops a `file:` destination before it is a token. Let it be one,
+// so an image the agent names that way can be matched with what it sent. No
+// `file:` URL is ever put on the page: a link passes `safeLink`, and an image
+// is only ever drawn from the runner's bytes.
+const allowed = markdown.validateLink.bind(markdown)
+markdown.validateLink = url => /^file:/i.test(url) || allowed(url)
+
+/// The element for an image whose destination is `src`, or null to leave its
+/// alt text.
+export type ImageFor = (src: string, alt: string) => HTMLElement | null
+
+const unescaped = (text: string) => {
+  try {
+    return decodeURI(text)
+  } catch {
+    return text
+  }
+}
+
+/// Whether two destinations are one: markdown-it percent-encodes what it reads.
+export const sameDestination = (a: string, b: string) => unescaped(a) === unescaped(b)
+
 const tags = new Map<string, keyof HTMLElementTagNameMap>([
   ['paragraph_open', 'p'], ['blockquote_open', 'blockquote'],
   ['bullet_list_open', 'ul'], ['ordered_list_open', 'ol'], ['list_item_open', 'li'],
@@ -58,7 +80,7 @@ function openElement(token: Token): HTMLElement {
   return node
 }
 
-function appendTokens(parent: HTMLElement, tokens: readonly Token[]): void {
+function appendTokens(parent: HTMLElement, tokens: readonly Token[], imageFor?: ImageFor): void {
   const stack = [parent]
   for (const token of tokens) {
     if (token.hidden) continue // Tight lists omit the paragraph around each item.
@@ -78,7 +100,7 @@ function appendTokens(parent: HTMLElement, tokens: readonly Token[]): void {
     } else {
       switch (token.type) {
         case 'inline':
-          appendTokens(current, token.children ?? [])
+          appendTokens(current, token.children ?? [], imageFor)
           break
         case 'fence':
         case 'code_block': {
@@ -106,9 +128,16 @@ function appendTokens(parent: HTMLElement, tokens: readonly Token[]): void {
         }
         case 'html_inline':
         case 'text':
-        case 'image': // Show alt text without loading agent-supplied URLs.
           current.append(document.createTextNode(token.content))
           break
+        case 'image': {
+          // Never loads an agent-supplied URL: either the runner's own bytes
+          // for a file the agent sent, or the alt text.
+          const src = token.attrGet('src')
+          const drawn = typeof src === 'string' ? imageFor?.(src, token.content) : null
+          current.append(drawn ?? document.createTextNode(token.content))
+          break
+        }
         case 'softbreak': // Agents use single newlines to separate thoughts.
         case 'hardbreak':
           current.append(document.createElement('br'))
@@ -122,9 +151,9 @@ function appendTokens(parent: HTMLElement, tokens: readonly Token[]): void {
 }
 
 /// Render untrusted chat Markdown using fixed DOM elements and text nodes.
-export function prose(text: string): HTMLElement {
+export function prose(text: string, imageFor?: ImageFor): HTMLElement {
   const box = document.createElement('div')
   box.className = 'prose'
-  appendTokens(box, markdown.parse(text, {}))
+  appendTokens(box, markdown.parse(text, {}), imageFor)
   return box
 }

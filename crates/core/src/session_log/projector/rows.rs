@@ -210,6 +210,9 @@ pub struct Prose {
     /// narration on the way there.
     pub conclusion: bool,
     pub at_ms: Option<i64>,
+    /// The Markdown images in `text` that are files the agent sent (ov-1509).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<super::sent_files::ProseImage>,
 }
 
 /// That the agent thought, and for how long. Its words are not kept: claude
@@ -243,6 +246,10 @@ pub struct Tool {
     /// answer with no text (an image).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<String>,
+    /// The files a `SendUserFile` call delivered (ov-1509), each fetched
+    /// through `agent.file`. A view draws these rather than the call.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sent: Option<super::sent_files::Sent>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

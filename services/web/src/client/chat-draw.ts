@@ -6,6 +6,7 @@
 
 import {
   askTitle,
+  fileWords,
   gapLine,
   groupPurpose,
   groupStatus,
@@ -25,7 +26,8 @@ import {
   transcriptWords,
 } from './chat-copy'
 import { bodyOf, kindOf, type Row } from './chat-rows'
-import { prose } from './chat-text'
+import { type FileEntry, type Media } from './chat-files'
+import { prose, sameDestination } from './chat-text'
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = ''): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag)
@@ -57,6 +59,32 @@ function folded(content: HTMLElement, expanded: boolean, remember: (open: boolea
     if (!box.classList.contains('open')) button.hidden = content.scrollHeight <= content.clientHeight + 1
   })
   return box
+}
+
+/// A `SendUserFile` call that delivered: its caption, then each file, a
+/// picture inline and anything else as a row.
+function sentRow(row: Row, media: Media): HTMLElement {
+  const sent = bodyOf(row).sent
+  const box = el('div', 'chat-sent')
+  if (sent.caption) box.append(el('p', 'chat-sent-caption', String(sent.caption)))
+  for (const [index, file] of (sent.files as FileEntry[]).entries()) {
+    const ask = { from: 'file' as const, row: row.id, index }
+    box.append(file.image ? media.picture({ ...ask, mime: file.mime, name: file.name, sizeWords: file.size_words, auto: file.auto }) : media.file(ask, file))
+  }
+  return box
+}
+
+/// A reply, with the pictures its Markdown names that the runner says were
+/// sent.
+function proseRow(row: Row, media?: Media): HTMLElement {
+  const body = bodyOf(row)
+  const images = (body.images ?? []) as (FileEntry & { src: string; row: string; index: number })[]
+  if (!media || !images.length) return prose(String(body.text ?? ''))
+  return prose(String(body.text ?? ''), (src, alt) => {
+    const found = images.find(i => sameDestination(i.src, src))
+    if (!found) return null
+    return media.picture({ from: 'file', row: found.row, index: found.index, mime: found.mime, name: alt || found.name, sizeWords: found.size_words, auto: found.auto })
+  })
 }
 
 /// What a row remembers of how the person left it, across redraws.
@@ -157,7 +185,7 @@ export function toolsGroup(id: string, rows: Row[], memory: Memory): HTMLElement
   })
 }
 
-function turnRow(row: Row, memory: Memory): HTMLElement | null {
+function turnRow(row: Row, memory: Memory, media?: Media): HTMLElement | null {
   const turn = bodyOf(row)
   const harness = turn.harness
   if (harness) {
@@ -179,7 +207,12 @@ function turnRow(row: Row, memory: Memory): HTMLElement | null {
   wrap.append(bubble)
   const note = originNote(turn)
   if (note) wrap.append(el('p', 'bubble-note', note))
-  if ((turn.images ?? []).length) wrap.append(el('p', 'bubble-note', turn.images.length === 1 ? '1 image attached' : `${turn.images.length} images attached`))
+  const images: { mime: string }[] = turn.images ?? []
+  if (images.length && media) {
+    const strip = el('div', 'bubble-images')
+    for (const [index, image] of images.entries()) strip.append(media.picture({ from: 'image', row: row.id, index, mime: image.mime, name: fileWords().attached(index + 1), sizeWords: '', auto: true }))
+    wrap.append(strip)
+  }
   return wrap
 }
 
@@ -250,12 +283,12 @@ function tasksRow(row: Row): HTMLElement {
 
 /// One row as an element, or null for a kind that draws nothing here (the
 /// hint is the composer's; a kind this build doesn't know is skipped).
-export function drawRow(row: Row, memory: Memory, openAgent?: (id: string) => void): HTMLElement | null {
+export function drawRow(row: Row, memory: Memory, openAgent?: (id: string) => void, media?: Media): HTMLElement | null {
   switch (kindOf(row)) {
     case 'Turn':
-      return turnRow(row, memory)
+      return turnRow(row, memory, media)
     case 'Prose':
-      return prose(String(bodyOf(row).text ?? ''))
+      return proseRow(row, media)
     case 'Thinking': {
       const t = bodyOf(row)
       const done = t.ended_ms !== null && t.ended_ms !== undefined
@@ -263,7 +296,7 @@ export function drawRow(row: Row, memory: Memory, openAgent?: (id: string) => vo
       return el('p', `thinking${done ? '' : ' live'}`, done ? (seconds ? `Thought for ${seconds}s` : 'Thought') : 'Thinking…')
     }
     case 'Tool':
-      return toolRow(row, memory)
+      return media && bodyOf(row).sent ? sentRow(row, media) : toolRow(row, memory)
     case 'Subagent':
       return subagentRow(row, openAgent)
     case 'Ask':

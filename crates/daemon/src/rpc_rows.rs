@@ -15,7 +15,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use farcooler_core::session_log::projector::{HINT_ID, RowKind, prompt_images};
+use farcooler_core::session_log::projector::{HINT_ID, RowKind, prompt_images, sent_files};
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1::{self as pb, Request, request, result};
 use uuid::Uuid;
@@ -119,6 +119,41 @@ pub(crate) async fn image(svc: &Service, req: Request) -> Result<result::Value> 
         total_size: bytes.len() as u64,
         offset: start as u64,
         chunk: bytes::Bytes::copy_from_slice(&bytes[start..end]),
+    }))
+}
+
+/// `agent.file` (ov-1509): a piece of one file the agent sent, from its
+/// `SendUserFile` row. The request names a row and a place on it, never a
+/// path: the path is the one the transcript says was delivered, and it is
+/// read only while it is still that file (`sent_files::read`). Refused as not
+/// found for anything else.
+pub(crate) async fn file(svc: &Service, req: Request) -> Result<result::Value> {
+    let Some(request::Payload::AgentFile(p)) = req.payload else { return Err(DomainError::InvalidArgument { what: "payload" }) };
+    let terminal = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
+    let open = ensure_open(svc, terminal).await?;
+    let index = p.index as usize;
+    let sent = match p.agent_id.is_empty() {
+        true => session_projectors::global().with_session(terminal, |s| s.projection().sent_file(&p.row_id, index).cloned()).flatten(),
+        false => match subagent_path(open, terminal, &p.agent_id).await? {
+            Some((path, parent)) => {
+                let (agent, row) = (p.agent_id.clone(), p.row_id.clone());
+                tokio::task::spawn_blocking(move || subagent_rows::global().sent_file(terminal, &agent, path, parent, &row, index)).await.ok().flatten()
+            }
+            None => None,
+        },
+    };
+    let sent = sent.ok_or(DomainError::NotFound)?;
+    let (offset, size, mime) = (p.offset, sent.size, sent.mime);
+    let chunk = tokio::task::spawn_blocking(move || sent_files::read(&sent, offset, farcooler_protocol::MAX_AGENT_IMAGE_CHUNK))
+        .await
+        .ok()
+        .and_then(|read| read.ok())
+        .ok_or(DomainError::NotFound)?;
+    Ok(result::Value::AgentFile(pb::AgentImage {
+        mime_type: mime.to_string(),
+        total_size: size,
+        offset: offset.min(size),
+        chunk: bytes::Bytes::from(chunk),
     }))
 }
 

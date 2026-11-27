@@ -469,7 +469,7 @@ fn scope_of(method: Method) -> Scope {
         // Bring Here (ov-369): clears what a person typed in claude's box.
         | Method::TerminalBringDraft
         | Method::TerminalAgentAnswer
-        | Method::WorktreeFileSearch | Method::AgentRows | Method::AgentRowsFollow | Method::AgentImage => Scope::Control,
+        | Method::WorktreeFileSearch | Method::AgentRows | Method::AgentRowsFollow | Method::AgentImage | Method::AgentFile => Scope::Control,
         // Review is `control`, and for exactly the reason the screen above is.
         //
         // A diff IS source. `read` is the scope handed to something that should
@@ -2039,6 +2039,7 @@ impl Rpc {
             "crash.report" => crate::crash_reports::handle(svc, &self.watcher, req), // ov-797
             "agent.rows" | "agent.rows_follow" | "settings.set_projector" => crate::rpc_rows::dispatch(svc, req).await, // ov-366, ov-372
             "agent.image" => crate::rpc_rows::image(svc, req).await, // ov-454
+            "agent.file" => crate::rpc_rows::file(svc, req).await, // ov-1509
 
             // ---- workspaces ----
             //

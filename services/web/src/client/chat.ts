@@ -14,6 +14,7 @@ import type { WebRunner } from 'fc-web'
 import { admit, filesOf, IMAGE_TYPES, IMAGE_WORDS, parseLimits, type Picked, readImages } from './attachments'
 import { chatTrouble, isWorking, transcriptWords } from './chat-copy'
 import { Outbox } from './chat-send'
+import { type Ask, Media } from './chat-files'
 import { closesWithLine, drawEnd, drawRow, type Memory, toolsGroup } from './chat-draw'
 import { bodyOf, type Delta, itemsOf, nodesOf, type Phase, RowFollower, RowLedger, type RowSource, type ViewNode } from './chat-rows'
 import type { Pane } from './panes'
@@ -49,6 +50,12 @@ export class ChatView implements Pane<WebRunner> {
   /// What is drawn, by node id: the element and what it was drawn from.
   private readonly drawn = new Map<string, { el: HTMLElement | null; sig: string }>()
   private child: { dialog: HTMLDialogElement; view: ChatView } | null = null
+  /// The files and pictures this conversation shows (chat-files.ts).
+  private readonly media = new Media(
+    ask => this.bytes(ask),
+    () => this.scroller,
+    () => this.placeScroll(),
+  )
 
   private readonly scroller = el('div', 'chat-scroll')
   private readonly older = el('button', 'quiet chat-older', 'Load Earlier Messages')
@@ -230,6 +237,7 @@ export class ChatView implements Pane<WebRunner> {
     if (this.runner === runner && this.terminal === terminal && this.follower?.following) return
     this.child?.dialog.close()
     this.follower?.stop()
+    if (this.terminal !== terminal) this.media.clear()
     this.runner = runner
     this.terminal = terminal
     if (!this.agentId) this.outbox ??= new Outbox(() => this.runner, terminal, this.runnerLabel)
@@ -264,6 +272,7 @@ export class ChatView implements Pane<WebRunner> {
 
   dispose(): void {
     this.detach()
+    this.media.clear()
     this.host.remove()
   }
 
@@ -339,7 +348,13 @@ export class ChatView implements Pane<WebRunner> {
       )
     }
     const row = rows.get(node.item.id)
-    return row ? drawRow(row, this.memory, this.agentId ? undefined : id => this.openChild(id)) : null
+    return row ? drawRow(row, this.memory, this.agentId ? undefined : id => this.openChild(id), this.media) : null
+  }
+
+  /// A sent file's or a prompt image's bytes, over the connection as it is now.
+  private async bytes(ask: Ask): Promise<Uint8Array> {
+    if (!this.runner) throw new Error('closed')
+    return ask.from === 'image' ? this.runner.agentImage(this.terminal, ask.row, ask.index) : this.runner.agentFile(this.terminal, ask.row, ask.index, this.agentId)
   }
 
   /// A child gets its own ledger and follower. Parent messages and Stop

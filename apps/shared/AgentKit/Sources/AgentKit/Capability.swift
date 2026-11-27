@@ -60,6 +60,7 @@ public enum Capability: String, CaseIterable, Sendable {
     case bringDraft = "bring_draft"
     case webPane = "web_pane"
     case agentImages = "agent_images"
+    case agentFiles = "agent_files"
     case composeFiles = "compose_files"
     case agentMessages = "agent_messages"
     case subagentRows = "subagent_rows"

@@ -108,6 +108,9 @@ declare module 'fc-web' {
     /// revision, held by the runner while nothing has.
     agentRows(terminal: string, before: number | undefined, limit: number, agent?: string): Promise<string>
     agentRowsFollow(terminal: string, epoch: number, afterRev: number, waitMs: number, agent?: string): Promise<string>
+    /// A file an agent sent (`agent.file`), and a prompt's image (`agent.image`).
+    agentFile(terminal: string, row: string, index: number, agent?: string): Promise<Uint8Array>
+    agentImage(terminal: string, row: string, index: number): Promise<Uint8Array>
     /// Send a message as the person's; true when the agent was busy and it waits.
     compose(terminal: string, text: string): Promise<boolean>
     /// `compose`, with images (`{mime, data}`) typed into the agent's box

@@ -63,6 +63,7 @@ enum class Capability(val wire: String) {
     BRING_DRAFT("bring_draft"),
     WEB_PANE("web_pane"),
     AGENT_IMAGES("agent_images"),
+    AGENT_FILES("agent_files"),
     COMPOSE_FILES("compose_files"),
     AGENT_MESSAGES("agent_messages"),
     SUBAGENT_ROWS("subagent_rows"),
