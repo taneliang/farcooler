@@ -7,7 +7,12 @@
 #   <out>/tailcat.wasm        crates/tailcat/go built for GOOS=js
 #   <out>/wasm_exec.js        Go's runtime support, from the same toolchain
 #
-#   crates/web/build.sh --channel canary|stable [--out DIR]
+#   crates/web/build.sh --channel canary|stable [--out DIR] [--module-only]
+#
+# --module-only stops after wasm-bindgen: farcooler_web.wasm and .js, not
+# optimized and without Tailcat. That is what the browser checks load
+# (crates/web/test-module.sh), and it is never deployed, so a tree with
+# uncommitted changes may build it.
 #
 # Then `WEB_WASM_DIR=<out> services/web/build.sh --channel <same>`, which
 # stores each .wasm as brotli only and bundles both .js files into the page.
@@ -29,10 +34,12 @@ here=$PWD
 
 channel=""
 out="$here/dist"
+module_only=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --channel) channel=${2:-}; shift 2 ;;
     --out) out=${2:-}; shift 2 ;;
+    --module-only) module_only=1; shift ;;
     *) echo "crates/web/build.sh: unknown argument $1" >&2; exit 2 ;;
   esac
 done
@@ -47,7 +54,7 @@ esac
 # phone accepts and run a daemon no runner has. Refused here, not discovered
 # on a phone.
 stamped=$(FARCOOLER_CHANNEL=$channel ../../scripts/version.sh channel)
-if [ "$stamped" != "$channel" ]; then
+if [ -z "$module_only" ] && [ "$stamped" != "$channel" ]; then
   echo "crates/web/build.sh: this tree stamps the $stamped channel, not $channel (uncommitted changes build as local); commit them first" >&2
   exit 1
 fi
@@ -80,6 +87,10 @@ rm -f "$out"/farcooler_web* "$out"/tailcat.wasm "$out"/wasm_exec.js
 FARCOOLER_CHANNEL=$channel "$CARGO" build --locked --release --target wasm32-unknown-unknown
 "$WASM_BINDGEN" --target web --no-typescript --out-dir "$out" --out-name farcooler_web \
   "${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/release/farcooler_web.wasm"
+if [ -n "$module_only" ]; then
+  mv "$out/farcooler_web_bg.wasm" "$out/farcooler_web.wasm"
+  exit 0
+fi
 # The features rustc's wasm32 target emits by default, named so wasm-opt
 # neither refuses the module nor introduces anything a browser lacks.
 "$WASM_OPT" -Oz \

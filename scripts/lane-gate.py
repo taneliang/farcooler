@@ -395,7 +395,24 @@ def steps_for(job, workflows, ctx):
         steps[before_doc:before_doc] = [produce, local]
     if job == "web":
         web_asset_skips(steps)
+        web_test_modules(steps)
     return steps
+
+
+def web_test_modules(steps):
+    """Build the wasm module the browser checks load, where CI's builder is skipped here.
+
+    CI hands those checks its release bundle through WEB_WASM_DIR, and that
+    build needs the Linux toolchain. Without a stand-in the checks would run
+    against a directory nothing wrote (ov-1499)."""
+    readers = {}
+    for i, step in enumerate(steps):
+        if not step.skip and "WEB_WASM_DIR" in step.env:
+            readers.setdefault(step.env["WEB_WASM_DIR"], i)
+    for out, i in sorted(readers.items(), key=lambda reader: -reader[1]):
+        steps.insert(i, Step("web", "web module for the browser checks (local)",
+                             '../../crates/web/test-module.sh "$MODULE_DIR"\n',
+                             "services/web", {"MODULE_DIR": out}))
 
 
 # ---------------------------------------------------------------- which jobs
@@ -1582,6 +1599,21 @@ def _self_test():
     expect("both Android UI shards are planned", all(any(f"-Pfarcooler.captureShard={shard}" in s.run for s in plans["android"]) for shard in ("first", "rest")), True)
     expect("Android's JDK 21 reaches the capture step", any(s.env.get("CAPTURE_JDK") == ctx["steps.jdk21.outputs.path"] for s in plans["android"]), True)
     expect("the web job leaves the Linux downloads to CI", any(s.skip and "gh-download.sh" in s.run for s in plans["web"]), True)
+
+    # A web check that runs here and reads a wasm directory needs a step here,
+    # before it, that writes that directory: CI's own builder is skipped (ov-1499).
+    written, readers = set(), []
+    for step in plans["web"]:
+        if step.skip:
+            continue
+        if "test-module.sh" in step.run:
+            written.add(step.env.get("MODULE_DIR"))
+        elif "WEB_WASM_DIR" in step.env:
+            readers.append(step.label())
+            expect(f"{step.label()} has its wasm module built first", step.env["WEB_WASM_DIR"] in written, True)
+    expect("the browser checks that read the wasm module still run here",
+           [any(name in label for label in readers) for name in ("chat-check", "chat-files-check", "work_view_bin")],
+           [True, True, True])
 
     # The real CI producers and consumers must stay paired by channel. A skipped
     # producer cannot supply dist, even if a stale dist happens to exist locally.
