@@ -379,22 +379,35 @@ async fn build_cleanup_crash_after_deletion_does_not_replay_against_rebuilt_outp
 }
 
 
-// Cleanup depends on a new candidate, so a single Git command can supply it.
 async fn cleanup_lander(check_passes: bool) -> (tempfile::TempDir, Runtime) {
     super::coding_verbs_tests::lander_with("pass", |config| {
         let CodingHarness::Command(build) = &mut config.harness else { unreachable!("landing fixture uses a command harness") };
-        let git = crate::git_launch::git_launch().unwrap();
-        build.argv = [git.program.to_str().unwrap(), "-c", "core.hooksPath=/dev/null",
-            "-c", "commit.gpgsign=false", "commit", "--allow-empty", "--quiet", "-m", "cleanup candidate"]
-            .into_iter().map(str::to_owned).collect();
+        // The fixture supplies the build result. Fail if a sweep launches this command by mistake.
+        build.argv = vec!["/usr/bin/false".into()];
         let check = if check_passes { "/usr/bin/true" } else { "/usr/bin/false" };
         config.checks[0].argv = vec![check.into()];
     }).await
 }
 
+// Make a real candidate in fixture setup with Git plumbing that leaves the index alone.
+// The tests exercise the cleanup triggered by settling this build.
+async fn finish_cleanup_build(runtime: &Runtime, item: &str) {
+    let binding = super::coding_tests::admitted(runtime).await;
+    let effect = &binding.effect;
+    assert_eq!(effect.item, item);
+    assert_eq!(effect.kind, EffectKind::Execute(StageKind::Build));
+    let tree = runtime.exec.tree(&binding);
+    let candidate = adapters::git(&tree, &["-c", "user.name=Test", "-c", "user.email=test@localhost",
+        "-c", "commit.gpgsign=false", "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "cleanup candidate"]).await.unwrap();
+    adapters::git(&tree, &["update-ref", "HEAD", &candidate]).await.unwrap();
+    let evidence = Evidence { candidate, manifest: "fixture-manifest".into(), receipt: "fixture-receipt".into(),
+        policy_pin: effect.policy_pin.clone() };
+    assert!(runtime.observe("w", effect, Outcome::Passed(evidence), false, 10).unwrap());
+}
+
 // A published group may provision and build its own candidate before a person's review.
 pub(super) async fn building_group(folders: Option<Vec<String>>) -> (tempfile::TempDir, Runtime, String, PathBuf) {
-    use super::coding_verbs_tests::{at_join, batched_push, command, until};
+    use super::coding_verbs_tests::{batched_push, command, phase_of, until};
     let (dir, mut runtime) = cleanup_lander(true).await;
     std::fs::write(runtime.repository().join(".git/info/exclude"), "target/\ncustom-output/\n").unwrap();
     let mut definition = batched_push(&runtime, "any", 5000);
@@ -404,7 +417,10 @@ pub(super) async fn building_group(folders: Option<Vec<String>>) -> (tempfile::T
         "coding-review/v1", "person:owner");
     definition.groups.get_mut("landing").unwrap().steps = vec![
         definition.stages[0].clone(), definition.stages[1].clone(), review];
-    at_join(&mut runtime, "one", &definition).await;
+    super::concurrency_tests::enqueue_item(&mut runtime, "w", "one", definition);
+    runtime.pump(2).await.unwrap();
+    finish_cleanup_build(&runtime, "one").await;
+    until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::WaitingJoin)).await;
     assert!(command(&runtime, Command::Queue { item: "one".into() }).result.is_ok());
     let state = until(&mut runtime, |s| s.items.values().any(|i| i.group_of.is_some()
         && i.definition.stages[i.stage].kind == StageKind::Build)).await;
@@ -415,13 +431,18 @@ pub(super) async fn building_group(folders: Option<Vec<String>>) -> (tempfile::T
     (dir, runtime, group, tree)
 }
 
+pub(super) async fn review_built_group(runtime: &mut Runtime, group: &str) {
+    finish_cleanup_build(runtime, group).await;
+    runtime.pump(11).await.unwrap();
+    assert_eq!(super::coding_verbs_tests::phase_of(&runtime.state("w").unwrap().unwrap(), group), Some(Phase::WaitingReview));
+}
+
 #[tokio::test]
 async fn build_cleanup_group_build_to_review_releases_output_and_records_result_once() {
-    use super::coding_verbs_tests::until;
     let (_dir, mut runtime, group, tree) = building_group(None).await;
     runtime.exec.release_builds(&["w".into()]).await.unwrap();
     assert!(tree.join("target/output").exists(), "a group still building keeps its output");
-    until(&mut runtime, |s| s.items[&group].phase == Phase::WaitingReview).await;
+    review_built_group(&mut runtime, &group).await;
     assert!(!tree.join("target").exists(), "a group waiting for review releases its output");
     let records: Vec<_> = runtime.store.workflow_cleanups("w").unwrap().into_iter()
         .filter(|r| r.effect.item == group && r.effect.directory.is_none()).collect();
@@ -436,11 +457,10 @@ async fn build_cleanup_group_build_to_review_releases_output_and_records_result_
 
 #[tokio::test]
 async fn build_cleanup_group_inherits_published_folder_list() {
-    use super::coding_verbs_tests::until;
     let (_dir, mut runtime, group, tree) = building_group(Some(vec!["custom-output".into()])).await;
     std::fs::create_dir(tree.join("custom-output")).unwrap();
     std::fs::write(tree.join("custom-output/binary"), b"custom").unwrap();
-    until(&mut runtime, |s| s.items[&group].phase == Phase::WaitingReview).await;
+    review_built_group(&mut runtime, &group).await;
     assert!(tree.join("target/output").exists());
     assert!(!tree.join("custom-output").exists());
     let record = runtime.store.workflow_cleanups("w").unwrap().into_iter()
@@ -550,8 +570,12 @@ async fn gradle_reports_cleanup(phase: Phase) {
     std::fs::write(runtime.repository().join(".git/info/exclude"), "target/\napps/\nreports/\n").unwrap();
     let definition = batched_push(&runtime, "any", 5000);
     enqueue(&mut runtime, "w", "one", definition);
-    until(&mut runtime, |s| s.items["one"].definition.stages[s.items["one"].stage].kind == StageKind::Check).await;
+    runtime.pump(2).await.unwrap();
     let tree = runtime.item_tree("w", "one");
+    finish_cleanup_build(&runtime, "one").await;
+    let state = runtime.state("w").unwrap().unwrap();
+    let item = &state.items["one"];
+    assert_eq!(item.definition.stages[item.stage].kind, StageKind::Check);
     for folder in ["target", "apps/android/build", "apps/android/app/build"] {
         std::fs::create_dir_all(tree.join(folder)).unwrap();
         std::fs::write(tree.join(folder).join("binary"), b"output").unwrap();
@@ -755,9 +779,9 @@ async fn build_cleanup_holds_effects_on_the_same_tree_until_it_finishes() {
 
 #[tokio::test]
 async fn build_cleanup_startup_reclaims_finished_group_output_and_preserves_local_work() {
-    use super::coding_verbs_tests::{command, until};
+    use super::coding_verbs_tests::command;
     let (_dir, mut runtime, group, tree) = building_group(None).await;
-    until(&mut runtime, |s| s.items[&group].phase == Phase::WaitingReview).await;
+    review_built_group(&mut runtime, &group).await;
     let tracked = tree.join("source.txt");
     std::fs::write(&tracked, b"original").unwrap();
     adapters::git(&tree, &["add", "--", "source.txt"]).await.unwrap();
@@ -1137,7 +1161,7 @@ async fn workflow_get_samples_private_trees_and_waiting_build_folders() {
 #[tokio::test]
 async fn build_cleanup_partial_folder_failure_reports_unknown_bytes() {
     let (_dir, mut runtime, group, tree) = building_group(Some(vec!["custom-output".into(), "target".into()])).await;
-    super::coding_verbs_tests::until(&mut runtime, |s| s.items[&group].phase == Phase::WaitingReview).await;
+    review_built_group(&mut runtime, &group).await;
     let protected = tree.join("target/protected");
     std::fs::create_dir_all(&protected).unwrap();
     std::fs::write(protected.join("output"), b"remaining output").unwrap();

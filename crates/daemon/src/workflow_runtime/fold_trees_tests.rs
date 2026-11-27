@@ -182,7 +182,7 @@ async fn a_split_group_keeps_its_tree_while_its_halves_rebuild() {
 #[tokio::test]
 async fn a_cancelled_group_keeps_its_output_until_the_running_effect_settles() {
     let (_dir, mut runtime, group, tree) = super::build_cleanup_tests::building_group(None).await;
-    until(&mut runtime, |s| s.items[&group].phase == Phase::WaitingReview).await;
+    super::build_cleanup_tests::review_built_group(&mut runtime, &group).await;
     let archive = super::build_cleanup_tests::seed_nextest_archive(&tree);
     let bytes = archive.metadata().unwrap().len();
     command(&runtime, Command::Cancel { item: group.clone(), reason: None });
@@ -199,7 +199,7 @@ async fn a_cancelled_group_keeps_its_output_until_the_running_effect_settles() {
 
 async fn interrupted_group_recovery(missing_git_link: bool, missing_result: bool) {
     let (_dir, mut runtime, group, tree) = super::build_cleanup_tests::building_group(None).await;
-    until(&mut runtime, |s| s.items[&group].phase == Phase::WaitingReview).await;
+    super::build_cleanup_tests::review_built_group(&mut runtime, &group).await;
     let archive = super::build_cleanup_tests::seed_nextest_archive(&tree);
     std::fs::write(tree.join("notes"), b"keep").unwrap();
     command(&runtime, Command::Cancel { item: group.clone(), reason: None });

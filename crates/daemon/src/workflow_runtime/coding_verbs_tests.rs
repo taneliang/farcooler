@@ -164,7 +164,11 @@ pub(super) async fn until(runtime: &mut Runtime, what: impl Fn(&State) -> bool) 
     }
     let state = runtime.state("w").unwrap().unwrap();
     let items: Vec<_> = state.items.iter().map(|(id, i)| format!("{id}: {:?} at {} attempt {}: {:?}", i.phase, i.definition.stages[i.stage.min(i.definition.stages.len() - 1)].id, i.attempt, i.failure)).collect();
-    let effects: Vec<_> = runtime.store.workflow_outbox("w").unwrap().iter().map(|s| format!("{:?} {} {}", s.effect.kind, s.dispatch_state, s.active)).collect();
+    let effects: Vec<_> = runtime.store.workflow_outbox("w").unwrap().iter().map(|s| {
+        let journal = runtime.exec.bytes(&runtime.exec.journal_path(&s.effect)).ok();
+        let outcome = journal.and_then(|raw| serde_json::from_slice::<Journal>(&raw).ok()).map(|j| j.outcome);
+        format!("{:?} {} {} {outcome:?}", s.effect.kind, s.dispatch_state, s.active)
+    }).collect();
     for id in state.items.keys() {
         eprintln!("Process logs for {id}: {:?}", runtime.exec.item_process_logs("w", id));
     }
@@ -173,8 +177,7 @@ pub(super) async fn until(runtime: &mut Runtime, what: impl Fn(&State) -> bool) 
         .map(|p| String::from_utf8_lossy(&std::fs::read(p).unwrap()).chars().filter(|c| *c != '\n').collect::<String>().replace(|c: char| c == '{' && false, "")).collect();
     let fetch: Vec<_> = std::fs::read_dir(runtime.root.join("receipts")).unwrap().map(|e| e.unwrap().path())
         .filter(|p| p.to_string_lossy().ends_with("poll-0.fetch.output")).map(|p| std::fs::read_to_string(p).unwrap()).collect();
-    eprintln!("FETCH {fetch:?}");
-    panic!("runtime failed to settle:\n{}\n{}\n{}", items.join("\n"), effects.join("\n"), facts.iter().map(|f| f.split("\"detail\"").last().unwrap().to_string()).collect::<Vec<_>>().join("\n"));
+    panic!("runtime failed to settle:\n{}\n{}\n{}\nFETCH {fetch:?}", items.join("\n"), effects.join("\n"), facts.iter().map(|f| f.split("\"detail\"").last().unwrap().to_string()).collect::<Vec<_>>().join("\n"));
 }
 /// Enqueue a ticket and run it to its join step.
 pub(super) async fn at_join(runtime: &mut Runtime, item: &str, definition: &Definition) {
