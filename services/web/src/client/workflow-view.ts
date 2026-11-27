@@ -1,6 +1,9 @@
 import { readLocal, writeLocal } from './workspace-layout'
 import { WorkflowBoard, type WorkflowPort, type WorkflowRun, type WorkflowView } from './workflow'
 
+/// The page's title, and the name of the tool that opens it.
+export const RUNS_TITLE = 'Workflow Runs'
+
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, text = '') => {
   const node = document.createElement(tag); node.textContent = text; return node
 }
@@ -105,7 +108,7 @@ export function openWorkflow(dialog: HTMLDialogElement, runner: string, workspac
   const scrollKey = `${scope}:scroll`
   const root = el('div'); root.className = 'plan-sheet-body'
   const bar = el('div'); bar.className = 'plan-sheet-bar'
-  bar.append(el('h2', 'Workflow Runs'), button('Close', closePage))
+  bar.append(el('h2', RUNS_TITLE), button('Close', closePage))
   dialog.replaceChildren(bar, root)
   let position = Number(readLocal(scrollKey))
   const board = new WorkflowBoard(workspace, () => currentPort(runner), view => {

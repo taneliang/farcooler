@@ -6,6 +6,9 @@
 /// A plain external store, read with `useSyncExternalStore`: every `set` makes
 /// a new immutable snapshot and tells each subscriber once.
 
+import { countLabel } from '../needs'
+import { RUNS_TITLE } from '../workflow-view'
+
 export type ShellScreen = 'status' | 'enroll' | 'compare' | 'join' | 'work'
 export type ShellTab = 'terminals' | 'needs' | 'board' | 'plan'
 export type ShellPage = ShellTab | 'workflow' | 'ticket'
@@ -71,8 +74,8 @@ export const INITIAL: ShellState = {
   repository: '',
   busy: false,
   page: 'terminals',
-  nav: { terminals: idle('Terminals'), needs: idle('Needs You'), board: { label: 'Board', disabled: true }, plan: idle('Plan') },
-  tools: { orchestrator: idle('Orchestrator'), workflow: idle('Workflow Runs'), commands: idle('Commands') },
+  nav: { terminals: idle('Terminals'), needs: idle(countLabel(0)), board: { label: 'Board', disabled: true }, plan: idle('Plan') },
+  tools: { orchestrator: idle('Orchestrator'), workflow: idle(RUNS_TITLE), commands: idle('Commands') },
   startWork: null,
   terminalLost: false,
   linkLost: false,
