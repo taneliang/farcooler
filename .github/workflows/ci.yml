@@ -1954,11 +1954,17 @@ jobs:
       - run: npx wrangler deploy --dry-run --env canary --outdir /tmp/web-build-canary
       - run: cargo build --locked --manifest-path ../../crates/web/Cargo.toml --example fake_daemon
       - run: node test/browser/chat-check.mjs
+        env:
+          WEB_WASM_DIR: ${{ runner.temp }}/wasm-canary
       - run: node test/browser/chat-files-check.mjs
+        env:
+          WEB_WASM_DIR: ${{ runner.temp }}/wasm-canary
       - run: node test/browser/plan-render-check.mjs
       - run: node test/browser/shell-check.mjs
       - name: Check work and board actions in Chrome
         shell: bash
+        env:
+          WEB_WASM_DIR: ${{ runner.temp }}/wasm-canary
         run: |
           cargo build --locked --manifest-path ../../Cargo.toml -p farcooler-client --example work_view_bin
           WORK_VIEW_BIN="${CARGO_TARGET_DIR:-../../target}/debug/examples/work_view_bin" \
