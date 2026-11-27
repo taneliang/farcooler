@@ -67,6 +67,9 @@ hook('sessionStart' if agent == 'cursor' else 'SessionStart')
 prompt = pathlib.Path(os.environ['TEST_LAUNCHED_PROMPT_FILE']).read_text() if 'TEST_LAUNCHED_PROMPT_FILE' in os.environ else os.environ['TEST_LAUNCHED_PROMPT']
 hook('beforeSubmitPrompt' if agent == 'cursor' else 'UserPromptSubmit', prompt=prompt)
 pathlib.Path(os.environ['STARTED']).write_text(str(os.getpid()))
+if mode == 'commit-then-interrupt' and pathlib.Path('result.txt').exists():
+    hook('Stop', last_assistant_message='The work is already committed.')
+    time.sleep(30)
 if mode == 'hook-disconnect':
     ready = pathlib.Path(os.environ['STARTED']).with_name('direction-ready')
     while not ready.exists():
@@ -130,6 +133,9 @@ else:
     pathlib.Path('result.txt').write_text('candidate native PTY')
     subprocess.check_call(['/usr/bin/git','add','--','result.txt'])
     subprocess.check_call(['/usr/bin/git','-c','commit.gpgsign=false','commit','--quiet','-m','native build'])
+    if mode == 'commit-then-interrupt':
+        pathlib.Path(os.environ['STARTED']).with_name('committed').touch()
+        time.sleep(30)
     print('native stdout evidence', flush=True)
     print('native stderr evidence', file=sys.stderr, flush=True)
     # A terminal UI can erase both the screen and scrollback before its final hook.
@@ -157,7 +163,7 @@ else:
     process.argv.clear();
     process.timeout_ms = match mode {
         "foreign-only" => 300,
-        "hook-disconnect" => 15_000,
+        "hook-disconnect" | "commit-then-interrupt" => 15_000,
         _ => 5000,
     };
     if mode == "active-steering" && matches!(agent, "claude" | "codex") {
@@ -497,17 +503,38 @@ async fn ov_1217_dirty_build_without_a_commit_reports_reason_files_and_last_mess
     assert_eq!(std::fs::read_to_string(runtime.item_tree("w", "one").join("result.txt")).unwrap(), "work kept without a commit");
 }
 #[tokio::test]
-async fn ov_1435_retry_keeps_committed_work_from_interrupted_attempt() {
-    let (_dir, mut runtime, _fake) = native_agent("no-changes", "codex").await;
+async fn ov_1492_retry_keeps_committed_work_from_interrupted_attempt() {
+    use super::super::{Command, Grant};
+
+    let (dir, mut runtime, _fake) = native_agent("commit-then-interrupt", "codex").await;
     let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
     runtime.pump(2).await.unwrap();
     let binding = admitted(&runtime).await;
     let tree = runtime.tree(&binding);
-    adapters::git(&tree, &["-c", "user.name=Test", "-c", "user.email=test@localhost", "-c", "commit.gpgsign=false",
-        "commit", "--allow-empty", "-m", "earlier work"]).await.unwrap();
-    let (_cancel, cancelled) = tokio::sync::watch::channel(false);
-    let outcome = runtime.execute_coding("w", &binding, cancelled).await.unwrap();
-    assert!(matches!(outcome, Outcome::Passed(_)), "{outcome:?}");
+    let (cancel, cancelled) = tokio::sync::watch::channel(false);
+    let interrupt = async {
+        let committed = super::super::wait_until(tokio::time::Instant::now() + Duration::from_secs(10),
+            Duration::from_millis(10), || dir.path().join("committed").exists()).await;
+        cancel.send_replace(true);
+        committed
+    };
+    let (outcome, committed_before_interrupt) = tokio::join!(runtime.execute_coding("w", &binding, cancelled), interrupt);
+    let outcome = outcome.unwrap();
+    assert!(committed_before_interrupt, "the first build did not commit: {outcome:?}");
+    assert_eq!(outcome, Outcome::SafeFailure);
+    let committed = adapters::git(&tree, &["rev-parse", "HEAD"]).await.unwrap();
+    assert_ne!(committed, binding.base);
+    assert!(runtime.observe("w", &binding.effect, outcome, false, 11).unwrap());
+    assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::Failed);
+
+    let retry = runtime.internal("w", Command::Retry { item: "one".into() }, Grant::Controller, 12).unwrap();
+    assert!(retry.result.is_ok(), "{retry:?}");
+    runtime.pump(13).await.unwrap();
+    let state = runtime.state("w").unwrap().unwrap();
+    let item = &state.items["one"];
+    assert_eq!(item.phase, Phase::Running, "{item:?}");
+    assert_eq!(item.stage, 2);
+    assert_eq!(item.candidate.as_deref(), Some(committed.as_str()));
 }
 #[tokio::test]
 async fn workflow_native_builds_overlap_each_on_its_own_hook_socket() {
