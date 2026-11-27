@@ -42,3 +42,17 @@ On the same macOS machine, the full page walk through a scratch sshd, the Chromi
 The only textual conflict was in `.github/workflows/ci.yml`, where ov-1509 added `chat-files-check.mjs` after the chat check. Both steps are kept. The new check also bundles `chat-page.ts`, which loads the WebAssembly bridge on this branch, so it failed to bundle after the rebase (`Could not resolve "fc-web"`). It now loads the bridge the same way `chat-check.mjs` does, and its CI step gets `WEB_WASM_DIR`.
 
 After the rebase, these passed on macOS: both TypeScript checks, the 254 web unit tests, the 50 Needs You tests and the workflow fixture test; the chat, sent-files, plan, work and board Chromium suites; the canary bundle with its size gate, the CSP walk against the fake daemon, the Chromium sleep walk and the two-runner workday walk; all `crates/web` tests; the `farcooler-client` library tests (422 passed, 2 ignored); the selected runner library tests (178 passed, 1 ignored); the two live lease cases, the two shared stdio writer cases and `agent_rows_over_every_transport` (6 passed, 1 ignored). The stable bundle, the Go wasm test and the full runner test suite weren't run.
+
+## Landing gate repair
+
+The gate failed with `ENOENT … wasm-canary/farcooler_web.wasm`. CI builds that directory with Linux-only tools, so the Mac gate skipped the build. It still ran the browser checks that read the directory, because they name it only in `env:`, which the skip rule doesn't read. Before this branch, those checks didn't need the module.
+
+The gate now builds the module itself before the first check that reads it. `crates/web/test-module.sh` installs the `wasm-bindgen` version that `Cargo.lock` names, under the target directory, then runs `build.sh --module-only`. That mode skips `wasm-opt` and Tailcat, and its output is never deployed. In the passing run the step took 79 seconds, including the install. A new gate self-test failed on the three affected checks before the fix. CI's own steps are unchanged.
+
+The failed run had also stopped before the Rust tests finished. Running them found a second failure: the CLI test that requires a decision for every event kind didn't cover `terminal_writer_changed`. The CLI never asks for that event, so it's now listed as having no reader.
+
+On macOS, through `scripts/landing-gate`: `web` passed at `77492dd13`; `rust` and its lints passed at `83016911d` (7,616 nextest tests, then the doc tests); every `wire` and `doc-comments` step passed at `77492dd13`. One earlier Rust run reported `ov1427_restart_reaps_a_native_owner_that_survived_the_runner` as flaky (it passed on its rerun); no ov-1499 commit changes that test or the code it covers (the ov-1475 commits in this range do change that code). The final Rust run had no flaky tests. `relay`, `site`, `tunnel` and the two Swift families weren't rerun; they passed in the failed landing run.
+
+With `CARGO_TARGET_DIR` shared across the whole gate, one `lane-gate.py --self-test` case failed because its fixture's `cargo test` didn't start in time. It passed without the variable.
+
+`scripts/landing-policy-test.py`, run by hand with `FARCOOLER_BASE` set, reports two failures and one error, on this branch and on the base alike. Under `lane-gate.py --self-test` it passes.
