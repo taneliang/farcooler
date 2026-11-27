@@ -861,7 +861,9 @@ fn every_kind_of_event_the_proto_carries_is_decided_on() {
     // `terminal_frame`. See `a_payload_with_no_reader_is_still_dropped`.
     // `terminal_writer_lost` is private to the input connection and is
     // handled by `terminal input`, outside this fleet event stream.
-    const NO_READER: &[u32] = &[10, 11, 12, 15, 17, 20, 30];
+    // `terminal_writer_changed` goes only to a connection that asked with
+    // `terminal.writer` WATCH, which the CLI never sends.
+    const NO_READER: &[u32] = &[10, 11, 12, 15, 17, 20, 30, 31];
     let mut kinds = 0;
     // From 3: tags 1 and 2 are `event_id` and `sequence`, not payloads.
     for tag in 3..256 {
