@@ -86,6 +86,10 @@ pub struct Item {
     /// Step retries spent in the current run.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub retries: u8,
+    /// The fence at which the runner refused to launch this run's step (`Outcome::LaunchRefused`). While it
+    /// is the run's fence, Retry spends none of the run's retries. Any later move changes the fence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refused_launch: Option<u64>,
     /// A group item only: the tickets it runs, each pinned to the candidate it joined with.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub members: Vec<Member>,
@@ -538,6 +542,9 @@ pub enum Outcome {
     SafeFailureWithReceipt { reason: Option<String>, receipt: String },
     /// A temporary resource refusal; retry without spending an attempt or a back-edge.
     ResourceHold(String),
+    /// The runner would not start the step's program until a person fixes something on the host, and says
+    /// what (ov-1511). The run fails at once without spending an attempt, and the Retry that follows is free.
+    LaunchRefused(String),
     Interrupted, Uncertain,
     /// A fenced recovery check could not establish what happened.
     UncertainBecause(String),

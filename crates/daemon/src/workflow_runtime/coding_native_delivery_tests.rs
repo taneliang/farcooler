@@ -351,7 +351,7 @@ with socket.socket(socket.AF_UNIX) as sock:
 
 #[cfg(target_os = "macos")]
 #[tokio::test]
-async fn a_queued_quarantine_retry_is_listed_until_the_native_agent_reports_its_start() {
+async fn a_refused_launch_spends_no_attempt_and_starts_with_one_retry() {
     let (dir, mut runtime, _fake) = tests::native_agent("hook-disconnect", "codex-engine").await;
     let executable = dir.path().join("quarantined codex");
     std::fs::write(&executable, r#"#!/usr/bin/python3
@@ -370,8 +370,12 @@ os.execv('/usr/bin/python3', ['/usr/bin/python3', str(script), 'hook-disconnect'
     let _stand_in = crate::service::test_agent::stand_in(&link);
     assert_quarantine_refused(&mut runtime, &link, &dir.path().join("ran")).await;
 
+    // The person runs the command the refusal names, then retries once.
     assert!(std::process::Command::new("/usr/bin/xattr")
         .args(["-d", "com.apple.quarantine"]).arg(&executable).status().unwrap().success());
+    assert!(runtime.internal("w", Command::Retry { item: "ov-1469".into() }, Grant::Controller, 11)
+        .unwrap().result.is_ok());
+    assert_eq!(runtime.state("w").unwrap().unwrap().items["ov-1469"].retries, 0, "the refusal spent a retry");
     let store = runtime.store.clone();
     let retry = runtime.pump(11);
     tokio::pin!(retry);
@@ -386,8 +390,7 @@ os.execv('/usr/bin/python3', ['/usr/bin/python3', str(script), 'hook-disconnect'
     }
     let state = store.workflow_state("w").unwrap().unwrap();
     let item = &state.items["ov-1469"];
-    assert_eq!(item.phase, Phase::Running);
-    assert!(item.failure.as_deref().is_some_and(|reason| reason.contains("com.apple.quarantine")));
+    assert_eq!((&item.phase, item.attempt), (&Phase::Running, 1));
     std::fs::write(dir.path().join("direction-ready"), "").unwrap();
     retry.await.unwrap();
     let state = store.workflow_state("w").unwrap().unwrap();
@@ -468,18 +471,20 @@ async fn assert_quarantine_refused(runtime: &mut Runtime, refused: &Path, ran: &
     let names_executable = |text: &str| [refused, canonical_refused.as_path()].iter()
         .any(|path| text.contains(path.to_str().unwrap()));
     assert!(reason.contains("com.apple.quarantine") && names_executable(reason), "{reason}");
+    let clears = |text: &str| [refused, canonical_refused.as_path()].iter().any(|path| text.ends_with(&format!(
+        "/usr/bin/xattr -d com.apple.quarantine {}", farcooler_core::shell::shell_quote(path.to_str().unwrap()))));
+    assert!(clears(reason), "no command to clear the mark: {reason}");
     assert!(!ran.exists(), "the refused launch ran");
     assert!(runtime.observe("w", &binding.effect, outcome, false, 10).unwrap());
     let item = &runtime.state("w").unwrap().unwrap().items[ticket];
-    assert_eq!(item.attempt, 2, "a queued retry still has to show the refusal");
-    assert_eq!(item.phase, Phase::Running);
-    assert!(item.pending.as_ref().is_some_and(|effect| *effect != binding.effect.id));
+    assert_eq!((&item.phase, item.attempt, item.retries), (&Phase::Failed, 1, 0), "the refusal spent an attempt");
+    assert_eq!(item.pending, None, "the refused launch was queued again");
     let mut items = Vec::new();
     crate::engine_stuck::include_refusals(&runtime.store, &mut items);
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].item, ticket);
     assert!(items[0].question.contains("com.apple.quarantine"));
-    assert!(names_executable(&items[0].question));
+    assert!(names_executable(&items[0].question) && clears(&items[0].question));
     let startup = crate::engine_stuck::Startup::new("w", ticket, "codex");
     startup.observe(false, false, Some("The new attempt is waiting for input."));
     let mut items = crate::engine_stuck::list();

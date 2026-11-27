@@ -29,7 +29,6 @@ pub struct WorkflowFailure {
     pub item: String,
     pub since_ms: i64,
     pub reason: String,
-    pub pending: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -191,20 +190,18 @@ impl Store {
         ).optional()?;
         raw.map(|s| serde_json::from_str(&s)).transpose().map_err(Into::into)
     }
-    /// Include a queued retry's previous failure and the pending effect that can supersede it.
+    /// Failed runs whose last failure starts with `prefix`.
     pub fn workflow_failures_with_prefix(&self, prefix: &str) -> Result<Vec<WorkflowFailure>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
             "SELECT s.workspace, i.key, COALESCE(json_extract(i.value, '$.since_ms'), 0),
-                    json_extract(i.value, '$.failure'), json_extract(i.value, '$.pending')
+                    json_extract(i.value, '$.failure')
              FROM workflow_states s, json_each(s.state, '$.items') i
              WHERE instr(json_extract(i.value, '$.failure'), ?1) = 1
-             AND (json_extract(i.value, '$.phase') = 'Failed'
-                 OR (json_extract(i.value, '$.phase') IN ('Running', 'WaitingApproval')
-                     AND json_extract(i.value, '$.attempt') > 1))",
+             AND json_extract(i.value, '$.phase') = 'Failed'",
         )?;
         Ok(stmt.query_map([prefix], |r| Ok(WorkflowFailure {
-            workspace: r.get(0)?, item: r.get(1)?, since_ms: r.get(2)?, reason: r.get(3)?, pending: r.get(4)?,
+            workspace: r.get(0)?, item: r.get(1)?, since_ms: r.get(2)?, reason: r.get(3)?,
         }))?
             .collect::<rusqlite::Result<_>>()?)
     }

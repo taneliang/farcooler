@@ -202,10 +202,13 @@ impl Exec {
     fn quarantine_reason(&self, binding: &Binding) -> Option<String> {
         if !cfg!(target_os = "macos") { return None; }
         let path = std::fs::read(self.quarantine_receipt(binding)).ok()?;
-        let path: String = String::from_utf8_lossy(&path).chars().filter(|c| !c.is_control()).take(300).collect();
+        // The whole path (Darwin's limit is 1024 bytes): a shortened one would break the command.
+        let path: String = String::from_utf8_lossy(&path).chars().filter(|c| !c.is_control()).take(1024).collect();
         if path.is_empty() { return None; }
-        Some(format!("{} macOS marked {path} with com.apple.quarantine. Verify the installation before retrying.",
-            crate::engine_stuck::QUARANTINE_PREFIX))
+        // The command comes last, with nothing after it, so it can be copied as it stands. Only a person runs it.
+        Some(format!("{} macOS marked {path} with com.apple.quarantine. Verify the installation before retrying. \
+            To clear the mark, run: /usr/bin/xattr -d com.apple.quarantine {}",
+            crate::engine_stuck::QUARANTINE_PREFIX, farcooler_core::shell::shell_quote(&path)))
     }
     /// The agent a build runs: the model it picked at Start, or the configured preset (ov-966).
     pub(super) fn native_agent(&self, binding: &Binding) -> Result<Agent> {
@@ -434,11 +437,7 @@ impl Exec {
                 continue;
             }
             heard = clock.now();
-            if !heard_from.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                let _ = super::execution::ACTIVITY.try_with(|a| {
-                    if let Some(retry) = &a.quarantine_retry { retry.confirm(); }
-                });
-            }
+            heard_from.store(true, std::sync::atomic::Ordering::Relaxed);
             if matches!(line.event.as_str(), "UserPromptSubmit" | "beforeSubmitPrompt") {
                 // What the agent was launched with is the briefed prompt, so that is what its hook reports.
                 if line.payload.get("prompt").and_then(|p| p.as_str()) == Some(prompt.as_str()) { prompted = true; }

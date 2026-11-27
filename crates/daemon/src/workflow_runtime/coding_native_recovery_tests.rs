@@ -50,9 +50,10 @@ async fn assert_native_reopen(quarantined: Option<&str>) {
     assert_ne!(host.0.pane_life(&owner.pane, id).await.unwrap(), farcooler_tmux::PaneLife::Live);
     let outcome = runtime.reconcile_coding(&binding).await.unwrap();
     if let Some(executable) = quarantined {
-        assert_eq!(item.phase, Phase::Failed);
+        assert_eq!((&item.phase, item.attempt), (&Phase::Failed, 1));
         let reason = item.failure.as_deref().unwrap();
         assert!(reason.contains("com.apple.quarantine") && reason.contains(executable), "{reason}");
+        assert!(reason.contains("/usr/bin/xattr -d com.apple.quarantine"), "{reason}");
         assert_eq!(outcome, Outcome::SafeFailureBecause(reason.into()));
         let mut needs_you = Vec::new();
         crate::engine_stuck::include_refusals(&runtime.store, &mut needs_you);

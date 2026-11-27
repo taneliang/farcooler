@@ -44,7 +44,7 @@ fn every_field_set() -> Value {
         "start_load": { "sample_milli": 4100, "below_milli": 6000 },
         "execution": { "phase": "Running", "position": null, "holders": [], "text": "" },
         "rework_history": [{ "id": "i", "principal": "owner", "revision": 1, "run": "r", "definition_pin": "d", "evidence": evidence, "iteration": 0, "reason": "why" }],
-        "back_edges": { "build": 1 }, "retries": 1, "members": [{ "item": "b", "candidate": "c" }],
+        "back_edges": { "build": 1 }, "retries": 1, "refused_launch": 1, "members": [{ "item": "b", "candidate": "c" }],
         "group_of": { "name": "landing", "pin": "p" }, "pushed": "c", "handed": ["b"], "since_ms": 5, "grouped_in": "g", "wait_since": 5,
         "models": { "build": "claude:opus" },
         "tree": { "name": "n", "branch": "b", "path": "/p", "base": "0123456789012345678901234567890123456789" },

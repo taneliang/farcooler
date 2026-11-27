@@ -11,7 +11,7 @@
 //! `needs_you::gather` reads `list`; a build leaves it when the question goes, its first hook arrives, or
 //! its run ends (`Listed`'s drop). Nothing here types into the pane: the person answers it by watching it
 //! (ov-972) or by opening it.
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
@@ -134,46 +134,12 @@ fn now_ms() -> i64 {
         .map_or(0, |d| d.as_millis() as i64)
 }
 
-type Confirmed = Mutex<HashSet<String>>;
-#[cfg(not(test))]
-static CONFIRMED: LazyLock<Confirmed> = LazyLock::new(Default::default);
-#[cfg(test)]
-thread_local! { static CONFIRMED_TABLE: &'static Confirmed = Box::leak(Box::default()); }
-#[cfg(test)]
-fn confirmed() -> &'static Confirmed { CONFIRMED_TABLE.with(|t| *t) }
-#[cfg(not(test))]
-fn confirmed() -> &'static Confirmed { &CONFIRMED }
-
-/// The live effect owns this confirmation through settlement. A later retry has its own effect ID.
-pub(crate) struct QuarantineRetry(String);
-impl QuarantineRetry {
-    pub(crate) fn new(effect: &str) -> Self {
-        Self(effect.into())
-    }
-
-    pub(crate) fn confirm(&self) {
-        if confirmed().lock().is_ok_and(|mut ids| ids.insert(self.0.clone())) {
-            announce();
-        }
-    }
-}
-impl Drop for QuarantineRetry {
-    fn drop(&mut self) {
-        if confirmed().lock().is_ok_and(|mut ids| ids.remove(&self.0)) {
-            announce();
-        }
-    }
-}
-
-/// A previous quarantine refusal fills in until the retry has a current diagnostic or reports its start.
+/// A quarantine refusal stays listed while its run is failed. Retry clears it from the run.
 pub(crate) fn include_refusals(store: &farcooler_store::Store, stuck: &mut Vec<Stuck>) {
     match store.workflow_failures_with_prefix(QUARANTINE_PREFIX) {
         Ok(failures) => {
-            let confirmed = confirmed().lock().ok();
             for failure in failures {
-                let started = confirmed.as_ref().zip(failure.pending.as_ref())
-                    .is_some_and(|(ids, effect)| ids.contains(effect));
-                if started || stuck.iter().any(|s| s.workspace == failure.workspace && s.item == failure.item) {
+                if stuck.iter().any(|s| s.workspace == failure.workspace && s.item == failure.item) {
                     continue;
                 }
                 stuck.push(Stuck {

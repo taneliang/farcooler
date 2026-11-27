@@ -155,3 +155,31 @@ fn a_persons_resolve_with_a_refused_reason_is_refused_not_dropped() {
     resolve.grant = Grant::Controller;
     assert_eq!(step(&state, &resolve), Err(Refusal::Invalid));
 }
+
+/// ov-1511: a launch the runner refuses spends no attempt and no retry, so the person's fix and one Retry run it.
+#[test]
+fn a_refused_launch_spends_no_attempt_and_its_retry_is_free() {
+    let state = State::empty("workspace".into(), 1);
+    let enqueue = input(&state, Command::Enqueue { item: "item".into(), definition: three_gates(), policy_pin: "policy-1".into(),
+        resource: "repo/branch".into(), dependencies: BTreeSet::new(), initial_candidate: None }, Grant::Controller);
+    let mut state = step(&state, &enqueue).unwrap().state;
+    let retry = |state: &State| step(state, &input(state, Command::Retry { item: "item".into() }, Grant::Controller))
+        .map(|t| t.state);
+    let advance = |state: &State| step(state, &input(state, Command::Advance, Grant::Controller)).unwrap().state;
+    // More refusals than a run has retries.
+    for round in 0..=MAX_RETRIES {
+        let refused = step(&state, &observe(&state, Outcome::LaunchRefused("The host blocks the agent.".into()))).unwrap();
+        assert!(refused.effects.iter().all(|e| !matches!(e.kind, EffectKind::Execute(_))), "round {round}");
+        let item = &refused.state.items["item"];
+        assert_eq!((item.phase.clone(), item.attempt, item.retries), (Phase::Failed, 1, 0), "round {round}");
+        assert_eq!(item.failure.as_deref(), Some("The host blocks the agent."));
+        assert!(item.reason.as_deref().is_some_and(|r| r.contains("The host blocks") && !r.contains("exhausted")));
+        state = advance(&retry(&refused.state).unwrap());
+        let item = &state.items["item"];
+        assert_eq!((item.phase.clone(), item.attempt, item.retries), (Phase::Running, 1, 0), "round {round}");
+    }
+    // An ordinary failure still spends its attempts, and the Retry after it spends one of the run's retries.
+    for _ in 0..2 { state = step(&state, &observe(&state, Outcome::SafeFailure)).unwrap().state; }
+    assert_eq!(state.items["item"].phase, Phase::Failed);
+    assert_eq!(retry(&state).unwrap().items["item"].retries, 1);
+}

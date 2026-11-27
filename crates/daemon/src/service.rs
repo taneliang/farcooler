@@ -364,12 +364,23 @@ fn render_preset_command(preset: &str, session_id: Option<&str>, extras: &Launch
     }
 }
 
+#[cfg(all(test, target_os = "macos"))]
+#[path = "service_quarantine_tests.rs"]
+mod quarantine_tests;
+
 const NATIVE_AGENT_PREFLIGHT: &str = r#"
+# The mark's value is `flags;time;agent;id`, with hexadecimal flags. 0x0040 says
+# the person already approved it, so macOS runs it without asking (ov-1511).
+# Homebrew casks commonly keep such a mark. Flags that can't be read refuse.
 check_quarantine() {
-    if /usr/bin/xattr -p com.apple.quarantine "$1" >/dev/null 2>&1; then
-        printf '%s\n' "$1" > "$FARCOOLER_NATIVE_QUARANTINE_RECEIPT"
-        exit 126
-    fi
+    mark=$(/usr/bin/xattr -p com.apple.quarantine "$1" 2>/dev/null) || return 0
+    flags=${mark%%;*}
+    case "$flags" in
+        ''|*[!0-9a-fA-F]*) ;;
+        *) [ "$((0x$flags & 0x40))" -eq 0 ] || return 0 ;;
+    esac
+    printf '%s\n' "$1" > "$FARCOOLER_NATIVE_QUARANTINE_RECEIPT"
+    exit 126
 }
 
 program=$(command -v -- "$1") || {

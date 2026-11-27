@@ -13,7 +13,7 @@ fn new_item(definition: &Definition, policy_pin: &str, resource: &str,
         restart: None, reuse_checkout: false, carried_progress: false, history: Vec::new(), reason: None, landing_ci: None, last_evidence: None, stopping: None, stopped_from: None,
         cancel_reason: None, closed: None, failure: None, queue_hold: None, group_failure: None, deciding: None,
         hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, landed: None,
-        rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
+        rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, refused_launch: None, pushed: None, wait_since: None,
         members: Vec::new(), handed: Vec::new(), since_ms: 0, group_of: None, grouped_in: None,
         models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new(),
     }
@@ -589,6 +589,15 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                                 enter(&mut item, id, input, &mut effects)?;
                             }
                         }
+                        Outcome::LaunchRefused(reason) => {
+                            if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
+                            if valid_rework_reason(reason) { item.failure = Some(reason.clone()); }
+                            else if resolving { return Err(Refusal::Invalid); }
+                            // Launching again would meet the same refusal, so the run waits for a person.
+                            item.pending = None;
+                            item.refused_launch = Some(item.fence);
+                            item.phase = Phase::Failed;
+                        }
                         Outcome::ResourceHold(reason) => {
                             if item.run.starts_with("cancel:") || item.group_of.is_none()
                                 || item.definition.stages[item.stage].kind != StageKind::Run
@@ -635,6 +644,10 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                                 describe_failure(&mut item, brief, Some(&evidence.receipt)),
                             Outcome::FoldConflict { evidence, files, .. } => {
                                 describe_failure(&mut item, &conflict_brief(evidence, files)?, Some(&evidence.receipt));
+                            }
+                            Outcome::LaunchRefused(_) => {
+                                let cause = item.failure.as_deref().unwrap_or("The runner refused to launch the step.").to_owned();
+                                describe_failure(&mut item, &cause, Some(&input.id));
                             }
                             _ => {}
                         }
@@ -722,7 +735,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                                 policy_pin: policy_pin.clone(), dependencies: BTreeSet::new(), resource,
                                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked,
                                 run: String::new(), pending: None, candidate: None, last_evidence: None,
-                                stopping: None, stopped_from: None, cancel_reason: None, closed: None, failure: None, queue_hold: None, group_failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, landed: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
+                                stopping: None, stopped_from: None, cancel_reason: None, closed: None, failure: None, queue_hold: None, group_failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, landed: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, refused_launch: None, pushed: None, wait_since: None,
                                 members: Vec::new(), handed: Vec::new(), since_ms: 0,
                                 group_of: Some(GroupOf { name: name.clone(), pin }),
                                 grouped_in: None, models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() });
@@ -790,10 +803,11 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                         item.last_evidence = None;
                         item.run.clear();
                         item.retries = 0;
-                    } else {
+                    } else if item.refused_launch != Some(item.fence) {
                         if item.retries >= item.definition.execution_limits().retries { return Err(Refusal::Limit); }
                         item.retries += 1;
                     }
+                    item.refused_launch = None;
                     item.attempt = 1;
                     item.failure = None;
                     item.reason = None;

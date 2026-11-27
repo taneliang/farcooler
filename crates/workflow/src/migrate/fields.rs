@@ -41,6 +41,7 @@ pub const ITEM_FIELDS: &[(&str, Decision)] = &[
     ("rework_history", Decision::Dropped("its back edges are the visits written from back_edges; the reasons stay in the legacy log")),
     ("back_edges", Decision::Mapped("closed visits ending in the station's back label, which its rework or returns policy counts")),
     ("retries", Decision::Dropped("retries have no cap; the legacy log keeps them")),
+    ("refused_launch", Decision::Dropped("it only keeps the retry cap from counting a refused launch, and retries have no cap")),
     ("members", Decision::Mapped("Batch::members, with each candidate in Membership::data")),
     ("group_of", Decision::Mapped("Batch::station is the members' join step; the archive keeps the group's name")),
     ("pushed", Decision::Mapped("a Crossing on the batch and its members, and coding data pushed")),

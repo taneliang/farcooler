@@ -1098,7 +1098,7 @@ impl Runtime {
                 if !self.admit_effect(&claim, clock())? { continue; }
                 let per_minute = self.places().cap(Pool::Agent);
                 self.restart_pacing.started(workspace, &effect, per_minute);
-                let activity = std::sync::Arc::new(execution::Activity::for_effect(&effect, item));
+                let activity = std::sync::Arc::new(execution::Activity::default());
                 self.activities.lock().unwrap().insert((workspace.clone(), effect.id.clone()), activity.clone());
                 let binding = Binding::new(workspace, &effect, claim.resource_generation, item.iteration, &base);
                 // Any I/O failure beyond admission is ambiguous, not a retry permission.
@@ -1166,6 +1166,9 @@ impl Runtime {
         -> Result<std::result::Result<(), Refusal>>
     {
         let outcome = match &outcome {
+            // A launch macOS would block meets the same block until a person clears it, so it spends nothing (ov-1511).
+            Outcome::SafeFailureBecause(reason) if reason.starts_with(crate::engine_stuck::QUARANTINE_PREFIX) =>
+                Outcome::LaunchRefused(reason.clone()),
             Outcome::SafeFailure | Outcome::SafeFailureBecause(_) => {
                 let journal = self.journal_path(effect);
                 match journal.file_name().and_then(|name| name.to_str()).filter(|_| journal.is_file()) {
