@@ -44,6 +44,7 @@ shell.handle({
   },
   pickRunner: id => asked.push(['runner', id]),
   addRunner: () => asked.push(['add runner']),
+  devices: () => asked.push(['devices']),
   tool: tool => {
     asked.push(['tool', tool])
     if (tool === 'commands') commands()

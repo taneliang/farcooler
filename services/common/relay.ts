@@ -162,6 +162,17 @@ export class Caller {
     return await this.call(`/v1/ceremony/reply/${ceremony}`, {}, 'GET')
   }
 
+  /// A sealed reply this browser made, approving another (ov-1490).
+  async postReply(body: { ceremony: string; account: string; sealed: string }): Promise<Answer> {
+    return await this.call('/v1/ceremony/reply', body)
+  }
+
+  /// `farcooler join`'s two signed-in calls (ov-1490): a ticket for the
+  /// command on screen, and the approval of the runner that answered it.
+  async join(route: 'ticket' | 'approve', body: { ceremony: string }): Promise<Answer> {
+    return await this.call(`/v1/join/${route}`, body)
+  }
+
   /// A browser's sealed copies (ov-779): every one its account keeps.
   async vaults(): Promise<Answer> {
     return await this.call('/v1/web/vault', {}, 'GET')

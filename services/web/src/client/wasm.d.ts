@@ -39,6 +39,14 @@ declare module 'fc-web' {
   ): string
   export function offerIsStale(shownAtMs: number): boolean
   export function freshnessMs(): number
+  /// The one command Add Runner shows (ov-1490).
+  export function joinCommand(offer: string, ticket: string, team: string): string
+  /// A new browser's code, checked: `{name, fingerprint}` as JSON.
+  export function approvalAsking(code: string, account: string, ownKeyLine: string): string
+  /// `{sealed, compare, ceremony}` as JSON, granting `runners` to `code`'s browser.
+  export function sealApproval(code: string, account: string, ownKeyLine: string, runners: string): string
+  /// `[{name, lastSeenAt}]` as JSON: the account's runners not opened here.
+  export function unenrolledRunners(teams: string, account: string, grants: string): string
   /// This build's app host: the RP ID its passkey is made and used for.
   export function rpId(): string
   /// A passkey's SPKI (`getPublicKey()`) as an `sk-ecdsa` OpenSSH line.
@@ -77,6 +85,9 @@ declare module 'fc-web' {
   export function ticketForm(): string
   export function workFailure(word: string, code: string, what: string): string
   export class WebRunner {
+    devices(keyA: string): Promise<string>
+    approveBrowser(code: string, account: string, keyA: string, hostKey: string, assert: (challenge: Uint8Array) => Promise<unknown>): Promise<string>
+    removeDevice(device: string, keyA: string, hostKey: string, assert: (challenge: Uint8Array) => Promise<unknown>): Promise<void>
     /// Tell the runner this is a sign-out; how long nothing had arrived, ms.
     signing_out(): number
     terminal_writer_supported(): boolean

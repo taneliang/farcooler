@@ -27,6 +27,15 @@ import { withHeaders } from './headers'
 /// - `ceremony/reply`: the sealed reply to this browser's offer, a GET at the
 ///   relay (`{ceremony}` in, `{replies}` out). Only the offer's own account
 ///   can read it, and the page opens it in wasm; the Worker holds no key.
+/// - `ceremony/reply/post`: the sealed reply this browser made to another's
+///   offer, approving it (ov-1490). The Worker names the account itself, as
+///   the signed-in one, so this page can only answer its own account's
+///   offers; approving a teammate's isn't offered here (ov-778).
+/// - `join/ticket` and `join/approve` (ov-1490): the ticket in the command Add
+///   Runner shows, and the person's approval of the runner that ran it.
+/// - `directory/teams/runners` (ov-1490): a team's runners, so the page can
+///   list the account's runners this browser doesn't open yet. The relay
+///   checks the caller is in the team.
 /// - `web/vault`, `web/vault/save` and `web/vault/delete`: this browser's
 ///   sealed copy of its runners (ov-779), read as a GET and saved as a POST at
 ///   the relay's `/v1/web/vault`, and deleted at Sign Out as a POST to
@@ -37,7 +46,7 @@ import { withHeaders } from './headers'
 ///
 /// With WEB_CLIENT "everyone" a route here is reachable by every signed-in
 /// stranger, so any new route needs its own security review (ov-810).
-export const ROUTES = new Set(['directory/me', 'directory/devices/challenge', 'directory/devices/register', 'ceremony/reply', 'web/vault', 'web/vault/save', 'web/vault/delete', 'account/web-push/key', 'account/web-push/add', 'account/web-push/remove'])
+export const ROUTES = new Set(['directory/me', 'directory/devices/challenge', 'directory/devices/register', 'directory/teams/runners', 'ceremony/reply', 'ceremony/reply/post', 'join/ticket', 'join/approve', 'web/vault', 'web/vault/save', 'web/vault/delete', 'account/web-push/key', 'account/web-push/add', 'account/web-push/remove'])
 
 /// A ceremony id as the relay mints it (`fresh_ceremony_id`): 128 bits as hex.
 const CEREMONY = /^[0-9a-f]{32}$/
@@ -76,11 +85,18 @@ export async function api(request: Request, url: URL, env: Configured & WebEnv):
     if (!body || typeof body !== 'object' || Array.isArray(body)) return json({ error: 'bad request' }, 400, cookies())
     const [kind, ...rest] = route.split('/')
     const sub = rest.join('/')
-    if (kind === 'ceremony') {
+    if (kind === 'ceremony' || kind === 'join') {
       // The id goes into a URL path, so it is exactly what the relay mints.
       const ceremony = (body as { ceremony?: unknown }).ceremony
       if (typeof ceremony !== 'string' || !CEREMONY.test(ceremony)) return json({ error: 'bad request' }, 400, cookies())
-      answer = await caller.ceremonyReply(ceremony)
+      if (route === 'ceremony/reply') answer = await caller.ceremonyReply(ceremony)
+      else if (kind === 'join') answer = await caller.join(sub as 'ticket' | 'approve', { ceremony })
+      else {
+        const sealed = (body as { sealed?: unknown }).sealed
+        if (typeof sealed !== 'string') return json({ error: 'bad request' }, 400, cookies())
+        // The account is the session's, never the page's word.
+        answer = await caller.postReply({ ceremony, account: me.body.user.id, sealed })
+      }
     } else if (kind === 'web') {
       answer =
         sub === 'vault/save' ? await caller.saveVault(body as Record<string, unknown>)

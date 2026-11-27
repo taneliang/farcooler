@@ -419,3 +419,37 @@ button.danger { color: var(--danger); }
 /* Start Work offers one submit at a time: Create Worktree while its form is
    open, else Start Terminal. */
 #start-work:has(#work-create:not([hidden])) #work-start { background: var(--surface); border-color: var(--control-edge); color: var(--text); }
+
+/* Add Runner and Devices (ov-1490). */
+.runner-add h2, .devices h3 { font-size: 16px; font-weight: 600; margin: 24px 0 4px; }
+.command { margin: 0 0 8px; padding: 10px 14px; border-radius: 12px; background: var(--card); max-height: 6.5em; overflow-y: auto; }
+.command code { font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }
+.join-steps { max-width: 68ch; }
+.join-steps p { margin: 0 0 8px; }
+.fingerprint { font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; color: var(--text-2); overflow-wrap: anywhere; }
+.hint { color: var(--text-2); max-width: 68ch; font-size: 13px; }
+.unenrolled { margin-bottom: 24px; }
+.unenrolled p { color: var(--text-2); margin: 0 0 8px; max-width: 68ch; }
+.unenrolled ul, .unenrolled-list { margin: 0; padding: 0; list-style: none; }
+.unenrolled li { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 10px 0; border-top: 1px solid var(--rule); }
+.unenrolled li strong { overflow-wrap: anywhere; }
+.unenrolled li span { color: var(--text-2); font-size: 13px; }
+.runner-tools { display: flex; flex-wrap: wrap; gap: 0 var(--s4); }
+.side-unenrolled { margin-top: var(--s3); max-height: 9em; overflow-y: auto; }
+.side-unenrolled .meta { margin: 0 0 var(--s1); }
+.side-unenrolled li { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; }
+.side-unenrolled li strong { flex: 1; min-width: 0; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-unenrolled li span { display: none; }
+.side-unenrolled li button { flex: none; padding: 2px 8px; font-size: 12px; }
+.devices-bar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.devices-bar h2 { overflow-wrap: anywhere; min-width: 0; }
+.devices li { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.devices li span { min-width: 0; overflow-wrap: anywhere; }
+.devices li button { flex: none; }
+.devices .actions { margin-top: 8px; }
+.devices video { width: 100%; margin-top: 8px; border-radius: 12px; background: #000; }
+.devices label { display: block; margin-top: 12px; color: var(--text-2); font-size: 13px; }
+.devices textarea { width: 100%; padding: 8px 12px; font: 12px/1.4 ui-monospace, "SF Mono", Menlo, monospace; color: var(--text); background: var(--bg); border: 1px solid var(--rule); border-radius: 8px; resize: vertical; }
+.devices fieldset { border: 0; margin: 0; padding: 0; }
+.devices fieldset label { color: var(--text); font-size: 15px; margin-top: 4px; overflow-wrap: anywhere; }
+.devices .compare-code { text-align: center; padding-left: 0.25em; font: 600 clamp(28px, 11vw, 44px)/1.2 ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0.25em; color: var(--text); }

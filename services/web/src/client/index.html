@@ -42,19 +42,48 @@
     </div>
   </section>
 
+  <section class="enroll runner-add" id="runner-add" hidden>
+    <h1>Add a Runner</h1>
+    <p class="lead">A runner is a computer your agents work on. Add one to open its terminals and workspaces here.</p>
+    <div class="unenrolled" id="unenrolled" hidden>
+      <h2>Not Set Up in This Browser</h2>
+      <p>These runners are in your account. To open one here, run the command below on that computer, or approve this browser from a device that already opens it.</p>
+      <ul id="unenrolled-list"></ul>
+    </div>
+    <p class="note" id="unenrolled-failed" hidden>Far Cooler couldn’t check which runners your account has. Reload to try again.</p>
+    <ol class="steps join-steps">
+      <li>
+        <p>In a terminal on that computer, run this one command:</p>
+        <pre class="command"><code id="join-command">Getting your command…</code></pre>
+        <button class="primary" id="join-copy" type="button" disabled>Copy Command</button>
+      </li>
+      <li>
+        <p>The terminal shows this browser’s passkey. Check that it matches, then type yes.</p>
+        <p class="fingerprint" id="join-fingerprint"></p>
+      </li>
+      <li><p id="join-waiting" role="status">Waiting for your runner. A code appears here to check before anything is added.</p></li>
+    </ol>
+    <p class="hint">The computer needs Far Cooler, and SSH turned on (OpenSSH 8.4 or later). A command works for two minutes, and a new one appears here when it expires. If you’ve lost every device that opens your runners, this is how you get back in.</p>
+    <p class="note" id="join-note" hidden></p>
+    <div class="actions">
+      <button class="quiet" id="join-back" type="button" hidden>Back to Runners</button>
+      <button class="quiet" id="join-from-device" type="button">Approve From Another Device</button>
+    </div>
+  </section>
+
   <section class="enroll" id="enroll" hidden>
-    <h1>Add this browser to your runners</h1>
-    <p class="lead">Your phone already reaches your runners. It can add this browser’s passkey to the runners you choose, and then your terminals open here.</p>
+    <h1>Approve This Browser From Another Device</h1>
+    <p class="lead">A device that already opens your runners can add this browser to them. Do this with both screens in front of you.</p>
     <div class="enroll-body">
       <figure class="code">
         <canvas id="offer-code" width="320" height="320"></canvas>
         <figcaption id="offer-fingerprint"></figcaption>
       </figure>
       <ol class="steps">
-        <li>On your phone, open Far Cooler, tap Add Device or Runner, then Add Another Device.</li>
-        <li>Scan this code, choose the runners this browser may use, and confirm.</li>
-        <li>Your phone sends its answer here and shows a short code. This page shows one too: check that they match.</li>
-        <li>If the answer doesn’t arrive, make sure your phone is connected, then select Start Over.</li>
+        <li>On the other device, open Far Cooler, connect to a runner and select Devices.</li>
+        <li>Under Add a Device, scan this code, or copy it and paste it there.<br><button class="quiet" id="offer-copy" type="button">Copy Code</button></li>
+        <li>Check that the passkey there matches the one under this code, then approve.</li>
+        <li>Both screens then show a short code: check that they match. If nothing arrives, select Start Over.</li>
       </ol>
     </div>
     <details>
@@ -70,6 +99,7 @@
     <p class="note" id="enroll-note" hidden></p>
     <div class="actions">
       <button class="quiet" id="enroll-back" type="button" hidden>Back to Runners</button>
+      <button class="quiet" id="enroll-add-runner" type="button">Add a Runner Instead</button>
       <button class="quiet" id="start-over" type="button">Start Over</button>
     </div>
 
@@ -157,6 +187,10 @@
     </div>
   </section>
 <a class="workspace-link" id="workspace-link" hidden></a>
+<div class="side-unenrolled" id="side-unenrolled" hidden>
+  <p class="meta">Not in This Browser</p>
+  <ul class="unenrolled-list" id="side-unenrolled-list"></ul>
+</div>
 <div class="terminal-sidebar" id="terminal-list">
   <div class="terminal-list" id="live-terminals"></div>
   <div class="terminal-list lost-terminals" id="lost-terminals" hidden></div>
@@ -202,6 +236,31 @@
   </div>
 </dialog>
 <dialog class="workspace-commands" id="workspace-commands"></dialog>
+<dialog class="saved-copies devices" id="devices" aria-labelledby="devices-title">
+  <header class="devices-bar">
+    <h2 id="devices-title">Devices</h2>
+    <button class="quiet" id="devices-close" type="button">Close</button>
+  </header>
+  <p id="devices-detail"></p>
+  <ul id="devices-list"></ul>
+  <h3>Add a Device</h3>
+  <p>Let a new browser or phone open your runners. Do this with it in front of you: open Far Cooler there, sign in, and choose Approve From Another Device.</p>
+  <div class="actions">
+    <button class="quiet" id="device-scan" type="button">Scan Its Code</button>
+  </div>
+  <video id="device-video" muted playsinline hidden></video>
+  <label for="device-code">Or paste its code</label>
+  <textarea id="device-code" rows="3" autocomplete="off" spellcheck="false" autocapitalize="none"></textarea>
+  <div class="actions"><button class="quiet" id="device-check" type="button">Check Code</button></div>
+  <div id="device-confirm" hidden>
+    <p id="device-asking"></p>
+    <p class="fingerprint" id="device-fingerprint"></p>
+    <fieldset id="device-runners" aria-label="Runners it may open"></fieldset>
+    <div class="actions"><button class="primary" id="device-approve" type="button">Approve</button></div>
+  </div>
+  <p class="compare-code" id="device-compare" aria-live="polite" hidden></p>
+  <p class="note" id="device-result" role="status" hidden></p>
+</dialog>
 <dialog class="saved-copies" id="saved-copies" aria-label="Saved Copies"></dialog>
 <dialog class="sign-out" id="sign-out" aria-labelledby="sign-out-title" aria-describedby="sign-out-detail">
   <h2 id="sign-out-title"></h2>

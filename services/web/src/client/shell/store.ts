@@ -9,7 +9,7 @@
 import { countLabel } from '../needs'
 import { RUNS_TITLE } from '../workflow-view'
 
-export type ShellScreen = 'status' | 'enroll' | 'compare' | 'join' | 'work'
+export type ShellScreen = 'status' | 'runner-add' | 'enroll' | 'compare' | 'join' | 'work'
 export type ShellTab = 'terminals' | 'needs' | 'board' | 'plan'
 export type ShellPage = ShellTab | 'workflow' | 'ticket'
 export type ShellTool = 'orchestrator' | 'workflow' | 'commands'
@@ -59,6 +59,7 @@ export interface ShellHandlers {
   pickSpace(id: string): void
   pickRunner(id: string): void
   addRunner(): void
+  devices(): void
   tool(tool: ShellTool): void
   startWork(): void
 }
@@ -87,6 +88,7 @@ const NOTHING: ShellHandlers = {
   pickSpace() {},
   pickRunner() {},
   addRunner() {},
+  devices() {},
   tool() {},
   startWork() {},
 }

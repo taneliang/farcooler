@@ -10,8 +10,9 @@ import { compareWords } from '../src/client/copy'
 describe('compareWords', () => {
   it('asks about your own phone for your own reply', () => {
     const { title, detail } = compareWords(null)
-    expect(title).toBe('Does your phone show this code?')
-    expect(detail).toContain('Your phone sent its answer')
+    expect(title).toBe('Does your other device show this code?')
+    expect(detail).toContain('Your other device sent its answer')
+    expect(compareWords(null, 'runner').title).toBe('Does your runner’s terminal show this code?')
   })
 
   it('names the teammate whose phone sent a teammate’s reply, and asks to check it in person', () => {

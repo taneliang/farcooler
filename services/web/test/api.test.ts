@@ -42,8 +42,8 @@ describe('/api/relay', () => {
   })
 
   it('forwards nothing off the allowlist, however the path is spelled', async () => {
-    expect([...ROUTES]).toEqual(['directory/me', 'directory/devices/challenge', 'directory/devices/register', 'ceremony/reply', 'web/vault', 'web/vault/save', 'web/vault/delete', 'account/web-push/key', 'account/web-push/add', 'account/web-push/remove'])
-    for (const path of ['web/vault/', 'web/vault/../me', 'web', 'web/vault/remove', 'directory/teams/members', 'ceremony/reply/0123456789abcdef0123456789abcdef', 'ceremony', 'directory/devices/revoke', 'directory/devices/certify', 'account/signout-all', 'auth/token', 'directory/me/', 'directory/me/../teams', 'directory//me', '../v1/directory/me']) {
+    expect([...ROUTES]).toEqual(['directory/me', 'directory/devices/challenge', 'directory/devices/register', 'directory/teams/runners', 'ceremony/reply', 'ceremony/reply/post', 'join/ticket', 'join/approve', 'web/vault', 'web/vault/save', 'web/vault/delete', 'account/web-push/key', 'account/web-push/add', 'account/web-push/remove'])
+    for (const path of ['web/vault/', 'web/vault/../me', 'web', 'web/vault/remove', 'directory/teams/members', 'join', 'join/register', 'join/reply', 'directory/teams/audit', 'ceremony/reply/0123456789abcdef0123456789abcdef', 'ceremony', 'directory/devices/revoke', 'directory/devices/certify', 'account/signout-all', 'auth/token', 'directory/me/', 'directory/me/../teams', 'directory//me', '../v1/directory/me']) {
       const calls = relay()
       const res = await post(`/api/relay/${path}`, good)
       // 404, or 405 for a path that normalized out of /api/relay/.
@@ -62,6 +62,31 @@ describe('/api/relay', () => {
     expect((await post('/api/relay/directory/me', { 'x-fc': '1', origin: ORIGIN })).status).toBe(401)
     relay('user_SOMEONE_ELSE')
     expect((await post('/api/relay/directory/me', good)).status).toBe(404)
+  })
+
+  // ov-1490: an approval is posted as the session's account, whatever the page says.
+  describe('approving another browser (ceremony/reply/post) and join', () => {
+    const ceremony = '0123456789abcdef0123456789abcdef'
+    const send = (route: string, body: unknown) => post(`/api/relay/${route}`, { ...good, 'content-type': 'application/json' }, JSON.stringify(body))
+
+    it("posts the sealed reply for the session's own account, never one the page names", async () => {
+      const calls = relay(OWNER, { '/v1/ceremony/reply': () => Response.json({ ok: true }) })
+      expect((await send('ceremony/reply/post', { ceremony, sealed: 'AAAA', account: 'user_SOMEONE_ELSE' })).status).toBe(200)
+      const asked = calls.find(c => c.path === '/v1/ceremony/reply')
+      expect(asked).toMatchObject({ method: 'POST', authorization: `Bearer ${ACCESS}` })
+      expect(asked!.body).toEqual({ ceremony, sealed: 'AAAA', account: OWNER })
+    })
+
+    it('forwards only a ceremony id to the join routes, and refuses a bad one', async () => {
+      const calls = relay(OWNER, { '/v1/join/ticket': () => Response.json({ ticket: 't', team: 'x' }) })
+      expect((await send('join/ticket', { ceremony, team: 'theirs' })).status).toBe(200)
+      expect(calls.find(c => c.path === '/v1/join/ticket')!.body).toEqual({ ceremony })
+      for (const bad of ['../me', 'A'.repeat(32), undefined]) {
+        expect((await send('join/approve', { ceremony: bad })).status, String(bad)).toBe(400)
+        expect((await send('ceremony/reply/post', { ceremony: bad, sealed: 'AAAA' })).status, String(bad)).toBe(400)
+      }
+      expect(calls.some(c => c.path === '/v1/join/approve')).toBe(false)
+    })
   })
 
   // ov-771: the sealed reply is read through the Worker, as a GET at the relay.

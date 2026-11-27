@@ -186,11 +186,15 @@ export function sealedRefusal(word: string): string {
 /// account that posted it, ov-778 R-113) was sent from the teammate's phone,
 /// not this person's, so the screen names them and asks for the code to be
 /// read off their screen.
-export function compareWords(grantedBy: string | null, cli = false): { title: string; detail: string } {
+export function compareWords(grantedBy: string | null, from: ReplyFrom = 'device'): { title: string; detail: string } {
   if (!grantedBy) {
+    if (from === 'runner') {
+      return { title: 'Does your runner’s terminal show this code?', detail: 'Your runner is waiting to be added. Check that its terminal shows the code below. If it doesn’t, select They Don’t Match and nothing is added.' } // platform copy: the join check
+    }
+    if (from === 'cli') return { title: 'Does the runner’s terminal show this code?', detail: 'Check that this code matches the code printed by the runner CLI.' } // platform copy: the browser enrollment check
     return {
-      title: 'Does your phone show this code?', // platform copy: the browser enrollment check, not runner data
-      detail: cli ? 'Check that this code matches the code printed by the runner CLI.' : 'Your phone sent its answer. Check that the code on its screen is the one below before you continue.', // platform copy: the browser enrollment check
+      title: 'Does your other device show this code?', // platform copy: the browser enrollment check, not runner data
+      detail: 'Your other device sent its answer. Check that the code on its screen is the one below before you continue.', // platform copy: the browser enrollment check
     }
   }
   return {
@@ -199,9 +203,28 @@ export function compareWords(grantedBy: string | null, cli = false): { title: st
   }
 }
 
+/// Who the reply being compared came from.
+export type ReplyFrom = 'device' | 'runner' | 'cli'
+
+/// What the page says when a joining runner’s code doesn’t match.
+export const JOIN_MISMATCH =
+  'The codes didn’t match, so Far Cooler added nothing here. If you ran the command on that computer, remove this browser there as its terminal says. Here’s a new command.'
+
+/// Why approving or removing a device didn’t work on a runner.
+export function approvalFailure(word: string, what: string, runner: string): string {
+  if (word === 'passkey_declined') return `Your passkey didn’t verify you, so nothing changed on ${runner}. Try again, and use your fingerprint, face or PIN.`
+  if (word === 'runner_too_old' || what === 'key_untrusted' || what === 'defensive_only') return `Far Cooler on ${runner} is too old to take this from a browser. Update it, then try again.`
+  if (what === 'not_admin' || what === 'not_yours' || what === 'not_owners_device') return `Only ${runner}’s owner or an admin can do this there.`
+  if (what === 'add_limit') return `This browser added as many devices to ${runner} as one may in a day. Try again tomorrow, or add it from ${runner}’s terminal.`
+  if (what === 'device_taken') return `${runner} already has this device, or removed it. Make a new passkey on the new device, then approve it again.`
+  if (what === 'no_tunnel') return `${runner} has no tunnel running, so a browser can’t reach it. Add it from ${runner}’s terminal first.`
+  if (word === 'closed') return `The connection to ${runner} dropped. Reconnect, then try again.`
+  return `${runner} didn’t make that change. Try again.`
+}
+
 /// What the page says when the codes don’t match.
 export const MISMATCH =
-  'The codes didn’t match, so Far Cooler kept nothing from that reply. If you didn’t just add this browser from your phone, someone else may have posted it. Waiting for another reply…'
+  'The codes didn’t match, so Far Cooler kept nothing from that reply. If you didn’t just approve this browser, someone else may have posted it. Waiting for another reply…'
 
 /// Why this browser couldn’t be put on the account’s device list.
 export function registerFailure(word: string): string {

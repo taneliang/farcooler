@@ -249,3 +249,25 @@ export async function askForCopy(rpId: string, ids: Uint8Array[], uv: boolean): 
   const handle = (credential.response as AuthenticatorAssertionResponse).userHandle
   return { id: new Uint8Array(credential.rawId), userHandle: handle ? new Uint8Array(handle) : null, prf: prfOf(credential) }
 }
+
+/// The passkey's signature over `challenge` with the person verified (a
+/// fingerprint, face or PIN, not only a touch): what approving or removing a
+/// device asks (ov-1490). No PRF here: a verified output can differ from the
+/// one this browser's keys came from. Throws `declined` or `failed`.
+export async function verifyWith(passkey: Passkey, rpId: string, challenge: Uint8Array): Promise<Signed> {
+  try {
+    const credential = (await navigator.credentials.get({
+      publicKey: {
+        challenge: challenge as Uint8Array<ArrayBuffer>,
+        rpId,
+        allowCredentials: [{ type: 'public-key', id: passkey.id as Uint8Array<ArrayBuffer> }],
+        userVerification: 'required',
+        timeout: 120_000,
+      },
+    })) as PublicKeyCredential
+    const response = credential.response as AuthenticatorAssertionResponse
+    return { authenticatorData: response.authenticatorData, clientDataJSON: response.clientDataJSON, signature: response.signature }
+  } catch (e) {
+    throw new Error(declined(e) ? 'declined' : 'failed')
+  }
+}

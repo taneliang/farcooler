@@ -57,7 +57,8 @@ export function parked(...ids: string[]): LegacyView {
 
 const VIEWS = {
   banners: parked('update', 'copy-note'),
-  screens: parked('status', 'enroll', 'compare', 'join', 'work'),
+  screens: parked('status', 'runner-add', 'enroll', 'compare', 'join', 'work'),
+  unenrolled: parked('side-unenrolled'),
   terminals: parked('workspace-link', 'terminal-list'),
   account: parked('bar-count', 'who', 'web-push', 'web-push-note', 'show-saved-copies', 'sign-out-form'),
   side: parked('workspace-side'),
@@ -144,7 +145,11 @@ function Sidebar({ state, store }: { state: ShellState; store: ShellStore }) {
           <span id="runner-health" role="status">{state.runner.health}</span>
           {state.runner.runtime && <span id="runtime-health">{state.runner.runtime}</span>}
         </p>
-        <button className="quiet link" id="add-runner" type="button" onClick={() => store.handlers.addRunner()}>Add Runner</button>
+        <div className="runner-tools">
+          <button className="quiet link" id="add-runner" type="button" onClick={() => store.handlers.addRunner()}>Add Runner</button>
+          <button className="quiet link" id="show-devices" type="button" aria-haspopup="dialog" onClick={() => store.handlers.devices()}>Devices</button>
+        </div>
+        <Legacy view={VIEWS.unenrolled} state={state} />
       </section>
       {state.spaces.length > 0 && <section className="rail-group">
         <h2 className="meta">Workspace</h2>
