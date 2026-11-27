@@ -291,7 +291,8 @@ impl Handler for RpcFactory {
     fn handle(&self, req: Request) -> impl std::future::Future<Output = Response> + Send {
         let session = self.session.clone();
         async move {
-            let compose_started = (req.method == "terminal.compose").then(std::time::Instant::now);
+            let compose_log = (req.method == "terminal.compose").then(|| crate::compose_log::ComposeLog::begin(
+                self.client_name.get().map(String::as_str), self.peer.client_id.as_deref()));
             let response = async {
                 let _request = crate::request_watchdog::Request::begin(&req.method);
                 let mut rpc = Rpc::new(self.service.clone(), self.watcher.clone(), crate::person_access::live_peer(&self.service.store, &self.peer), session.clone(), self.stop.clone(), self.push.clone(), self.attachment.clone());
@@ -315,20 +316,8 @@ impl Handler for RpcFactory {
                 }
                 rpc.handle(req).await
             }.await;
-            if let Some(started) = compose_started {
-                let outcome = match &response.outcome {
-                    Some(response::Outcome::Result(value)) => match &value.value {
-                        Some(result::Value::TerminalTold(told)) if told.queued => "queued",
-                        Some(result::Value::TerminalTold(_)) => "sent",
-                        _ => "unexpected_result",
-                    },
-                    Some(response::Outcome::Error(error)) if !error.what.is_empty() => &error.what,
-                    Some(response::Outcome::Error(error)) => farcooler_core::error::word_for(error.code),
-                    None => "missing_response",
-                };
-                tracing::info!(outcome, elapsed_ms = started.elapsed().as_millis() as u64,
-                    client = ?self.client_name.get().map(String::as_str).unwrap_or("unknown"),
-                    device = self.peer.client_id.as_deref().unwrap_or("local"), "terminal.compose");
+            if let Some(log) = compose_log {
+                log.answered(&response);
             }
             response
         }

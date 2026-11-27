@@ -448,18 +448,9 @@ pub fn page_available(page: &str, workspace: bool, ticket: bool) -> bool {
     }
 }
 
-/// Read the named orchestrator from the workspace's Plan reply.
-pub fn orchestrator(plan: &str) -> Option<String> {
-    let plan: serde_json::Value = serde_json::from_str(plan).ok()?;
-    let agent = plan.get("agents")?.as_array()?.iter().find(|a| a["role"] == "orchestrator")?;
-    agent["terminal"].as_str().filter(|id| !id.is_empty())
-        .or_else(|| agent["id"].as_str()?.strip_prefix("pane:").filter(|id| !id.is_empty()))
-        .map(str::to_owned)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{json, orchestrator, page_available};
+    use super::{json, page_available};
     use serde_json::{Value, json as value};
 
     fn context(page: &str) -> Value {
@@ -623,12 +614,5 @@ mod tests {
         let fallback = step(&unknown, &changed, value!({"kind": "present"}));
         assert!(fallback["side"].is_null());
         assert_eq!(fallback["focus"], "main");
-    }
-
-    #[test]
-    fn plan_names_an_explicit_terminal_or_a_pane_id() {
-        assert_eq!(orchestrator(r#"{"agents":[{"role":"orchestrator","terminal":"t","id":"pane:p"}]}"#).as_deref(), Some("t"));
-        assert_eq!(orchestrator(r#"{"agents":[{"role":"agent","terminal":"wrong"},{"role":"orchestrator","id":"pane:p"}]}"#).as_deref(), Some("p"));
-        assert_eq!(orchestrator(r#"{"agents":[{"role":"orchestrator","id":"native:123"}]}"#), None);
     }
 }

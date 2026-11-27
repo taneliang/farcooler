@@ -3,6 +3,10 @@ import type { WebRunner, WriterInput } from 'fc-web'
 export type { WriterInput } from 'fc-web'
 type Runner = Pick<WebRunner, 'terminal_writer_supported' | 'terminal_writer'>
 type Action = 'watch' | 'claim' | 'status' | 'take-over' | 'release'
+/// How soon a failed lease read is tried again, doubling up to the ceiling.
+const RETRY_MS = 2000
+const RETRY_CEILING_MS = 30_000
+
 interface State {
   writable: boolean
   label: string
@@ -20,6 +24,8 @@ export class TerminalWriter {
   private runner: Runner | null = null
   private supported = false
   private generation = 0
+  private retry = 0
+  private retryMs = RETRY_MS
   private readonly pending = new WeakMap<Runner, Promise<void>>()
 
   constructor(
@@ -47,9 +53,12 @@ export class TerminalWriter {
     this.runner = runner
     this.supported = runner?.terminal_writer_supported() ?? false
     this.generation++
+    clearTimeout(this.retry)
+    this.retryMs = RETRY_MS
     this.bar.hidden = true
     if (runner || previousSupported) {
-      this.setInput(this.supported ? 'claiming' : 'viewing')
+      // A runner with no lease for this grant answers a write itself, in words.
+      this.setInput(!runner ? 'viewing' : this.supported ? 'claiming' : 'writable')
     }
     if (previous && previousSupported && this.isConnected(previous)) {
       this.enqueue(previous, async () => {
@@ -73,9 +82,11 @@ export class TerminalWriter {
     this.enqueue(runner, async () => {
       const current = () => this.generation === generation && this.runner === runner && this.isConnected(runner)
       if (!current()) return
+      clearTimeout(this.retry)
       try {
         const view: State | null = JSON.parse(await runner.terminal_writer(this.terminal, action))
         if (!current()) return
+        this.retryMs = RETRY_MS
         if (view) this.draw(runner, view)
         else {
           this.supported = false
@@ -85,7 +96,12 @@ export class TerminalWriter {
       } catch (e) {
         if (!current()) return
         const reason = await this.failure(e as Error)
-        if (current()) this.draw(runner, { writable: false, label: '', reason, action: null })
+        if (!current()) return
+        this.draw(runner, { writable: false, label: '', reason, action: null })
+        // Nothing else reads a lease that hasn't changed, so one failed read
+        // would leave the pane read-only. A takeover is never repeated by itself.
+        this.retry = window.setTimeout(() => this.request(runner, action === 'watch' ? 'watch' : 'status'), this.retryMs)
+        this.retryMs = Math.min(this.retryMs * 2, RETRY_CEILING_MS)
       }
     })
   }

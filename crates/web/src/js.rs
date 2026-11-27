@@ -60,14 +60,14 @@ pub fn composer_input(input: &str, sending: bool, connected: bool, has_draft: bo
 
 #[wasm_bindgen(js_name = terminalInputChange)]
 pub fn terminal_input_change(previous: &str, next: &str, buffered: bool) -> Result<String, JsValue> {
-    let action = match terminal_input::writer_changed(writer_input(previous)?, writer_input(next)?, buffered) {
-        BufferedKeys::Keep => "keep",
-        BufferedKeys::Wait => "wait",
-        BufferedKeys::Flush => "flush",
-        BufferedKeys::Clear => "clear",
-        BufferedKeys::Refused => "writer_keys_refused",
-    };
-    Ok(action.into())
+    let action = terminal_input::writer_changed(writer_input(previous)?, writer_input(next)?, buffered);
+    let decision = serde_json::json!({
+        "changed": !matches!(action, BufferedKeys::Keep),
+        "flush": matches!(action, BufferedKeys::Flush),
+        "discard": matches!(action, BufferedKeys::Clear | BufferedKeys::Refused),
+        "problem": matches!(action, BufferedKeys::Refused).then_some("writer_keys_refused"),
+    });
+    Ok(decision.to_string())
 }
 
 #[wasm_bindgen(js_name = terminalKeyAction)]

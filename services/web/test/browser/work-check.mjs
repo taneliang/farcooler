@@ -257,6 +257,25 @@ try {
     assert.equal(await rpc(page, 'status'), undefined)
   })
 
+  // One read can time out while the runner is stalled. With no poll behind it,
+  // the pane has to ask again by itself.
+  await test('a pane recovers from one failed lease read', async page => {
+    await page.getByText('Writer', { exact: true }).waitFor()
+    await page.locator('[data-attached=true]:visible').waitFor()
+    let failed = false
+    await page.route('**/writer', async route => {
+      if (!failed && JSON.parse(route.request().postData()).action === 'status') {
+        failed = true
+        return route.fulfill({ body: 'not an answer' })
+      }
+      await route.fallback()
+    })
+    await page.evaluate(() => window.writerChanged('lost-agent') ?? window.writerChanged('shell'))
+    await page.getByText('Writer', { exact: true }).waitFor({ state: 'detached' })
+    await page.getByText('Writer', { exact: true }).waitFor({ timeout: 8000 })
+    assert.equal(failed, true)
+  })
+
   await test('read-only grant explains why terminal commands are unavailable', async page => {
     await page.getByText('Read-only', { exact: true }).waitFor()
     await page.locator('#pane-note').filter({ hasText: /This browser has read-only access/ }).waitFor()

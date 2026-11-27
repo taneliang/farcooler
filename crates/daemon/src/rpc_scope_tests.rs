@@ -211,21 +211,21 @@ fn changes_status_scans_run_on_a_worker() {
     }
 }
 
+#[derive(Clone, Default)]
+struct Log(Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for Log {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+}
+
 #[tokio::test]
 async fn ov_1499_compose_logs_client_outcome_and_milliseconds() {
     use tracing::instrument::WithSubscriber;
-
-    #[derive(Clone, Default)]
-    struct Log(Arc<std::sync::Mutex<Vec<u8>>>);
-
-    impl std::io::Write for Log {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(bytes);
-            Ok(bytes.len())
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
-    }
 
     let dir = tempfile::tempdir().unwrap();
     let svc = Arc::new(Service::open_in(dir.path().to_path_buf()).await.unwrap());
@@ -256,4 +256,45 @@ async fn ov_1499_compose_logs_client_outcome_and_milliseconds() {
         let elapsed = row.split("elapsed_ms=").nth(1).unwrap().split_whitespace().next().unwrap();
         assert!(elapsed.parse::<u64>().is_ok(), "{row}");
     }
+}
+
+/// A connection that ends abandons what is still running after its drain
+/// deadline, by dropping it. A compose lost that way is still recorded.
+#[tokio::test]
+async fn ov_1499_an_abandoned_compose_is_logged() {
+    use farcooler_protocol::v1::{AgentPrompt, TerminalIntent, request};
+    use tracing::instrument::WithSubscriber;
+
+    let dir = tempfile::tempdir().unwrap();
+    let svc = Arc::new(Service::open_in(dir.path().to_path_buf()).await.unwrap());
+    let host = uuid::Uuid::now_v7();
+    let root = svc.store.create_repository_root(host, "/repos/asks", 1_000).unwrap();
+    let repo = svc.store.create_repository(host, root.id, "repo", "/repos/asks/.git", "").unwrap();
+    let tree = svc.store.create_worktree(repo.id, "main", "/repos/asks", true).unwrap();
+    let terminal = svc.store.create_terminal(tree.id, "pane", "claude", TerminalIntent::Running, 80, 24).unwrap().id;
+    // Another write holds the pane, so the compose is received and waits.
+    let sessions = svc.sessions();
+    let other = sessions.open(None);
+    let (push, _events) = farcooler_transport::push_queue(1024);
+    let _held = sessions.terminal_writers.write(terminal, &other, &push, None).await.unwrap();
+
+    let factory = RpcFactory::new(svc.clone(), crate::watch::Watcher::new(svc.clone()),
+        Arc::new(tokio::sync::Notify::new()), Peer { client_id: None, scope: Scope::HostAdmin });
+    let mut request = farcooler_transport::request("terminal.compose");
+    request.payload = Some(request::Payload::AgentPrompt(AgentPrompt {
+        terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
+        ..Default::default()
+    }));
+    let log = Log::default();
+    let subscriber = tracing_subscriber::fmt().with_ansi(false)
+        .with_writer({ let log = log.clone(); move || log.clone() }).finish();
+    async {
+        let waited = tokio::time::timeout(std::time::Duration::from_millis(200), factory.handle(request)).await;
+        assert!(waited.is_err(), "the compose was still running when it was dropped");
+    }.with_subscriber(subscriber).await;
+
+    let logged = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
+    let rows: Vec<_> = logged.lines().filter(|line| line.contains("terminal.compose")).collect();
+    assert_eq!(rows.len(), 1, "{logged}");
+    assert!(rows[0].contains("outcome=\"abandoned\""), "{logged}");
 }

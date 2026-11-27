@@ -179,6 +179,7 @@ impl Runner {
         Self { session, writer_access, link, _watching: watching, _writer_events: stop }
     }
 
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // the bindings call it
     pub(crate) fn on_terminal_writer_change(&self, listener: Option<WriterListener>) {
         self.writer_access.borrow_mut().listener = listener;
     }

@@ -299,7 +299,7 @@ impl Writer {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{Action, Uuid, event};
     use crate::sessions::Sessions;
     use farcooler_transport::{PushReceiver, push_queue};
     use std::time::Duration;

@@ -102,17 +102,18 @@ export class PaneView implements Pane<WebRunner> {
   }
 
   setInput(input: WriterInput): void {
-    const action = terminalInputChange(this.input, input, this.typedEarlyBytes > 0)
-    if (action === 'keep') return
+    const change: { changed: boolean; flush: boolean; discard: boolean; problem: string | null } =
+      JSON.parse(terminalInputChange(this.input, input, this.typedEarlyBytes > 0))
+    if (!change.changed) return
     this.input = input
     this.term.options.disableStdin = input === 'viewing'
-    if (action === 'flush') {
+    if (change.flush) {
       this.refit(true)
       this.flushEarly()
     } else {
-      if (action !== 'wait') this.clearEarly()
+      if (change.discard) this.clearEarly()
       this.lease.release()
-      if (action === 'writer_keys_refused') this.onProblem(action)
+      if (change.problem) this.onProblem(change.problem)
     }
   }
 

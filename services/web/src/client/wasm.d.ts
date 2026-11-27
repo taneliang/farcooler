@@ -10,7 +10,9 @@ declare module 'fc-web' {
   type WriterInput = 'claiming' | 'writable' | 'viewing'
   /// The composer projection, as JSON with can_send and problem fields.
   export function composerInput(input: WriterInput, sending: boolean, connected: boolean, hasDraft: boolean): string
-  export function terminalInputChange(previous: WriterInput, next: WriterInput, buffered: boolean): 'keep' | 'wait' | 'flush' | 'clear' | 'writer_keys_refused'
+  /// What a pane does with its held keys, as JSON with changed, flush,
+  /// discard and problem fields.
+  export function terminalInputChange(previous: WriterInput, next: WriterInput, buffered: boolean): string
   export function terminalKeyAction(input: WriterInput, attaching: boolean, bufferedBytes: number, keyBytes: number): 'ignore' | 'buffer' | 'still_attaching' | 'write'
   /// A new ceremony's reply key, as its secret half. Kept while the code on
   /// screen is up, and given to `makeOffer` and `openReply`.
@@ -65,7 +67,6 @@ declare module 'fc-web' {
   export function planView(request: string): string
   export function workspacePageAvailable(page: string, workspace: boolean, ticket: boolean): boolean
   export function workspaceLayout(request: string): string
-  export function workspaceOrchestrator(plan: string): string | undefined
   export function runnerHealth(runner: string, connection: string): string
   export function needsAttention(count: number): string | undefined
   export function needsYouView(request: string): string
