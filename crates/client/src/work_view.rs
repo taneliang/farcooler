@@ -12,6 +12,9 @@ pub struct Inventory {
     pub repositories: Vec<Choice>,
     pub worktrees: Vec<Worktree>,
     pub terminals: Vec<Terminal>,
+    /// `Host.agents_found`; `None` from a runner that didn't say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agents: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -51,6 +54,9 @@ pub struct Terminal {
     pub state: String,
     pub columns: u32,
     pub rows: u32,
+    /// `Terminal.restart_refusal`: the runner's word against this caller.
+    #[serde(default, rename = "restartRefusal", skip_serializing_if = "Option::is_none")]
+    pub restart_refusal: Option<String>,
 }
 
 #[derive(Default, Deserialize)]
@@ -63,6 +69,14 @@ pub struct Selection {
     pub worktree: Option<String>,
     pub terminal: Option<String>,
     pub stream_ended: bool,
+    /// The visible terminal this browser watches without the writer lease.
+    pub viewing: Option<Viewing>,
+}
+
+#[derive(Deserialize)]
+pub struct Viewing {
+    pub terminal: String,
+    pub reason: String,
 }
 
 pub fn inventory(
@@ -104,6 +118,7 @@ pub fn inventory(
             workspace: w.workspace_id.as_deref().and_then(id),
         })).collect(),
         terminals: terminals.into_iter().filter_map(terminal).collect(),
+        agents: None,
     }
 }
 
@@ -125,6 +140,7 @@ pub fn terminal(t: wire::Terminal) -> Option<Terminal> {
         rows: t.rows,
         agent,
         orchestrator,
+        restart_refusal: t.restart_refusal,
     })
 }
 
@@ -132,38 +148,95 @@ pub fn terminal(t: wire::Terminal) -> Option<Terminal> {
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum Intent {
     Create { repository: Uuid, workspace: Option<Uuid>, name: String, branch: String },
-    Start { worktree: Uuid, preset: Preset },
+    Start {
+        worktree: Uuid,
+        preset: Preset,
+        /// One of the preset's models, or empty for the agent's own default.
+        #[serde(default)]
+        model: String,
+    },
     Rename { terminal: Uuid, name: String },
     Close { terminal: Uuid },
+    /// Bring back a terminal whose process exited, failed or was lost.
     Restart { terminal: Uuid },
+    /// Restart a workspace's orchestrator, running or not.
+    RestartOrchestrator { terminal: Uuid },
 }
 
+/// What New Terminal can open. The agents and their models are the Mac
+/// app's (`Agents.all` in Composer.swift; a test holds the two together).
 #[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Preset {
     Shell,
-    Codex,
     Claude,
+    Codex,
+    Cursor,
 }
 
 impl Preset {
+    pub const ALL: [Preset; 4] = [Self::Shell, Self::Claude, Self::Codex, Self::Cursor];
+
     pub fn label(self) -> &'static str {
-        match self { Self::Shell => "Shell", Self::Codex => "Codex", Self::Claude => "Claude Code" }
+        match self { Self::Shell => "Shell", Self::Codex => "Codex", Self::Claude => "Claude Code", Self::Cursor => "Cursor" }
     }
 
     pub fn command(self) -> &'static str {
-        match self { Self::Shell => "shell", Self::Codex => "codex", Self::Claude => "claude" }
+        match self { Self::Shell => "shell", Self::Codex => "codex", Self::Claude => "claude", Self::Cursor => "cursor" }
+    }
+
+    /// A short list, not an exhaustive one; the empty model is the agent's
+    /// own default.
+    pub fn models(self) -> &'static [&'static str] {
+        match self {
+            Self::Shell => &[],
+            Self::Claude => &["opus", "sonnet", "haiku"],
+            Self::Codex => &["gpt-5.6-sol", "gpt-5.6-sol-high"],
+            Self::Cursor => &["auto", "sonnet-4.5", "gpt-5"],
+        }
+    }
+
+    /// The program `Host.agents_found` names it by.
+    fn program(self) -> Option<&'static str> {
+        match self { Self::Shell => None, Self::Cursor => Some("cursor-agent"), _ => Some(self.command()) }
+    }
+
+    /// The `command_preset` the runner launches, `agent` or `agent:model`;
+    /// `None` for a model this agent doesn't list.
+    pub fn launch(self, model: &str) -> Option<String> {
+        match model {
+            "" => Some(self.command().into()),
+            model if self.models().contains(&model) => Some(format!("{}:{model}", self.command())),
+            _ => None,
+        }
+    }
+
+    fn choice(self, found: Option<&[String]>) -> Value {
+        let unavailable = self.program().is_some_and(|program| found.is_some_and(|f| !f.iter().any(|p| p == program)));
+        let models: Vec<Value> = if self.models().is_empty() { Vec::new() } else {
+            std::iter::once(json!({"id": "", "label": "Default Model"}))
+                .chain(self.models().iter().map(|m| json!({"id": m, "label": crate::plan_view::words::model(m)})))
+                .collect()
+        };
+        let label = if unavailable { format!("{} · Not Installed", self.label()) } else { self.label().into() };
+        json!({"id": self.command(), "label": label, "unavailable": unavailable, "models": models})
     }
 }
+
+const RESTART_ORCHESTRATOR: &str = "Restart Orchestrator";
 
 pub const TAKE_OVER_TERMINAL: &str = "Take Over";
 
 pub const READ_ONLY: &str = "This browser has read-only access to the runner. A device with control access can open the terminal and make changes.";
 
+const NOT_YOURS: &str = "Your account can’t manage this terminal on the runner.";
+const NOT_LEAD: &str = "Only this workspace’s lead or the runner’s owner can restart its orchestrator.";
+
 pub fn failure(word: &str, code: &str, what: &str) -> &'static str {
     match (word, code, what) {
         (_, "scope-denied", _) => READ_ONLY,
-        (_, "not-yours", _) => "Your account can’t manage this terminal on the runner.",
+        (_, "not-yours", "not_lead") => NOT_LEAD,
+        (_, "not-yours", _) => NOT_YOURS,
         (_, "not-found", _) => "The selected worktree or terminal is no longer on the runner.",
         (_, "branch-exists", _) => "That branch already exists. Pick a different branch name or select its worktree.",
         (_, "worktree-exists", _) => "A worktree already uses that name. Choose it from the list or enter another name.",
@@ -182,7 +255,7 @@ pub fn failure(word: &str, code: &str, what: &str) -> &'static str {
 }
 
 pub fn view(inventory: &Inventory, selection: &Selection) -> Value {
-    let Inventory { scope, workspaces, repositories, worktrees, terminals } = inventory;
+    let Inventory { scope, workspaces, repositories, worktrees, terminals, agents } = inventory;
     // Control grants terminal operations. Input ownership comes from the
     // runner's separate terminal.writer response.
     let control = matches!(scope.as_str(), "control" | "host_admin");
@@ -242,13 +315,38 @@ pub fn view(inventory: &Inventory, selection: &Selection) -> Value {
     let terminal_rows: Vec<_> = visible.into_iter().map(|t| {
         let running = t.state == "running";
         let is_seat = seat.is_some_and(|s| s.id == t.id);
-        let recover = if t.state == "lost" && control {
+        let stopped = matches!(t.state.as_str(), "exited" | "error" | "lost");
+        // Why a restart is off for this person, here: their grant, then the
+        // runner's own word on them.
+        let refused: Option<String> = if !control {
+            Some(READ_ONLY.into())
+        } else {
+            t.restart_refusal.as_deref().map(|what| failure("", "not-yours", what).into())
+        };
+        // The Mac's offers (`LostPane`, the orchestrator's menu): Restart for
+        // a stopped terminal, and for the orchestrator while it runs.
+        let recover = if t.state == "lost" {
             json!({
                 "action": "restart", "label": "Recover Terminal",
                 "sidebarLabel": "Recover", "sidebarName": format!("Recover {}", t.title),
+                "disabled": refused,
+            })
+        } else if stopped {
+            json!({
+                "action": "restart", "label": if t.orchestrator { RESTART_ORCHESTRATOR } else { "Restart Terminal" },
+                "disabled": refused,
             })
         } else if running && readable && selected.is_some_and(|s| s.id == t.id) && selection.stream_ended {
             json!({"action": "reattach", "label": "Reconnect Terminal"})
+        } else if is_seat {
+            // Another client writing to it would lose what runs under them.
+            let watching = selection.viewing.as_ref().filter(|v| v.terminal == t.id)
+                .map(|v| format!("{} Only the writer can restart it.", v.reason));
+            json!({
+                "action": "restart_orchestrator", "label": RESTART_ORCHESTRATOR,
+                "confirm": "Restart the orchestrator? What it’s doing now stops. Claude Code and Codex return to their conversation.",
+                "disabled": refused.or(watching),
+            })
         } else {
             Value::Null
         };
@@ -266,6 +364,10 @@ pub fn view(inventory: &Inventory, selection: &Selection) -> Value {
             "attach": readable && running,
             "attachNote": if !readable { READ_ONLY } else if t.state == "lost" {
                 "This terminal’s process was lost. Recover it to continue."
+            } else if t.state == "exited" {
+                "This terminal’s process ended. Restart it to continue."
+            } else if t.state == "error" {
+                "The runner couldn’t start this terminal. Restart it to try again."
             } else if !running { "This terminal is currently unavailable." } else { "" },
             "access": if readable { "" } else { "Read-only" },
             "rename": control.then_some(json!({"label": "Rename", "prompt": "Terminal name"})),
@@ -307,15 +409,17 @@ pub fn view(inventory: &Inventory, selection: &Selection) -> Value {
         "notice": notice,
         "missingTerminal": selected.is_none() && selection.terminal.is_some(),
         "labels": {
-            "open": "Start Work", "link": "Workspace Link", "repository": "Repository", "worktree": "Worktree",
+            "open": "New Terminal", "link": "Workspace Link", "repository": "Repository", "worktree": "Worktree",
             "close": "Done", "refresh": "Refresh", "review": (readable && chosen_tree.is_some()).then_some("Review Changes"), "emptyTree": "No worktrees available",
         },
-        "create": (control && repository.is_some() && !missing_workspace).then_some(json!({
+        "create": (repository.is_some() && !missing_workspace).then(|| json!({
             "open": "New Worktree", "submit": "Create Worktree", "name": "Worktree Name", "branch": "Branch",
+            "disabled": (!control).then_some(READ_ONLY),
         })),
-        "start": (control && chosen_tree.is_some()).then(|| json!({
-            "preset": "Terminal Type", "submit": "Start Terminal",
-            "presets": ([Preset::Shell, Preset::Codex, Preset::Claude].map(|preset| json!({"id": preset.command(), "label": preset.label()}))),
+        "start": chosen_tree.is_some().then(|| json!({
+            "preset": "Terminal Type", "model": "Model", "submit": "Start Terminal",
+            "presets": Preset::ALL.map(|preset| preset.choice(agents.as_deref())),
+            "disabled": (!control).then_some(READ_ONLY),
         })),
     })
 }

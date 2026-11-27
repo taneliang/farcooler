@@ -34,6 +34,8 @@ export class TerminalWriter {
     private readonly setInput: (input: WriterInput) => void,
     private readonly failure: (error: Error) => string | Promise<string>,
     private readonly isConnected: (runner: Runner) => boolean,
+    /** Told why this browser only watches, or null while it doesn't. */
+    private readonly watching: (reason: string | null) => void = () => {},
   ) {
     this.bar.className = 'terminal-writer'
     this.bar.hidden = true
@@ -56,6 +58,7 @@ export class TerminalWriter {
     clearTimeout(this.retry)
     this.retryMs = RETRY_MS
     this.bar.hidden = true
+    this.watching(null)
     if (runner || previousSupported) {
       // A runner with no lease for this grant answers a write itself, in words.
       this.setInput(!runner ? 'viewing' : this.supported ? 'claiming' : 'writable')
@@ -108,6 +111,7 @@ export class TerminalWriter {
 
   private draw(runner: Runner, view: State): void {
     this.setInput(view.writable ? 'writable' : 'viewing')
+    this.watching(view.writable ? null : view.reason)
     if (this.label.textContent !== view.label) this.label.textContent = view.label
     if (this.reason.textContent !== view.reason) this.reason.textContent = view.reason
     this.button.hidden = !view.action

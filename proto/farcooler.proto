@@ -1913,6 +1913,15 @@ message Terminal {
   // the names here are cleaned and cut and no longer match what the rows
   // say. Empty from a runner before it (ov-619).
   repeated string subagent_ids = 50;
+
+  // Why this caller's `terminal.restart` of this terminal would be refused
+  // for who they are, in that refusal's own word (ov-1491): `not_lead` for
+  // another's orchestrator, `not_yours` for another person's lane or rep. So
+  // an app disables Restart and says why. Per caller, as `activity` is, and
+  // set on `terminal.list` and a terminal reply, never on an event. Absent
+  // when the runner would take it, and from a runner before it. Scope is not
+  // in it: a caller below `control` restarts nothing.
+  optional string restart_refusal = 51;
 }
 
 // The person a pane's Claude login belongs to. Names them rather than

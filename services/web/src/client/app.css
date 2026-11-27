@@ -289,6 +289,9 @@ button.danger { color: var(--danger); }
 .terminal-access { padding: 1px 8px; border: 1px solid var(--rule); border-radius: 10px; }
 .terminal-actions, .work-commands { display: flex; flex-wrap: wrap; gap: 6px; }
 .terminal-actions button { padding: 5px 10px; font-size: 13px; }
+.terminal-reason { flex: 1 0 100%; margin: 0; font-size: 13px; color: var(--text-2); overflow-wrap: anywhere; }
+:is(.terminal-actions, .lost-terminal, .start-work, .recovery) button:disabled { opacity: .45; cursor: default; }
+.start-work select:disabled { opacity: .6; }
 .start-work { width: min(460px, calc(100% - 32px)); max-width: none; box-sizing: border-box; border: 1px solid var(--rule); border-radius: 16px; padding: 16px; background: var(--bg); color: var(--text); }
 .start-work::backdrop { background: rgb(0 0 0 / .35); }
 .start-work header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 12px; }

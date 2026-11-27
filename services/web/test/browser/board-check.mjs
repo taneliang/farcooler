@@ -160,7 +160,7 @@ try {
         label.top < bounds.top || label.bottom > bounds.bottom ||
         label.left < sidebar.left || label.right > sidebar.right || button.scrollWidth > button.clientWidth
     }).map(button => button.textContent)), [], `section labels fit at ${width}px`)
-    assert.deepEqual(await filledButtons(tab), ['#show-start-work Start Work'], `filled actions at ${width}px`)
+    assert.deepEqual(await filledButtons(tab), ['#show-start-work New Terminal'], `filled actions at ${width}px`)
     await tab.context().close()
   }
   console.log('PASS full view labels and one filled action at 320, 641 and 1280px')

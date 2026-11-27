@@ -5,6 +5,7 @@ import { optionLabel } from './scope'
 
 interface Choice { id: string; label: string }
 interface Prompt { label: string; prompt: string }
+interface Preset extends Choice { unavailable: boolean; models: Choice[] }
 
 export interface WorkTerminal {
   id: string
@@ -20,7 +21,15 @@ export interface WorkTerminal {
   attachNote: string
   rename: Prompt | null
   close: Prompt | null
-  recover: { action: 'restart' | 'reattach'; label: string; sidebarLabel?: string; sidebarName?: string } | null
+  recover: {
+    action: 'restart' | 'restart_orchestrator' | 'reattach'
+    label: string
+    sidebarLabel?: string
+    sidebarName?: string
+    confirm?: string
+    /** Why it's off here. */
+    disabled?: string | null
+  } | null
 }
 
 export interface WorkView {
@@ -45,8 +54,8 @@ export interface WorkView {
     emptyTree: string
     review?: string | null
   }
-  create: { open: string; submit: string; name: string; branch: string } | null
-  start: { preset: string; submit: string; presets: Choice[] } | null
+  create: { open: string; submit: string; name: string; branch: string; disabled: string | null } | null
+  start: { preset: string; model: string; submit: string; presets: Preset[]; disabled: string | null } | null
 }
 
 interface Selection {
@@ -56,13 +65,16 @@ interface Selection {
   worktree?: string | null
   terminal?: string | null
   streamEnded?: boolean
+  viewing?: Viewing
 }
+
+interface Viewing { terminal: string; reason: string }
 
 type Intent =
   | { action: 'create'; repository: string | null; workspace: string | null; name: string; branch: string }
-  | { action: 'start'; worktree: string | null; preset: string }
+  | { action: 'start'; worktree: string | null; preset: string; model: string }
   | { action: 'rename'; terminal: string; name: string }
-  | { action: 'close' | 'restart'; terminal: string }
+  | { action: 'close' | 'restart' | 'restart_orchestrator'; terminal: string }
 
 interface WorkRunner {
   work_inventory(): Promise<string>
@@ -114,10 +126,14 @@ function follow(event: MouseEvent, run: () => void): void {
   run()
 }
 
-function choices(select: HTMLSelectElement, items: Choice[], chosen?: string | null): void {
+function choices(select: HTMLSelectElement, items: (Choice & { unavailable?: boolean })[], chosen?: string | null): void {
   const signature = JSON.stringify(items)
   if (select.dataset.choices !== signature) {
-    select.replaceChildren(...items.map(({ id, label }) => new Option(label, id)))
+    select.replaceChildren(...items.map(({ id, label, unavailable }) => {
+      const option = new Option(label, id)
+      option.disabled = !!unavailable
+      return option
+    }))
     select.dataset.choices = signature
   }
   if (chosen !== undefined) select.value = chosen ?? ''
@@ -140,6 +156,7 @@ export function mountWork(options: Options) {
   const repo = get<HTMLSelectElement>('work-repository')
   const tree = get<HTMLSelectElement>('work-worktree')
   const preset = get<HTMLSelectElement>('work-preset')
+  const model = get<HTMLSelectElement>('work-model')
   const workspaceLink = get<HTMLAnchorElement>('workspace-link')
   const workNote = get('work-note')
   const start = get<HTMLButtonElement>('work-start')
@@ -150,7 +167,7 @@ export function mountWork(options: Options) {
   const close = get<HTMLButtonElement>('terminal-close')
   const recover = get<HTMLButtonElement>('terminal-recover')
   const manage = get('terminal-manage')
-  const mutationControls = [repo, tree, preset, create, start, newTree, refreshButton, rename, close, recover]
+  const mutationControls = [repo, tree, preset, model, create, start, newTree, refreshButton, rename, close, recover]
   let inventory = options.inventory
   let selection: Selection = { preferredWorkspace: options.prefer(), ...fromUrl() }
   let view: WorkView | undefined
@@ -164,19 +181,43 @@ export function mountWork(options: Options) {
   let drawnTerminal: string | null = null
   let replaced: string | undefined
   const ended = new Set<string>()
+  let viewing: Viewing | undefined
 
+  // Not twice: the dialog's disabled controls may say the same sentence.
+  const noteShows = (words: string) => !!words && dialog.open && words !== get('work-reason').textContent
   const notify = (words: string) => {
-    workNote.hidden = !words || !dialog.open
     workNote.textContent = words
+    workNote.hidden = !noteShows(words)
     options.note(words)
+  }
+
+  // A control the view turned off says so in `data-off`, and stays off
+  // when a command in flight finishes.
+  const off = (control: HTMLElement) => control.dataset.off === 'true'
+  const turn = (control: HTMLButtonElement | HTMLSelectElement | HTMLInputElement, reason?: string | null) => {
+    control.dataset.off = String(!!reason)
+    control.disabled = busy || !!reason
   }
 
   function lock(on: boolean): void {
     busy = on
-    for (const control of mutationControls) control.disabled = on
-    for (const button of lostList.querySelectorAll('button')) button.disabled = on
+    for (const control of mutationControls) control.disabled = on || off(control)
+    for (const button of lostList.querySelectorAll('button')) button.disabled = on || off(button)
     shell.set({ busy: on })
     dialog.setAttribute('aria-busy', String(on))
+  }
+
+  function why(id: string, reason?: string | null): void {
+    const line = get(id)
+    line.textContent = reason ?? ''
+    line.hidden = !reason
+  }
+
+  /** The chosen agent's models; a shell has none. */
+  function drawModels(): void {
+    const models = view?.start?.presets.find(p => p.id === preset.value)?.models ?? []
+    get('work-model-row').hidden = models.length === 0
+    choices(model, models)
   }
 
   function navigate(next: Selection): void {
@@ -199,7 +240,7 @@ export function mountWork(options: Options) {
   async function project(open: boolean, historyMode?: 'pushState' | 'replaceState', replace?: string): Promise<WorkTerminal | undefined> {
     if (!inventory) return
     const revision = ++drawId
-    const next = JSON.parse(await options.project(inventory, JSON.stringify(selection))) as WorkView
+    const next = JSON.parse(await options.project(inventory, JSON.stringify({ ...selection, viewing }))) as WorkView
     if (disposed || revision !== drawId) return
     view = next
     const terminal = next.terminals.find(t => t.id === next.terminal)
@@ -239,7 +280,7 @@ export function mountWork(options: Options) {
       startWork: () => {
         if (disposed || dialog.open) return
         dialog.showModal()
-        workNote.hidden = !workNote.textContent
+        workNote.hidden = !noteShows(workNote.textContent ?? '')
       },
     })
     action(get('work-review'), options.review ? view.labels.review ?? undefined : undefined, () => {
@@ -251,7 +292,10 @@ export function mountWork(options: Options) {
       form.hidden = !form.hidden
       if (!form.hidden) get('work-name').focus()
     })
-    if (!view.create) form.hidden = true
+    if (!view.create || view.create.disabled) form.hidden = true
+    turn(newTree, view.create?.disabled)
+    turn(create, view.create?.disabled)
+    why('work-reason', view.start?.disabled ?? view.create?.disabled)
     if (view.create) {
       get('work-name-label').textContent = view.create.name
       get('work-branch-label').textContent = view.create.branch
@@ -260,9 +304,12 @@ export function mountWork(options: Options) {
     get('work-start-fields').hidden = !view.start
     if (view.start) {
       get('work-preset-label').textContent = view.start.preset
+      get('work-model-label').textContent = view.start.model
       choices(preset, view.start.presets)
+      drawModels()
+      for (const control of [preset, model, start]) turn(control, view.start.disabled)
       action(start, view.start.submit, () => {
-        void send({ action: 'start', worktree: view.worktree, preset: preset.value })
+        void send({ action: 'start', worktree: view.worktree, preset: preset.value, model: model.value })
       })
     }
     const focused = list.contains(document.activeElement) ? document.activeElement as HTMLElement : null
@@ -308,7 +355,11 @@ export function mountWork(options: Options) {
           button.textContent = t.recover.sidebarLabel ?? ''
           button.setAttribute('aria-label', t.recover.sidebarName ?? '')
           button.dataset.terminal = t.id
-          button.disabled = busy
+          turn(button, t.recover.disabled)
+          if (t.recover.disabled) {
+            button.title = t.recover.disabled
+            button.setAttribute('aria-description', t.recover.disabled)
+          }
           button.onclick = () => void send({ action: 'restart', terminal: t.id })
           row.append(button)
         }
@@ -347,12 +398,24 @@ export function mountWork(options: Options) {
     action(close, terminal?.close?.label, () => {
       if (terminal?.close && window.confirm(terminal.close.prompt)) void send({ action: 'close', terminal: terminal.id })
     })
-    shell.set({ terminalLost: !!terminal?.recover })
     action(recover, terminal?.recover?.label, () => {
-      if (!terminal?.recover) return
-      if (terminal.recover.action === 'restart') void send({ action: 'restart', terminal: terminal.id })
-      else void refresh(true)
+      const offer = terminal?.recover
+      if (!offer) return
+      if (offer.action === 'reattach') void refresh(true)
+      else if (!offer.confirm || window.confirm(offer.confirm)) void send({ action: offer.action, terminal: terminal.id })
     })
+    turn(recover, terminal?.recover?.disabled)
+    // Restarting a running orchestrator interrupts it, and a button that's off
+    // does nothing: neither is the view's filled action, nor a warning.
+    const interrupts = terminal?.recover?.action === 'restart_orchestrator' && terminal.live
+    const loud = !!terminal?.recover && !interrupts && !terminal.recover.disabled
+    recover.classList.toggle('primary', loud)
+    recover.classList.toggle('quiet', !loud)
+    get('terminal-recovery').classList.toggle('calm', interrupts)
+    shell.set({ terminalLost: loud })
+    why('terminal-reason', terminal?.recover?.disabled)
+    // The pane under the bar may be saying it already; the button still reads it.
+    if (terminal && terminal.recover?.disabled === terminal.attachNote) get('terminal-reason').hidden = true
     // The pane renders Rust's empty and attachment notices in the workspace.
     const paneNotice = options.navigation && !view.missingTerminal && view.workspace && terminal?.recover?.action !== 'reattach'
     notify(paneNotice ? '' : view.notice || terminal?.attachNote || '')
@@ -383,13 +446,14 @@ export function mountWork(options: Options) {
     if (!runner || busy || disposed) return
     const navigation = navigationId
     const destination = { workspace: view?.workspace, worktree: view?.worktree }
-    const pushHistory = intent.action === 'start' || (intent.action === 'restart' && intent.terminal !== view?.terminal)
+    const restarts = intent.action === 'restart' || intent.action === 'restart_orchestrator'
+    const pushHistory = intent.action === 'start' || (restarts && intent.terminal !== view?.terminal)
     lock(true)
     notify('')
     try {
       const id = await runner.work_intent(JSON.stringify(intent))
       if (disposed) return
-      if (intent.action === 'close' || intent.action === 'restart') replaced = intent.terminal
+      if (intent.action === 'close' || restarts) replaced = intent.terminal
       if (navigation !== navigationId) {
         await refresh()
         return
@@ -402,6 +466,7 @@ export function mountWork(options: Options) {
           break
         case 'start':
         case 'restart':
+        case 'restart_orchestrator':
           if (intent.action === 'start') options.started()
           selection = { workspace: destination.workspace, terminal: id }
           if (dialog.open) dialog.close()
@@ -410,7 +475,7 @@ export function mountWork(options: Options) {
           selection = destination
           break
       }
-      const opensTerminal = intent.action === 'start' || intent.action === 'restart'
+      const opensTerminal = intent.action === 'start' || restarts
       await refresh(opensTerminal, pushHistory ? 'pushState' : 'replaceState')
     } catch (e) {
       if (!disposed) notify(await options.failure(e as WorkError))
@@ -419,6 +484,7 @@ export function mountWork(options: Options) {
     }
   }
 
+  preset.onchange = () => drawModels()
   if (!options.navigation) shell.handle({ pickSpace: workspace => navigate({ workspace }) })
   repo.onchange = () => navigate({ repository: repo.value })
   tree.onchange = () => {
@@ -444,6 +510,14 @@ export function mountWork(options: Options) {
   return {
     refresh,
     chooseTerminal,
+    /** Whether this browser watches `id` without being its writer. */
+    viewing(id: string, reason: string | null) {
+      const next = reason ? { terminal: id, reason } : undefined
+      if (!next && viewing?.terminal !== id) return
+      if (JSON.stringify(next) === JSON.stringify(viewing)) return
+      viewing = next
+      if (view?.terminal === id) void project(false)
+    },
     async show(workspace: string | null, terminal?: string, worktree?: string) {
       navigationId++
       if (selection.worktree && selection.worktree !== worktree && dialog.open) dialog.close()
@@ -478,6 +552,8 @@ export function mountWork(options: Options) {
       unavailable.open = false
       workspaceLink.hidden = true
       manage.hidden = true
+      recover.hidden = true
+      why('terminal-reason')
       lock(false)
       shell.set({ startWork: null, terminalLost: false, busy: false })
       shell.handle({ startWork: () => {} })

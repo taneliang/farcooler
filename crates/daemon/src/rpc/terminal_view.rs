@@ -35,6 +35,7 @@ impl Rpc {
         // The runner's answers, as `announce` makes them, so a list and an event agree.
         crate::task_link::stamp_notice_task(&self.service.store, &view.terminal, &mut message);
         self.service.stamp_claude_login(logins, &view.terminal, &mut message);
+        message.restart_refusal = crate::people::restart_refusal(&self.service.store, &self.peer, view.terminal.id).map(str::to_string);
         // As `person` reads it: a member's own look ends their `Done` (ov-740).
         let (activity, state_since, turn_started_at) = self.watcher.activity_for(person, view.terminal.id).await;
         message.activity = activity as i32;

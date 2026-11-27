@@ -993,11 +993,11 @@ async function workspaceWalk(page) {
   await pickSpace(page, 'Sandbox · Studio')
   await page.waitForSelector('#pane-note:not([hidden])')
   const notice = await page.textContent('#pane-note')
-  if (notice !== 'Sandbox has no terminals yet. Use Start Work to open one.' || (await titles()).length) {
+  if (notice !== 'Sandbox has no terminals yet. Use New Terminal to open one.' || (await titles()).length) {
     failures.push(`the empty workspace lists ${JSON.stringify(await titles())} and says ${JSON.stringify(notice)}`)
   }
   await page.click('#show-commands')
-  await page.locator('#workspace-commands').getByRole('button', { name: 'Start Work', exact: true }).click()
+  await page.locator('#workspace-commands').getByRole('button', { name: 'New Terminal', exact: true }).click()
   await page.locator('#start-work[open]').getByRole('button', { name: 'New Worktree' }).waitFor()
   await page.click('#work-done')
 
@@ -1402,7 +1402,7 @@ async function remoteWorkday({ context, page, passkeys }) {
   await switchRunner('studio')
   await switchRunner('build-box')
 
-  const work = page.getByRole('dialog', { name: 'Start Work' })
+  const work = page.getByRole('dialog', { name: 'New Terminal' })
   async function chooseCheckout() {
     await page.locator('#show-start-work').click()
     await work.getByLabel('Repository').selectOption({ label: 'workday' })
@@ -1540,6 +1540,109 @@ async function remoteWorkday({ context, page, passkeys }) {
   writeFileSync(join(second.dir, 'advance-landing'), '')
   await landing.getByText(/^checking on ci$/i).waitFor(wait)
   console.log('workday: answered Needs You, read the committed diff and followed the runner’s landing in Plan')
+
+  await terminalsWalk({ page, runner: second, chooseCheckout, work, assert, wait })
+}
+
+/// New shell and agent terminals, and restarting one that exited and the
+/// workspace's orchestrator (ov-1491). Everything the browser claims is read
+/// back through the runner's own CLI. The three scenarios stand alone, so one
+/// failing doesn't hide the others.
+async function terminalsWalk({ page, runner, chooseCheckout, work, assert, wait }) {
+  const env = { ...process.env, FARCOOLER_HOME: runner.runtime }
+  const cli = (...args) => execFileSync(workdayCli, args, { env, encoding: 'utf8' })
+  const listed = () => JSON.parse(cli('--json', 'worktree', 'list')).worktrees
+  const pane = id => listed().flatMap(tree => tree.terminals).find(t => t.id === id)
+  const eventually = async (what, ready) => {
+    const deadline = Date.now() + wait.timeout
+    while (!ready()) {
+      if (Date.now() > deadline) throw new Error(`timed out: ${what}`)
+      await new Promise(resolve => setTimeout(resolve, 200))
+    }
+  }
+  const state = word => page.locator('#terminal-state').filter({ hasText: new RegExp(`^${word}$`) }).waitFor(wait)
+  const selected = () => new URL(page.url()).searchParams.get('terminal')
+  /// Keystrokes in the browser's pane, read off the runner's screen.
+  async function typeAndSee(id, keys, expected) {
+    const live = page.locator('#terminal .terminal-host:not(.chat-host):not([hidden])[data-attached="true"]:visible')
+    await live.waitFor(wait)
+    await page.locator('.terminal-writer:not([hidden]):visible').getByText('Writer', { exact: true }).waitFor(wait)
+    await live.click()
+    await page.keyboard.type(keys)
+    await page.keyboard.press('Enter')
+    await eventually(`the runner's screen shows ${expected}`, () => cli('terminal', 'screen', id).includes(expected))
+  }
+  async function openNew(type, model) {
+    await page.click('#show-terminals')
+    const before = selected()
+    await chooseCheckout()
+    await work.getByLabel('Terminal Type').selectOption(type)
+    if (model) await work.getByLabel('Model', { exact: true }).selectOption(model)
+    await work.getByRole('button', { name: 'Start Terminal' }).click()
+    await work.waitFor({ state: 'hidden', ...wait })
+    await eventually('the new terminal was selected', () => selected() && selected() !== before)
+    await state('Running')
+    return selected()
+  }
+  async function scenario(name, run) {
+    try {
+      await run()
+      console.log(`workday: ${name}`)
+    } catch (e) {
+      failures.push(`workday: ${name}: ${e.message.split('\n')[0]}`)
+      if (await work.isVisible()) await work.getByRole('button', { name: 'Done' }).click()
+    }
+  }
+
+  let shell
+  await scenario('opened a shell in a chosen worktree and typed in it', async () => {
+    shell = await openNew('shell')
+    const checkout = listed().find(tree => tree.terminals.some(t => t.id === shell))
+    assert(JSON.stringify(checkout).includes('workday-review'), 'the shell opened in the chosen worktree')
+    await typeAndSee(shell, 'echo typed-$((6*7))', 'typed-42')
+  })
+
+  await scenario('restarted a shell whose process exited, in place', async () => {
+    if (!shell) shell = await openNew('shell')
+    const { epoch } = pane(shell)
+    await typeAndSee(shell, 'echo leaving-$((2*3)); exit', 'leaving-6')
+    await state('Exited')
+    await shoot(page, 'workday-restart-exited', 320)
+    await page.getByRole('button', { name: 'Restart Terminal', exact: true }).click()
+    await state('Running')
+    assert(selected() === shell, 'the same terminal stayed selected')
+    await eventually('a new epoch', () => pane(shell).epoch > epoch)
+    await typeAndSee(shell, 'echo again-$((7*7))', 'again-49')
+  })
+
+  await scenario('started Claude Code with a chosen model', async () => {
+    const agent = await openNew('claude', 'sonnet')
+    assert(pane(agent).program === 'claude:sonnet', `launched ${pane(agent).program}`)
+    await page.locator('#terminal-name').filter({ hasText: /^Claude Code$/ }).waitFor(wait)
+  })
+
+  await scenario('restarted the running orchestrator', async () => {
+    const workspace = new URL(page.url()).searchParams.get('workspace')
+    cli('workspace', 'start-orchestrator', workspace, '--harness', 'claude')
+    let seat
+    await eventually('the orchestrator is listed', () => {
+      seat = listed().flatMap(tree => tree.terminals).find(t => t.role === 'orchestrator')
+      return seat
+    })
+    await page.click('#show-terminals')
+    await page.locator(`#terminal-list a[data-terminal="${seat.id}"]`).click()
+    await state('Running')
+    const raw = page.locator('#view-terminal')
+    await raw.click()
+    await typeAndSee(seat.id, 'before-the-restart', 'before-the-restart')
+    const { epoch } = pane(seat.id)
+    await shoot(page, 'workday-restart-orchestrator', 320)
+    page.once('dialog', dialog => dialog.accept())
+    await page.getByRole('button', { name: 'Restart Orchestrator', exact: true }).click()
+    await eventually('a new epoch', () => pane(seat.id).epoch > epoch)
+    await state('Running')
+    await typeAndSee(seat.id, 'after-the-restart', 'after-the-restart')
+  })
 }
 
 let session

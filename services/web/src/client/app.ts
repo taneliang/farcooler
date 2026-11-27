@@ -783,7 +783,9 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   panes?.dispose()
   const budget = paneBudgets.get(target.id) ?? { max: MAX_LIVE_PANES }
   paneBudgets.set(target.id, budget)
-  const mounted = new WorkspacePanes(scope, target.label, budget, () => reconnector.current, ended)
+  // A moment later: the pane says so while the work view may be drawing it.
+  const mounted = new WorkspacePanes(scope, target.label, budget, () => reconnector.current, ended,
+    (id, reason) => queueMicrotask(() => screen?.viewing(id, reason)))
   panes = mounted
 
   let currentWork = initial

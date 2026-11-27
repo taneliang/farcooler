@@ -27,6 +27,7 @@ export class WorkspacePanes {
     budget: Budget,
     private readonly runner: () => WebRunner | null,
     private readonly ended: (runner: WebRunner, id: string) => void,
+    private readonly watching: (id: string, reason: string | null) => void,
   ) {
     this.set = new PaneSet(id => {
       const model = this.models.get(id)!
@@ -66,7 +67,7 @@ export class WorkspacePanes {
         raw?.setInput(next)
         chat?.setInput(next)
       }, error => workFailure(error.message, (error as WorkError).code ?? '', (error as WorkError).what ?? ''),
-      runner => this.runner() === runner)
+      runner => this.runner() === runner, reason => this.watching(id, reason))
       this.mounts.set(id, { root, pane, writer })
       return pane
     }, budget)

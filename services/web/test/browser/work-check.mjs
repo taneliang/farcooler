@@ -70,8 +70,8 @@ async function test(name, run, { query = '', width = 1280, sharedWriter = false 
 }
 
 const work = async page => {
-  await page.getByRole('button', { name: 'Start Work', exact: true }).click()
-  return page.getByRole('dialog', { name: 'Start Work' })
+  await page.getByRole('button', { name: 'New Terminal', exact: true }).click()
+  return page.getByRole('dialog', { name: 'New Terminal' })
 }
 const rpc = async (page, action) => page.evaluate(a => window.calls.filter(c => c.action === a).at(-1), action)
 // The sidebar's workspace picker is a Base UI select (ov-1510): its options
@@ -110,7 +110,7 @@ try {
     if (out) await page.screenshot({ path: join(out, `sidebar-${width}.png`) })
     const unavailable = list.getByText('Unavailable Terminals', { exact: true })
     await unavailable.click()
-    assert.deepEqual(await visibleIds(), ['seat', 'shell', 'lost-seat', 'exited-seat'])
+    assert.deepEqual(await visibleIds(), ['seat', 'shell', 'lost-seat', 'exited-seat', 'ended'])
     await unavailable.click()
     await recover.click()
     await page.waitForURL('**terminal=recovered')
@@ -150,8 +150,126 @@ try {
     await dialog.getByLabel('Terminal Type').selectOption('codex')
     await dialog.getByRole('button', { name: 'Start Terminal' }).click()
     await page.waitForURL('**terminal=codex')
-    assert.deepEqual(await rpc(page, 'start'), { action: 'start', worktree: 'release', preset: 'codex' })
+    assert.deepEqual(await rpc(page, 'start'), { action: 'start', worktree: 'release', preset: 'codex', model: '' })
   })
+
+  const options = select => select.locator('option').allTextContents()
+  await test('start an agent with the Mac app’s choices of agent, model and worktree', async page => {
+    const dialog = await work(page)
+    await dialog.getByLabel('Worktree', { exact: true }).selectOption('release')
+    const agent = dialog.getByLabel('Terminal Type')
+    const model = dialog.getByLabel('Model', { exact: true })
+    assert.deepEqual(await options(agent), ['Shell', 'Claude Code', 'Codex', 'Cursor · Not Installed'])
+    assert.equal(await agent.locator('option[value=cursor]').getAttribute('disabled'), '')
+    assert.equal(await model.isVisible(), false, 'a shell has no model')
+    await agent.selectOption('claude')
+    assert.deepEqual(await options(model), ['Default Model', 'opus', 'sonnet', 'haiku'])
+    await model.selectOption('sonnet')
+    await agent.selectOption('codex')
+    assert.equal(await model.inputValue(), '', 'a model belongs to one agent')
+    assert.deepEqual(await options(model), ['Default Model', 'gpt-5.6-sol', 'gpt-5.6-sol-high'])
+    await agent.selectOption('claude')
+    await model.selectOption('sonnet')
+    await dialog.getByRole('button', { name: 'Start Terminal' }).click()
+    await page.waitForURL('**terminal=claude')
+    assert.deepEqual(await rpc(page, 'start'), { action: 'start', worktree: 'release', preset: 'claude', model: 'sonnet' })
+  }, { query: '?agents' })
+
+  await test('restart a terminal whose process exited, in place', async page => {
+    const list = page.locator('#terminal-list')
+    await list.getByText('Unavailable Terminals', { exact: true }).click()
+    await list.locator('a[data-terminal=exited-seat]').click()
+    await page.getByRole('button', { name: 'Restart Orchestrator', exact: true }).waitFor()
+    await list.locator('a[data-terminal=ended]').click()
+    await page.locator('#pane-note').filter({ hasText: 'This terminal’s process ended. Restart it to continue.' }).waitFor()
+    await page.getByRole('button', { name: 'Restart Terminal', exact: true }).click()
+    await page.waitForURL('**terminal=recovered')
+    assert.equal((await rpc(page, 'restart')).terminal, 'ended')
+    await page.locator('#terminal-state').filter({ hasText: /^Running$/ }).waitFor()
+  }, { query: '?sidebar' })
+
+  await test('restart the running orchestrator after confirming', async page => {
+    await page.locator('#terminal-list a[data-terminal=seat]').click()
+    await page.waitForURL('**terminal=seat')
+    await page.getByText('Writer', { exact: true }).filter({ visible: true }).waitFor()
+    const restart = page.getByRole('button', { name: 'Restart Orchestrator', exact: true })
+    let asked = ''
+    page.once('dialog', dialog => { asked = dialog.message(); void dialog.dismiss() })
+    await restart.click()
+    assert.match(asked, /stops/)
+    assert.equal(await rpc(page, 'restart_orchestrator'), undefined)
+    page.once('dialog', dialog => dialog.accept())
+    await restart.click()
+    await page.waitForFunction(() => window.calls.some(c => c.action === 'restart_orchestrator'))
+    assert.equal((await rpc(page, 'restart_orchestrator')).terminal, 'seat')
+    await page.waitForFunction(() => window.calls.filter(c => c.action === 'attach' && c.terminal === 'seat').length === 2)
+  }, { query: '?sidebar' })
+
+  const disabledBecause = async (page, button, reason) => {
+    await button.waitFor()
+    assert.equal(await button.isDisabled(), true)
+    await page.getByText(reason, { exact: true }).filter({ visible: true }).first().waitFor()
+  }
+  for (const width of [320, 1280]) {
+    await test(`a read-only browser sees the controls disabled with the reason at ${width}px`, async page => {
+      const reason = 'This browser has read-only access to the runner. A device with control access can open the terminal and make changes.'
+      await page.locator('#terminal-list a[data-terminal=seat]').click()
+      await disabledBecause(page, page.getByRole('button', { name: 'Restart Orchestrator', exact: true }), reason)
+      assert.equal(await page.getByRole('button', { name: 'Recover orchestrator', exact: true }).isDisabled(), true)
+      if (out) await page.screenshot({ path: join(out, `restart-read-only-${width}.png`) })
+      const dialog = await work(page)
+      for (const name of ['Start Terminal', 'New Worktree']) {
+        assert.equal(await dialog.getByRole('button', { name, exact: true }).isDisabled(), true, name)
+      }
+      assert.equal(await dialog.getByLabel('Terminal Type').isDisabled(), true)
+      assert.equal(await dialog.getByText(reason, { exact: true }).filter({ visible: true }).count(), 1, 'said once')
+      assert.equal(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth), true)
+      if (out) await page.screenshot({ path: join(out, `new-terminal-read-only-${width}.png`) })
+      assert.equal(await rpc(page, 'attach'), undefined)
+    }, { width, query: '?sidebar&read' })
+
+    await test(`a member who doesn’t lead can’t restart the orchestrator at ${width}px`, async page => {
+      await page.locator('#terminal-list a[data-terminal=seat]').click()
+      await disabledBecause(page, page.getByRole('button', { name: 'Restart Orchestrator', exact: true }),
+        'Only this workspace’s lead or the runner’s owner can restart its orchestrator.')
+      if (out) await page.screenshot({ path: join(out, `restart-not-lead-${width}.png`) })
+      // The command palette doesn't offer what the button won't do.
+      await page.locator('#show-commands').click()
+      assert.equal(await page.locator('#workspace-commands').getByRole('button', { name: /Restart Orchestrator/ }).count(), 0)
+    }, { width, query: '?sidebar&member' })
+
+    await test(`new terminal and restart controls at ${width}px`, async page => {
+      await page.locator('#terminal-list a[data-terminal=seat]').click()
+      await page.getByText('Writer', { exact: true }).waitFor()
+      await page.getByRole('button', { name: 'Restart Orchestrator', exact: true }).waitFor()
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), width)
+      if (out) await page.screenshot({ path: join(out, `restart-orchestrator-${width}.png`) })
+      const dialog = await work(page)
+      await dialog.getByLabel('Terminal Type').selectOption('claude')
+      assert.equal(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth), true)
+      if (out) await page.screenshot({ path: join(out, `new-terminal-${width}.png`) })
+    }, { width, query: '?sidebar' })
+
+    await test(`a viewer who isn’t the writer can’t restart the orchestrator at ${width}px`, async (first, context) => {
+      await first.locator('#terminal-list a[data-terminal=seat]').click()
+      await first.getByText('Writer', { exact: true }).waitFor()
+      const second = await context.newPage()
+      second.setDefaultTimeout(5000)
+      try {
+        await second.goto(origin + '/?sidebar&terminal=seat')
+        await second.getByText('Viewer', { exact: true }).waitFor()
+        const restart = second.getByRole('button', { name: 'Restart Orchestrator', exact: true })
+        await disabledBecause(second, restart, 'Another client is writing to this terminal. Only the writer can restart it.')
+        if (out) await second.screenshot({ path: join(out, `restart-viewer-${width}.png`) })
+        await second.getByRole('button', { name: 'Take Over' }).click()
+        await second.getByText('Writer', { exact: true }).waitFor()
+        await second.waitForFunction(() => !document.getElementById('terminal-recover').disabled)
+        await first.waitForFunction(() => document.getElementById('terminal-recover').disabled)
+      } finally {
+        await second.close()
+      }
+    }, { width, query: '?sidebar', sharedWriter: true })
+  }
 
   await test('rename and close a terminal', async page => {
     page.once('dialog', dialog => dialog.accept('Reviewed deployment logs'))
@@ -281,7 +399,7 @@ try {
     await page.locator('#pane-note').filter({ hasText: /This browser has read-only access/ }).waitFor()
     assert.equal(await page.getByRole('button', { name: 'Rename' }).count(), 0)
     assert.equal(await page.locator('#lost-terminals a').count(), 1)
-    assert.equal(await page.locator('#lost-terminals button').count(), 0)
+    assert.equal(await page.locator('#lost-terminals button:disabled').count(), 1)
     assert.equal(await rpc(page, 'attach'), undefined)
   }, { query: '?read' })
 
@@ -311,7 +429,7 @@ try {
   })
 
   await test('a worktree link opens the exact checkout without selecting a different terminal', async page => {
-    const dialog = page.getByRole('dialog', { name: 'Start Work' })
+    const dialog = page.getByRole('dialog', { name: 'New Terminal' })
     await dialog.waitFor()
     assert.equal(await dialog.getByLabel('Worktree', { exact: true }).inputValue(), 'release')
     await page.reload()

@@ -528,3 +528,30 @@ async fn a_charter_that_is_a_link_or_a_pipe_is_none() {
     assert!(made.success());
     assert_eq!(read().await, (false, String::new()), "a pipe");
 }
+
+/// Each listed terminal says whether its caller may restart it (ov-1491), in
+/// the gate's own word, so an app can disable Restart with the reason rather
+/// than offer what the runner would refuse.
+#[tokio::test]
+async fn a_listed_terminal_says_whether_this_caller_may_restart_it() {
+    let r = runner().await;
+    let worktree = r.agent.worktree_id;
+    let bobs = r.svc.create_terminal(worktree, "Bob's", "claude").await.expect("Bob's pane");
+    on_logins_of(&r.svc, bobs.id, "bob");
+    let seat = r.svc.start_orchestrator(r.workspace, "claude", false, None).await.expect("an orchestrator");
+    for (device, expected) in [
+        (BOB, [(r.agent.id, Some("not_yours")), (bobs.id, None), (seat.id, Some("not_lead"))]),
+        (OWNERS_PHONE, [(r.agent.id, None), (bobs.id, None), (seat.id, None)]),
+    ] {
+        let rpc = factory(&r.svc, device, Scope::Control);
+        let list = Request { method: "terminal.list".into(), ..Default::default() };
+        let Some(result::Value::TerminalList(list)) = call(&rpc, list).await.unwrap() else { panic!("a list") };
+        for (pane, said) in expected {
+            let listed = list.items.iter().find(|t| parse_id(&t.id) == Some(pane)).expect("listed");
+            assert_eq!(listed.restart_refusal.as_deref(), said, "{device:?} on {}", listed.title);
+            // The word is the gate's own on the restart itself.
+            let restart = Request { method: "terminal.restart".into(), target_resource_id: Some(id_bytes(pane)), ..Default::default() };
+            assert_eq!(gate_says(&r, device, &restart), said.map(|what| format!("not-yours:{what}")));
+        }
+    }
+}

@@ -90,6 +90,10 @@ button.link:hover:not(:disabled) { background: none; color: var(--accent-hover);
 .recovery { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); padding: var(--s3) var(--s4); background: var(--attention-bg); color: var(--attention); }
 .recovery:not(:has(> :not([hidden]))) { display: none; }
 .recovery-text { flex: 1 1 24ch; margin: 0; font: var(--medium) var(--type-label) var(--sans); overflow-wrap: anywhere; }
+.recovery .terminal-reason { color: inherit; }
+/* A running orchestrator's restart: nothing is wrong, so nothing says so. */
+.recovery.calm { background: none; color: var(--text); padding-block: var(--s2); }
+.recovery.calm .terminal-reason { color: var(--muted); }
 .link-note { background: var(--attention-bg); color: var(--attention); }
 .link-note .link-detail { color: var(--attention); }
 

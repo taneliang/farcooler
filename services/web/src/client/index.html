@@ -154,7 +154,8 @@
             <!-- A lost terminal's message and its recovery, side by side. -->
             <div class="recovery" id="terminal-recovery">
               <p class="recovery-text" id="pane-note" hidden></p>
-              <button class="primary" type="button" id="terminal-recover" hidden></button>
+              <button class="primary" type="button" id="terminal-recover" aria-describedby="terminal-reason" hidden></button>
+              <p class="terminal-reason" id="terminal-reason" hidden></p>
             </div>
             <div class="pane-bar" id="pane-bar" hidden>
               <span class="pane-title" id="pane-title"></span>
@@ -219,6 +220,7 @@
     <button class="quiet" type="button" id="work-done"></button>
   </header>
   <p class="note" id="work-note" role="status" hidden></p>
+  <p class="note" id="work-reason" hidden></p>
   <label><span id="work-repository-label"></span><select id="work-repository" aria-labelledby="work-repository-label"></select></label>
   <label><span id="work-worktree-label"></span><select id="work-worktree" aria-labelledby="work-worktree-label"></select></label>
   <div class="work-commands">
@@ -232,6 +234,7 @@
   </form>
   <div id="work-start-fields" hidden>
     <label><span id="work-preset-label"></span><select id="work-preset" aria-labelledby="work-preset-label"></select></label>
+    <label id="work-model-row" hidden><span id="work-model-label"></span><select id="work-model" aria-labelledby="work-model-label"></select></label>
     <button class="primary" type="button" id="work-start"></button>
   </div>
 </dialog>

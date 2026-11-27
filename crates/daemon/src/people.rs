@@ -512,6 +512,16 @@ fn gate_seen(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>
     if caller_rep.is_some_and(|rep| rep != pane) {
         return Err(DomainError::NotYours { what: "not_yours" });
     }
+    pane_refusal(store, &person_of(store, peer)?, pane, req).inspect_err(|e| {
+        if e.what() == "not_lead" {
+            tracing::info!(device = peer.client_id.as_deref().unwrap_or("-"), method = %req.method, "refused: only the lead talks to the orchestrator");
+        }
+    })
+}
+
+/// The gate's last rule: whether `person` may act on `pane` as `req` does. A
+/// pane that isn't there passes, to be `NotFound` at its handler.
+fn pane_refusal(store: &Store, person: &Person, pane: Uuid, req: &Request) -> Result<()> {
     let Ok(terminal) = store.get_terminal(pane) else { return Ok(()) };
     let rep = store.rep_of_terminal(pane)?.map(|r| r.handle);
     let workspace = terminal.workspace_id.filter(|_| terminal.role == TerminalRole::Orchestrator);
@@ -519,18 +529,37 @@ fn gate_seen(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>
         Some(ws) if rep.is_none() => Some(store.workspace_lead(ws)?),
         _ => None,
     };
-    let person = person_of(store, peer)?;
-    if may_act_on(&person, rep.as_deref(), lead.as_ref().map(|l| l.as_deref())) {
+    if may_act_on(person, rep.as_deref(), lead.as_ref().map(|l| l.as_deref())) {
         if rep.is_none() && workspace.is_none() {
-            return refuse_someone_elses_lane(store, &person, pane, req);
+            return refuse_someone_elses_lane(store, person, pane, req);
         }
         return Ok(());
     }
     if rep.is_some() {
         return Err(DomainError::NotYours { what: "not_yours" });
     }
-    tracing::info!(device = peer.client_id.as_deref().unwrap_or("-"), method = %req.method, "refused: only the lead talks to the orchestrator");
     Err(DomainError::NotYours { what: "not_lead" })
+}
+
+/// Why the gate would refuse `person`'s `terminal.restart` of `pane` for who
+/// they are, in its word, for `Terminal.restart_refusal` (ov-1491): the same
+/// rule the gate runs, so a listed terminal never offers a restart it would
+/// refuse. A released device is refused everything. A store that can't be
+/// read says nothing; the call itself still asks.
+pub fn restart_refusal(store: &Store, peer: &Peer, pane: Uuid) -> Option<&'static str> {
+    // Whom the gate asks about: the connection's person.
+    let person = person_of(store, peer).ok()?;
+    if person == Person::Owner {
+        return None;
+    }
+    if person == Person::Released {
+        return Some("not_yours");
+    }
+    let restart = Request { method: "terminal.restart".into(), ..Default::default() };
+    match pane_refusal(store, &person, pane, &restart) {
+        Err(DomainError::NotYours { what }) => Some(what),
+        _ => None,
+    }
 }
 
 /// The ruling on `req`'s method, or `None` for a name this build doesn't
@@ -798,7 +827,7 @@ fn refuse_someone_elses_lane(store: &Store, person: &Person, pane: Uuid, req: &R
     if store.terminal_login(pane)?.is_some_and(|login| login.handle == *me) {
         return Ok(());
     }
-    tracing::info!(method = %req.method, "refused: a member acting on someone else's lane");
+    tracing::debug!(method = %req.method, "refused: a member acting on someone else's lane");
     Err(DomainError::NotYours { what: "not_yours" })
 }
 

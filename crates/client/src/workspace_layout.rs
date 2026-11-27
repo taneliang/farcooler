@@ -71,6 +71,9 @@ struct Terminal {
 #[derive(Deserialize)]
 struct WorkAction {
     label: String,
+    /// Why it's off. A command that is off isn't offered.
+    #[serde(default)]
+    disabled: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -143,7 +146,7 @@ impl Command {
             Self::Conversation => "Chat",
             Self::RawTerminal => "Raw Terminal",
             Self::ClosePage => "Close Page",
-            Self::StartWork => "Start Work",
+            Self::StartWork => "New Terminal",
             Self::RenameTerminal => "Rename Terminal",
             Self::CloseTerminal => "Close Terminal",
             Self::RecoverTerminal => "Recover Terminal",
@@ -294,7 +297,7 @@ impl Layout {
             Command::CloseTerminal => terminal.close.as_ref(),
             Command::RecoverTerminal => terminal.recover.as_ref(),
             _ => None,
-        }.map(|action| action.label.as_str())
+        }.filter(|action| action.disabled.is_none()).map(|action| action.label.as_str())
     }
 
     fn allowed(&self, command: Command, slot: Slot, context: &Context) -> bool {
@@ -456,7 +459,7 @@ mod tests {
     fn context(page: &str) -> Value {
         value!({
             "page": page, "workspace": true, "orchestrator": "orch",
-            "workspace_name": "Billing", "workspace_count": 2, "runner_name": "Build Mac", "start_work": "Start Work",
+            "workspace_name": "Billing", "workspace_count": 2, "runner_name": "Build Mac", "start_work": "New Terminal",
             "terminals": [
                 {"id": "orch", "title": "Runner agent", "running": true, "agent": true, "attach": true, "attachNote": ""},
                 {"id": "shell", "title": "Build", "running": true, "agent": false, "attach": true, "attachNote": ""},
@@ -502,19 +505,30 @@ mod tests {
     }
 
     #[test]
+    fn a_disabled_restart_is_not_offered_as_a_command() {
+        let mut page = context("terminals");
+        page["terminals"][0]["recover"] = value!({"label": "Restart Orchestrator"});
+        let on = run(&Value::Null, &page, "recover_terminal");
+        assert_eq!(on["effect"]["kind"], "work");
+        page["terminals"][0]["recover"]["disabled"] = value!("Read only");
+        let off = run(&Value::Null, &page, "recover_terminal");
+        assert_eq!(off["effect"]["kind"], "none");
+    }
+
+    #[test]
     fn empty_workspace_names_where_to_open_a_terminal() {
         let mut page = context("terminals");
         page["terminals"] = value!([]);
         page["orchestrator"] = Value::Null;
         let split = run(&Value::Null, &page, "split");
         assert!(split["main"]["terminal"].is_null());
-        let notice = "Billing has no terminals yet. Use Start Work to open one.";
+        let notice = "Billing has no terminals yet. Use New Terminal to open one.";
         assert_eq!(split["main"]["notice"], notice);
         assert_eq!(split["side"]["notice"], notice);
 
         page["workspace_count"] = value!(1);
         let single_workspace = step(&split, &page, value!({"kind": "present"}));
-        assert_eq!(single_workspace["main"]["notice"], "Build Mac has no terminals yet. Use Start Work to open one.");
+        assert_eq!(single_workspace["main"]["notice"], "Build Mac has no terminals yet. Use New Terminal to open one.");
 
         page["page"] = value!("plan");
         let plan = step(&single_workspace, &page, value!({"kind": "present"}));

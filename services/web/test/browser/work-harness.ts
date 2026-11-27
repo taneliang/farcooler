@@ -38,6 +38,7 @@ const seed = sidebar ? { worktrees: [tree], terminals: [
   { ...shell, title: 'Web: permanent orchestrator and workstation navigation' },
   { ...orchestrator, id: 'lost-seat' },
   { ...orchestrator, id: 'exited-seat', state: 'exited' },
+  { ...shell, id: 'ended', title: 'Release log tail', state: 'exited' },
   { ...orchestrator, id: 'seat', state: 'running' },
   { ...orchestrator, id: 'other-seat', workspace: 'next', state: 'running' },
 ]} : { worktrees: [tree], terminals: [
@@ -71,7 +72,12 @@ const fake = {
       calls.push({ action: 'write', terminal, text: new TextDecoder().decode(bytes) })
     }, resize: async () => {}, close() {}, free() {} }
   },
-  work_inventory: async () => JSON.stringify({ ...data, scope, workspaces, repositories: roots }),
+  work_inventory: async () => JSON.stringify({
+    ...data, scope, workspaces, repositories: roots,
+    ...(params.has('agents') ? { agents: ['claude', 'codex'] } : {}),
+    // A member who doesn't lead, as the runner marks the seat for them.
+    ...(params.has('member') ? { terminals: data.terminals.map(t => t.id === 'seat' ? { ...t, restartRefusal: 'not_lead' } : t) } : {}),
+  }),
   work_intent: async (json: string): Promise<string | undefined> => {
     const arg = JSON.parse(json)
     calls.push(arg)
@@ -95,6 +101,9 @@ const fake = {
       case 'restart':
         result = 'recovered'
         Object.assign(data.terminals.find(t => t.id === arg.terminal)!, { id: result, state: 'running' })
+        break
+      case 'restart_orchestrator':
+        result = arg.terminal
         break
     }
     localStorage.setItem('test-work', JSON.stringify(data))
@@ -138,7 +147,7 @@ const panes = new PaneSet<WebRunner>(id => {
   writers.set(id, {
     root,
     view: new TerminalWriter(root, id, input => pane.setInput(input), explain,
-      connection => connection === writerRunner),
+      connection => connection === writerRunner, reason => queueMicrotask(() => screen.viewing(id, reason))),
   })
   return pane
 })

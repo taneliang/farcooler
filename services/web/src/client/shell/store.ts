@@ -43,7 +43,7 @@ export interface ShellState {
   page: ShellPage
   nav: Record<ShellTab, Command>
   tools: Record<ShellTool, Command>
-  /// The view's one filled action: Start Work. Null where it isn't offered.
+  /// The view's one filled action: New Terminal. Null where it isn't offered.
   startWork: string | null
   /// A recovery action is on screen, so it, not Start Work, is the filled
   /// one: Recover beside the terminal it brings back (Terminals only), or
