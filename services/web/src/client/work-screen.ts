@@ -11,6 +11,7 @@ export interface WorkTerminal {
   sidebarTitle: string
   sidebarBadge: string | null
   live: boolean
+  lost: boolean
   agent: boolean
   state: string
   access: string
@@ -18,7 +19,7 @@ export interface WorkTerminal {
   attachNote: string
   rename: Prompt | null
   close: Prompt | null
-  recover: { action: 'restart' | 'reattach'; label: string } | null
+  recover: { action: 'restart' | 'reattach'; label: string; sidebarLabel?: string; sidebarName?: string } | null
 }
 
 export interface WorkView {
@@ -289,7 +290,7 @@ export function mountWork(options: Options) {
       })
       if (t.live) {
         liveLinks.push(link)
-      } else if (t.state === 'Lost') {
+      } else if (t.lost) {
         link.setAttribute('aria-label', t.title)
         link.setAttribute('aria-description', t.state)
         const row = document.createElement('div')
@@ -299,8 +300,8 @@ export function mountWork(options: Options) {
           const button = document.createElement('button')
           button.type = 'button'
           button.className = 'quiet'
-          button.textContent = 'Recover'
-          button.setAttribute('aria-label', `Recover ${t.title}`)
+          button.textContent = t.recover.sidebarLabel ?? ''
+          button.setAttribute('aria-label', t.recover.sidebarName ?? '')
           button.dataset.terminal = t.id
           button.disabled = busy
           button.onclick = () => void send({ action: 'restart', terminal: t.id })
@@ -318,7 +319,7 @@ export function mountWork(options: Options) {
     unavailableList.replaceChildren(...unavailableLinks)
     unavailable.hidden = unavailableLinks.length === 0
     if (drawnWorkspace !== view.workspace || unavailable.hidden) unavailable.open = false
-    if (terminal && !terminal.live && terminal.state !== 'Lost' && (drawnWorkspace !== view.workspace || drawnTerminal !== terminal.id)) {
+    if (terminal && !terminal.live && !terminal.lost && (drawnWorkspace !== view.workspace || drawnTerminal !== terminal.id)) {
       unavailable.open = true
     }
     drawnWorkspace = view.workspace

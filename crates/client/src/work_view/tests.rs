@@ -73,6 +73,10 @@ fn deep_links_select_lost_terminal_and_do_not_fall_through_if_gone() {
     assert_eq!(selected["worktree"], "b");
     assert_eq!(selected["terminal"], "lost");
     assert_eq!(selected["terminals"][0]["recover"]["action"], "restart");
+    assert_eq!(selected["terminals"][0]["lost"], true);
+    assert_eq!(selected["terminals"][0]["recover"]["sidebarLabel"], "Recover");
+    let title = selected["terminals"][0]["title"].as_str().unwrap();
+    assert_eq!(selected["terminals"][0]["recover"]["sidebarName"], format!("Recover {title}"));
     let missing = view(&data, &Selection { terminal: Some("deleted".into()), ..Default::default() });
     assert!(missing["terminal"].is_null());
     assert_eq!(missing["notice"], "This terminal is no longer on the runner.");

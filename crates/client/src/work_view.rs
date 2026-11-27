@@ -242,7 +242,10 @@ pub fn view(inventory: &Inventory, selection: &Selection) -> Value {
         let running = t.state == "running";
         let is_seat = seat.is_some_and(|s| s.id == t.id);
         let recover = if t.state == "lost" && control {
-            json!({"action": "restart", "label": "Recover Terminal"})
+            json!({
+                "action": "restart", "label": "Recover Terminal",
+                "sidebarLabel": "Recover", "sidebarName": format!("Recover {}", t.title),
+            })
         } else if running && readable && selected.is_some_and(|s| s.id == t.id) && selection.stream_ended {
             json!({"action": "reattach", "label": "Reconnect Terminal"})
         } else {
@@ -256,6 +259,7 @@ pub fn view(inventory: &Inventory, selection: &Selection) -> Value {
         json!({
             "id": t.id, "title": t.title, "agent": t.agent || is_seat, "state": state, "running": running,
             "live": live(t),
+            "lost": t.state == "lost",
             "sidebarTitle": if is_seat && t.title.eq_ignore_ascii_case("orchestrator") { "" } else { &t.title },
             "sidebarBadge": if is_seat { Some("Orchestrator") } else if !running { Some(state) } else { None },
             "attach": readable && running,
