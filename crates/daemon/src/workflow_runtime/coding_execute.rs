@@ -878,9 +878,10 @@ impl Exec {
     /// attempt remains valid when a retry has nothing further to commit.
     pub(super) async fn unfinished_build(&self, binding: &Binding, tree: &Path) -> Result<Option<String>> {
         let changed = self.tree_changes(binding, tree).await?;
-        let head = self.git_recorded(binding, tree, &["rev-parse", "HEAD"]).await?;
+        // Counted, not compared: an adopted branch can sit behind the base, with a different HEAD and nothing beyond it.
+        let beyond = self.git_recorded(binding, tree, &["rev-list", "--count", &format!("{}..HEAD", binding.base)]).await?;
         let mut reasons = Vec::new();
-        if head == binding.base {
+        if beyond == "0" {
             reasons.push("The build ended without changes: it made no new commit.".to_string());
         }
         if !changed.is_empty() {

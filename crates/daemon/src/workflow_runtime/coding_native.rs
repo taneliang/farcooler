@@ -802,6 +802,10 @@ fn cursor_last_message(path: &Path) -> Option<String> {
 mod delivery_tests;
 
 #[cfg(test)]
+#[path = "coding_native_unfinished_tests.rs"]
+mod unfinished_tests;
+
+#[cfg(test)]
 #[path = "coding_native_tests.rs"]
 pub(super) mod tests;
 
