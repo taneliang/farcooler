@@ -176,6 +176,8 @@ jobs:
       - run: python3 scripts/quarantine.py --lint
       - run: python3 scripts/rust-select-test.py
       - run: python3 scripts/rust-shards.py --self-test
+      # Builders' dependency seed keeps third-party units only (ov-1516).
+      - run: ./scripts/dependency-seed.py --self-test
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'

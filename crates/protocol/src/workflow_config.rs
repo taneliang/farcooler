@@ -151,6 +151,11 @@ pub struct CodingConfig {
     pub checks: Vec<CodingCommand>,
     pub reviewer: Option<CodingReviewer>,
     pub ci: CodingCi,
+    /// Run in a private checkout of each landed commit with `FARCOOLER_SEED` set to an empty folder under the
+    /// engine root. What it leaves there is cloned into each Build and Review step's `FARCOOLER_SCRATCH` before
+    /// the agent starts (ov-1516). Left out of the pinned bytes when absent, so earlier configurations keep their pin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dependency_seed: Option<CodingCommand>,
 }
 
 impl CodingConfig { pub fn pin(&self) -> String { farcooler_workflow::digest(self) } }

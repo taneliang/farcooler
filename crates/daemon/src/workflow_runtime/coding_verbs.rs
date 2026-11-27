@@ -1071,6 +1071,8 @@ impl Exec {
                 let mut detail = serde_json::json!({ "base": base, "log": digest(&output) });
                 if red_base { detail["red_base"] = true.into(); }
                 self.write_fact(binding, "passed", &candidate, detail)?;
+                // Builders after this one start from the landed commit's dependencies (ov-1516).
+                drop(self.refresh_seed(&candidate));
                 // The local copy of the target follows, when it was where this push started. Best effort: the remote is the record.
                 // Only for a landing on this machine: a network landing never writes a ref in the shared repository, whose
                 // main belongs to its owner (ov-1058 review).

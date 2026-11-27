@@ -84,6 +84,7 @@ fn commands(config: &CodingConfig) -> Vec<(String, &CodingCommand)> {
     out.extend(config.reviewer.as_ref().map(|r| ("the reviewer".to_string(), &r.command)));
     out.push(("CI".into(), &config.ci.command));
     out.extend(config.pull_request.as_ref().map(|p| ("pull requests".to_string(), &p.gh)));
+    out.extend(config.dependency_seed.as_ref().map(|c| ("the build seed".to_string(), c)));
     out
 }
 /// The live adapter's environment for the command `name` names, as `changes` reads it. Checks carry no name
@@ -309,7 +310,7 @@ fn runs(config: &CodingConfig) -> Vec<String> {
 /// is shown here.
 fn in_full(config: &CodingConfig, live: Option<&CodingConfig>) -> Vec<String> {
     let exactly = |c: &CodingCommand, name: &str| exactly(c, before(live, config, name));
-    let CodingConfig { repository, base, landing_ref, landing, pull_request, harness, checks, reviewer, ci, security_reviews } = config;
+    let CodingConfig { repository, base, landing_ref, landing, pull_request, harness, checks, reviewer, ci, security_reviews, dependency_seed } = config;
     let mut lines = Vec::new();
     if !security_reviews.is_empty() { lines.push(format!("Required security review sequence: {}.", code(&serde_json::to_string(security_reviews).unwrap_or_default()))); }
     match harness {
@@ -326,6 +327,7 @@ fn in_full(config: &CodingConfig, live: Option<&CodingConfig>) -> Vec<String> {
         }
     }
     for (i, c) in checks.iter().enumerate() { lines.push(format!("Check {} runs {}.", i + 1, exactly(c, &format!("check {}", i + 1)))); }
+    if let Some(c) = dependency_seed { lines.push(format!("After each landing, the build seed runs {}.", exactly(c, "the build seed"))); }
     match reviewer {
         Some(CodingReviewer { identity, command }) => lines.push(format!("The reviewer, as {}, runs {}.", code(identity), exactly(command, "the reviewer"))),
         None => lines.push("No reviewer command.".into()),
@@ -410,7 +412,7 @@ mod tests {
 
     fn cmd(text: &str) -> CodingCommand { CodingCommand { argv: vec!["/bin/sh".into(), "-c".into(), text.into()], environment: BTreeMap::new(), timeout_ms: 1000 } }
     fn config() -> CodingConfig {
-        CodingConfig { security_reviews: vec![], repository: "/r".into(), base: "a".repeat(40), landing_ref: "refs/heads/main".into(), landing: None, pull_request: None,
+        CodingConfig { dependency_seed: None, security_reviews: vec![], repository: "/r".into(), base: "a".repeat(40), landing_ref: "refs/heads/main".into(), landing: None, pull_request: None,
             harness: CodingHarness::Command(CodingCommand { argv: vec!["/usr/bin/claude".into()], environment: BTreeMap::new(), timeout_ms: 1000 }),
             checks: vec![], reviewer: None, ci: farcooler_protocol::workflow_config::CodingCi { repository: "o/r".into(), workflow: "ci".into(), event: "push".into(), command: cmd("true"), unrun: None } }
     }
@@ -526,7 +528,7 @@ mod tests {
     fn everything(harness: CodingHarness) -> CodingConfig {
         use farcooler_protocol::workflow_config::*;
         let c = |tag: &str| CodingCommand { argv: vec![format!("/opt/{tag}/bin"), format!("--{tag}-flag")], environment: [(format!("{}_VAR", tag.to_uppercase()), format!("{tag}-value"))].into(), timeout_ms: 90_000 };
-        CodingConfig { security_reviews: vec![], repository: "/code/repository".into(), base: "b".repeat(40), landing_ref: "refs/heads/the-landing-ref".into(),
+        CodingConfig { dependency_seed: None, security_reviews: vec![], repository: "/code/repository".into(), base: "b".repeat(40), landing_ref: "refs/heads/the-landing-ref".into(),
             landing: Some(CodingLanding { job: "landing-job".into(), repository: "/mirror/bare.git".into(), target: "refs/heads/the-target".into(), config_digest: "config-digest".into() }),
             pull_request: Some(CodingPullRequest { repository: "owner/pr-repo".into(), base: "pr-base".into(), remote: Some("ssh://git@example.com/elsewhere.git".into()), gh: c("gh") }),
             harness, checks: vec![c("check"), cmd("make check")], reviewer: Some(CodingReviewer { identity: "reviewer-identity".into(), command: c("reviewer") }),

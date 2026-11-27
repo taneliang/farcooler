@@ -58,6 +58,7 @@ mod places;
 pub use places::{DEFAULT_EFFECT_CAP, DEFAULT_LANDING_PLACES, DEFAULT_WORK_PLACES};
 use places::{Placed, Places, Pool};
 mod build_cleanup;
+mod dependency_seed;
 mod disk_usage;
 mod owned_directories;
 #[cfg(test)]
@@ -265,6 +266,8 @@ pub struct Exec {
     /// Cleanup takes exclusive access to a tree. Dispatch only tries the lock, so other trees can proceed.
     tree_locks: build_cleanup::TreeLocks,
     disk_usage: disk_usage::DiskUsage,
+    /// The dependency seed builders' scratch starts from, shared by every copy (ov-1516).
+    seeds: dependency_seed::Seeds,
     /// Set by the Service: makes a run's named worktree one the app lists (ov-967).
     pub host: Option<WorktreeHost>,
     /// One first download of a landing remote's main at a time, per remote, shared by every copy (ov-1058 review 3):
@@ -461,7 +464,7 @@ impl Runtime {
         let runtime = Self { inbox, send, next_lease: None, next_cleanup: None, orphan_cleanup_retries: BTreeMap::new(), next_process_log_prune: None, continuous: false,
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
             exec: Exec { yielding: crate::yielding::Yielding::at(&root), activities: Default::default(), places: std::sync::Arc::new(std::sync::Mutex::new(Places::load(&root)?)), root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, runner_interrupted: Default::default(), host: None,
-                seeding: Default::default(), tree_locks: Default::default(), disk_usage: Default::default(), #[cfg(test)] user_home: None, #[cfg(test)] build_free_bytes: Some(u64::MAX), #[cfg(test)] scratch_base: None, #[cfg(test)] cleanup_check: None, #[cfg(test)] cleanup_test_probe: None, open_file_checks: None },
+                seeding: Default::default(), tree_locks: Default::default(), disk_usage: Default::default(), seeds: Default::default(), #[cfg(test)] user_home: None, #[cfg(test)] build_free_bytes: Some(u64::MAX), #[cfg(test)] scratch_base: None, #[cfg(test)] cleanup_check: None, #[cfg(test)] cleanup_test_probe: None, open_file_checks: None },
             notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None, trees_recovered: false, next_join_refresh: None, cleanup_started: None, cancel_refused: Default::default(), recovery: Default::default(), restart_pacing: Default::default(), scheduling: Default::default(),
             _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
         runtime.validate_native_host()?;

@@ -464,6 +464,9 @@ impl Exec {
         // without requiring local output to survive recovery or an upgrade.
         let pinned_environment = command.environment.clone();
         self.attach_owned_directory(binding, owner, &mut command)?;
+        if let Some(scratch) = command.environment.get(super::owned_directories::SCRATCH_ENV) {
+            self.seed_scratch(Path::new(scratch), &binding.base).await;
+        }
         // A named tree is one people edit in: what a Run gate changes there is noted as it runs, so a crash that
         // stops the run can name what changed while the gate ran (ov-979). They are only named, never cleared.
         let ledger = (binding.effect.tree.is_some() && matches!(binding.effect.kind, EffectKind::Execute(StageKind::Run)))

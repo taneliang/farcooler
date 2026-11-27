@@ -158,6 +158,17 @@ whose step stays uncertain is deleted a day after it was recorded. Each cleanup
 round checks: at runner start, after runs finish, and hourly. Nothing is deleted
 while a process has a file open inside it (ov-1516).
 
+When the adapter sets `dependency_seed`, scratch doesn't start empty. After each
+landing, the engine checks out the landed commit privately and runs that command
+with `$FARCOOLER_SEED` set to an empty folder under the engine root, where agents
+can't write. Each new scratch folder then starts as an APFS clone of the newest
+seed. For this repository, the command is `scripts/dependency-seed.py`. It
+builds with the same plain environment builders use and then keeps only the
+third-party crates, so a builder's `CARGO_TARGET_DIR="$FARCOOLER_SCRATCH/target"`
+compiles just the workspace. A seed waits for the same free space as a build.
+The engine removes the previous seed by its recorded path once the new one is
+ready.
+
 ### A Linux runner
 
 ```sh

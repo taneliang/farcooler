@@ -47,7 +47,7 @@ async fn configured() -> (tempfile::TempDir, CodingConfig) {
     let build = CodingCommand { argv: vec!["/bin/sh".into(), "-c".into(), "echo built > result.txt && git add result.txt && git commit -q -m build".into()],
         environment: ["PATH=/usr/bin:/bin", "GIT_AUTHOR_NAME=Build", "GIT_AUTHOR_EMAIL=b@localhost", "GIT_COMMITTER_NAME=Build", "GIT_COMMITTER_EMAIL=b@localhost"]
             .iter().map(|kv| { let (k, v) = kv.split_once('=').unwrap(); (k.to_string(), v.to_string()) }).collect(), timeout_ms: 20000 };
-    let config = CodingConfig { security_reviews: vec![], repository: repo.canonicalize().unwrap(), base, landing_ref: "refs/heads/workflow-target".into(), landing: Some(landing), pull_request: None,
+    let config = CodingConfig { dependency_seed: None, security_reviews: vec![], repository: repo.canonicalize().unwrap(), base, landing_ref: "refs/heads/workflow-target".into(), landing: Some(landing), pull_request: None,
         harness: CodingHarness::Command(build), checks: vec![], reviewer: None,
         ci: CodingCi { repository: "offline/repository".into(), workflow: "ci".into(), event: "push".into(), command: green_ci, unrun: None }, };
     (dir, config)

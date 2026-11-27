@@ -123,7 +123,7 @@ elif stage == 'ci':
     if mode == "review-restart" {
         reviewer.environment.insert("STARTED".into(), dir.path().join("review-started").to_string_lossy().into_owned());
     }
-    let config = CodingConfig { security_reviews: vec![], repository: repo.canonicalize().unwrap(), base,
+    let config = CodingConfig { dependency_seed: None, security_reviews: vec![], repository: repo.canonicalize().unwrap(), base,
         landing_ref: "refs/heads/workflow-target".into(), landing: None, pull_request: None, harness: CodingHarness::Command(build),
         checks: fast_checks.unwrap_or_else(|| vec![command("check"), command("check")]),
         reviewer: review.then(|| CodingReviewer { identity: "reviewer".into(), command: reviewer }),

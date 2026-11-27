@@ -60,6 +60,9 @@ impl CodingConfigExt for CodingConfig {
         if let Some(landing) = &self.landing {
             validate_landing_identity(landing).map_err(|error| error.at_field("landing"))?;
         }
+        if let Some(seed) = &self.dependency_seed {
+            seed.validate().map_err(|error| error.at_field("dependency_seed"))?;
+        }
         match &self.harness {
             CodingHarness::Command(command) => command.validate().map_err(|error| error.at_field("harness.Command"))?,
             CodingHarness::Native { preset, settings, project_hooks, plugin_dir, prompt, process, codex_hooks } => {
