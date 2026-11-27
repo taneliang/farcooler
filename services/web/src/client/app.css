@@ -299,8 +299,8 @@ button.danger { color: var(--danger); }
 .terminal-choice span { overflow: hidden; text-overflow: ellipsis; }
 .terminal-choice .terminal-badge { flex: none; font-size: 11px; padding: 1px 6px; border: 1px solid var(--rule); border-radius: 8px; color: var(--text-2); }
 .lost-terminals { margin-top: 4px; }
-.lost-terminal { display: flex; flex: none; align-items: center; gap: 4px; }
-.lost-terminal .terminal-choice { flex: 1; min-width: 0; max-width: none; padding-inline-end: 0; white-space: normal; overflow-wrap: anywhere; }
+.lost-terminal { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px; }
+.lost-terminal .terminal-choice { flex: 1 1 11rem; min-width: 0; max-width: none; padding-inline-end: 0; white-space: normal; overflow-wrap: anywhere; }
 .lost-terminal button { flex: none; padding: 4px 8px; font-size: 13px; }
 .unavailable-terminals { margin-top: 4px; font-size: 13px; color: var(--text-2); }
 .unavailable-terminals summary { cursor: pointer; padding: 6px 10px; }
