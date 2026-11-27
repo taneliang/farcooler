@@ -59,10 +59,10 @@ How it works:
 - **The runner writes one more line in the fence**, tied to the same device:
 
   ```
-  restrict,expiry-time="20261127T2141Z",command="~/.local/bin/farcoolerd-canary --stdio --client farcooler-b3aae7d8d0ba --scope control --node-key K --quiet-until 1764279660" ssh-ed25519 AAAA… Chrome on Mac (quiet)
+  restrict,expiry-time="202611272141Z",command="~/.local/bin/farcoolerd-canary --stdio --client farcooler-b3aae7d8d0ba --scope control --node-key K --quiet-until 1795815660" ssh-ed25519 AAAA… Chrome on Mac (quiet)
   ```
 
-  - **sshd refuses the line by itself** once `expiry-time` has passed. That needs OpenSSH 8.2 or newer; this runner has 10.5. The time is the runner's clock, written in UTC with a `Z`.
+  - **sshd refuses the line by itself** once `expiry-time` has passed. That needs OpenSSH 8.2 or newer; this runner has 10.5. The time is the runner's clock, written in UTC as `YYYYMMDDHHMM[SS]Z`, with no `T` or other separator (`man sshd`); any other shape makes sshd fail to parse the options and refuse every login on that line.
   - **The forced command repeats the end time** (`--quiet-until`), so the daemon has its own copy. It refuses a login after that time, and ends any session still open at that time.
   - **The client id, scope and node key are the passkey line's**, copied from it. A quiet key never gives more than the passkey line it came from.
 - **A reconnect signs with the quiet key**, through the same `russh::Signer` path, with no prompt. The page offers the quiet key first and falls back to the passkey (one click and one touch) if the runner refuses it.
@@ -136,7 +136,7 @@ Revoking:
 - **Never extended without a touch.** Each touch mints a new key with a new 12 hours. Using the key does not push back its end.
 
 **Revocation rules:**
-1. **Expiry.** sshd refuses the line after `expiry-time`. The daemon refuses after `--quiet-until`, ends open quiet sessions at that time, and deletes expired lines when it starts and every minute after.
+1. **Expiry.** sshd refuses the line after `expiry-time`, which takes `YYYYMMDDHHMM[SS]Z` with no separator (for example `202611272141Z`). The daemon refuses after `--quiet-until`, ends open quiet sessions at that time, and deletes expired lines when it starts and every minute after.
 2. **Idle.** The daemon deletes the quiet line once the device has had no session open, by either line, for 2 h, counted from when its last session closed.
 3. **Sign out on the page.** First, over the live connection, `client.quiet_key.end` for every runner connected. Then the page deletes the key with the rest of IndexedDB (Clear-Site-Data already covers that). If a runner can't be reached, the page says that runner still accepts the key until its end time and names the time. With the local copy deleted, only a copy taken earlier could still use it.
 4. **Revoke the device.** `client.revoke` removes the device's quiet line with its passkey line, under the same fence lock, and `mark_revoked` ends its sessions. Removing a member covers their browser devices the same way.
@@ -214,7 +214,7 @@ If that trade is refused, A remains: ov-1513's fixes plus a SharedWorker, which 
 | End removes only the quiet line | Daemon. `client.quiet_key.end`; the quiet line is gone, the passkey line stays, and the quiet session closes | Remove both, and the passkey login fails |
 | Sign-out ends it on the runner | Web unit test (`sign-out.test.ts`) with fake deps: `.end` is called for each connected runner before the store is forgotten; an unreachable runner shows its end time | Skip the call, and the test sees no `.end` |
 | Page script cannot export the key | Browser test: `crypto.subtle.exportKey` on the stored key rejects | Generate with `extractable: true`, and the export succeeds |
-| The line is written in the runner's UTC | Fence. Render with a fake clock in a non-UTC zone; `expiry-time` ends in `Z` and matches `--quiet-until` | Format in local time, and the two disagree |
+| The line is written in the runner's UTC | Fence. Render with a fake clock in a non-UTC zone; `expiry-time` is `YYYYMMDDHHMM[SS]Z` with no separator (it parses under real sshd) and names the same instant as `--quiet-until` | Format in local time, or write a `T` separator, and the test fails |
 | The device list shows it, and it goes away | `client.list` reports `quiet_until` while the line exists and not after End or expiry; a web view test renders the line and the End button | — |
 
 **Acceptance for that ticket:**
