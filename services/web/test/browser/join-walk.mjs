@@ -153,7 +153,9 @@ export async function joinWalk({ session, startRunner, stub, cli, me, shoot, ori
     const exited = once(run, 'exit')
     run.stdin.end('yes\n')
     try {
-      await page.waitForSelector('#compare:not([hidden])', wait)
+      await page.waitForSelector('#compare:not([hidden])', wait).catch(e => {
+        throw new Error(`no code on screen; farcooler join ${run.exitCode === null ? 'is still running' : `ended ${run.exitCode}`}: ${said.replaceAll('\n', ' ').slice(-600)}; page note: ${e.message.split('\n')[0]}`)
+      })
       const fingerprint = /The browser's passkey: (SHA256:\S+)/.exec(said)?.[1]
       assert(fingerprint && (await page.textContent('#join-fingerprint')).includes(fingerprint), `the terminal and the page show one passkey (${fingerprint})`)
       const shown = /Check that it's (\S+),/.exec(said)?.[1]
