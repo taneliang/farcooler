@@ -29,26 +29,51 @@ The real `index.html` and shell stack into one column. The image is drawn
   (`test/browser/chat-files-harness.ts`).
 - At 320 it also requires the image to be at least 272 px wide, and a tap on
   Download to save the file's bytes. No wait or timeout changed.
-- With the narrow side-by-side column forced back, it fails with CI's message.
-  With a much wider font, it passes.
+- With the chat held to 140 px, the check fails with CI's message.
 
-## A second failure behind it
+## Failures behind it
 
-CI stops a job at its first failing step, so the later browser checks never ran
-on `022667bfb`. The workday walk (`csp-check.mjs --workday-runner`) failed too:
-it called `selectOption` on Switch Runner, which `7e6ba7e4d` had made a picker.
-It now opens the picker and chooses the runner.
+CI stops a job at its first failing step, so the later browser checks didn't
+run on `022667bfb`.
 
-## Checks run on macOS
+The workday walk (`csp-check.mjs --workday-runner`) called `selectOption` on
+Switch Runner, which `7e6ba7e4d` had made a picker. ov-1499 fixed that on the
+landing base, so this branch's copy of the fix was dropped in the rebase.
 
-`chat-check`, `chat-files-check`, `plan-render-check`, `shell-check`,
-`work-check`, `board-check`, `csp-check` with the fake daemon,
-`sleep-check`, and the workday walk all passed. So did the stable and canary
-builds, their size gates and the size gate's self-test.
+## The rebase onto 8d8a2f2b7
 
-The first `csp-check` run failed one timing limit (keystroke echo p95
-106.8 ms, limit 100 ms) with the load average near 20. The rerun measured
-56.9 ms and passed.
+`chat-files-check.mjs` conflicted. It keeps both changes: ov-1499's web core
+wasm module and policy, and this ticket's React shell page and 320 assertions.
+
+After the rebase, the workday walk failed twice at its last step: no Landing
+"Checking Here" on the Plan. Here the page was wrong. `29af4d78b` and
+`447b9d461` (ov-1412) are on the base.
+
+- The walk's runner has no workflow service, so it refuses `workflow.get`. The
+  client then shows the plan without a workflow. A read-only client that's
+  refused takes the same path.
+- The plan still lists the engine's landing, as number 0.
+- ov-1412 stopped drawing a card for number 0 and left the row to the workflow.
+  Without one, the Plan showed no landing.
+
+The shared Plan view (`plan_view/landing_queue.rs`) now draws those entries as
+rows when there's no workflow. With a workflow, nothing changes. A new test
+there failed before the fix. This is shared by every app, not only the web.
+
+## Checks run on macOS, on the fix commit's code
+
+- `chat-check`, `chat-files-check`, `plan-render-check`, `shell-check`,
+  `work-check`, `board-check`, `csp-check` with the fake daemon, `sleep-check`
+  and the workday walk passed.
+- The stable and canary builds and their size gates passed.
+- Both TypeScript checks, the web unit tests (268) and Needs You tests (50)
+  passed. The size gate's self-test passed before the presenter fix.
+- The `farcooler-client` library tests (427 passed, 2 ignored), its Clippy,
+  the `crates/web` tests and `lane-gate.py --quick-only` passed.
+- The Swift and Android tests weren't run.
+
+The browser checks ran with the pane's `FARCOOLER_*` variables unset on the
+last run.
 
 Not yet seen: the `Web` and `Web bundles and browser checks` jobs on main.
 They run after this lands. `chat-check.mjs` still writes its own copy of the
