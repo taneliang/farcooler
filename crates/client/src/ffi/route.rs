@@ -228,8 +228,8 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // Rulings (ov-304) are read in `plan.get`'s answer. Only the
         // orchestrator records one: the owner asks it, citing the short id.
         | Method::RulingAdd
-        // Stored landing history is a CLI read; apps project engine groups.
-        | Method::LandingHistory
+        // Landings (ov-309, ov-872) are read in `plan.get`'s answer too, and
+        // only the orchestrator writes them.
         // Landing detection (ov-313) is the CLI's, run with the owner's `gh`.
         | Method::RepositoryLanding => None,
         // The CLI reads it today; the Summary page (ov-188 phase 3) will

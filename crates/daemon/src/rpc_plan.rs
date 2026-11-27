@@ -73,6 +73,9 @@ pub(crate) async fn dispatch(svc: &Arc<Service>, watcher: &Arc<Watcher>, scope: 
             let closed_since = if p.include_closed { i64::MIN } else { now() - CLOSED_FOR_MS };
             let mut plan = read_plan(svc, watcher, workspace, closed_since, admin, control).await?;
             if let Some(query) = p.detail {
+                if matches!(query.subject, Some(pb::plan_detail_read::Subject::Landings(_))) {
+                    add_landing_history(svc, workspace, &mut plan)?;
+                }
                 plan = detail::page(plan, query)?;
             } else {
                 if !p.include_closed {
@@ -85,12 +88,6 @@ pub(crate) async fn dispatch(svc: &Arc<Service>, watcher: &Arc<Watcher>, scope: 
                 }
             }
             Ok(result::Value::Plan(plan))
-        }
-        "landing.history" => {
-            let Some(request::Payload::PlanGet(p)) = req.payload else { return Err(payload_missing()) };
-            let workspace = required_id(&p.workspace_id)?;
-            let (landings, cards) = svc.store.landing_history(workspace)?;
-            Ok(result::Value::Plan(pb::Plan { landings: landings.iter().map(crate::rpc_landings::pb_landing_view).collect(), cards: cards.iter().map(pb_card).collect(), ..Default::default() }))
         }
         "plan.events" => {
             let Some(request::Payload::PlanEvents(p)) = req.payload else { return Err(payload_missing()) };
@@ -636,6 +633,16 @@ pub(crate) fn pb_status(status: TaskStatus) -> i32 {
 
 fn pb_card(c: &CardRef) -> pb::PlanCard {
     pb::PlanCard { task_id: id_bytes(c.task_id), key: c.key.clone(), title: c.title.clone(), status: pb_status(c.status) }
+}
+
+/// The stored landings from before the engine, which only a `Landings` detail
+/// read carries (`landing list` and `landing show`). They join before paging.
+fn add_landing_history(svc: &Service, workspace: Uuid, plan: &mut pb::Plan) -> Result<()> {
+    let (landings, cards) = svc.store.landing_history(workspace)?;
+    plan.landings.extend(landings.iter().map(crate::rpc_landings::pb_landing_view));
+    let named: HashSet<_> = plan.cards.iter().map(|card| card.task_id.clone()).collect();
+    plan.cards.extend(cards.iter().map(pb_card).filter(|card| !named.contains(&card.task_id)));
+    Ok(())
 }
 
 /// The plan as the wire carries it. The cards are every card a theme, ticket,

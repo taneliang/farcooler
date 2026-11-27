@@ -84,8 +84,6 @@ async fn list_and_show_distinguish_engine_groups() {
         "INSERT INTO workflow_states(workspace, revision, epoch, state) VALUES ('{}', {}, 1, '{json}')",
         repo.workspace, state.revision,
     ));
-    std::os::unix::fs::symlink(&h.socket, h.socket.with_file_name("farcoolerd.sock")).unwrap();
-
     let plan = store.plan(repo.workspace, i64::MIN).unwrap();
     assert_eq!(plan.landings.len(), 2);
     assert!(plan.landings.iter().all(|view| view.landing.number == 0));
@@ -169,8 +167,6 @@ async fn list_and_show_read_stored_history() {
             farcooler_core::usage::TokenCounts { input: 1000, output: 0, cache_read: 0, cache_write: 0, cache_write_1h: 0, fast: false }, Some(2000))],
         kind: farcooler_store::usage::TurnKind::Subagent,
     }).unwrap();
-    let home = h.socket.parent().unwrap();
-    std::os::unix::fs::symlink(&h.socket, home.join("farcoolerd.sock")).unwrap();
     for args in [&["list"][..], &["show", "373"][..]] {
         let value = landing(&h, &repo, args).await;
         let landing = if args[0] == "list" { &value["landings"][0] } else { &value };

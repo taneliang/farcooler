@@ -20,7 +20,7 @@ fn number(m: &str, f: &str) -> i32 {
         .number()
 }
 
-const LINE_METHODS: [&str; 6] = ["line.set", "line.order", "agent.record", "agent.work", "agent.end", "landing.history"];
+const LINE_METHODS: [&str; 5] = ["line.set", "line.order", "agent.record", "agent.work", "agent.end"];
 
 /// The plan's new fields, and the requests and results, hold their tags: a
 /// block of their own from 600, past every lane and train tag, which stay

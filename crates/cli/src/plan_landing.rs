@@ -22,8 +22,8 @@ use serde_json::json;
 
 use super::overview_text::{agent_name, key_of};
 use super::{
-    Common, Failed, age, ago, events_json, events_of, get_plan, id_text, needs_the_line, on_a_board,
-    spend_words, unreadable,
+    Common, Failed, age, ago, events_json, events_of, get_plan_detail, id_text, needs_the_line, on_a_board,
+    spend_words,
 };
 use crate::ci_words::{landing_phase_word, landing_state_word, read_for, stale, summary};
 use crate::tasks::{Board, DispatchLink};
@@ -62,18 +62,36 @@ pub(super) fn landing_label(l: &pb::Landing) -> String {
     if l.title.is_empty() || l.title.eq_ignore_ascii_case(&number) { number } else { format!("{} ({number})", l.title) }
 }
 
-/// Match an engine group UUID or a historical number such as "12", "#12",
-/// "Landing 12" or "landing-12".
-fn find_landing<'a>(plan: &'a pb::Plan, given: &str) -> Result<&'a pb::Landing, Failed> {
-    if let Ok(id) = uuid::Uuid::parse_str(given.trim()) {
-        return plan.landings.iter()
-            .find(|l| l.number == 0 && l.id.as_ref() == id.as_bytes())
-            .ok_or_else(|| format!("No engine landing here has ID {id}. `farcooler landing list` shows them.").into());
+/// What `landing show` was given: an engine group UUID, or a historical number
+/// such as "12", "#12", "Landing 12" or "landing-12".
+#[derive(Clone, Copy)]
+enum Selector {
+    Group(uuid::Uuid),
+    Number(u32),
+}
+
+impl Selector {
+    fn parse(given: &str) -> Result<Self, Failed> {
+        if let Ok(id) = uuid::Uuid::parse_str(given.trim()) {
+            return Ok(Self::Group(id));
+        }
+        let text = given.trim().to_lowercase();
+        let text = text.strip_prefix("landing").unwrap_or(&text).trim_start_matches(['#', '-', ' ']);
+        let Ok(number) = text.parse::<u32>() else {
+            return Err(format!("Use a historical landing number or an engine group UUID from `farcooler landing list`. Got {given:?}.").into());
+        };
+        Ok(Self::Number(number))
     }
-    let text = given.trim().to_lowercase();
-    let text = text.strip_prefix("landing").unwrap_or(&text).trim_start_matches(['#', '-', ' ']);
-    let Ok(number) = text.parse::<u32>() else {
-        return Err(format!("Use a historical landing number or an engine group UUID from `farcooler landing list`. Got {given:?}.").into());
+}
+
+fn find_landing(plan: &pb::Plan, selector: Selector) -> Result<&pb::Landing, Failed> {
+    let number = match selector {
+        Selector::Group(id) => {
+            return plan.landings.iter()
+                .find(|l| l.number == 0 && l.id.as_ref() == id.as_bytes())
+                .ok_or_else(|| format!("No engine landing here has ID {id}. `farcooler landing list` shows them.").into());
+        }
+        Selector::Number(number) => number,
     };
     let mut matches = plan.landings.iter().filter(|l| l.number == number);
     let found = matches.next().ok_or_else(|| {
@@ -199,21 +217,17 @@ pub(super) async fn run_on<L: DispatchLink>(
     needs_the_line(&link.capabilities())?;
     let (board, ws) = on_a_board(link, board).await?;
     let board = &board;
-    let mut plan = get_plan(link, &ws, true).await?;
-    let payload = pb::request::Payload::PlanGet(pb::PlanGetRequest { workspace_id: ws, include_closed: true });
-    let mut request = super::with(super::req_for("landing.history", board.repository), payload);
-    request.required_capabilities.push(farcooler_protocol::capability::BOARD_LINE.to_string());
-    match link.call(request).await {
-        Ok(answer) => match super::expect_value(answer.value)? {
-            pb::result::Value::Plan(history) => {
-                plan.landings.extend(history.landings);
-                plan.cards.extend(history.cards);
-            }
-            _ => return Err(unreadable()),
-        },
-        Err(super::ClientError::Daemon { code, .. }) if code == pb::ErrorCode::CapabilityUnsupported as i32 => (),
-        Err(e) => return Err(super::refused_here(e, "The runner couldn't read landing history.")),
-    }
+    let selector = match &cmd {
+        LandingCmd::List => None,
+        LandingCmd::Show { selector } => Some(Selector::parse(selector)?),
+    };
+    // A number narrows the read on the runner. An engine group is picked here.
+    let number = match selector {
+        Some(Selector::Number(number)) => Some(number),
+        _ => None,
+    };
+    let subject = pb::plan_detail_read::Subject::Landings(pb::PlanLandingQuery { number });
+    let plan = get_plan_detail(link, &ws, Some(subject)).await?;
     match cmd {
         LandingCmd::List => Ok(if json {
             let all: Vec<_> = plan.landings.iter().map(|l| farcooler_client::plan_json::landing_json(&plan, l)).collect();
@@ -223,8 +237,8 @@ pub(super) async fn run_on<L: DispatchLink>(
         } else {
             plan.landings.iter().flat_map(|l| landing_text(&plan, l, now)).collect::<Vec<_>>().join("\n")
         }),
-        LandingCmd::Show { selector } => {
-            let found = find_landing(&plan, &selector)?;
+        LandingCmd::Show { .. } => {
+            let found = find_landing(&plan, selector.expect("show parsed a selector"))?;
             // Engine groups have workflow history. The line timeline only accepts stored landing IDs.
             let events = if found.number == 0 {
                 Vec::new()

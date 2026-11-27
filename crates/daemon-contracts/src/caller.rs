@@ -112,7 +112,6 @@ pub fn rep_may(req: &Request) -> bool {
                 | M::TaskSearch
                 | M::PlanGet
                 | M::PlanEvents
-                | M::LandingHistory
                 | M::WorkspaceList
                 | M::WorkspaceCheckInShow
                 | M::WorkspaceCharter

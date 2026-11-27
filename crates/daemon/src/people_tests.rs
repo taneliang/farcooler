@@ -291,9 +291,8 @@ async fn a_reps_pane_only_reads_messages_and_comments() {
     let Some(response::Outcome::Error(e)) = in_rep.handle(bare("task.create")).await.outcome else { panic!("refused") };
     assert_eq!(Some(e.message.as_str()), farcooler_core::error::sentence("rep_messenger"));
 
-    for req in ["plan.get", "plan.events", "landing.history", "task.list", "task.get_by_key", "member.list", "workspace.list", "host.get"].map(bare) {
+    for req in ["plan.get", "plan.events", "task.list", "task.get_by_key", "member.list", "workspace.list", "host.get"].map(bare) {
         assert_ne!(refused(&in_rep, req.clone()).await.as_deref(), Some(MESSENGER), "{}: a read", req.method);
-        assert_ne!(refused(&elsewhere, req.clone()).await.as_deref(), Some(MESSENGER), "{}: an unplaced caller reads", req.method);
     }
     // The plan changes it makes for its member are `people_rep_plan_tests`'.
     assert_eq!(refused(&in_rep, note(pb::TaskNoteKind::Comment)).await, None, "a comment");
@@ -328,7 +327,7 @@ fn a_rep_may_call_only_what_is_listed() {
         "host.get", "host.health", "daemon.version", "repository.list", "worktree.list", "branch.list",
         "terminal.list", "layout.list", "theme.list", "changes.inbox", "stack.get", "needs_you.list",
         "report.get", "usage.report", "usage.task", "task.list", "task.get", "task.get_by_key", "task.search",
-        "plan.get", "plan.events", "landing.history", "workspace.list", "client.list",
+        "plan.get", "plan.events", "workspace.list", "client.list",
         "member.list", "message.send", "worktree.grep", "workspace.charter", "workspace.check_in_show",
     ];
     listed.sort();

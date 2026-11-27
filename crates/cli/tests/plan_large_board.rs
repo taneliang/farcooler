@@ -98,6 +98,8 @@ async fn a_large_board_loads_in_plan_overview_and_detail_commands() {
         old_landing(store, repo.workspace, n as u32 + 1, "landed", None, cards, now + n as i64);
     }
     old_landing(store, repo.workspace, 100, "landed", None, &tasks[1200..], now + 99);
+    // Enough more that the history outgrows one page.
+    old_landing(store, repo.workspace, 101, "landed", None, &tasks[..300], now + 100);
 
     seed_large_workflow_archive(store, repo.workspace);
     h.service.start_workflows().unwrap();
@@ -117,9 +119,7 @@ async fn a_large_board_loads_in_plan_overview_and_detail_commands() {
     assert_eq!(read.themes[0].counts.unwrap().cancelled, 250);
     assert_eq!(read.board_counts.unwrap().cancelled, 1450);
     assert!(read.lines.iter().any(|line| line.task_id == id(tasks[0])));
-    assert_eq!(read.landings[0].number, 100);
-    assert!(!read.landings[0].summary.is_empty());
-    assert!(read.landings.len() < 100, "landing history must be bounded");
+    assert!(read.landings.is_empty(), "stored landings aren't part of the Plan");
     assert!(read.cards.len() < 1500, "closed cards must be summarized");
 
     // The released app reads the unpaged board, then sends workflow.get with no view marker.
@@ -140,7 +140,7 @@ async fn a_large_board_loads_in_plan_overview_and_detail_commands() {
     assert_eq!(legacy["themes"][0]["counts"]["cancelled"], 250);
     assert_eq!(legacy["themes"][0]["story"], "Now on the board");
     assert_eq!(legacy["themes"][0]["next"], "Next on the board");
-    assert_eq!(legacy["landings"][0]["number"], 100);
+    assert_eq!(legacy["landings"], serde_json::json!([]));
     assert_eq!(legacy["workflow"]["runs"][0]["item"], "item");
     let result::Value::WorkflowReply(full) = link.call(get_full).await.unwrap().value.unwrap() else {
         panic!("wrong Engine workflow reply");
@@ -184,6 +184,7 @@ async fn a_large_board_loads_in_plan_overview_and_detail_commands() {
         vec!["plan", "ticket", "set", &waiting, "--reason", "Updated on the large board"],
         vec!["plan", "set", &waiting],
         vec!["landing", "show", "100"],
+        vec!["landing", "list"],
     ];
     let mut failures = Vec::new();
     for (i, args) in commands.iter().enumerate() {
@@ -222,9 +223,24 @@ async fn a_large_board_loads_in_plan_overview_and_detail_commands() {
                 assert_eq!(response["number"], 100);
                 assert!(response["summary"].as_str().unwrap().len() > 64 * 1024);
             }
+            7 => {
+                assert_eq!(response["landings"].as_array().unwrap().len(), 101);
+            }
             _ => unreachable!(),
         }
     }
+    // What `landing list` asks for.
+    let mut get = farcooler_transport::request("plan.get");
+    get.payload = Some(payload::Payload::PlanGet(pb::PlanGetRequest {
+        workspace_id: id(repo.workspace), include_closed: true,
+        detail: Some(pb::PlanDetailRead {
+            subject: Some(pb::plan_detail_read::Subject::Landings(pb::PlanLandingQuery { number: None })),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }));
+    let result::Value::Plan(first) = connect(&h).await.call(get).await.unwrap().value.unwrap() else { panic!("wrong result") };
+    assert!(first.next_offset.is_some(), "stored history is paged, so `landing list` above read several pages");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 

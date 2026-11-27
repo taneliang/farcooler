@@ -1143,7 +1143,6 @@ pub mod method {
         WorktreeListDir = "worktree.list_dir" => WORKTREE_FILES,
         WorktreeReadFile = "worktree.read_file" => WORKTREE_FILES,
         TerminalRename = "terminal.rename" => TERMINAL_NAMES,
-        LandingHistory = "landing.history" => BOARD_LINE,
         BoardThemeList = "board_theme.list" => BOARD_THEME_LIST,
         PlanGet = "plan.get" => BOARD_PLAN,
         PlanEvents = "plan.events" => BOARD_PLAN,

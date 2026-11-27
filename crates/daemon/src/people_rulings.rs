@@ -125,7 +125,6 @@ pub fn member_ruling(method: M) -> Ruling {
         | M::BoardThemeList
         | M::PlanGet
         | M::PlanEvents
-        | M::LandingHistory
         | M::WorkspaceList
         | M::WorkspaceCheckInShow
         | M::ClientList

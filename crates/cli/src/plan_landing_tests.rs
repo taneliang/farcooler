@@ -84,13 +84,6 @@ async fn landings_are_only_read_here() {
 }
 
 #[tokio::test]
-async fn older_runner_uses_history_in_its_plan() {
-    let mut link = Runner { history_unsupported: true, ..runner() };
-    assert!(landing_say(&mut link, "list").await.unwrap().contains("Landing 9"));
-    assert!(landing_say(&mut link, "show 9").await.unwrap().contains("Landing 9"));
-}
-
-#[tokio::test]
 async fn an_engine_uuid_and_a_historical_number_select_different_landings() {
     let mut plan = the_plan();
     let group_id = uuid::Uuid::from_u128(0x6002);
@@ -105,7 +98,7 @@ async fn an_engine_uuid_and_a_historical_number_select_different_landings() {
     let engine: Value = serde_json::from_str(&engine).unwrap();
     assert_eq!(engine["id"], group_id.to_string());
     assert_eq!(engine["events"], serde_json::json!([]));
-    assert_eq!(last(&link).method, "landing.history");
+    assert_eq!(last(&link).method, "plan.get");
     let by_zero = landing_in(&mut link, "show 0", true).await.unwrap();
     assert_eq!(serde_json::from_str::<Value>(&by_zero).unwrap(), engine);
 
