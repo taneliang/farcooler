@@ -1,4 +1,4 @@
-//! Start the installed standalone runner via its owner, even over SSH.
+//! Prefer launchd for standalone runner startup when the job is loaded.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -11,7 +11,8 @@ pub fn install_root(home: &Path) -> PathBuf {
 }
 
 /// True when launchd owns startup. An updater holding the exclusive lock
-/// will start the job itself, so clients can wait for the socket.
+/// will start the job itself, so clients can wait for the socket. If the job
+/// has yet to load, clients can use their ordinary on-demand startup.
 #[cfg(target_os = "macos")]
 pub fn start_if_installed() -> io::Result<bool> {
     use std::fs::{self, File, TryLockError};
@@ -40,16 +41,44 @@ pub fn start_if_installed() -> io::Result<bool> {
     let uid = unsafe { libc::geteuid() };
     let output = Command::new("/bin/launchctl")
         .args(["kickstart", &format!("user/{uid}/{LABEL}")]).output()?;
-    if !output.status.success() {
-        return Err(io::Error::other(format!(
+    kickstart_result(output)
+}
+
+#[cfg(target_os = "macos")]
+fn kickstart_result(output: std::process::Output) -> io::Result<bool> {
+    match output.status.code() {
+        Some(0) => Ok(true),
+        // sshd can create the user domain before the first Aqua login loads
+        // the LaunchAgent. launchctl reports "Could not find service" (113).
+        Some(113) => Ok(false),
+        _ => Err(io::Error::other(format!(
             "Could not start the standalone LaunchAgent: {}",
             String::from_utf8_lossy(&output.stderr).trim(),
-        )));
+        ))),
     }
-    Ok(true)
 }
 
 #[cfg(not(target_os = "macos"))]
 pub fn start_if_installed() -> io::Result<bool> {
     Ok(false)
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::kickstart_result;
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::{ExitStatus, Output};
+
+    fn output(status: ExitStatus, stderr: &str) -> Output {
+        Output { status, stdout: Vec::new(), stderr: stderr.as_bytes().to_vec() }
+    }
+
+    #[test]
+    fn only_an_unloaded_launch_agent_allows_on_demand_startup() {
+        assert!(kickstart_result(output(ExitStatus::from_raw(0), "")).unwrap());
+        assert!(!kickstart_result(output(ExitStatus::from_raw(113 << 8), "Could not find service")).unwrap());
+        let denied = kickstart_result(output(ExitStatus::from_raw(1 << 8), "Operation not permitted"));
+        assert!(denied.unwrap_err().to_string().contains("Operation not permitted"));
+        assert!(kickstart_result(output(ExitStatus::from_raw(libc::SIGTERM), "")).is_err());
+    }
 }

@@ -81,9 +81,11 @@ installer needs neither sudo nor the Mac app.
 
 The background job runs in the launchd user domain. An agent in
 `~/Library/LaunchAgents` starts it at graphical login, including the first
-login after reboot. A Mac that must be available before anyone logs in after
-a reboot needs system-level configuration. Existing terminal processes live
-in tmux and can survive a runner restart. A machine reboot ends those processes.
+login after reboot. If SSH is already reachable before that login, SSH stdio
+sessions and CLI commands can start the runner on demand. Automatic startup
+before the first graphical login requires system-level configuration.
+Existing terminal processes live in tmux and can survive a runner restart.
+A machine reboot ends those processes.
 
 ```sh
 ~/.local/bin/farcooler-canary status

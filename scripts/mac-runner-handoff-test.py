@@ -17,6 +17,7 @@ import runpy
 import select
 import signal
 import shutil
+import socket
 import subprocess
 import tempfile
 import time
@@ -76,6 +77,47 @@ def unload_login(env):
     run("/bin/launchctl", "bootout", f"{GUI}/{BOOTSTRAP_LABEL}", env=env, check=False)
 
 
+def wait_for_runner_stop(endpoint):
+    deadline = time.monotonic() + 15
+    with endpoint.with_suffix(".lock").open("rb") as owner:
+        while time.monotonic() < deadline:
+            try:
+                fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                time.sleep(0.1)
+            else:
+                assert not endpoint.exists(), endpoint
+                return
+    raise RuntimeError(f"Runner did not release {endpoint}")
+
+
+def start_before_login(home, env):
+    endpoint = home / RUNTIME / "farcoolerd.sock"
+    wait_for_runner_stop(endpoint)
+    cli = home / ".local/bin/farcooler-canary"
+    # Run the real remote protocol through the installed --stdio entry point
+    # without configuring an sshd or keys on the fixture host.
+    ssh = cli.with_name("ssh")
+    ssh.write_text('#!/bin/sh\n[ "$1" = -G ] && exit 0\nexec "$HOME/.local/bin/farcoolerd-canary" --stdio\n')
+    ssh.chmod(0o700)
+    ssh_env = dict(env, PATH=f"{ssh.parent}:{env['PATH']}")
+    try:
+        run(cli, "--runner", "fixture", "status", env=ssh_env)
+        # The stdio runner exits on idle. A cold CLI call must start its own.
+        wait_for_runner_stop(endpoint)
+        run(cli, "status", env=env)
+        assert run("/bin/launchctl", "print", JOB, env=env, check=False).returncode != 0
+    finally:
+        if endpoint.exists():
+            with socket.socket(socket.AF_UNIX) as peer:
+                peer.connect(str(endpoint))
+                # Darwin's SOL_LOCAL / LOCAL_PEERPID identifies this fixture's daemon.
+                os.kill(peer.getsockopt(0, 2), signal.SIGTERM)
+            wait_for_runner_stop(endpoint)
+        ssh.unlink()
+    print("Unloaded LaunchAgent: SSH stdio and local CLI status both started the runner on demand.", flush=True)
+
+
 def load_older_template(env, plist, cli):
     older = plistlib.loads(plist.read_bytes())
     older["EnvironmentVariables"]["LEGACY_FIXTURE"] = "old-template"
@@ -97,9 +139,10 @@ def clean_install(home, feed, profile):
         assert (home / ".local/bin/farcoolerd-canary").is_file()
         print("Clean HOME: launchd started the daemon and the CLI/daemon links resolve.", flush=True)
 
+        unload_login(env)
+        unload(env)
+        start_before_login(home, env)
         if run("/bin/launchctl", "print", GUI, env=env, check=False).returncode == 0:
-            unload_login(env)
-            unload(env)
             plist = home / f"Library/LaunchAgents/{BOOTSTRAP_LABEL}.plist"
             run("/bin/launchctl", "bootstrap", GUI, plist, env=env)
             end = time.monotonic() + 15

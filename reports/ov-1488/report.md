@@ -52,6 +52,10 @@ publication rules.
 - The focused Rust run passed 33 tests across standalone activation, local
   daemon connections, and SSH stdio transport. The canary planner, wire gate
   self-test, and workflow lint passed locally.
+- The macOS handoff fixture now unloads both LaunchAgents before testing
+  cold startup through the installed CLI and the SSH stdio entry point. The
+  fixture runs the stdio protocol through a local SSH shim and then exercises
+  the Aqua agent's launchd bootstrap.
 
 ## Split acceptance item
 
@@ -61,7 +65,8 @@ with an isolated HOME on the shared macOS account. The remaining acceptance
 check is to record a signed install on a fresh macOS user account, verify
 the background runner through logout, and verify it starts automatically
 at the first graphical login after reboot. That check needs a dedicated
-Mac or VM and remains open. Operation before the first login after power-on
+Mac or VM and remains open. SSH can start the runner on demand as soon as
+sshd can accept connections. Automatic startup before first graphical login
 requires a system-level service. [Apple launchd documentation](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html)
 
 Production notarization and R2 publication will run on green main. The local
