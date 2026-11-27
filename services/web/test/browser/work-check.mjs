@@ -99,6 +99,7 @@ try {
     assert.equal((await rpc(page, 'restart')).terminal, 'lost-seat')
     await page.locator('#terminal-state').filter({ hasText: /^Running$/ }).waitFor()
     await page.goBack()
+    await page.waitForURL('**terminal=shell')
     await page.locator('a[data-terminal=shell][aria-current=true]').waitFor()
     await picker.selectOption('next')
     await list.locator('a[data-terminal=other-seat]').waitFor()
