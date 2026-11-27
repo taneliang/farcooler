@@ -17,7 +17,8 @@
 // - a prompt's own images are drawn on the person's message;
 // - twenty images: only those near the screen are fetched, three at a time,
 //   and the page keeps up (the measures are printed);
-// - 320 and 1280 wide: no sideways scroll, no CSP violation.
+// - 320 and 1280 wide: no sideways scroll, no CSP violation; at 320 the chat
+//   has the screen's width, an image opens by tap and a file downloads by tap.
 
 import { createServer } from 'node:http'
 import { mkdirSync, readFileSync } from 'node:fs'
@@ -26,7 +27,7 @@ import { deflateSync, crc32 } from 'node:zlib'
 
 import { build } from 'esbuild'
 import { chromium } from 'playwright-core'
-import { styles } from '../../scripts/styles.mjs'
+import { harnessHtml, styles } from '../../scripts/styles.mjs'
 
 const args = process.argv.slice(2)
 const shots = args.includes('--screenshots') ? args[args.indexOf('--screenshots') + 1] : null
@@ -63,14 +64,9 @@ function png(width, height, hue = 0) {
 const wasmDir = process.env.WEB_WASM_DIR
 if (!wasmDir) throw new Error('Set WEB_WASM_DIR to the built crates/web wasm directory')
 const wasm = readFileSync(join(wasmDir, 'farcooler_web.wasm'))
-const bundle = await build({ alias: { 'fc-web': resolve(wasmDir, 'farcooler_web.js') }, entryPoints: ['test/browser/chat-page.ts'], bundle: true, format: 'esm', target: 'es2022', write: false })
+const bundle = await build({ alias: { 'fc-web': resolve(wasmDir, 'farcooler_web.js') }, entryPoints: ['test/browser/chat-files-harness.ts'], bundle: true, format: 'esm', target: 'es2022', jsx: 'automatic', write: false })
 const css = styles().toString()
-const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Far Cooler</title>
-<link rel="stylesheet" href="/app.css"><script type="module" src="/app.js"></script></head><body>
-<header class="bar"><span class="title">Far Cooler</span><span class="who">owner@example.com</span></header>
-<main><section class="work" id="work"><nav class="sidebar" aria-label="Terminals"><span class="runner">studio</span><div class="terminal-list">
-<button class="terminal-choice" aria-current="true" type="button">Design review</button></div></nav>
-<div class="pane"><div class="terminal" id="terminal"></div></div></section></main></body></html>`
+const html = harnessHtml().replace('{{app.css}}', '/app.css').replace('{{app.js}}', '/app.js')
 const files = { '/': [html, 'text/html'], '/app.js': [bundle.outputFiles[0].text, 'text/javascript'], '/app.css': [css, 'text/css'], '/farcooler_web.wasm': [wasm, 'application/wasm'] }
 // img-src as the shell's own policy has it (src/headers.ts), and no more.
 const csp = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; require-trusted-types-for 'script'; trusted-types fc"
@@ -237,7 +233,8 @@ await run('at 320 wide', async () => {
   const image = page.getByRole('img', { name: 'board-1280.png', exact: true })
   await image.waitFor()
   const shown = await drawn(page, image)
-  check(shown.width <= 320 - 24 && await inColumn(page) && await noSidewaysScroll(page), `at 320 the image fits the column (${Math.round(shown.width)} px) with no sideways scroll`)
+  // The shell stacks at this width, so the column is the screen less its padding.
+  check(shown.width >= 320 - 48 && shown.width <= 320 - 24 && await inColumn(page) && await noSidewaysScroll(page), `at 320 the image fills the column (${Math.round(shown.width)} px) with no sideways scroll`)
   if (shots) { await image.scrollIntoViewIfNeeded(); await page.screenshot({ path: join(shots, 'sent-320.png') }) }
   await page.locator('.chat-file').first().scrollIntoViewIfNeeded()
   if (shots) await page.screenshot({ path: join(shots, 'file-row-320.png') })
@@ -247,6 +244,11 @@ await run('at 320 wide', async () => {
   const box = await viewer.boundingBox()
   check(box.x >= 0 && box.x + box.width <= 320 && await viewer.getByRole('button', { name: 'Close', exact: true }).isVisible(), 'the full-size view fits a 320 screen')
   if (shots) await page.screenshot({ path: join(shots, 'viewer-320.png') })
+  await viewer.getByRole('button', { name: 'Close', exact: true }).tap()
+  await page.waitForFunction(() => !document.querySelector('.chat-viewer'))
+  const save = page.locator('.chat-file', { hasText: 'very-long-name' }).getByRole('button', { name: 'Download', exact: true })
+  const [download] = await Promise.all([page.waitForEvent('download'), save.tap()])
+  check(readFileSync(await download.path()).equals(REPORT) && await noSidewaysScroll(page), 'at 320 a tap on Download saves the file')
   await context.close()
 })
 
