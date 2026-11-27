@@ -45,6 +45,8 @@ declare module 'fc-web' {
   export function approvalAsking(code: string, account: string, ownKeyLine: string): string
   /// `{sealed, compare, ceremony}` as JSON, granting `runners` to `code`'s browser.
   export function sealApproval(code: string, account: string, ownKeyLine: string, runners: string): string
+  /// What Add Runner, approval and Devices say (`say.ts`).
+  export function enrollWords(say: string): string
   /// `[{name, lastSeenAt}]` as JSON: the account's runners not opened here.
   export function unenrolledRunners(teams: string, account: string, grants: string): string
   /// This build's app host: the RP ID its passkey is made and used for.

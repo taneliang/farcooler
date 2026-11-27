@@ -6,6 +6,8 @@
 /// relay gives only a ticket. The runner's sealed answer is opened like any
 /// other reply, and nothing is kept before the person matches its code.
 
+import { say } from './say'
+
 export interface Unenrolled {
   name: string
   lastSeenAt: number | null
@@ -50,17 +52,6 @@ export async function unenrolledRunners(deps: ListDeps, account: string, grants:
   return JSON.parse(deps.unenrolled(JSON.stringify(lists), account, JSON.stringify(grants ?? []))) as Unenrolled[]
 }
 
-/// When the directory last heard from a runner, as the list says it.
-export function lastHeard(at: number | null, now: number): string {
-  if (at === null) return 'Not heard from yet'
-  const minutes = Math.floor((now - at) / 60_000)
-  if (minutes < 5) return 'Online now'
-  if (minutes < 60) return `Last heard from ${minutes} minutes ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 48) return `Last heard from ${hours === 1 ? '1 hour' : `${hours} hours`} ago`
-  return `Last heard from ${Math.floor(hours / 24)} days ago`
-}
-
 /// Draw the not-yet-set-up list, each with its Set Up button.
 export function drawUnenrolled(list: HTMLElement, runners: Unenrolled[], setUp: ((name: string) => void) | null, now: number): void {
   list.replaceChildren(
@@ -69,14 +60,14 @@ export function drawUnenrolled(list: HTMLElement, runners: Unenrolled[], setUp: 
       const name = document.createElement('strong')
       name.textContent = runner.name
       const heard = document.createElement('span')
-      heard.textContent = lastHeard(runner.lastSeenAt, now)
+      heard.textContent = say({ say: 'last_heard', at: runner.lastSeenAt, now })
       item.append(name, heard)
       if (setUp) {
         const button = document.createElement('button')
         button.type = 'button'
         button.className = 'quiet'
-        button.textContent = 'Set Up'
-        button.setAttribute('aria-label', `Set Up ${runner.name}`)
+        button.textContent = say({ say: 'set_up' })
+        button.setAttribute('aria-label', say({ say: 'set_up_runner', name: runner.name }))
         button.onclick = () => setUp(runner.name)
         item.append(button)
       }

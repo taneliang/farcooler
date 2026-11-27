@@ -7,7 +7,7 @@ use base64ct::{Base64, Encoding};
 use farcooler_protocol::v1::{self as pb, Request, Scope, request, result};
 
 use super::tests::{Device, Runner, enroll_req, key, lines, nonce, revoke_req, runner, word};
-use super::*;
+use super::{ALG_DEVICE, ALG_PASSKEY_LINE};
 use crate::rpc_people::tests::{call, factory};
 
 const UP: u8 = 0x01;

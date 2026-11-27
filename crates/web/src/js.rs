@@ -292,6 +292,13 @@ pub fn seal_approval(code: &str, account: &str, own_key_line: &str, runners: &st
     Ok(serde_json::json!({ "sealed": sealed, "compare": compare, "ceremony": offer.ceremony }).to_string())
 }
 
+/// What Add Runner, approval and Devices say (`enroll_view::Say` as JSON).
+#[wasm_bindgen(js_name = enrollWords)]
+pub fn enroll_words(say: &str) -> Result<String, JsValue> {
+    let say = serde_json::from_str(say).map_err(|e| failure("protocol", &e.to_string()))?;
+    Ok(farcooler_client::enroll_view::words(say))
+}
+
 /// The runners the account has that this browser can't open:
 /// `[{name, lastSeenAt}]`.
 #[wasm_bindgen(js_name = unenrolledRunners)]

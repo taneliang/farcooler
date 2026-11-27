@@ -36,7 +36,7 @@ pub async fn post(relay: &str, route: &str, body: &Value) -> Result<(u16, Value)
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::relay_origin;
 
     #[test]
     fn a_ticket_never_crosses_a_network_in_the_clear() {

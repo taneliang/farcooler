@@ -23,9 +23,9 @@
 
 import { openWorkflow, installWorkflowPort } from './workflow-view'
 import { WorkflowSessionPort } from './workflow-session'
-import init, { connect, fingerprint, freshnessMs, makeOffer, mergeRunnerGrants, newReplySecret, newWriterKey, offerIsStale, joinCommand, approvalAsking, sealApproval, unenrolledRunners as unenrolledIn, needsAttention, needsYouView, runnerHealth, openReply, openCliReply, passkeyKeyLine, planView, recoveryView, registrationData, registrationProof, rpId, workFailure, workView, boardFailure, reviewFailure, reviewApprovalResult, ticketForm, workspaceLayout, workspacePageAvailable, type WebRunner } from 'fc-web'
+import init, { connect, newWriterKey, approvalAsking, sealApproval, needsAttention, needsYouView, runnerHealth, passkeyKeyLine, planView, recoveryView, registrationData, registrationProof, rpId, workFailure, workView, boardFailure, reviewFailure, reviewApprovalResult, ticketForm, workspaceLayout, workspacePageAvailable, type WebRunner } from 'fc-web'
 
-import { approvalFailure, compareWords, connectFailure, JOIN_MISMATCH, joinDetail, joinTitle, MISMATCH, type ReplyFrom, needsYouFailure, registerFailure, restoreFailure, runnerDeferred, runnerStopped, saveFailure, sealedRefusal, unreachable } from './copy'
+import { approvalFailure, connectFailure, needsYouFailure, registerFailure, restoreFailure, runnerDeferred, runnerStopped, saveFailure, unreachable } from './copy'
 import { askForCopy, assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed, verifyWith } from './device'
 import { Fleet, type RunnerDeps } from './fleet'
 import { type BoardView, buttonsFor, countLabel, countOf, isCounted, pageTitle } from './needs'
@@ -45,14 +45,16 @@ import { corePhrases } from './core-phrases'
 import { useNeedsYouPresenter } from './needs-present'
 import { useConversationWords } from './chat-copy'
 import { askToUsePasskey } from './passkey-prompt'
-import { drawCode, scan } from './qr'
-import { drawUnenrolled, joinCommandFor, unenrolledRunners } from './add-runner'
+import { scan } from './qr'
+import { drawUnenrolled } from './add-runner'
+import { enrollingScreens } from './enrolling'
+import { say } from './say'
 import { DevicesSheet, type LiveRunner } from './devices'
 import { type Budget, MAX_LIVE_PANES } from './panes'
 import { readLocal, WorkspaceLayout, writeLocal, type Tab } from './workspace-layout'
 import { WorkspacePanes } from './workspace-panes'
 import { workspaceUrl, WorkspaceHistory, type Route } from './workspace-history'
-import { comparisonButtons, type Opened, registerDevice, waitForReply } from './sealed'
+import { registerDevice } from './sealed'
 import { type LinkView, Reconnector, recheckOnReturn } from './reconnect'
 import { installSignOut } from './sign-out'
 import { mountWebPush, stopWebPush } from './web-push'
@@ -277,38 +279,6 @@ function keyLineOf(passkey: Passkey): string {
   return passkeyKeyLine(passkey.spki, 'farcooler-web')
 }
 
-/// The timer that retires the code on screen when it expires.
-let retiring = 0
-
-/// The secret half of the reply key behind the code on screen. In memory, and
-/// in this tab's `sessionStorage` so a reload keeps the code answerable; never
-/// in IndexedDB, which outlives the tab. A code whose secret is gone is retired.
-const SECRET = 'fc-reply-secret'
-let replySecret: string | null = null
-function keepSecret(secret: string): void {
-  replySecret = secret
-  try {
-    sessionStorage.setItem(SECRET, secret)
-  } catch {}
-}
-function loadSecret(): string | null {
-  if (replySecret) return replySecret
-  try {
-    replySecret = sessionStorage.getItem(SECRET)
-  } catch {}
-  return replySecret
-}
-function dropSecret(): void {
-  replySecret = null
-  try {
-    sessionStorage.removeItem(SECRET)
-  } catch {}
-}
-
-/// Which wait for a sealed reply is current; a new count cancels the one before.
-let polling = 0
-const stopPolling = () => void ++polling
-
 // MARK: Registering
 
 /// Put this browser's passkey on the account's device list, so the phone can
@@ -344,321 +314,7 @@ async function register(session: Session): Promise<void> {
 
 // MARK: Enrolling
 
-/// Which of the two waiting screens this tab is on, so a reload stays there.
-const WAITING = 'fc-waiting-on'
-function waitingOn(screen?: 'device' | 'runner'): 'device' | 'runner' {
-  try {
-    if (screen) sessionStorage.setItem(WAITING, screen)
-    return sessionStorage.getItem(WAITING) === 'device' ? 'device' : 'runner'
-  } catch {
-    return screen ?? 'runner'
-  }
-}
-
-/// A browser with no runner starts at Add Runner (ov-1490), unless this tab
-/// was waiting for another device's approval.
-function firstScreen(session: Session): Promise<void> {
-  return waitingOn() === 'device' ? enroll(session) : addRunner(session)
-}
-
-/// This browser's offer, still answerable: a stored one past the window, or
-/// one whose secret is gone, is replaced.
-async function freshOffer(session: Session): Promise<string> {
-  const { device } = session
-  if (device.offer && (offerIsStale(device.offerShownAt ?? 0) || !loadSecret())) {
-    delete device.offer
-    delete device.offerShownAt
-  }
-  if (!device.offer) {
-    const secret = newReplySecret()
-    keepSecret(secret)
-    device.offer = makeOffer(deviceName(), device.account, session.keyLine, device.nodePub, secret)
-    device.offerShownAt = Date.now()
-    await saveDevice(device)
-  }
-  return device.offer
-}
-
-/// Replace the code on screen when it expires.
-function retireWith(session: Session, screen: string, again: () => void): void {
-  retiring = window.setTimeout(() => {
-    if (!$(screen).hidden) again()
-  }, Math.max(0, (session.device.offerShownAt ?? 0) + freshnessMs() - Date.now()) + 500)
-}
-
-/// The account's runners this browser doesn't open, or null when unreadable.
-function listUnenrolled(session: Session) {
-  return unenrolledRunners({ call: relayRaw, unenrolled: unenrolledIn }, session.device.account, session.device.runners ?? [])
-}
-
-/// Which render of Add Runner is current, so a slow answer for an old one
-/// draws nothing.
-let adding = 0
-
-/// Add Runner: the command to run on a computer, then wait for that runner's
-/// answer, which the person compares before it is kept.
-async function addRunner(session: Session, notice = ''): Promise<void> {
-  const { device } = session
-  clearTimeout(retiring)
-  stopPolling()
-  waitingOn('runner')
-  if (!device.registered) {
-    await register(session)
-    return
-  }
-  const mine = ++adding
-  const offer = await freshOffer(session)
-  const note = $('join-note')
-  const say = (words: string) => {
-    note.textContent = words
-    note.hidden = words === ''
-  }
-  say(notice)
-  const command = $('join-command')
-  const copy = $<HTMLButtonElement>('join-copy')
-  command.textContent = 'Getting your command…'
-  copy.disabled = true
-  $('join-fingerprint').textContent = fingerprint(session.keyLine) ?? ''
-  const back = $<HTMLButtonElement>('join-back')
-  back.hidden = !device.runners?.length
-  back.onclick = () => {
-    stopPolling()
-    clearTimeout(retiring)
-    void work(session)
-  }
-  $<HTMLButtonElement>('join-from-device').onclick = () => void enroll(session)
-  show('runner-add')
-  retireWith(session, 'runner-add', () => void addRunner(session, 'That command expired, so here’s a new one. Copy it again.'))
-  void waitForSealedReply(session, note, 'runner')
-
-  void listUnenrolled(session).then(listed => {
-    if (mine !== adding) return
-    $('unenrolled-failed').hidden = listed !== null
-    $('unenrolled').hidden = !listed?.length
-    drawUnenrolled($('unenrolled-list'), listed ?? [], null, Date.now())
-  })
-  const made = await joinCommandFor({ call: relayRaw, command: joinCommand }, offer).catch(() => null)
-  if (mine !== adding) return
-  if (!made) {
-    command.textContent = ''
-    say('Far Cooler couldn’t make a command just now. Reload the page to try again.')
-    return
-  }
-  command.textContent = made
-  copy.disabled = false
-  copy.textContent = 'Copy Command'
-  copy.onclick = () => void copyText(made, copy)
-}
-
-async function copyText(text: string, button: HTMLButtonElement): Promise<void> {
-  const was = button.textContent
-  const ok = await navigator.clipboard.writeText(text).then(() => true, () => false)
-  button.textContent = ok ? 'Copied' : 'Select It and Copy'
-  window.setTimeout(() => (button.textContent = was), 2000)
-}
-
-/// Show this browser's code, and read another device's reply to it.
-///
-/// A code is answerable for the ceremony's window (two minutes) from when it
-/// went up, as on every other device: the reply leg carries no proof of who
-/// wrote it, and everything a forged reply must echo is printed in the code. So
-/// a stored code past the window is discarded for a new one, a code on screen
-/// is replaced when it expires, and a reply that comes later is refused in
-/// wasm (`openReply`).
-async function enroll(session: Session, notice = ''): Promise<void> {
-  const { device } = session
-  clearTimeout(retiring)
-  stopPolling()
-  waitingOn('device')
-  adding++
-  if (!device.registered) {
-    // Tried without a click first; a refusal to prompt becomes a button.
-    await register(session)
-    return
-  }
-  const offer = await freshOffer(session)
-
-  drawCode($<HTMLCanvasElement>('offer-code'), offer)
-  $('offer-fingerprint').textContent = `This browser’s passkey: ${fingerprint(session.keyLine) ?? ''}`
-  const copy = $<HTMLButtonElement>('offer-copy')
-  copy.onclick = () => void copyText(offer, copy)
-  const note = $('enroll-note')
-  note.textContent = notice
-  note.hidden = notice === ''
-  $('offer-account').textContent = device.account
-  $<HTMLTextAreaElement>('cli-offer').value = offer
-  const reply = $<HTMLTextAreaElement>('cli-reply')
-  reply.value = ''
-  $('cli-compare').onclick = () => {
-    try {
-      const opened = JSON.parse(openCliReply(reply.value, device.offer ?? '', loadSecret() ?? '', device.offerShownAt ?? 0))
-      reply.value = ''
-      compare(session, opened, [], 'cli')
-    } catch (error) {
-      note.textContent = sealedRefusal((error as Error).message)
-      note.hidden = false
-    }
-  }
-  show('enroll')
-  // A reply to the retired code is refused by the same freshness window.
-  retireWith(session, 'enroll', () => void enroll(session, 'That code expired, so here’s a new one. Scan or copy it again.'))
-
-  void waitForSealedReply(session, note, 'device')
-
-  const back = $<HTMLButtonElement>('enroll-back')
-  back.hidden = !device.runners?.length
-  back.onclick = () => {
-    stopPolling()
-    clearTimeout(retiring)
-    void work(session)
-  }
-  $<HTMLButtonElement>('enroll-add-runner').onclick = () => void addRunner(session)
-
-  $<HTMLButtonElement>('start-over').onclick = async () => {
-    dropSecret()
-    delete device.offer
-    delete device.offerShownAt
-    await saveDevice(device)
-    void enroll(session)
-  }
-
-}
-
-/// Wait for the sealed reply to the code on screen. When one opens, the
-/// person compares its code; nothing is kept before they say it matches.
-function waitForSealedReply(session: Session, note: HTMLElement, from: ReplyFrom): void {
-  const { device } = session
-  const offer = device.offer
-  if (!offer) return
-  const ceremony = (JSON.parse(offer) as { ceremony: string }).ceremony
-  const mine = ++polling
-  void waitForReply(
-    {
-      read: id => relayRaw('ceremony/reply', { ceremony: id }),
-      open: answer => JSON.parse(openReply(answer, device.offer ?? '', loadSecret() ?? '', !device.offer, device.offerShownAt ?? 0)) as Opened[],
-      now: () => Date.now(),
-      sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
-      cancelled: () => mine !== polling,
-      refused: word => {
-        note.textContent = sealedRefusal(word)
-        note.hidden = false
-      },
-    },
-    ceremony,
-  ).then(async waited => {
-    if (waited.kind === 'opened') compare(session, waited.opened, waited.others, from)
-    else if (waited.kind === 'ended' && mine === polling) {
-      // Too late for this code, and so for any reply to it: a new one.
-      dropSecret()
-      delete device.offer
-      delete device.offerShownAt
-      await saveDevice(device)
-      void (from === 'runner' ? addRunner : enroll)(session, sealedRefusal(waited.word))
-    }
-  })
-}
-
-/// The reply's own code, to match against the phone's before it is kept.
-function compare(session: Session, opened: Opened, others: Opened[] = [], from: ReplyFrom = 'device'): void {
-  stopPolling()
-  clearTimeout(retiring)
-  adding++
-  const words = compareWords(opened.granted_by, from)
-  $('compare-title').textContent = words.title
-  $('compare-detail').textContent = words.detail
-  $('compare-code').textContent = opened.code
-  show('compare')
-  // Nothing was kept on a mismatch and the code is still unanswered: the QR
-  // reply and a later sealed one still work.
-  // Another reply from the same read may be the real one (ov-778 R-113): show
-  // it before starting over.
-  const next = () =>
-    others.length ? compare(session, others[0], others.slice(1), from) : void (from === 'runner' ? addRunner(session, JOIN_MISMATCH) : enroll(session, MISMATCH))
-  const buttons = comparisonButtons(opened, taken => keep(session, taken, from), next)
-  const yes = $<HTMLButtonElement>('compare-yes')
-  const no = $<HTMLButtonElement>('compare-no')
-  yes.disabled = false
-  no.disabled = false
-  // The first tap answers, so both buttons go dark at once: no second save.
-  yes.onclick = () => {
-    yes.disabled = true
-    no.disabled = true
-    void buttons.yes()
-  }
-  no.onclick = () => {
-    yes.disabled = true
-    no.disabled = true
-    void buttons.no()
-  }
-}
-
-/// The runner to connect to next, once, after it was just added.
-let justAdded: string | null = null
-
-/// Keep what a confirmed reply grants. For a runner that ran the join command,
-/// the match is also the person's approval of it: the relay adds it to the
-/// account only now. A reply that didn't come through a ticket has none to
-/// approve, which the relay says with a 404.
-async function keep(session: Session, opened: Opened, from: ReplyFrom = 'device'): Promise<void> {
-  if (from === 'runner' && !opened.granted_by && session.device.offer) {
-    const ceremony = (JSON.parse(session.device.offer) as { ceremony: string }).ceremony
-    const answer = await relayRaw('join/approve', { ceremony }).catch(() => null)
-    if (!answer || (answer.status !== 200 && answer.status !== 404)) {
-      $('copy-note-text').textContent = 'You can open this runner here, but Far Cooler couldn’t add it to your account. Run a new command on it to finish.'
-      $('copy-note').hidden = false
-    }
-  }
-  justAdded = opened.runners.find(r => r.why === '')?.id ?? null
-  await finishTaken(session, { granted_by: opened.granted_by, runners: opened.runners })
-}
-
-/// A sealed reply whose code the person matched spends the offer.
-async function finishTaken(session: Session, taken: { granted_by: string | null; runners: Granted[] }): Promise<void> {
-  const { device } = session
-  stopPolling()
-  clearTimeout(retiring)
-  dropSecret()
-  delete device.offer
-  delete device.offerShownAt
-  await saveDevice(device)
-  if (taken.granted_by) {
-    confirmJoin(session, taken.granted_by, taken.runners)
-    return
-  }
-  device.runners = mergeRunners(device.runners ?? [], taken.runners)
-  await saveDevice(device)
-  await keepCopy(session)
-  void work(session)
-}
-
-function mergeRunners(known: Granted[], added: Granted[]): Granted[] {
-  return JSON.parse(mergeRunnerGrants(JSON.stringify(known), JSON.stringify(added)))
-}
-
-/// Another account's runners: asked about, never joined silently, as a phone
-/// asks (apps/ios/FarCooler/Ceremony/JoinView.swift, TeammateJoinPrompt).
-function confirmJoin(session: Session, from: string, runners: Granted[]): void {
-  $('join-title').textContent = joinTitle(runners.map(r => r.label))
-  $('join-detail').textContent = joinDetail(from)
-  const list = $('join-runners')
-  list.replaceChildren(
-    ...(runners.length > 1
-      ? runners.map(r => {
-          const item = document.createElement('li')
-          item.textContent = r.label
-          return item
-        })
-      : []),
-  )
-  show('join')
-  $<HTMLButtonElement>('join-yes').onclick = async () => {
-    session.device.runners = mergeRunners(session.device.runners ?? [], runners)
-    await saveDevice(session.device)
-    await keepCopy(session)
-    void work(session)
-  }
-  $<HTMLButtonElement>('join-no').onclick = () => void firstScreen(session)
-}
+const { firstScreen, addRunner, enroll, listUnenrolled, dropSecret, takeAdded } = enrollingScreens<Session>({ $, show, relayRaw, deviceName, register, work, keepCopy })
 
 // MARK: Working
 
@@ -827,15 +483,14 @@ function stopNeeds(): void {
 
 async function work(session: Session): Promise<void> {
   const runners = session.device.runners ?? []
-  const added = justAdded
-  justAdded = null
+  const added = takeAdded()
   const wanted = linkedRunner()
   const target = added
     ? runners.find(r => r.id === added && r.why === '')
     : wanted ? runners.find(r => r.id === wanted && r.why === '') : runners.find(r => r.why === '')
   if (wanted && !target) {
     status('This runner is unavailable', 'Open this link in a browser paired with the runner.',
-      { label: 'Add Again', run: () => void addAgain(session) }, () => void addRunner(session), 'Add Runner')
+      { label: 'Add Again', run: () => void addAgain(session) }, () => void addRunner(session), say({ say: 'add_runner' }))
     return
   }
   if (!target) {
@@ -845,16 +500,17 @@ async function work(session: Session): Promise<void> {
       first ? unreachable(first.why, first.label, first.cause) : 'No runner was granted to this browser.',
       { label: 'Add Again', run: () => void addAgain(session) },
       () => void addRunner(session),
-      'Add Runner',
+      say({ say: 'add_runner' }),
     )
     return
   }
 
   // A button first: the passkey prompt this leads to needs a click (Safari).
+  const connectToIt = `Connect to ${target.label}`
   status(
-    added ? `${target.label} is added` : `Connect to ${target.label}`,
-    added ? 'Touch your passkey to open its terminals and workspaces.' : 'You’ll touch your passkey to sign in.',
-    { label: added ? `Connect to ${target.label}` : 'Connect', run: () => void connectTo(session, target) },
+    added ? say({ say: 'added_title', runner: target.label }) : connectToIt,
+    added ? say({ say: 'added_detail' }) : 'You’ll touch your passkey to sign in.',
+    { label: added ? connectToIt : 'Connect', run: () => void connectTo(session, target) },
   )
 }
 

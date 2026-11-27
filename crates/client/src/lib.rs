@@ -46,6 +46,7 @@ pub mod work_view;
 pub mod workspaces_json;
 pub mod workflow_presentation;
 pub mod engine_view;
+pub mod enroll_view;
 
 pub mod recovery_view;
 

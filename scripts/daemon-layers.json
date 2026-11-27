@@ -214,6 +214,7 @@
    "paths",
    "proc_cwd",
    "proc_table",
+   "join_relay",
    "push",
    "refusal",
    "resync",

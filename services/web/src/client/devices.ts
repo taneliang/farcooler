@@ -8,6 +8,7 @@
 /// is sent can open anything until its person matches that code.
 
 import type { Granted } from './device'
+import { say } from './say'
 
 export interface DeviceRow {
   clientId: string
@@ -43,23 +44,6 @@ export interface DevicesDeps {
   scan: (video: HTMLVideoElement, found: (text: string) => boolean) => Promise<{ stop: () => void }>
 }
 
-export function codeFailure(word: string): string {
-  switch (word) {
-    case 'wrong_account':
-      return 'That code is for another account. Sign in to this account on the new device, then use its new code.'
-    case 'not_a_browser':
-      return 'That isn’t a new browser’s code. On the new device, open Far Cooler, sign in and choose Approve From Another Device.'
-    case 'wrong_target':
-      return 'That’s this browser’s own code. Use the one on the new device.'
-    case 'channel':
-      return 'That code is from a different Far Cooler release. Open the same one on both devices.'
-    case 'version':
-      return 'That code is from a newer Far Cooler. Reload this page, then try again.'
-    default:
-      return 'That code couldn’t be read. Copy all of it, or scan it again.'
-  }
-}
-
 export class DevicesSheet {
   private camera: { stop: () => void } | null = null
   private removing: string | null = null
@@ -79,9 +63,9 @@ export class DevicesSheet {
   open(): void {
     this.reset()
     const front = this.deps.runners()[0]
-    const name = front?.grant.label ?? 'this runner'
-    this.$('devices-title').textContent = `Devices on ${name}`
-    this.$('devices-detail').textContent = `These can open ${name}. Remove one you’ve lost or no longer use: it stops opening it at once.`
+    const runner = front?.grant.label ?? null
+    this.$('devices-title').textContent = say({ say: 'devices_title', runner })
+    this.$('devices-detail').textContent = say({ say: 'devices_detail', runner })
     this.dialog.showModal()
     void this.list()
   }
@@ -115,7 +99,7 @@ export class DevicesSheet {
     const front = this.deps.runners()[0]
     if (!front) {
       list.replaceChildren()
-      this.say('Connect to a runner to see its devices.')
+      this.say(say({ say: 'no_runner_to_list' }))
       return
     }
     let rows: DeviceRow[]
@@ -130,14 +114,15 @@ export class DevicesSheet {
       ...rows.map(row => {
         const item = document.createElement('li')
         const name = document.createElement('span')
-        name.textContent = row.here ? `${row.label} (this browser)` : row.label
+        name.textContent = row.here ? say({ say: 'this_browser_row', label: row.label }) : row.label
         item.append(name)
         if (!row.here) {
           const button = document.createElement('button')
           button.type = 'button'
           button.className = this.removing === row.clientId ? 'danger' : 'quiet'
-          button.textContent = this.removing === row.clientId ? 'Confirm Remove' : 'Remove'
-          button.setAttribute('aria-label', `${button.textContent} ${row.label}`)
+          const confirming = this.removing === row.clientId
+          button.textContent = say({ say: 'remove_button', confirming })
+          button.setAttribute('aria-label', say({ say: 'remove_label', confirming, device: row.label }))
           button.onclick = () => {
             if (this.removing !== row.clientId) {
               this.removing = row.clientId
@@ -164,7 +149,7 @@ export class DevicesSheet {
       for (const runner of this.deps.runners()) {
         try {
           if (!(await runner.devices()).some(d => d.clientId === row.clientId)) continue
-          this.say(`Removing ${row.label} from ${runner.grant.label}. Verify with your passkey.`)
+          this.say(say({ say: 'removing', device: row.label, runner: runner.grant.label }))
           await runner.remove(row.clientId)
           done.push(runner.grant.label)
         } catch (error) {
@@ -175,14 +160,7 @@ export class DevicesSheet {
       this.busy = false
       this.removing = null
     }
-    const offline = this.deps.offline()
-    this.say(
-      [
-        done.length ? `${row.label} can no longer open ${done.join(', ')}.` : '',
-        ...failed,
-        done.length && offline.length ? `This browser isn’t connected to ${offline.join(', ')}. If ${row.label} was added there, connect and remove it too.` : '',
-      ].filter(Boolean).join(' '),
-    )
+    this.say(say({ say: 'removed', device: row.label, done, failed, offline: this.deps.offline() }))
     await this.list()
   }
 
@@ -201,7 +179,7 @@ export class DevicesSheet {
       })
     } catch {
       video.hidden = true
-      this.say('This browser couldn’t use a camera. Paste the code instead.')
+      this.say(say({ say: 'no_camera' }))
     }
   }
 
@@ -212,17 +190,17 @@ export class DevicesSheet {
     try {
       asking = this.deps.asking(code.trim())
     } catch (error) {
-      this.say(codeFailure((error as Error).message))
+      this.say(say({ say: 'code_refused', word: (error as Error).message }))
       return
     }
     const runners = this.deps.runners()
     if (!runners.length) {
-      this.say('Connect to a runner first.')
+      this.say(say({ say: 'connect_first' }))
       return
     }
     this.say('')
     this.asked = code.trim()
-    this.$('device-asking').textContent = `${asking.name} wants to open your runners. Check that it shows this passkey:`
+    this.$('device-asking').textContent = say({ say: 'asking', name: asking.name })
     this.$('device-fingerprint').textContent = asking.fingerprint
     const choices = this.$('device-runners')
     choices.replaceChildren(
@@ -239,7 +217,7 @@ export class DevicesSheet {
     const offline = this.deps.offline()
     if (offline.length) {
       const note = document.createElement('p')
-      note.textContent = `Not connected now: ${offline.join(', ')}. To include one, open it first.`
+      note.textContent = say({ say: 'not_connected', runners: offline })
       choices.append(note)
     }
     this.$('device-confirm').hidden = false
@@ -251,7 +229,7 @@ export class DevicesSheet {
     const chosen = new Set([...this.$('device-runners').querySelectorAll<HTMLInputElement>('input:checked')].map(box => box.value))
     const runners = this.deps.runners().filter(r => chosen.has(r.grant.id))
     if (!runners.length) {
-      this.say('Choose at least one runner.')
+      this.say(say({ say: 'choose_runner' }))
       return
     }
     this.busy = true
@@ -260,7 +238,7 @@ export class DevicesSheet {
     const failed: string[] = []
     try {
       for (const runner of runners) {
-        this.say(`Adding it to ${runner.grant.label}. Verify with your passkey.`)
+        this.say(say({ say: 'adding', runner: runner.grant.label }))
         try {
           const token = await runner.approve(code)
           granted.push({ ...runner.grant, token, why: '', cause: '' })
@@ -276,14 +254,14 @@ export class DevicesSheet {
       const reply = this.deps.seal(code, granted)
       const posted = await this.deps.post(reply.ceremony, reply.sealed).catch(() => null)
       if (posted?.status !== 200) {
-        this.say('The runners added it, but Far Cooler couldn’t send it the answer. Make a new code on the new device and approve it again.')
+        this.say(say({ say: 'reply_not_sent' }))
         return
       }
       this.$('device-confirm').hidden = true
       this.asked = ''
       this.$('device-compare').textContent = reply.compare
       this.$('device-compare').hidden = false
-      this.say([`Check that the new device shows this code, then select They Match there. If it shows another, remove it above.`, ...failed].join(' '))
+      this.say(say({ say: 'check_code', failed }))
       await this.list()
     } finally {
       this.busy = false
