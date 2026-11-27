@@ -263,6 +263,44 @@ pub fn registration_proof(
     register::proof(account, challenge, key_line, &assertion).map_err(|e| failure(e.word(), &e.to_string()))
 }
 
+/// The command Add Runner shows for the offer on screen, the relay's ticket
+/// and its team: one line a person copies to the runner's terminal.
+#[wasm_bindgen(js_name = joinCommand)]
+pub fn join_command(offer: &str, ticket: &str, team: &str) -> Result<String, JsValue> {
+    let code = farcooler_ceremony::JoinCode::new(offer, ticket, team).map_err(|e| failure(e.code(), &e.to_string()))?;
+    Ok(farcooler_ceremony::join_command(&code))
+}
+
+/// A new browser's code, checked: `{name, fingerprint}`, or the ceremony's
+/// word (`wrong_account`, `not_a_browser`, `wrong_target` for this browser's
+/// own).
+#[wasm_bindgen(js_name = approvalAsking)]
+pub fn approval_asking(code: &str, account: &str, own_key_line: &str) -> Result<String, JsValue> {
+    let (_, asking) = crate::approve::asking(code, account, own_key_line).map_err(|e| failure(e.code(), &e.to_string()))?;
+    serde_json::to_string(&asking).map_err(|e| failure("malformed", &e.to_string()))
+}
+
+/// The sealed reply granting `runners` (a JSON list of `{id, label, user,
+/// host_key, token}`) to the browser `code` names, as `{sealed, compare,
+/// ceremony}`.
+#[wasm_bindgen(js_name = sealApproval)]
+pub fn seal_approval(code: &str, account: &str, own_key_line: &str, runners: &str) -> Result<String, JsValue> {
+    let (offer, _) = crate::approve::asking(code, account, own_key_line).map_err(|e| failure(e.code(), &e.to_string()))?;
+    let granted: Vec<enroll::Granted> = serde_json::from_str(runners).map_err(|e| failure("protocol", &e.to_string()))?;
+    let entries = granted.iter().map(|g| farcooler_ceremony::tunneled_runner(&g.id, &g.label, &g.user, &g.host_key, &g.token)).collect();
+    let (sealed, compare) = crate::approve::seal(&offer, entries).map_err(|e| failure(e.code(), &e.to_string()))?;
+    Ok(serde_json::json!({ "sealed": sealed, "compare": compare, "ceremony": offer.ceremony }).to_string())
+}
+
+/// The runners the account has that this browser can't open:
+/// `[{name, lastSeenAt}]`.
+#[wasm_bindgen(js_name = unenrolledRunners)]
+pub fn unenrolled_runners(teams: &str, account: &str, grants: &str) -> Result<String, JsValue> {
+    let grants: Vec<enroll::Granted> = serde_json::from_str(grants).map_err(|e| failure("protocol", &e.to_string()))?;
+    let listed = crate::approve::unenrolled(teams, account, &grants).map_err(|e| failure("protocol", &e.to_string()))?;
+    serde_json::to_string(&listed).map_err(|e| failure("protocol", &e.to_string()))
+}
+
 /// The ceremony's window in milliseconds, so the page can retire a code on
 /// time without a second spelling of the number.
 #[wasm_bindgen(js_name = freshnessMs)]
@@ -347,6 +385,33 @@ pub async fn connect(
 
 #[wasm_bindgen]
 impl WebRunner {
+    /// The devices that may log in here, as `[{clientId, label, here}]`.
+    pub async fn devices(&self, key_a: String) -> Result<String, JsValue> {
+        let runner = self.0.clone();
+        let listed = runner.clients().await.map_err(web_failure)?;
+        let rows = crate::approve::devices(&listed.to_string(), &key_a).map_err(|e| failure("protocol", &e.to_string()))?;
+        serde_json::to_string(&rows).map_err(|e| failure("protocol", &e.to_string()))
+    }
+
+    /// Add the browser `code` names to this runner: one passkey prompt that
+    /// verifies the person (`assert`, as `connect` takes it). Answers the
+    /// tunnel token the new browser dials.
+    #[wasm_bindgen(js_name = approveBrowser)]
+    pub async fn approve_browser(&self, code: String, account: String, key_a: String, host_key: String, assert: Function) -> Result<String, JsValue> {
+        let runner = self.0.clone();
+        let (offer, _) = crate::approve::asking(&code, &account, &key_a).map_err(|e| failure(e.code(), &e.to_string()))?;
+        let mut signer = JsAuthenticator(assert);
+        runner.approve_browser(&offer, &key_a, &host_key, |challenge| signer.assert(challenge)).await.map_err(web_failure)
+    }
+
+    /// Take `device` off this runner, verified by the same passkey prompt.
+    #[wasm_bindgen(js_name = removeDevice)]
+    pub async fn remove_device(&self, device: String, key_a: String, host_key: String, assert: Function) -> Result<(), JsValue> {
+        let runner = self.0.clone();
+        let mut signer = JsAuthenticator(assert);
+        runner.remove_device(&device, &key_a, &host_key, |challenge| signer.assert(challenge)).await.map_err(web_failure)
+    }
+
     /// Whether the runner answers right now. The page asks when the tab comes
     /// back and when the browser comes online; false means the connection is
     /// over and `on_lost` is called.

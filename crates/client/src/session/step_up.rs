@@ -168,6 +168,32 @@ impl Session {
     /// signature of the statement `step_up_begin` answered). The token is
     /// spent whatever the runner says: a nonce is good for one assertion.
     pub async fn step_up_finish(&self, token: &str, signature: Vec<u8>) -> Result<result::Value, SessionError> {
+        self.step_up_send(token, StepUp { alg: ALG.to_string(), signature: signature.into(), ..Default::default() }).await
+    }
+
+    /// [`Session::step_up_finish`] for a browser, which signs with its passkey:
+    /// `alg` is the runner's name for the check, and the assertion's three
+    /// parts go as the browser gave them, over the SHA-256 of the statement.
+    pub async fn step_up_finish_assertion(
+        &self,
+        token: &str,
+        alg: &str,
+        signature: Vec<u8>,
+        authenticator_data: Vec<u8>,
+        client_data_json: Vec<u8>,
+    ) -> Result<result::Value, SessionError> {
+        self.step_up_send(token, StepUp {
+            alg: alg.to_string(),
+            signature: signature.into(),
+            authenticator_data: authenticator_data.into(),
+            client_data_json: client_data_json.into(),
+            ..Default::default()
+        })
+        .await
+    }
+
+    /// Send what `token` prepared, under `signed`'s algorithm and signature.
+    async fn step_up_send(&self, token: &str, signed: StepUp) -> Result<result::Value, SessionError> {
         let prepared = {
             let mut kept = self.step_ups.lock().unwrap();
             let at = kept.iter().position(|p| p.token == token);
@@ -177,16 +203,7 @@ impl Session {
             return Err(SessionError::Protocol("that step-up was already used or has expired".into()));
         };
         let method = request.method.clone();
-        request.step_up = Some(StepUp {
-            action_bytes: action_bytes.into(),
-            alg: ALG.to_string(),
-            nonce: nonce.into(),
-            host_pin,
-            signature: signature.into(),
-            authenticator_data: Default::default(),
-            client_data_json: Default::default(),
-            approval_id: String::new(),
-        });
+        request.step_up = Some(StepUp { action_bytes: action_bytes.into(), nonce: nonce.into(), host_pin, ..signed });
         let answer = self.client.send(request, crate::deadlines::for_method(&method))?;
         Pending { answer, method }.value().await
     }

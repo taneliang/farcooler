@@ -16,6 +16,7 @@
 //! against an in-process SSH server.
 
 pub mod agent;
+pub mod approve;
 pub mod enroll;
 pub mod error;
 pub mod handshake;

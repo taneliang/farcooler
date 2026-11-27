@@ -30,6 +30,13 @@ use tokio::io::AsyncReadExt;
 use uuid::Uuid;
 
 use crate::error::WebError;
+use crate::passkey::Assertion;
+use crate::ssh::SignError;
+use sha2::{Digest as _, Sha256};
+
+/// The runner's name for a browser's assertion checked against its own line
+/// (`farcooler_daemon::step_up::ALG_PASSKEY_LINE`).
+pub const ALG_PASSKEY_LINE: &str = "webauthn-line-es256";
 use crate::liveness::Link;
 use crate::ssh::Connection;
 
@@ -98,6 +105,67 @@ pub struct Runner {
 }
 
 impl Runner {
+    /// Send `method`, signed by this browser's passkey, which the runner checks
+    /// against the line this connection logged in with (ov-1490). `assert` is
+    /// given the SHA-256 of the statement as its WebAuthn challenge, and must
+    /// verify the person, not only a touch.
+    pub async fn passkey_approved<F, Fut>(
+        &self,
+        method: &str,
+        args: &serde_json::Value,
+        key_line: &str,
+        host_key: &str,
+        assert: F,
+    ) -> Result<farcooler_protocol::v1::result::Value, WebError>
+    where
+        F: FnOnce(Vec<u8>) -> Fut,
+        Fut: Future<Output = Result<Assertion, SignError>>,
+    {
+        let client_id = farcooler_ceremony::client_id(key_line).ok_or_else(|| WebError::Signer("this browser's passkey has no id".into()))?;
+        let (token, statement) = self.session.step_up_begin(method, args, &client_id, host_key).await?;
+        let assertion = assert(Sha256::digest(&statement).to_vec()).await.map_err(|e| match e {
+            SignError::Declined => WebError::PasskeyDeclined,
+            SignError::Sign(why) => WebError::Signer(why),
+            other => WebError::Signer(format!("{other:?}")),
+        })?;
+        Ok(self
+            .session
+            .step_up_finish_assertion(&token, ALG_PASSKEY_LINE, assertion.signature, assertion.authenticator_data, assertion.client_data_json)
+            .await?)
+    }
+
+    /// Add the browser `offer` names to this runner, approved with this
+    /// browser's passkey, and answer the tunnel token it dials.
+    pub async fn approve_browser<F, Fut>(&self, offer: &farcooler_ceremony::Offer, key_line: &str, host_key: &str, assert: F) -> Result<String, WebError>
+    where
+        F: FnOnce(Vec<u8>) -> Fut,
+        Fut: Future<Output = Result<Assertion, SignError>>,
+    {
+        let args = crate::approve::enroll_args(offer);
+        match self.passkey_approved("client.enroll", &args, key_line, host_key, assert).await? {
+            farcooler_protocol::v1::result::Value::ClientEnroll(done) if !done.conn_blob.is_empty() => Ok(done.conn_blob),
+            // Added, with no tunnel to reach it by: no use to a browser.
+            farcooler_protocol::v1::result::Value::ClientEnroll(_) => Err(WebError::Refused { code: "resource-conflict".into(), what: "no_tunnel".into() }),
+            _ => Err(WebError::Protocol("the runner answered another call".into())),
+        }
+    }
+
+    /// Take `device` off this runner, approved with this browser's passkey.
+    pub async fn remove_device<F, Fut>(&self, device: &str, key_line: &str, host_key: &str, assert: F) -> Result<(), WebError>
+    where
+        F: FnOnce(Vec<u8>) -> Fut,
+        Fut: Future<Output = Result<Assertion, SignError>>,
+    {
+        let args = serde_json::json!({ "clientId": device });
+        self.passkey_approved("client.revoke", &args, key_line, host_key, assert).await?;
+        Ok(())
+    }
+
+    /// Every device that may log in to this runner, as `client.list` answers.
+    pub async fn clients(&self) -> Result<serde_json::Value, WebError> {
+        Ok(self.session.enrolled_clients().await?)
+    }
+
     /// Start the control session on an authenticated connection.
     pub async fn start(conn: Connection) -> Result<Runner, WebError> {
         let session = Rc::new(Session::over_ssh(conn, CLIENT_NAME, None).await?);
