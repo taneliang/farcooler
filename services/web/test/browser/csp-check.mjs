@@ -100,10 +100,10 @@ const delay = Number(flag('--tunnel-delay') ?? 0)
 // alone (ov-846): panes learn the limit from the first refusal.
 const maxSessions = Number(flag('--max-sessions') ?? 10)
 const later = send => (delay > 0 ? setTimeout(send, delay) : send())
-const shoot = async (page, name) => {
+const shoot = async (page, name, phoneWidth = 390) => {
   const directory = name.startsWith('workstation-') ? workstationShots ?? shots : shots
   if (!directory) return
-  for (const [width, height] of [[1280, 800], [390, 844]]) {
+  for (const [width, height] of [[1280, 800], [phoneWidth, 844]]) {
     await page.setViewportSize({ width, height })
     await page.waitForTimeout(300)
     await page.screenshot({ path: join(directory, `${name}-${width}.png`) })
@@ -1316,10 +1316,15 @@ async function remoteWorkday({ context, page, passkeys }) {
   assert(touches === healthTouches, 'runner health changed without a new passkey sign-in')
   console.log('workday: runner health showed tmux degradation and recovery on the same connection')
 
-  const lost = page.getByRole('link', { name: 'Lost workday agent', exact: true })
+  const sidebar = page.locator('#terminal-list')
+  const lost = sidebar.getByRole('link', { name: 'Lost workday agent', exact: true })
+  if (shots) {
+    await lost.waitFor(wait)
+    await shoot(page, 'workday-lost-terminal', 320)
+  }
   await lost.click()
   await page.locator('#terminal-state').filter({ hasText: /^Lost$/ }).waitFor(wait)
-  await page.getByRole('button', { name: 'Recover Terminal' }).click()
+  await sidebar.getByRole('button', { name: 'Recover Lost workday agent', exact: true }).click()
   await page.locator('#terminal-state').filter({ hasText: /^Running$/ }).waitFor(wait)
   await page.locator('#terminal-name').filter({ hasText: /^Lost workday agent$/ }).waitFor(wait)
   const terminalUrl = page.url()

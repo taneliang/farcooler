@@ -71,24 +71,35 @@ const work = async page => {
   return page.getByRole('dialog', { name: 'Start Work' })
 }
 const rpc = async (page, action) => page.evaluate(a => window.calls.filter(c => c.action === a).at(-1), action)
-const showUnavailable = page => page.getByText('Unavailable Terminals', { exact: true }).click()
-
 try {
   for (const width of [320, 1280]) await test(`workspace terminal sidebar at ${width}px`, async page => {
     const picker = page.getByLabel('Workspace', { exact: true })
     const list = page.locator('#terminal-list')
     const visibleIds = () => list.locator('a:visible').evaluateAll(links => links.map(link => link.dataset.terminal))
     await list.locator('a[data-terminal=seat]').waitFor()
+    const shell = list.locator('a[data-terminal=shell]')
+    await shell.click()
+    await page.waitForURL('**terminal=shell')
     await page.getByText('Writer', { exact: true }).waitFor()
-    if (out) await page.screenshot({ path: join(out, `sidebar-${width}.png`) })
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), width)
-    assert.deepEqual(await visibleIds(), ['seat', 'shell'])
+    assert.deepEqual(await visibleIds(), ['seat', 'shell', 'lost-seat'])
     assert.equal(await list.locator('a[data-terminal=seat]').innerText(), 'Orchestrator')
     assert.deepEqual(await picker.locator('option').allTextContents(), ['Main · overnight', 'Main · Verdela'])
-    await list.getByText('Unavailable Terminals', { exact: true }).click()
+    const lost = list.getByRole('link', { name: 'orchestrator', exact: true })
+    assert.equal(await lost.getAttribute('aria-description'), 'Lost')
+    const recover = list.getByRole('button', { name: 'Recover orchestrator', exact: true })
+    assert.equal(await recover.isVisible(), true)
+    if (out) await page.screenshot({ path: join(out, `sidebar-${width}.png`) })
+    const unavailable = list.getByText('Unavailable Terminals', { exact: true })
+    await unavailable.click()
     assert.deepEqual(await visibleIds(), ['seat', 'shell', 'lost-seat', 'exited-seat'])
-    await list.getByRole('link', { name: 'Lost orchestrator', exact: true }).click()
-    await page.getByRole('button', { name: 'Recover Terminal' }).waitFor()
+    await unavailable.click()
+    await recover.click()
+    await page.waitForURL('**terminal=recovered')
+    assert.equal((await rpc(page, 'restart')).terminal, 'lost-seat')
+    await page.locator('#terminal-state').filter({ hasText: /^Running$/ }).waitFor()
+    await page.goBack()
+    await page.locator('a[data-terminal=shell][aria-current=true]').waitFor()
     await picker.selectOption('next')
     await list.locator('a[data-terminal=other-seat]').waitFor()
     assert.deepEqual(await visibleIds(), ['other-seat'])
@@ -138,7 +149,6 @@ try {
   })
 
   await test('recover a lost agent using the returned terminal identity', async page => {
-    await showUnavailable(page)
     await page.getByRole('link', { name: /Bring back the observability/ }).click()
     await page.getByRole('button', { name: 'Recover Terminal' }).click()
     await page.waitForURL('**terminal=recovered')
@@ -202,6 +212,8 @@ try {
     await page.getByText('Read-only', { exact: true }).waitFor()
     await page.locator('#pane-note').filter({ hasText: /This browser has read-only access/ }).waitFor()
     assert.equal(await page.getByRole('button', { name: 'Rename' }).count(), 0)
+    assert.equal(await page.locator('#lost-terminals a').count(), 1)
+    assert.equal(await page.locator('#lost-terminals button').count(), 0)
     assert.equal(await rpc(page, 'attach'), undefined)
   }, { query: '?read' })
 
@@ -212,7 +224,6 @@ try {
   }, { query: '?refuse' })
 
   await test('terminal and workspace links survive reload, new tab and Back', async (page, context) => {
-    await showUnavailable(page)
     const terminal = page.getByRole('link', { name: /Bring back the observability/ })
     await terminal.waitFor()
     const href = await terminal.getAttribute('href')

@@ -130,6 +130,7 @@ export function mountWork(options: Options) {
   const picker = get<HTMLSelectElement>('space-picker')
   const list = get('terminal-list')
   const liveList = get('live-terminals')
+  const lostList = get('lost-terminals')
   const unavailable = get<HTMLDetailsElement>('unavailable-terminals')
   const unavailableList = get('unavailable-terminal-list')
   const dialog = get<HTMLDialogElement>('start-work')
@@ -173,6 +174,7 @@ export function mountWork(options: Options) {
   function lock(on: boolean): void {
     busy = on
     for (const control of mutationControls) control.disabled = on
+    for (const button of lostList.querySelectorAll('button')) button.disabled = on
     dialog.setAttribute('aria-busy', String(on))
   }
 
@@ -257,8 +259,9 @@ export function mountWork(options: Options) {
         void send({ action: 'start', worktree: view.worktree, preset: preset.value })
       })
     }
-    const focused = list.contains(document.activeElement) ? (document.activeElement as HTMLAnchorElement).href : null
+    const focused = list.contains(document.activeElement) ? document.activeElement as HTMLElement : null
     const liveLinks: HTMLAnchorElement[] = []
+    const lostRows: HTMLDivElement[] = []
     const unavailableLinks: HTMLAnchorElement[] = []
     for (const t of view.terminals) {
       const link = document.createElement('a')
@@ -284,20 +287,46 @@ export function mountWork(options: Options) {
         if (options.navigation) options.navigation.terminal(t.id)
         else void chooseTerminal(t.id)
       })
-      if (t.live) liveLinks.push(link)
-      else unavailableLinks.push(link)
+      if (t.live) {
+        liveLinks.push(link)
+      } else if (t.state === 'Lost') {
+        link.setAttribute('aria-label', t.title)
+        link.setAttribute('aria-description', t.state)
+        const row = document.createElement('div')
+        row.className = 'lost-terminal'
+        row.append(link)
+        if (t.recover?.action === 'restart') {
+          const button = document.createElement('button')
+          button.type = 'button'
+          button.className = 'quiet'
+          button.textContent = 'Recover'
+          button.setAttribute('aria-label', `Recover ${t.title}`)
+          button.dataset.terminal = t.id
+          button.disabled = busy
+          button.onclick = () => void send({ action: 'restart', terminal: t.id })
+          row.append(button)
+        }
+        lostRows.push(row)
+      } else {
+        unavailableLinks.push(link)
+      }
     }
     liveList.replaceChildren(...liveLinks)
     liveList.hidden = liveLinks.length === 0
+    lostList.replaceChildren(...lostRows)
+    lostList.hidden = lostRows.length === 0
     unavailableList.replaceChildren(...unavailableLinks)
     unavailable.hidden = unavailableLinks.length === 0
     if (drawnWorkspace !== view.workspace || unavailable.hidden) unavailable.open = false
-    if (terminal && !terminal.live && (drawnWorkspace !== view.workspace || drawnTerminal !== terminal.id)) {
+    if (terminal && !terminal.live && terminal.state !== 'Lost' && (drawnWorkspace !== view.workspace || drawnTerminal !== terminal.id)) {
       unavailable.open = true
     }
     drawnWorkspace = view.workspace
     drawnTerminal = view.terminal
-    if (focused) [...list.querySelectorAll('a')].find(link => link.href === focused)?.focus()
+    if (focused?.dataset.terminal) {
+      [...list.querySelectorAll<HTMLElement>('[data-terminal]')].find(control =>
+        control.tagName === focused.tagName && control.dataset.terminal === focused.dataset.terminal)?.focus()
+    }
     manage.hidden = !terminal
     get('terminal-name').textContent = terminal?.title ?? ''
     const access = get('terminal-access')
@@ -347,6 +376,7 @@ export function mountWork(options: Options) {
     if (!runner || busy || disposed) return
     const navigation = navigationId
     const destination = { workspace: view?.workspace, worktree: view?.worktree }
+    const pushHistory = intent.action === 'start' || (intent.action === 'restart' && intent.terminal !== view?.terminal)
     lock(true)
     notify('')
     try {
@@ -374,7 +404,7 @@ export function mountWork(options: Options) {
           break
       }
       const opensTerminal = intent.action === 'start' || intent.action === 'restart'
-      await refresh(opensTerminal, intent.action === 'start' ? 'pushState' : 'replaceState')
+      await refresh(opensTerminal, pushHistory ? 'pushState' : 'replaceState')
     } catch (e) {
       if (!disposed) notify(await options.failure(e as WorkError))
     } finally {
@@ -434,6 +464,8 @@ export function mountWork(options: Options) {
       window.removeEventListener('popstate', pop)
       if (dialog.open) dialog.close()
       liveList.replaceChildren()
+      lostList.replaceChildren()
+      lostList.hidden = true
       unavailableList.replaceChildren()
       unavailable.hidden = true
       unavailable.open = false
