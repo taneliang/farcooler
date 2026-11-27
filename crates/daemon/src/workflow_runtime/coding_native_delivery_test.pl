@@ -31,7 +31,11 @@ sub hook {
     }
 }
 die 'native agent needs a PTY' unless -t STDIN && -t STDOUT;
-hook('UserPromptSubmit', prompt => $ENV{TEST_LAUNCHED_PROMPT});
+# The engine hands the brief over by file (ov-1512); the launch reads it into the agent's last argument.
+open my $brief_file, '<:encoding(UTF-8)', $ENV{TEST_LAUNCHED_PROMPT_FILE} or die $!;
+my $brief = do { local $/; <$brief_file> };
+close $brief_file;
+hook('UserPromptSubmit', prompt => $brief);
 open my $started, '>', $ENV{STARTED} or die $!;
 print $started $$;
 close $started;

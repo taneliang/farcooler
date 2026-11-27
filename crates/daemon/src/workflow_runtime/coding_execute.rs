@@ -270,24 +270,21 @@ impl Exec {
                         }
                         None => {}
                     }
-                    let mut extras = crate::service::LaunchExtras { settings: settings.as_ref().map(|s| s.path.clone()),
+                    // The brief always travels by file, never on the command line (ov-1512). The launch quotes it
+                    // three times on its way to tmux (login shell, launch script, hold), and each quoting turns an
+                    // apostrophe into four bytes: a review brief under the inline limit once quoted grew past tmux's
+                    // 16 KB message ceiling, and its pane was refused with "command too long".
+                    let brief = self.root.join("receipts").join(format!("{}.launch-brief", digest(&binding.effect)));
+                    if launch { self.launch_file(&brief, &self.native_prompt(binding)?)?; }
+                    let extras = crate::service::LaunchExtras { settings: settings.as_ref().map(|s| s.path.clone()),
                         codex_hooks: if let Some(text) = self.codex_hook_override(binding)? {
                             let path = self.root.join("receipts").join(format!("{}.launch-hooks", digest(&binding.effect)));
                             if launch { self.launch_file(&path, &text)?; }
                             Some(path)
                         } else { None },
-                        plugin_dir: plugin_dir.clone(), prompt: Some(crate::service::LaunchPrompt::Inline(self.native_prompt(binding)?)),
+                        plugin_dir: plugin_dir.clone(), prompt: Some(crate::service::LaunchPrompt::File(brief)),
                         ..Default::default() };
                     let mut launch_command = crate::service::preset_command_with_hooks(preset, Some(&Self::native_session(binding)), &extras);
-                    if agent == "codex" || launch_command.len() > crate::service::MAX_INLINE_LAUNCH_BYTES {
-                        let path = self.root.join("receipts").join(format!("{}.launch-brief", digest(&binding.effect)));
-                        if launch {
-                            let text = self.native_prompt(binding)?;
-                            self.launch_file(&path, &text)?;
-                        }
-                        extras.prompt = Some(crate::service::LaunchPrompt::File(path));
-                        launch_command = crate::service::preset_command_with_hooks(preset, Some(&Self::native_session(binding)), &extras);
-                    }
                     let mut command = process.clone();
                     // The hold's exec wrappers are launch mechanics. Keep the original
                     // command identity when reconstructing a retained process fact.
@@ -301,8 +298,6 @@ impl Exec {
                         // The fake agent reports what it was launched with, as a real one would, so the turn check can't drift.
                         if let Some(crate::service::LaunchPrompt::File(path)) = &extras.prompt {
                             command.environment.insert("TEST_LAUNCHED_PROMPT_FILE".into(), path.to_string_lossy().into_owned());
-                        } else {
-                            command.environment.insert("TEST_LAUNCHED_PROMPT".into(), self.native_prompt(binding)?);
                         }
                     }
                     command.environment.entry("TERM".into()).or_insert_with(|| "xterm-256color".into());

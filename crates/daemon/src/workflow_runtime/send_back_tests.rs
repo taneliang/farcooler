@@ -56,10 +56,12 @@ async fn workflow_send_back_builds_again_in_the_same_tree_and_the_agent_is_told_
     let command = runtime.coding_command(&binding).unwrap();
     let brief = Exec::briefed("implement the selected task", &binding.effect, binding.iteration);
     assert!(brief.contains("sent back to you") && brief.contains(reason), "{brief}");
-    // The launch quotes the brief (twice, inside a login shell), so look for words the quoting leaves alone.
+    // The launch reads the brief from a file, never from its command line (ov-1512).
     let launch = command.argv.last().unwrap();
-    assert!(launch.contains("This ticket was sent back to you.") && launch.contains("result.txt must say what changed")
-        && launch.contains("修复它."), "the launch carries the brief: {launch}");
+    assert!(launch.contains(".launch-brief") && !launch.contains("sent back to you"), "{launch}");
+    let delivered = std::fs::read_to_string(runtime.root.join("receipts").join(format!("{}.launch-brief", digest(&binding.effect)))).unwrap();
+    assert!(delivered.contains("This ticket was sent back to you.") && delivered.contains("result.txt must say what changed")
+        && delivered.contains("修复它."), "the launch carries the brief: {delivered}");
     assert_eq!(runtime.coding_command(&binding).unwrap(), command);
     let item = &runtime.state("w").unwrap().unwrap().items["ov-7"];
     assert_eq!((item.sent_back.len(), item.sent_back[0].from.as_str(), item.sent_back[0].to.as_str()), (1, "check-0", "build"));

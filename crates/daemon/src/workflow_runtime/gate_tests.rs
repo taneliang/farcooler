@@ -370,7 +370,7 @@ async fn a_review_runs_with_the_model_its_changed_paths_earn_and_the_workflows_w
     // The launch, and a rebuild of it, name the chosen model and carry the workflow's words after the engine's brief.
     let command = runtime.coding_command(&binding).unwrap();
     assert_eq!(command.environment.get("FARCOOLER_WORKFLOW_MODEL").map(String::as_str), Some("claude:opus"));
-    let prompt = command.environment.get("TEST_LAUNCHED_PROMPT").unwrap();
+    let prompt = &std::fs::read_to_string(command.environment.get("TEST_LAUNCHED_PROMPT_FILE").unwrap()).unwrap();
     assert!(prompt.starts_with("You are reviewing ticket one.") && prompt.ends_with("\n\nRead the lane rules first."), "{prompt}");
     assert!(prompt.contains(" workflow verdict --passed false --summary") && !prompt.contains("`farcooler "),
         "the reviewer is told how to record its finding: {prompt}");
@@ -813,4 +813,71 @@ async fn shutdown_after_review_pass_preserves_last_attempt() {
     assert_eq!(item.phase, Phase::Running);
     assert_eq!((item.stage, item.attempt, &item.run), (before.stage, before.attempt, &before.run));
     assert!(item.reason.as_deref().is_some_and(|s| s.contains("interrupted") && s.contains("resumed")));
+}
+
+/// ov-1512: a long brief still opens the build's and the agent review's panes, and is never on the tmux command
+/// line. ov-1488's second review round failed twice with "command too long": its launch was under the inline limit,
+/// but the launch quotes the brief three times on its way to tmux, and each apostrophe grew to over a hundred bytes.
+#[tokio::test]
+async fn ov_1512_a_long_brief_opens_the_build_and_review_panes() {
+    use farcooler_store::models::{Actor, AcceptanceItem, TaskUpdate};
+    const MARKER: &str = "OV1512-BRIEF-MARKER";
+    // Apostrophes under the old inline limit, which tmux refused once quoted; and a 100 KB ticket.
+    let dense = format!("{MARKER} {}", "it's ".repeat(250));
+    let long = format!("{MARKER} {}", "A finding to fix, quoted \"just so\". ".repeat(1_400));
+    assert!(long.len() * 2 > 100_000, "a ticket of over 100 KB");
+    for (intent, acceptance) in [(dense, "It doesn't fail.".to_owned()), (long.clone(), long)] {
+        let (dir, mut runtime, _fake) = three_gates("pass").await;
+        // The real launch, shells and all, with a stand-in for claude that records what reached it.
+        let stand_in = dir.path().join("claude-stand-in");
+        std::fs::write(&stand_in, r#"#!/usr/bin/python3
+import json, os, pathlib, subprocess, sys
+assert sys.argv[1] == 'claude', sys.argv
+here = pathlib.Path(__file__).parent
+# Every process above the agent, up to the tmux server whose argv began the session.
+ancestors, pid = [], os.getppid()
+while pid > 1:
+    ppid, args = subprocess.run(['/bin/ps', '-ww', '-o', 'ppid=,args=', '-p', str(pid)],
+        capture_output=True, text=True).stdout.strip().split(None, 1)
+    ancestors.append(args)
+    pid = int(ppid)
+with (here / 'launches.jsonl').open('a') as f: f.write(json.dumps(dict(prompt=sys.argv[-1], ancestors=ancestors)) + '\n')
+os.environ['TEST_LAUNCHED_PROMPT'] = sys.argv[-1]
+os.execv('/usr/bin/python3', ['/usr/bin/python3', str(here / 'gates.py'), 'pass'])
+"#).unwrap();
+        std::fs::set_permissions(&stand_in, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let _stand_in = crate::service::test_agent::stand_in(&stand_in);
+        super::coding_native::TEST_ARGV.with(|p| p.borrow_mut().take());
+        let host = Uuid::now_v7();
+        let root = runtime.store.create_repository_root(host, "/long-brief", 0).unwrap();
+        let repo = runtime.store.create_repository(host, root.id, "long", "/long-brief/.git", "").unwrap();
+        let ws = runtime.store.ensure_main_workspace(repo.id).unwrap();
+        let task = runtime.store.create_task(ws.id, "Long brief", Actor::User).unwrap();
+        let update = TaskUpdate { title: task.title.clone(), intent: intent.clone(),
+            acceptance: vec![AcceptanceItem { id: Uuid::now_v7(), text: acceptance.clone(), met: false }],
+            constraints: vec![], labels: vec![], worktree_id: None };
+        runtime.store.update_task(task.id, task.resource_version, &update).unwrap();
+        let definition = definition(&runtime);
+        enqueue(&mut runtime, "w", &task.key, definition);
+        let (mut stage, mut failure) = (String::new(), None);
+        for time in 2..42 {
+            runtime.pump(time).await.unwrap();
+            let state = runtime.state("w").unwrap().unwrap();
+            let item = &state.items[&task.key];
+            (stage, failure) = (item.definition.stages.get(item.stage).map_or("end".into(), |s| s.id.clone()), item.failure.clone());
+            if stage == "orchestrator-review" || item.phase == Phase::Failed { break; }
+        }
+        assert_eq!(stage, "orchestrator-review", "the build and its agent review both ran: {failure:?}");
+        let launches: Vec<serde_json::Value> = std::fs::read_to_string(dir.path().join("launches.jsonl")).unwrap()
+            .lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+        let reviews = launches.iter().filter(|l| l["prompt"].as_str().unwrap().starts_with("You are reviewing")).count();
+        assert!(launches.len() > reviews && reviews > 0, "a build and a review launched: {}", launches.len());
+        for launch in &launches {
+            let prompt = launch["prompt"].as_str().unwrap();
+            assert!(prompt.contains(&intent) && prompt.contains(&acceptance), "the whole ticket reaches the agent");
+            for ancestor in launch["ancestors"].as_array().unwrap() {
+                assert!(!ancestor.as_str().unwrap().contains(MARKER), "the brief is on a command line: {ancestor}");
+            }
+        }
+    }
 }

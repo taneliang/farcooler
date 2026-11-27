@@ -579,7 +579,10 @@ async fn workflow_coding_native_launch_pins_existing_hooks_without_installing_or
     let launch = command.argv.last().unwrap();
     assert!(launch.contains("--settings"));
     assert!(launch.contains("--model opus"));
-    assert!(launch.contains("implement the selected task"));
+    // The prompt is read from a file, never carried on the tmux command line (ov-1512).
+    assert!(launch.contains(".launch-brief") && !launch.contains("implement the selected task"), "{launch}");
+    let brief = runtime.root.join("receipts").join(format!("{}.launch-brief", digest(&binding.effect)));
+    assert!(std::fs::read_to_string(brief).unwrap().contains("implement the selected task"));
     std::fs::write(&settings, b"changed hook settings").unwrap();
     assert!(config.definition().is_err());
     assert!(!runtime.root.join("repo").exists());
@@ -681,8 +684,11 @@ async fn workflow_coding_a_started_ticket_tells_its_agent_which_ticket_it_is() {
     runtime.coding = Some(config);
     let command = runtime.coding_command(&binding).unwrap();
     let launch = command.argv.last().unwrap();
-    assert!(launch.contains("ticket ov-7"), "the prompt names the ticket: {launch}");
-    assert!(launch.contains("implement the selected task"), "and keeps the published prompt");
+    assert!(launch.contains(".launch-brief") && !launch.contains("ticket ov-7"), "the prompt is read from a file: {launch}");
+    let brief = runtime.root.join("receipts").join(format!("{}.launch-brief", digest(&binding.effect)));
+    let brief = std::fs::read_to_string(brief).unwrap();
+    assert!(brief.contains("ticket ov-7"), "the prompt names the ticket: {brief}");
+    assert!(brief.contains("implement the selected task"), "and keeps the published prompt");
     assert_eq!(command.environment["FARCOOLER_WORKFLOW_ITEM"], "ov-7");
     assert_eq!(command.environment["FARCOOLER_WORKSPACE"], "w");
     // A recovery rebuilds the same command.
