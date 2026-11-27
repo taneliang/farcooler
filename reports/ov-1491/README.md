@@ -34,6 +34,8 @@ The browser walk against two real Rust runners (`csp-check.mjs --workday-runner`
 | Start Claude Code with Sonnet | fails: no Model choice | passes |
 | Restart the running orchestrator, then type in it | fails: no Restart Orchestrator | passes |
 
+Recovering a lost terminal shipped before this ticket, so its tests pass on both pages. It's walked on the real runners (the lost agent in the workday walk) and in the Work suite.
+
 For the old page, a temporary copy of the walk looked for the old **Start Work** dialog name, so each scenario failed on its own control. Agents on these runners are the daemon's stub, so no real Claude or Codex ran.
 
 Read-only and viewer states are shown by the Work browser suite (`work-check.mjs`, 29 passing). It uses the real Rust projection with a stand-in runner. The member refusal is shown there, in the core's tests, and in a runner test that compares each listed terminal's word with the permission check (`a_listed_terminal_says_whether_this_caller_may_restart_it`). No browser test signs in to a real runner as a member or read-only.
@@ -42,13 +44,19 @@ Also passing on this Mac: the `farcooler-client`, `farcooler-cli` and `farcooler
 
 Not run: CI, Linux, the stable bundle, the full daemon suite and the landing gate.
 
+## Rechecked after the interrupted step
+
+A runner restart interrupted the build step. After it resumed, these ran again on the same code and passed: the `farcooler-client`, `farcooler-protocol` and `farcooler-cli` tests; the daemon library tests under the filters above, and `rpc_over_socket`; both TypeScript checks; the web unit tests (263); the Work and Board browser suites; the canary bundle's size gate; the two-runner walk; and the shared-core, copy, doc-comment, daemon-layer, capability-name, file-size and proto lints. The old-page comparison was rebuilt from `edf1f42fa` with the same runner binaries and gave the table's result. The web crate tests, the fake-daemon walk, the sleep check and Clippy weren't run again.
+
+The shell needs an arm64 Node first on `PATH`; the default one here is x86_64 and doesn't start.
+
 ## Captures
 
 | | 320 | 1280 |
 | --- | --- | --- |
 | New Terminal | ![](new-terminal-320.png) | ![](new-terminal-1280.png) |
-| Exited, real runner | ![](restart-exited-320.png) | ![](restart-exited-1280.png) |
-| Orchestrator, real runner | ![](restart-orchestrator-320.png) | ![](restart-orchestrator-1280.png) |
+| Exited, real runner | ![](workday-restart-exited-320.png) | ![](workday-restart-exited-1280.png) |
+| Orchestrator, real runner | ![](workday-restart-orchestrator-320.png) | ![](workday-restart-orchestrator-1280.png) |
 | Read-only | ![](new-terminal-read-only-320.png) | ![](new-terminal-read-only-1280.png) |
 | Member who doesn't lead | ![](restart-not-lead-320.png) | ![](restart-not-lead-1280.png) |
 | Viewer, not the writer | ![](restart-viewer-320.png) | ![](restart-viewer-1280.png) |
