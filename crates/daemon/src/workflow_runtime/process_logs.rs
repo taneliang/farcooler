@@ -356,7 +356,12 @@ mod tests {
                     assert_eq!(row["pin"], state.items[&newest].pin);
                     assert_eq!(row["phase"], "Failed");
                     assert!(raw["state"]["items"].get("group-0-failed").is_none());
-                } else {
+                }
+                // An app from before paging reads one reply: unmarked, or marked
+                // `workflow_full_v1` as the last shipped Engine view sends it.
+                if flag != Some("workflow_summary_v1") {
+                    assert!(raw["items_compact"].is_null(), "an older Engine view needs whole rows");
+                    assert!(raw["items_omitted"].is_null(), "no live ticket may be left out");
                     let view = farcooler_client::engine_view::from_workflow_reply(
                         workspace, &raw, None, farcooler_client::workflow_presentation::Style::Apple).unwrap();
                     let view = serde_json::to_value(view).unwrap();

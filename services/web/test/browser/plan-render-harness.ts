@@ -69,6 +69,7 @@ if ((window as any).failWorkflowRead) {
   let reads = 0
   const runner = {
     workspaces: async () => JSON.stringify([{ id: 'ws', is_main: true }]),
+    boardOrderLabel: () => undefined,
     plan: async () => {
       if (++reads === 1) throw Object.assign(new Error('refused'), { code: 'operation-failed', what: 'response_too_large' })
       return JSON.stringify(queuePlan)

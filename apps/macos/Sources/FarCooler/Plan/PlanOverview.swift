@@ -77,8 +77,12 @@ struct PlanOverviewView: View {
                     view: view, model: model, statuses: statuses, plan: plan, selected: selected, keyed: keyed,
                     defaults: defaults, onOpen: onOpen)
             } else {
-                // The core couldn't read the plan: say so, as Android and the web do.
-                PlanNotice(title: PlanWords.couldntRead, detail: nil).identified("plan-unreadable")
+                // The core couldn't read the plan: say so, as the phones and the web do.
+                VStack(alignment: .leading, spacing: 0) {
+                    PlanNotice(title: PlanWords.couldntRead, detail: nil).identified("plan-unreadable")
+                    Button(PlanWords.tryAgain) { Task { await plan.tryAgain() } }
+                        .padding(.leading, NavigatorGrid.textInset)
+                }
             }
             // Behind `board_cost`: a runner without it sends no cost (ov-307).
             if let cost = model.cost, cost.isWorthShowing { costSection(cost) }
