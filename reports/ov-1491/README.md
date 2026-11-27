@@ -23,32 +23,46 @@ The Rust work view (`crates/client/src/work_view.rs`) decides what's offered, wh
 
 Restarting a terminal that keeps its ID, such as the running orchestrator, removed its pane and attached nothing in its place. The page's layout looked unchanged, so it skipped the attach. The Work suite's stand-in page reattaches by itself and passed. The two-runner walk failed until `WorkspacePanes.forget` was fixed.
 
-## Tests
+## Rebased onto `8d8a2f2b7`
 
-The browser walk against two real Rust runners (`csp-check.mjs --workday-runner`) gained four scenarios. Keystrokes and restarts are read back through the runner's CLI.
+The new base brought the React shell (ov-1510) and moved terminal input into the Rust core (ov-1499). Fitting these controls in changed four things:
 
-| Scenario | Old page (`edf1f42fa`) | This branch |
+- The pane's Recover button now sits in the shell's recovery strip, with the reason under it.
+- A view has one filled button. A restart takes it from **New Terminal** only when it can be pressed and interrupts nothing. For a running orchestrator the strip matches the terminal header instead of looking like a warning. My first merge left it see-through over the dark terminal, which the captures showed. The Work suite now checks its color.
+- Both branches had added a field called `watching` to `WorkspacePanes`. Git merged them cleanly, and TypeScript caught it. This branch's is now `viewing`.
+- The Work suite's test page sent a pane's errors and the work view's note to one element, so this branch's redraw erased the base's "Keys … were not sent". The app uses two elements, and the test page now does too.
+
+## The two-runner walk fails on the base
+
+`csp-check.mjs --workday-runner` stops at line 1498: after the fixture opens a landing, the Plan never shows **Checking Here**. It shows only Backlog and To Do. The untouched base, built on its own, stops at the same line. This branch doesn't change the Plan, and I didn't fix it or look for the cause.
+
+This ticket's four scenarios come after that step, so **the committed walk doesn't reach them until the base is fixed**. CI runs this walk. For the results below I removed the Plan landing step from a temporary copy. Everything else in the walk passed, with no CSP violations. The walk's "followed the runner's landing in Plan" log line still printed, but that part didn't run.
+
+| Scenario | Base page (`8d8a2f2b7`) | This branch |
 | --- | --- | --- |
 | Open a shell in a chosen worktree and type in it | passes (it could already) | passes |
 | Restart a shell whose process exited | fails: no Restart Terminal | passes |
 | Start Claude Code with Sonnet | fails: no Model choice | passes |
 | Restart the running orchestrator, then type in it | fails: no Restart Orchestrator | passes |
 
-Recovering a lost terminal shipped before this ticket, so its tests pass on both pages. It's walked on the real runners (the lost agent in the workday walk) and in the Work suite.
+For the base page, the temporary copy also used the old **Start Work** dialog name, so each scenario failed on its own control. Both columns used this branch's runner binaries. Keystrokes and restarts are read back through the runner's CLI. Agents on these runners are the daemon's stub, so no real Claude or Codex ran.
 
-For the old page, a temporary copy of the walk looked for the old **Start Work** dialog name, so each scenario failed on its own control. Agents on these runners are the daemon's stub, so no real Claude or Codex ran.
+Recovering a lost terminal shipped before this ticket, so its tests pass on both pages. It's walked on the real runners and in the Work suite.
 
-Read-only and viewer states are shown by the Work browser suite (`work-check.mjs`, 29 passing). It uses the real Rust projection with a stand-in runner. The member refusal is shown there, in the core's tests, and in a runner test that compares each listed terminal's word with the permission check (`a_listed_terminal_says_whether_this_caller_may_restart_it`). No browser test signs in to a real runner as a member or read-only.
+## Tests
 
-Also passing on this Mac: the `farcooler-client`, `farcooler-cli` and `farcooler-protocol` tests; the daemon's library tests matching people, rpc, wire, terminal, Claude login, lead change, reps and Needs You (501); `rpc_over_socket`; the web crate; the web unit tests; both TypeScript checks; the Board browser check; the fake-daemon security walk with a 100 ms tunnel delay; the split-pane sleep check; the canary size gate; and the shared-core, copy, file-size, doc-comment, daemon-layer, capability-name and proto lints. Clippy reported nothing in the touched files. The CLI and client tests need the agent pane's `FARCOOLER_*` variables cleared, or their hook tests fail.
+Read-only and viewer states are shown by the Work browser suite (`work-check.mjs`, 32 passing). It uses the real Rust projection with a stand-in runner. The member refusal is shown there, in the core's tests, and in a runner test (`a_listed_terminal_says_whether_this_caller_may_restart_it`). No browser test signs in to a real runner as a member or read-only.
 
-Not run: CI, Linux, the stable bundle, the full daemon suite and the landing gate.
+Passing on this Mac after the rebase:
 
-## Rechecked after the interrupted step
+- the `farcooler-client`, `farcooler-cli` and `farcooler-protocol` tests (1303), the web crate tests, and `rpc_over_socket` (90);
+- the daemon library tests matching people, rpc, wire, terminal, Claude login, lead change, reps and Needs You. Two database recovery tests failed in that run of 504 (the filter reaches them because "prepares" contains "reps"). All 15 recovery tests passed when run alone, and this branch doesn't touch that code;
+- the web unit tests (268, and 50 for Needs You) and both TypeScript checks;
+- the Work, Board, shell, chat and chat-files browser checks;
+- the fake-runner walk with a 100 ms tunnel delay, the split-pane sleep check and the canary size gate;
+- the shared-core, web client tree, copy, file-size, doc-comment, daemon-layer, capability-name and proto lints. Clippy reported nothing in the touched files.
 
-A runner restart interrupted the build step. After it resumed, these ran again on the same code and passed: the `farcooler-client`, `farcooler-protocol` and `farcooler-cli` tests; the daemon library tests under the filters above, and `rpc_over_socket`; both TypeScript checks; the web unit tests (263); the Work and Board browser suites; the canary bundle's size gate; the two-runner walk; and the shared-core, copy, doc-comment, daemon-layer, capability-name, file-size and proto lints. The old-page comparison was rebuilt from `edf1f42fa` with the same runner binaries and gave the table's result. The web crate tests, the fake-daemon walk, the sleep check and Clippy weren't run again.
-
-The shell needs an arm64 Node first on `PATH`; the default one here is x86_64 and doesn't start.
+Not run: CI, Linux, the stable bundle, the full daemon suite, the review browser check (it needs its own fixture) and the landing gate. The CLI and client tests need the agent pane's `FARCOOLER_*` variables cleared, and some client tests need `farcoolerd` built first.
 
 ## Captures
 
