@@ -43,6 +43,7 @@ async fn list_and_show_distinguish_engine_groups() {
             tickets: vec![key.into()],
             pushed: Some(sha.into()),
             since_ms: now_millis(),
+            landing_ci: None,
         }),
         start_load: None,
         last_run: None,
