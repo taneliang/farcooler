@@ -312,7 +312,7 @@ mod tests {
                     phase: Phase::Done,
                     group: Some(farcooler_workflow::ArchivedGroup {
                         name: "landing".into(), tickets: vec!["item-000".into()],
-                        pushed: last_run.candidate.clone(), since_ms: 2 * n + 1,
+                        pushed: last_run.candidate.clone(), since_ms: 2 * n + 1, landing_ci: None,
                     }),
                     candidate: last_run.candidate.clone(), start_load: None, closed: None,
                     last_run: Some(last_run.clone()), history: Vec::new(),
