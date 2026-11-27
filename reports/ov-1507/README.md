@@ -22,4 +22,4 @@ The Board, Conversation and Plan browser checks passed. All 304 web tests, the w
 
 The full CSP walk with the fake daemon and CI's 100 ms tunnel delay passed without violations. Its workload keystroke echo was 21.3 ms at p95 against a 100 ms limit. The four-session CSP walk and all seven split-pane sleep scenarios also passed.
 
-GitHub Actions verification of the fix is pending. The existing Web bundles and browser checks job runs the two-runner walk on the landing candidate.
+GitHub Actions has no CI run for fix candidate `d93cf090ca46d03b656d32d2f32baf5076093c22`. The failed run above checked `bedde8580`, so rerunning it would test the same revision. The CI workflow triggers on pushes to `landing/**`. The approval system blocked the candidate push because it would publish the code and report to the public origin without explicit authorization. The two-runner CI result remains pending that authorization.
