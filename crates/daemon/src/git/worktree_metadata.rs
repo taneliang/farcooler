@@ -2,14 +2,15 @@
 //!
 //! `worktree add` writes a new worktree's `.git/worktrees/<id>/commondir` a moment after its `gitdir`, and between
 //! the two the file is there but empty. A git that walks every worktree's refs meanwhile (another `worktree add -b`,
-//! checking that its new branch isn't checked out elsewhere; `worktree list`; `branch -D`) reads that empty file and
-//! dies with `fatal: failed to read .git/worktrees/<id>/commondir: Undefined error: 0`. A `worktree add -b` that dies
+//! checking that its new branch isn't checked out elsewhere; `worktree list`; `branch -D`; a `for-each-ref` that
+//! prints `%(worktreepath)`, as `git::list_branches` does) reads that empty file and dies with `fatal: failed to read .git/worktrees/<id>/commondir: Undefined error: 0`. A `worktree add -b` that dies
 //! there has already made its branch, so a run's Provision was left uncertain: four provisions in one sweep on macOS
 //! CI lost one about once in fifty.
 //!
-//! So an add holds this lock exclusively, and those readers share it. Other gits don't take it: one that reads every
-//! worktree isn't known to, and holding it across a long fetch or a slow `worktree remove` would hold provisions back.
-//! It orders only this process's gits; a person's own git can still race an add.
+//! So an add holds this lock exclusively, and those readers share it. Other gits don't take it, so a long fetch or a
+//! slow `worktree remove` never holds provisions back. A `fetch` into `refs/heads` walks every worktree too, but the
+//! daemon fetches only into `refs/farcooler/*`, which git doesn't check. A new git that walks every worktree must be
+//! added to `access`. The lock orders only this process's gits; a person's own git can still race an add.
 
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -54,6 +55,7 @@ pub(super) fn access(args: &[&str]) -> Option<Access> {
     match (sub, rest.find(|a| !a.starts_with('-'))) {
         ("worktree", Some("add")) => Some(Access::Writes),
         ("worktree", Some("list")) | ("branch", _) => Some(Access::Walks),
+        ("for-each-ref", _) if args.iter().any(|a| a.contains("%(worktreepath)")) => Some(Access::Walks),
         _ => None,
     }
 }
@@ -63,11 +65,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_add_writes_and_a_list_or_a_branch_walks() {
+    fn an_add_writes_and_a_list_a_branch_or_a_worktreepath_walks() {
         assert_eq!(access(&["worktree", "add", "--no-checkout", "-b", "b", "/t", "c"]), Some(Access::Writes));
         assert_eq!(access(&["-c", "user.name=T", "worktree", "add", "--detach", "/t"]), Some(Access::Writes));
         assert_eq!(access(&["worktree", "list", "--porcelain"]), Some(Access::Walks));
         assert_eq!(access(&["branch", "-D", "wf-x"]), Some(Access::Walks));
+        let format = "%(refname)\t%(worktreepath)";
+        assert_eq!(access(&["for-each-ref", "--format", format, "refs/heads"]), Some(Access::Walks));
+        assert_eq!(access(&["for-each-ref", "--format=%(worktreepath)", "refs/heads"]), Some(Access::Walks));
+        assert_eq!(access(&["for-each-ref", "--format=%(refname)", "refs/heads"]), None);
         assert_eq!(access(&["worktree", "remove", "--force", "/t"]), None);
         assert_eq!(access(&["rev-parse", "HEAD"]), None);
         assert_eq!(access(&["-c", "branch.x=y", "status"]), None);

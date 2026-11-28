@@ -55,8 +55,12 @@ race a provision this way. The fix below covers both.
 runs:
 
 - `worktree add` takes it exclusively, because it writes the metadata.
-- `worktree list` and `branch` share it, because they walk every worktree's refs.
-- Every other git runs without it, so a long fetch or a slow `worktree remove` never holds provisions back.
+- `worktree list`, `branch`, and a `for-each-ref` whose format prints `%(worktreepath)` share it, because they read
+  every worktree's metadata. That last one is `git::list_branches` (`git.rs:587`), which
+  `create_worktree_from_branch` (`git.rs:679`) calls, so a person making a worktree from a remote-only branch while a
+  workflow provisions could hit the same race. Review caught it; git 2.54 dies on an empty commondir there too.
+- Every other git runs without it, so a long fetch or a slow `worktree remove` never holds provisions back. A `fetch`
+  into `refs/heads` also reads every worktree, but the daemon's fetches write only `refs/farcooler/*`.
 
 The lock is taken before the git's own timeout starts. The fill (`reset --hard`) stays parallel, which keeps the
 slow part of provisioning concurrent.
