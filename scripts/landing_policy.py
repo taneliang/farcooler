@@ -265,8 +265,44 @@ def script_users(path, commands):
     return users
 
 
+# What the csp-check browser walks cover (ov-1508): a change under one of these
+# can break a walk, so the gate runs them. ov-1470 and ov-1485 each passed their
+# gate, landed together, and broke the workday walk only on main.
+WALK_PATHS = ("services/web/", "crates/web/", "crates/client/")
+NO_WALK = "browser walks: nothing under " + ", ".join(WALK_PATHS) + " changed; left to CI"
+
+
+def web_walks(steps, files):
+    """Run the web job's browser walks for a change they cover, else leave them to CI."""
+    if not any(path.startswith(WALK_PATHS) for path in files):
+        for step in steps:
+            if step.walk:
+                step.skip = NO_WALK
+            elif not step.skip and "wrangler deploy --dry-run --env canary" in step.run:
+                step.skip = "canary web asset build skipped (a browser walk step); dry-run left to CI"
+        return
+    # The walks load the whole canary build, so the one module build makes all
+    # of it, before CI's own services/web/build.sh turns it into dist/.
+    module = next(s for s in steps if "test-module.sh" in s.run)
+    steps.remove(module)
+    module.name = "web wasm for the browser walks (local)"
+    module.run = module.run.replace("test-module.sh", "test-module.sh --bundle")
+    dist = next(i for i, s in enumerate(steps) if s.walk and "./build.sh --channel canary --build" in s.run)
+    steps.insert(dist, module)
+    for step in steps:
+        if step.walk and "--example web_workday_runner" in step.run:
+            # It builds a canary farcooler and farcoolerd. In the shared target
+            # those would replace the binaries the Rust job's tests spawn,
+            # while both families run (ov-1185).
+            step.run = ('export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$GITHUB_WORKSPACE/target}/web-walks"\n'
+                        + step.run)
+
+
 def workflow_checks(plans, files, step_type):
-    """Keep workflow validation without selecting a platform build for it."""
+    """Keep workflow validation without selecting a platform build for it,
+    and the web job's browser walks to the changes they cover."""
+    if "web" in plans:
+        web_walks(plans["web"], files)
     if any(path.startswith(".github/workflows/") for path in files):
         plans["wire"].extend([
             step_type("wire", "Workflow lint", "./scripts/actionlint.sh\n"),

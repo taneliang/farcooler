@@ -1957,7 +1957,7 @@ jobs:
       - run: ../../crates/web/build.sh --channel canary --out "$RUNNER_TEMP/wasm-canary"
       - run: WEB_WASM_DIR="$RUNNER_TEMP/wasm-canary" ./build.sh --channel canary --build "$GITHUB_SHA"
       - run: node scripts/size-gate.mjs dist
-      - run: npx wrangler deploy --dry-run --env canary --outdir /tmp/web-build-canary
+      - run: npx wrangler deploy --dry-run --env canary --outdir "$RUNNER_TEMP/web-build-canary"
       - run: cargo build --locked --manifest-path ../../crates/web/Cargo.toml --example fake_daemon
       - run: node test/browser/chat-check.mjs
         env:
@@ -1980,17 +1980,21 @@ jobs:
             node test/browser/work-check.mjs
           WORK_VIEW_BIN="${CARGO_TARGET_DIR:-../../target}/debug/examples/work_view_bin" \
             node test/browser/board-check.mjs
-      - run: node test/browser/csp-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon --tunnel-delay 100
-      - run: node test/browser/sleep-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon --engines chromium --split
-      - name: Walk a workday on two isolated Rust runners
+      - run: node test/browser/csp-check.mjs --fake-daemon "${CARGO_TARGET_DIR:-../../crates/web/target}/debug/examples/fake_daemon" --tunnel-delay 100
+      - run: node test/browser/sleep-check.mjs --fake-daemon "${CARGO_TARGET_DIR:-../../crates/web/target}/debug/examples/fake_daemon" --engines chromium --split
+      - name: Make sure there is tmux for the workday walk
         env:
-          FARCOOLER_CHANNEL: canary
-          CARGO_PROFILE_DEV_DEBUG: "0"
+          DEBIAN_FRONTEND: noninteractive
         run: |
           if ! command -v tmux >/dev/null; then
             sudo apt-get -o Acquire::Retries=3 update
             sudo apt-get -o Acquire::Retries=3 install -y tmux
           fi
+      - name: Walk a workday on two isolated Rust runners
+        env:
+          FARCOOLER_CHANNEL: canary
+          CARGO_PROFILE_DEV_DEBUG: "0"
+        run: |
           cargo build --locked --manifest-path ../../Cargo.toml -p farcooler-daemon --features tailcat-helper --bin farcoolerd --example web_workday_runner
           cargo build --locked --manifest-path ../../Cargo.toml -p farcooler-cli --bin farcooler
           # Joining with no app (ov-1490): `farcooler join` at the runner, a second
