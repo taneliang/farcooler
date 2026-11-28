@@ -3,7 +3,9 @@
 //! sends and what an agent's session is refused are the same bytes.
 //!
 //! Every refusal here was watched to go red with its check taken out (see the commit message).
-use super::*;
+use super::{Command, Exec, Phase, Request, Runtime, adapters::coding_definition};
+use farcooler_workflow::{Definition, Progression, StageKind, digest};
+use uuid::Uuid;
 use super::admission_tests::{factory, receipt, refused, sent, snapshot};
 use super::coding_tests::{admitted_in, configured};
 use super::coding_verbs_tests::{batched_push, lander};
@@ -303,14 +305,14 @@ async fn ov1486_an_agents_or_the_orchestrators_answer_decides_no_draft() {
         reason: "Gate every push on make check.".into(), definition: draft.definition, adapter: Box::new(draft.adapter) }).await;
     let filed = receipt(&reply);
     let (id, card) = (filed["draft"]["id"].as_str().unwrap().to_owned(), filed["draft"]["card"].as_str().unwrap().parse::<Uuid>().unwrap());
-    let detail = detail(&board, card);
-    let asked = engine_page::draft(&id, &detail);
+    let seen = detail(&browser, card).await;
+    let asked = engine_page::draft(&id, &seen);
     assert!(asked.problem.is_none() && asked.question.contains("make check"), "{asked:?}");
     let orchestrator = board.agent(TerminalRole::Orchestrator, None).await;
     let builder = board.agent(TerminalRole::Agent, None).await;
     for approve in [true, false] {
         for (who, rpc) in [("the workspace's orchestrator", &orchestrator), ("a builder's pane", &builder)] {
-            let words = engine_page::decision(&id, &asked.note, approve, &self::detail(&board, card))
+            let words = engine_page::decision(&id, &asked.note, approve, &detail(&browser, card).await)
                 .expect("the card still asks the question the person saw");
             let pending = rpc.handle(note(card, &words));
             tokio::select! {
@@ -326,9 +328,13 @@ async fn ov1486_an_agents_or_the_orchestrators_answer_decides_no_draft() {
     }
 }
 
-fn detail(board: &Board, card: Uuid) -> pb::TaskDetail {
-    let notes = board.svc.store.notes_for(card, None).unwrap().iter().map(crate::task_ops::pb_note).collect();
-    pb::TaskDetail { task: None, notes, blocks: Vec::new() }
+/// The draft's card, read as the web reads it: `task.get`, through dispatch.
+async fn detail(rpc: &RpcFactory, card: Uuid) -> pb::TaskDetail {
+    let answer = rpc.handle(pb::Request { method: "task.get".into(), payload: Some(request::Payload::TaskGet(
+        pb::TaskGetRequest { task_id: crate::wire::id_bytes(card), note_kind: 0 })), ..Default::default() }).await;
+    let Some(response::Outcome::Result(pb::Result { value: Some(pb::result::Value::TaskDetail(detail)), .. })) = answer.outcome
+    else { panic!("task.get: {:?}", answer.outcome) };
+    detail
 }
 
 const LONG_TITLES: [&str; 4] = [

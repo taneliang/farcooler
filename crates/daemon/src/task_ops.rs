@@ -224,7 +224,7 @@ pub(crate) fn pb_task(task: &Task) -> pb::Task {
     }
 }
 
-pub(crate) fn pb_note(note: &TaskNote) -> pb::TaskNote {
+fn pb_note(note: &TaskNote) -> pb::TaskNote {
     pb::TaskNote {
         id: id_bytes(note.id),
         task_id: id_bytes(note.task_id),
