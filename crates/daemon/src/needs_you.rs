@@ -152,6 +152,8 @@ pub struct Inputs {
     pub pr_requests: Vec<crate::pr_review::ReviewRequest>,
     /// The engine builds stopped on a question or never heard from (`engine_stuck`, ov-1077).
     pub engine_stuck: Vec<crate::engine_stuck::Stuck>,
+    /// The cards of runs stopped at a provider's limit: one item per provider speaks for them (ov-1515).
+    pub at_limit: std::collections::HashSet<Uuid>,
     /// The hosts of a repository's own git remotes, lowercased, for each
     /// repository that has a task waiting on a question that names a review
     /// thread: the Enterprise hosts a thread's link may have (ov-315).
@@ -240,6 +242,7 @@ pub async fn gather(
     inputs.engine_stuck = crate::engine_stuck::list();
     inputs.engine_stuck.extend(crate::engine_stuck::uncertain(&svc.store));
     crate::engine_stuck::include_refusals(&svc.store, &mut inputs.engine_stuck);
+    inputs.at_limit = crate::engine_stuck::include_limits(&svc.store, &mut inputs.engine_stuck);
     inputs.logins = svc.login_needs();
     inputs.runner = crate::push::runner_name().to_string();
     let since = millis(SystemTime::now()) - kept::WINDOW_MS;
@@ -453,6 +456,7 @@ fn task_signal(task: &models::Task, inputs: &Inputs) -> Option<Signal> {
         TaskStatus::NeedsDecision => {
             let notes = inputs.notes.get(&task.id).map(Vec::as_slice).unwrap_or_default();
             let question = waiting_question(task, notes)?;
+            if question.is_none() && inputs.at_limit.contains(&task.id) { return None; }
             let hosts = inputs.remote_hosts.get(&task.repository_id).map(Vec::as_slice).unwrap_or_default();
             if let Some((note, thread)) = question.and_then(|q| Some((q, pr::thread_of(q, hosts)?))) {
                 return Some(pr::thread_signal(task, note, thread, hosts));
@@ -883,6 +887,19 @@ mod tests {
         assert_eq!(items[0].kind(), NeedsYouKind::Blocked);
         assert_eq!(items[0].detail.as_deref(), Some(ticket.as_str()));
         assert_eq!(items[0].question, finding);
+    }
+
+    #[test]
+    fn a_card_stopped_at_a_providers_limit_asks_nothing_of_its_own() {
+        // Its provider's one item speaks for it (ov-1515). A question somebody asked on it is still theirs.
+        let mut fleet = Fleet::new();
+        let quiet = fleet.task(TaskStatus::NeedsDecision, 5 * MINUTE);
+        let asked = fleet.task(TaskStatus::NeedsDecision, 5 * MINUTE);
+        fleet.note(asked, NoteKind::Question, "Which PDF library?", serde_json::json!({}), 5 * MINUTE);
+        fleet.inputs.at_limit.extend([quiet, asked]);
+        let items = fleet.items();
+        assert_eq!(items.len(), 1, "{items:#?}");
+        assert_eq!(items[0].question, "Which PDF library?");
     }
 
     #[test]

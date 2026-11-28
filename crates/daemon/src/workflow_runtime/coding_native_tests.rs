@@ -96,6 +96,13 @@ if mode in ('steering', 'active-steering'):
 if mode == 'model-refused':
     print("■ The 'gpt-6.1-luna' model is not supported when using Codex with a ChatGPT account", flush=True)
     time.sleep(30)
+if mode == 'codex-limit':
+    # What Codex's terminal printed on Nov 27, byte for byte; then it sits at its prompt (ov-1515).
+    os.write(1, pathlib.Path(os.environ['LIMIT_BYTES']).read_bytes())
+    time.sleep(30)
+if mode == 'claude-limit':
+    hook('StopFailure', error='rate_limit', last_assistant_message="You've hit your session limit \u00b7 resets 1pm (America/Los_Angeles)")
+    time.sleep(30)
 if mode == 'barrier':
     d = pathlib.Path(os.environ['STARTED']).parent / 'barrier'
     d.mkdir(exist_ok=True)
@@ -127,6 +134,14 @@ if mode in ('background', 'abandon'):
     pathlib.Path('result.txt').write_text('started before the wait')
     hook('Stop')
     time.sleep(30 if mode == 'abandon' else 0.5)
+if mode == 'move':
+    # Each agent says who it is and whether it found the last one's uncommitted work, then stays at work.
+    work = pathlib.Path('result.txt')
+    with open(pathlib.Path(os.environ['STARTED']).with_name('agents'), 'a') as f:
+        f.write(json.dumps(dict(pid=os.getpid(), cwd=os.getcwd(), model=os.environ.get('FARCOOLER_WORKFLOW_MODEL'),
+            found=work.read_text() if work.exists() else None)) + '\n')
+    work.write_text('half done')
+    time.sleep(30)
 if mode == 'cancel':
     subprocess.run(['/bin/sleep','30'])
 else:
@@ -164,6 +179,7 @@ else:
     process.timeout_ms = match mode {
         "foreign-only" => 300,
         "hook-disconnect" | "commit-then-interrupt" => 15_000,
+        "move" => 30_000,
         _ => 5000,
     };
     if mode == "active-steering" && matches!(agent, "claude" | "codex") {
@@ -174,6 +190,10 @@ else:
         std::os::unix::fs::symlink(profile.join("farcooler"), bin.join(farcooler_protocol::CHANNEL.cli_binary_name())).unwrap();
         process.environment.insert("PATH".into(), format!("{}:{}:/usr/bin:/bin", bin.display(), profile.display()));
         process.environment.insert("TEST_AGENT_SETTINGS".into(), hooks.to_string_lossy().into_owned());
+    }
+    if mode == "codex-limit" {
+        let capture = concat!(env!("CARGO_MANIFEST_DIR"), "/src/workflow_runtime/fixtures/codex-usage-limit.bin");
+        process.environment.insert("LIMIT_BYTES".into(), capture.into());
     }
     if engine { process.environment.insert("EXPECT_CODEX_HOOKS".into(), hooks.to_string_lossy().into_owned()); }
     TEST_ARGV.with(|p| *p.borrow_mut() = Some(vec!["/usr/bin/python3".into(), script.to_string_lossy().into_owned(), mode.into(), agent.into()]));
@@ -313,6 +333,67 @@ async fn workflow_native_startup_model_refusal_fails_promptly_with_reason() {
     let item = &runtime.state("w").unwrap().unwrap().items["one"];
     assert_eq!(item.phase, Phase::Failed);
     assert!(item.failure.as_ref().unwrap().contains("not supported when using Codex"));
+}
+
+#[tokio::test]
+async fn ov_1515_an_agent_at_its_limit_fails_the_step_at_once_saying_until_when() {
+    for (mode, agent, said) in [
+        ("codex-limit", "codex", "usage limit until Dec 1st, 2026 1:23 AM (Codex)"),
+        ("claude-limit", "claude", "usage limit until 1pm (America/Los_Angeles) (Claude)"),
+    ] {
+        let (_dir, mut runtime, _fake) = native_agent(mode, agent).await;
+        // Two attempts: neither is spent launching against the same limit again.
+        let mut definition = runtime.configured_definition().unwrap();
+        definition.stages.iter_mut().for_each(|s| s.max_attempts = 2);
+        enqueue(&mut runtime, "w", "one", definition);
+        runtime.pump(2).await.unwrap();
+        // Well inside the step's own time limit.
+        let state = tokio::time::timeout(Duration::from_secs(4), finish(&mut runtime, "w")).await
+            .unwrap_or_else(|_| panic!("{mode}: a limit must end the step at once"));
+        let item = &state.items["one"];
+        assert_eq!((&item.phase, item.attempt), (&Phase::Failed, 1), "{mode}: {item:?}");
+        assert_eq!(item.failure.as_deref(), Some(said), "{mode}");
+    }
+}
+
+#[tokio::test]
+async fn ov_1515_moving_a_running_ticket_stops_its_agent_and_starts_the_new_model_in_the_same_tree() {
+    use farcooler_workflow::Command;
+    let (dir, mut runtime, _fake) = native("move").await;
+    let mut definition = runtime.configured_definition().unwrap();
+    let build = definition.stages.iter().find(|s| s.kind == StageKind::Build).unwrap().id.clone();
+    definition.models.insert(build, vec!["claude".into(), "claude:sonnet".into()]);
+    enqueue(&mut runtime, "w", "one", definition);
+    let controller = runtime.controller();
+    let handle = runtime.command_handle(&controller).unwrap();
+    let (stop, shutdown) = tokio::sync::watch::channel(false);
+    let task = tokio::spawn(async move { runtime.run(shutdown).await.unwrap(); runtime });
+    let log = dir.path().join("agents");
+    let agents = || std::fs::read_to_string(&log).unwrap_or_default().lines()
+        .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap()).collect::<Vec<_>>();
+    let until = |n: usize| async move {
+        super::super::wait_until(tokio::time::Instant::now() + Duration::from_secs(20), Duration::from_millis(20),
+            || agents().len() >= n).await
+    };
+    assert!(until(1).await, "the first build never started");
+    let state = handle.state("w").await.unwrap().unwrap();
+    let request = super::super::Request { id: "move".into(), workspace: "w".into(), expected_revision: state.revision,
+        sequence: state.source_sequences.get("controller").copied().unwrap_or(0) + 1,
+        command: Command::SetModel { item: "one".into(), model: "claude:sonnet".into(), step: None } };
+    let receipt = handle.submit(&controller, request, 20).await.unwrap();
+    assert!(receipt.result.is_ok(), "{receipt:?}");
+    let second = until(2).await;
+    let state = handle.state("w").await.unwrap().unwrap();
+    assert!(second, "the new model's build never started: {:?}", state.items["one"]);
+    let seen = agents();
+    assert_eq!((seen[0]["model"].as_str(), seen[1]["model"].as_str()), (Some("claude"), Some("claude:sonnet")));
+    assert_eq!(seen[0]["cwd"], seen[1]["cwd"], "the same worktree");
+    assert_eq!(seen[1]["found"], "half done", "with the first agent's uncommitted work in it");
+    let first = seen[0]["pid"].as_i64().unwrap() as i32;
+    assert_ne!(unsafe { libc::kill(first, 0) }, 0, "the old agent has ended");
+    assert_eq!(state.items["one"].models.values().next().unwrap(), "claude:sonnet");
+    stop.send(true).unwrap();
+    task.await.unwrap();
 }
 
 #[tokio::test]
@@ -610,6 +691,30 @@ async fn workflow_native_stop_reaps_a_paused_agent_without_cancelling_its_run() 
     let (outcome, ()) = tokio::join!(runtime.execute_coding("w", &binding, cancel), stop);
     assert_eq!(outcome.unwrap(), Outcome::SafeFailure);
     assert_eq!(runtime.state("w").unwrap().unwrap(), state, "Stop leaves settlement to the engine");
+}
+
+/// The stall watch finds a real agent's processes through its hold (ov-1515).
+#[tokio::test]
+async fn ov_1515_the_stall_watch_reads_a_held_agents_processes() {
+    let (dir, mut runtime, _fake) = native("cancel").await;
+    let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
+    runtime.pump(2).await.unwrap();
+    let binding = admitted(&runtime).await;
+    let pulse = crate::engine_stuck::Pulse::of(runtime.process_log(&binding), runtime.native_hold_socket(&binding));
+    let (cancel, cancelled) = tokio::sync::watch::channel(false);
+    let started = dir.path().join("started");
+    let read = async {
+        assert!(super::super::wait_until(tokio::time::Instant::now() + Duration::from_secs(10), Duration::from_millis(10),
+            || started.exists()).await, "interactive fixture did not start");
+        let agent: i32 = std::fs::read_to_string(&started).unwrap().parse().unwrap();
+        // The agent and the command it is waiting on.
+        let found = pulse.cpu().await;
+        cancel.send_replace(true);
+        (agent, found)
+    };
+    let (_, (agent, found)) = tokio::join!(runtime.execute_coding("w", &binding, cancelled), read);
+    let found = found.expect("the hold names its agent");
+    assert!(found.contains_key(&agent), "{agent} in {found:?}");
 }
 
 #[tokio::test]

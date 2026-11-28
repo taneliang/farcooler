@@ -429,7 +429,7 @@ fn apply_in_snapshot(tx: &Transaction<'_>, input: &Input, payload: &str, by: Opt
         let target=match &input.command {
             Command::Enqueue {resource,..} | Command::Start {resource,..} | Command::Reopen {resource,..} => Some(resource.as_str()),
             Command::Approve {item,..}|Command::Review {item,..}|Command::Observe {item,..}|Command::Cancel {item,..}|Command::Retry {item}|Command::RestartReview {item}|Command::Queue {item}|Command::Leave {item}|Command::Move {item,..}|Command::Resolve {item,..}
-                |Command::Decide {item,..}|Command::SendBack {item,..}|Command::Close {item,..}|Command::Land {item,..}
+                |Command::Decide {item,..}|Command::SendBack {item,..}|Command::SetModel {item,..}|Command::Close {item,..}|Command::Land {item,..}
                 |Command::RefreshJoin {item,..}|Command::RepinPending {item,..} => state.items.get(item).map(|i|i.resource.as_str()),
             Command::HoldQueue { .. } | Command::Advance | Command::RefreshGroups { .. } | Command::AdoptPublication { .. } => None,
         };

@@ -143,7 +143,7 @@ pub(super) fn batched_push(runtime: &Runtime, base_mode: &str, patience_ms: u64)
         stages: vec![stage(c, "provision", StageKind::Provision, "coding-worktree/v1", ""),
             stage(c, "build", StageKind::Build, "coding-harness/v1", ""),
             stage(c, "check", StageKind::Check, "coding-check/v1", "0"), join],
-        groups: [("landing".to_string(), GroupDef { limit: Some(4), exclusive: c.landing_resource().unwrap(), steps })].into(), models: Default::default(), send_backs: None, build_folders: None, script_policies: Default::default(), start_policy: None, limits: None, policies: Default::default() }
+        groups: [("landing".to_string(), GroupDef { limit: Some(4), exclusive: c.landing_resource().unwrap(), steps })].into(), models: Default::default(), fallbacks: Default::default(), send_backs: None, build_folders: None, script_policies: Default::default(), start_policy: None, limits: None, policies: Default::default() }
 }
 pub(super) fn command(runtime: &Runtime, command: Command) -> Receipt {
     let controller = runtime.controller();

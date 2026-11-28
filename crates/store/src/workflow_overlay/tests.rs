@@ -15,14 +15,14 @@ fn steps() -> Vec<Stage> {
 }
 fn group(at: usize, phase: Phase, candidate: Option<&str>, members: &[&str]) -> Item {
     let definition = Definition { schema: 2, source: "group/landing".into(), stages: steps(), max_reworks: 0,
-        rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None, build_folders: None, script_policies: Default::default(), start_policy: None, limits: None, policies: Default::default() };
+        rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new(), fallbacks: Default::default(), send_backs: None, build_folders: None, script_policies: Default::default(), start_policy: None, limits: None, policies: Default::default() };
     Item { start_load: None, execution: None, restart: None, reuse_checkout: false, carried_progress: false, history: Vec::new(), reason: None, landing_ci: None, stopped_from: None, definition, pin: "pin".into(), policy_pin: "policy".into(), dependencies: BTreeSet::new(),
         resource: "ref:origin:main".into(), stage: at, iteration: 0, attempt: 0, fence: 1, phase, run: "run".into(),
         pending: None, candidate: candidate.map(Into::into), last_evidence: None, stopping: None, cancel_reason: None, closed: None, failure: None, queue_hold: None, group_failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, landed: None,
         rework_history: vec![], back_edges: BTreeMap::new(), retries: 0, refused_launch: None, pushed: None,
         members: members.iter().map(|m| Member { item: (*m).into(), candidate: format!("cand-{m}") }).collect(),
         handed: vec![], since_ms: 0, wait_since: None,
-        group_of: Some(GroupOf { name: "landing".into(), pin: "pin".into() }), grouped_in: None, models: BTreeMap::new(), tree: None,
+        group_of: Some(GroupOf { name: "landing".into(), pin: "pin".into() }), grouped_in: None, models: BTreeMap::new(), moved: Default::default(), resume_after_stop: false, tree: None,
         sent_back: vec![], brief: None, follows: None, followers: vec![] }
 }
 fn ci(sha: &str, status: CiStatus) -> CiRead {

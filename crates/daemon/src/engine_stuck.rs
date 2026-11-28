@@ -12,12 +12,15 @@
 //! its run ends (`Listed`'s drop). Nothing here types into the pane: the person answers it by watching it
 //! (ov-972) or by opening it.
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
 use farcooler_core::activity::Registry;
 use farcooler_tmux::TmuxServer;
+
+use crate::native_hold;
 
 /// How often a running build's pane is read.
 #[cfg(not(test))]
@@ -28,6 +31,102 @@ const LOOK: Duration = Duration::from_millis(50);
 /// How long an agent has to be heard from once its launch barrier is released.
 const START_WITHIN: Duration = Duration::from_secs(60);
 pub(crate) const QUARANTINE_PREFIX: &str = "Agent launch blocked by macOS quarantine.";
+
+/// How long a build may print nothing and use no CPU before it is reported stalled (ov-1515): long enough for
+/// any quiet wait an agent is likely to be in, short enough that its slot isn't lost for the turn's three hours.
+const STALLED_AFTER: Duration = Duration::from_secs(10 * 60);
+/// How often the process table is read for it.
+const PULSE_EVERY: Duration = Duration::from_secs(30);
+
+/// CPU time each of an agent's processes has used, by pid.
+pub(crate) type Cpu = HashMap<i32, Duration>;
+
+/// How long an agent has been quiet: no output, and next to no CPU.
+#[derive(Default)]
+pub(crate) struct Quiet { since: Duration, output: u64, cpu: Option<Cpu>, used: Duration }
+impl Quiet {
+    /// One look at `now`, with the bytes its terminal has printed so far and its processes' CPU times. True once
+    /// it has been quiet for `after`. CPU that can't be read starts the quiet again: it is not "no CPU".
+    pub(crate) fn look(&mut self, now: Duration, output: u64, cpu: Option<Cpu>, after: Duration) -> bool {
+        let (Some(cpu), Some(before)) = (&cpu, &self.cpu) else {
+            *self = Quiet { since: now, output, cpu, used: Duration::ZERO };
+            return false;
+        };
+        // What each process used since the last look; a new one's whole time. One that has ended takes nothing back.
+        self.used += cpu.iter().map(|(pid, time)| time.saturating_sub(before.get(pid).copied().unwrap_or_default())).sum();
+        let quiet = now.saturating_sub(self.since);
+        // An idle terminal program still wakes now and then: up to 2% of one core, or three seconds in all.
+        if output != self.output || self.used > (quiet / 50).max(Duration::from_secs(3)) {
+            *self = Quiet { since: now, output, cpu: Some(cpu.clone()), used: Duration::ZERO };
+            return false;
+        }
+        self.cpu = Some(cpu.clone());
+        quiet >= after
+    }
+}
+
+/// `ps`'s CPU time: `M:SS.ss` on macOS, `[D-]HH:MM:SS` on Linux.
+fn cpu_time(text: &str) -> Option<Duration> {
+    let (days, clock) = match text.split_once('-') { Some((d, rest)) => (d.parse::<u64>().ok()?, rest), None => (0, text) };
+    let mut seconds = 0.0;
+    for part in clock.split(':') { seconds = seconds * 60.0 + part.parse::<f64>().ok()?; }
+    Duration::try_from_secs_f64(days as f64 * 86_400.0 + seconds).ok()
+}
+
+/// The CPU times of `root` and everything under it, from `ps -axo pid=,ppid=,time=`. `None` when `root` isn't there.
+pub(crate) fn cpu_under(table: &str, root: i32) -> Option<Cpu> {
+    let rows: Vec<(i32, i32, Duration)> = table.lines().filter_map(|line| {
+        let mut words = line.split_whitespace();
+        Some((words.next()?.parse().ok()?, words.next()?.parse().ok()?, cpu_time(words.next()?)?))
+    }).collect();
+    let mut found = Cpu::new();
+    let mut parents = vec![root];
+    found.insert(root, rows.iter().find(|r| r.0 == root)?.2);
+    while let Some(parent) = parents.pop() {
+        for (pid, _, time) in rows.iter().filter(|r| r.1 == parent) {
+            if found.insert(*pid, *time).is_none() { parents.push(*pid); }
+        }
+    }
+    Some(found)
+}
+
+/// Where the watched agent's processes start.
+pub(crate) enum Agent {
+    /// The agent's hold, which knows its leader.
+    Hold(PathBuf),
+    #[cfg(test)]
+    Process(i32),
+}
+
+/// What tells whether a build is still doing anything: the log of what its terminal prints, and its processes.
+pub(crate) struct Pulse { pub(crate) log: PathBuf, pub(crate) agent: Agent, pub(crate) after: Duration, pub(crate) every: Duration }
+impl Pulse {
+    pub(crate) fn of(log: PathBuf, hold: PathBuf) -> Self {
+        Self { log, agent: Agent::Hold(hold), after: STALLED_AFTER, every: PULSE_EVERY }
+    }
+
+    pub(crate) async fn cpu(&self) -> Option<Cpu> {
+        let leader = match &self.agent {
+            Agent::Hold(socket) => match native_hold::ask(socket, "group", Duration::from_secs(1)).await {
+                native_hold::Answer::Said(line) => line.trim().parse().ok()?,
+                _ => return None,
+            },
+            #[cfg(test)]
+            Agent::Process(pid) => *pid,
+        };
+        let ps = tokio::process::Command::new("ps").args(["-axo", "pid=,ppid=,time="]).kill_on_drop(true).output();
+        let out = tokio::time::timeout(Duration::from_secs(5), ps).await.ok()?.ok()?;
+        cpu_under(&String::from_utf8_lossy(&out.stdout), leader)
+    }
+}
+
+/// What a stalled build is reported as: how long, and the last lines of its terminal.
+fn stalled_report(command: &str, after: Duration, screen: &str) -> String {
+    let lines: Vec<&str> = screen.lines().map(str::trim_end).filter(|l| !l.trim().is_empty()).collect();
+    let last: Vec<String> = lines[lines.len().saturating_sub(8)..].iter().map(|l| l.chars().take(200).collect()).collect();
+    format!("{command} has printed nothing and used no CPU for {} minutes. The last lines of its terminal:\n{}",
+        after.as_secs() / 60, last.join("\n"))
+}
 
 /// One stuck build.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,6 +253,54 @@ pub(crate) fn include_refusals(store: &farcooler_store::Store, stuck: &mut Vec<S
     }
 }
 
+/// What an item that speaks for a provider has in place of a ticket's key.
+pub(crate) const LIMIT_ITEM: &str = "provider-limit:";
+
+/// One entry for each provider in each workspace whose runs stopped at its limit, however many tickets that
+/// stopped (ov-1515). It stays while any of them is failed there.
+pub(crate) fn provider_limits(failures: &[farcooler_store::workflow::WorkflowFailure]) -> Vec<Stuck> {
+    let mut grouped: std::collections::BTreeMap<(&str, &str), Vec<(&farcooler_store::workflow::WorkflowFailure, &str)>> = Default::default();
+    for failure in failures {
+        if let Some((harness, until)) = crate::provider_limit::parse(&failure.reason) {
+            grouped.entry((&failure.workspace, harness)).or_default().push((failure, until));
+        }
+    }
+    grouped.into_iter().map(|((workspace, harness), mut stopped)| {
+        stopped.sort_by(|a, b| (a.0.since_ms, &a.0.item).cmp(&(b.0.since_ms, &b.0.item)));
+        // The latest word on when it lifts.
+        let (_, until) = stopped[stopped.len() - 1];
+        let mut keys: Vec<&str> = stopped.iter().map(|(f, _)| f.item.as_str()).collect();
+        keys.sort_unstable();
+        let name = if harness == "codex" { "Codex" } else { "Claude" };
+        Stuck {
+            workspace: workspace.into(),
+            item: format!("{LIMIT_ITEM}{name}"),
+            since_ms: stopped[0].0.since_ms,
+            question: format!("{name} is at its usage limit until {until}. It stopped {}. To move one to another model, run \
+                `farcooler workflow model {workspace} <key> <model>`. Or retry it after the limit lifts.", keys.join(", ")),
+        }
+    }).collect()
+}
+
+/// List each provider's limit, and return the cards it speaks for: each stopped run's, and those of the tickets
+/// that follow it.
+pub(crate) fn include_limits(store: &farcooler_store::Store, stuck: &mut Vec<Stuck>) -> std::collections::HashSet<uuid::Uuid> {
+    let mut cards = std::collections::HashSet::new();
+    let failures = match store.workflow_failures_with_prefix(crate::provider_limit::PREFIX) {
+        Ok(failures) => failures,
+        Err(error) => { tracing::warn!(%error, "could not read runs stopped at a usage limit"); return cards; }
+    };
+    for failure in &failures {
+        let followers = store.workflow_state(&failure.workspace).ok().flatten()
+            .and_then(|state| state.items.get(&failure.item).map(|item| item.followers.clone())).unwrap_or_default();
+        for key in std::iter::once(&failure.item).chain(&followers) {
+            if let Ok(Some(card)) = store.workflow_item_task(&failure.workspace, key) { cards.insert(card); }
+        }
+    }
+    stuck.extend(provider_limits(&failures));
+    cards
+}
+
 /// Unlists the build when its run ends, however it ends.
 pub(crate) struct Startup {
     key: Key,
@@ -171,7 +318,9 @@ impl Startup {
         }
     }
 
-    pub(crate) fn observe(&self, heard: bool, held: bool, question: Option<&str>) {
+    /// `quiet` is the report of a build that has gone quiet (`Quiet`), which counts as stalled whether or not it
+    /// was ever heard from.
+    pub(crate) fn observe(&self, heard: bool, held: bool, question: Option<&str>, quiet: Option<&str>) {
         let stalled = !heard && self.opened.elapsed() >= START_WITHIN;
         let fallback = stalled.then(|| format!(
             "{} has not reported its start within {} seconds. {}",
@@ -179,10 +328,10 @@ impl Startup {
             if held { "The builder is paused for a landing check." }
             else { "The agent may be blocked during launch or waiting for input." },
         ));
-        let reason = question.or(fallback.as_deref());
+        let reason = question.or(quiet).or(fallback.as_deref());
         if let Some(activity) = &self.activity
             && let Ok(mut state) = activity.startup_stall.lock() {
-            *state = reason.filter(|_| stalled).map(str::to_owned);
+            *state = reason.filter(|_| stalled || quiet.is_some()).map(str::to_owned);
         }
         if let Some(reason) = reason {
             let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
@@ -259,8 +408,12 @@ fn asking(command: &str, screen: &str) -> Option<String> {
 /// spoken. Never returns.
 pub(crate) async fn watch(
     startup: Startup, tmux: &TmuxServer, pane: &str, heard: &AtomicBool,
-    builder: Option<&crate::yielding::BuilderGuard>,
+    builder: Option<&crate::yielding::BuilderGuard>, pulse: Option<Pulse>,
 ) -> std::convert::Infallible {
+    let mut quiet = Quiet::default();
+    let mut pulsed: Option<tokio::time::Instant> = None;
+    let mut stalled: Option<String> = None;
+    let mut last_screen = String::new();
     let mut look = tokio::time::interval_at(startup.opened + LOOK, LOOK);
     look.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let deadline = tokio::time::sleep_until(startup.opened + START_WITHIN);
@@ -275,10 +428,23 @@ pub(crate) async fn watch(
                 look.tick().await;
                 tmux.capture_screen(pane).await
             } => {
-                if let Ok(screen) = screen { question = asking(&startup.command, &screen); }
+                if let Ok(screen) = screen {
+                    question = asking(&startup.command, &screen);
+                    last_screen = screen;
+                }
             }
         }
-        startup.observe(heard.load(Ordering::Relaxed), builder.is_some_and(|b| b.held().1), question.as_deref());
+        let held = builder.is_some_and(|b| b.held().1);
+        if let Some(pulse) = &pulse
+            && pulsed.is_none_or(|at| at.elapsed() >= pulse.every) {
+            pulsed = Some(tokio::time::Instant::now());
+            let output = std::fs::metadata(&pulse.log).map_or(0, |m| m.len());
+            // A build held for a landing check is quiet because the engine stopped it.
+            let cpu = if held { None } else { pulse.cpu().await };
+            stalled = quiet.look(startup.opened.elapsed(), output, cpu, pulse.after)
+                .then(|| stalled_report(&startup.command, pulse.after, &last_screen));
+        }
+        startup.observe(heard.load(Ordering::Relaxed), held, question.as_deref(), stalled.as_deref());
     }
 }
 

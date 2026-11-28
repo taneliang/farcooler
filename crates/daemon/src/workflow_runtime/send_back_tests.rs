@@ -10,8 +10,12 @@ fn ok(value: &serde_json::Value) { assert!(value.pointer("/receipt/result/Ok").i
 
 /// Publish the configured coding workflow, track `ov-7`, and start it in its private tree.
 async fn started(runtime: &mut Runtime) {
+    let definition = runtime.coding.clone().unwrap().definition().unwrap();
+    started_with(runtime, definition).await;
+}
+
+async fn started_with(runtime: &mut Runtime, definition: farcooler_workflow::Definition) {
     let published = runtime.coding.clone().unwrap();
-    let definition = published.definition().unwrap();
     let adapter = Some(Box::new(AdapterConfiguration::Coding(published)));
     let pin = farcooler_store::workflow_publication::configuration_pin(&definition, adapter.as_deref());
     ok(&runtime.wire_command("w", "owner", Action::Publish { reason:None, notifications: None, adapter, mutation: m("publish", 0, 1), expected_pin: None, definition }).unwrap());
@@ -19,6 +23,35 @@ async fn started(runtime: &mut Runtime) {
     let state = runtime.state("w").unwrap().unwrap(); let item = &state.items["ov-7"];
     ok(&runtime.wire_command("w", "orchestrator", Action::Start { mutation: m("start", state.revision, 2), item: "ov-7".into(),
         run: item.run.clone(), pin: item.pin.clone(), start_pin: pin, models: Default::default(), worktree: None, with: vec![] }).unwrap());
+}
+
+/// ov-1515: the command as a client sends it. A stale run and an unlisted model are refused; a failed ticket runs
+/// again on the new model, in the tree it already has.
+#[tokio::test]
+async fn ov_1515_set_model_over_the_wire_runs_a_failed_ticket_again_on_the_new_model() {
+    let (_dir, mut runtime) = configured(false, "prose").await;
+    let mut definition = runtime.coding.clone().unwrap().definition().unwrap();
+    definition.models.insert("build".into(), vec!["codex:sol".into(), "claude:sonnet".into()]);
+    started_with(&mut runtime, definition).await;
+    let state = finish(&mut runtime, "w").await;
+    let item = &state.items["ov-7"];
+    assert_eq!(item.phase, Phase::Failed, "the build committed nothing: {item:?}");
+    let send = |runtime: &mut Runtime, id: &str, sequence: u64, run: Option<&str>, model: &str| {
+        let state = runtime.state("w").unwrap().unwrap(); let item = &state.items["ov-7"];
+        runtime.wire_command("w", "orchestrator", Action::SetModel { mutation: m(id, state.revision, sequence), item: "ov-7".into(),
+            run: run.unwrap_or(&item.run).into(), pin: item.pin.clone(), model: model.into(), step: None }).unwrap()
+    };
+    let stale = send(&mut runtime, "stale", 3, Some("another-run"), "claude:sonnet");
+    assert_eq!(stale.pointer("/receipt/result/Err").and_then(|e| e.as_str()), Some("Stale"), "only the run that was looked at");
+    let unlisted = send(&mut runtime, "unlisted", 4, None, "claude:haiku");
+    assert!(unlisted.pointer("/receipt/result/Err/ModelRefused").is_some(), "{unlisted}");
+    ok(&send(&mut runtime, "move", 5, None, "claude:sonnet"));
+    let binding = admitted(&runtime).await;
+    assert_eq!(binding.effect.kind, EffectKind::Execute(StageKind::Build));
+    assert_eq!((binding.effect.model.as_deref(), binding.effect.model_chosen), (Some("claude:sonnet"), true));
+    // The same tree, with what the first build left uncommitted still in it.
+    let left = std::fs::read_to_string(runtime.tree(&binding).join("result.txt")).unwrap();
+    assert!(left.starts_with("candidate iteration 0"), "{left}");
 }
 
 #[tokio::test]

@@ -486,7 +486,7 @@ async fn assert_quarantine_refused(runtime: &mut Runtime, refused: &Path, ran: &
     assert!(items[0].question.contains("com.apple.quarantine"));
     assert!(names_executable(&items[0].question) && clears(&items[0].question));
     let startup = crate::engine_stuck::Startup::new("w", ticket, "codex");
-    startup.observe(false, false, Some("The new attempt is waiting for input."));
+    startup.observe(false, false, Some("The new attempt is waiting for input."), None);
     let mut items = crate::engine_stuck::list();
     let current = items.clone();
     crate::engine_stuck::include_refusals(&runtime.store, &mut items);

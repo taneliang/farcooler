@@ -378,6 +378,12 @@ impl Exec {
                         let output = tmux.capture_pane(&owner.pane, 40).await
                             .map_err(|_| Error::Refused("native startup output unavailable"))?;
                         if let Some(reason) = startup_refusal(agent, &output) { return Ok((false, hooks, Some(reason))); }
+                        // At its limit Codex says so and sits at its prompt, with no hook to end the turn (ov-1515).
+                        // A reviewer that recorded its verdict first has already answered.
+                        if !self.recorded_verdict(binding)
+                            && let Some(reason) = crate::provider_limit::codex(&output, &self.log_end(binding)) {
+                            return Ok((false, hooks, Some(reason)));
+                        }
                     }
                     if verdict.is_none() && self.recorded_verdict(binding) { verdict = Some(clock.now()); }
                     if let Some(stop) = &mut claude_stop {
@@ -467,7 +473,12 @@ impl Exec {
                 let _ = stream.get_mut().write_all(b"{}\n").await;
             }
             if keyed_stop && let Followup::Sent(reply) = followup { continued_stop = Some((line.payload.clone(), reply)); }
+            // Claude's limit ends its turn with a failure hook that says until when (ov-1515).
+            let limit = (prompted && agent == Agent::Claude && line.event == "StopFailure"
+                && line.payload.get("agent_id").is_none() && !self.recorded_verdict(binding))
+                .then(|| crate::provider_limit::claude(&line.payload)).flatten();
             hooks.push(line);
+            if let Some(reason) = limit { return Ok((false, hooks, Some(reason))); }
             if hooks.len() > 4096 { return Err(Error::Refused("too many native hooks")); }
             if continued || check_claude {
                 claude_stop = (!continued).then(ClaudeStop::default);
@@ -490,6 +501,20 @@ impl Exec {
                 }
             }
         }
+    }
+    /// The end of what the agent's terminal has printed, as bytes: enough to hold its latest state report.
+    fn log_end(&self, binding: &Binding) -> Vec<u8> {
+        use std::io::{Read, Seek, SeekFrom};
+        const END: u64 = 64 * 1024;
+        let read = || -> std::io::Result<Vec<u8>> {
+            let mut file = std::fs::File::open(self.process_log(binding))?;
+            let len = file.metadata()?.len();
+            file.seek(SeekFrom::Start(len.saturating_sub(END)))?;
+            let mut bytes = Vec::new();
+            file.take(END).read_to_end(&mut bytes)?;
+            Ok(bytes)
+        };
+        read().unwrap_or_default()
     }
     pub(super) async fn run_native(&self, binding: &Binding, command: &CodingCommand,
         cancel: tokio::sync::watch::Receiver<bool>) -> Result<crate::effect_runner::ProcessExit> {
@@ -558,7 +583,9 @@ impl Exec {
         tmux.send_keys(&window.pane_id, "\n").await.map_err(|_| Error::Refused("native launch delivery uncertain"))?;
         // A build stopped on a question, or never heard from, is told in Needs You (ov-1077).
         let heard_from = std::sync::atomic::AtomicBool::new(false);
-        let stuck = crate::engine_stuck::watch(startup, tmux, &window.pane_id, &heard_from, _builder.as_ref());
+        // One that prints nothing and uses no CPU for a long stretch is told as stalled there too (ov-1515).
+        let pulse = crate::engine_stuck::Pulse::of(self.process_log(binding), self.native_hold_socket(binding));
+        let stuck = crate::engine_stuck::watch(startup, tmux, &window.pane_id, &heard_from, _builder.as_ref(), Some(pulse));
         let (send, orders) = mpsc::channel(8);
         let review = !matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build));
         let _steerable = crate::engine_steering::publish(&binding.workspace, &binding.effect.item, id,

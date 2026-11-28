@@ -90,7 +90,8 @@ impl Exec {
     /// The model this step's agent runs with: for a review whose options choose by path, the one chosen before it
     /// started; otherwise the run's pick at Start (ov-966). `None` is the configured preset.
     pub(super) fn run_model(&self, binding: &Binding) -> Option<String> {
-        if Self::review_options(binding).is_some_and(|o| !o.models.is_empty()) {
+        // A move to another model, or a fallback, holds over a review's pick by path (ov-1515).
+        if !binding.effect.model_chosen && Self::review_options(binding).is_some_and(|o| !o.models.is_empty()) {
             let chosen = self.bytes(&self.chosen_model_path(binding)).ok()
                 .and_then(|raw| serde_json::from_slice::<ChosenModel>(&raw).ok())
                 .filter(|c| c.binding == digest(binding));

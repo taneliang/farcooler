@@ -146,6 +146,13 @@ pub enum WorkflowCmd {
     SendBack { workspace:Uuid,item:String,#[arg(long)] run:Option<String>,#[arg(long)] pin:Option<String>,
         /// Why, for the agent: what to change. At most 4096 bytes; the first 1500 are in its brief.
         #[arg(long)] reason:String,#[command(flatten)] identity:RoutineIdentity },
+    /// Move a queued, failed or running ticket to another model, keeping its worktree: `workflow model <workspace>
+    /// <key> claude:opus`. The model is one the step lists. A running agent is stopped and the step starts again on
+    /// the new model; a failed run runs again.
+    Model { workspace:Uuid,item:String,model:String,
+        /// The step to move, where the run's own step (or the build before it) isn't the one meant.
+        #[arg(long)] step:Option<String>,
+        #[arg(long)] run:Option<String>,#[arg(long)] pin:Option<String>,#[command(flatten)] identity:RoutineIdentity },
     /// Close a failed run as landed, when its commit is already on the target branch. The runner reads the remote
     /// first and refuses a commit that is not on the target there. Taken only while the run is Failed.
     Landed { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,
@@ -220,6 +227,7 @@ impl WorkflowCmd {
                 }
                 (workspace,Action::SendBack { mutation:identity.mutation()?,item,run:run.ok_or("missing --run")?,pin:pin.ok_or("missing --pin")?,reason })
             }
+            Self::Model { workspace,item,model,step,run,pin,identity } => (workspace,Action::SetModel { mutation:identity.mutation()?,item,run:run.ok_or("missing --run")?,pin:pin.ok_or("missing --pin")?,model,step }),
             Self::Landed { workspace,item,run,pin,sha,identity } => {
                 if sha.len()!=40 || !sha.bytes().all(|b| b.is_ascii_hexdigit()) { return Err("--sha must be the full 40-character commit hash.".into()); }
                 (workspace,Action::Landed { mutation:identity.mutation(),item,run,pin,sha })
@@ -240,7 +248,7 @@ impl WorkflowCmd {
         match self {
             Self::Queue {workspace,item,run,pin,identity} | Self::Leave {workspace,item,run,pin,identity}
             | Self::Retry {workspace,item,run,pin,identity} | Self::Cancel {workspace,item,run,pin,identity}
-            | Self::SendBack {workspace,item,run,pin,identity,..} => Some((*workspace,item,Some((run,pin)),None,identity)),
+            | Self::SendBack {workspace,item,run,pin,identity,..} | Self::Model {workspace,item,run,pin,identity,..} => Some((*workspace,item,Some((run,pin)),None,identity)),
             Self::Start {workspace,item,run,pin,start_pin,identity,..} => Some((*workspace,item,Some((run,pin)),Some(start_pin),identity)),
             Self::Track {workspace,item,identity,..} => Some((*workspace,item,None,None,identity)),
             _ => None,
@@ -703,6 +711,20 @@ mod tests {
         assert_eq!(super::request(workspace,&reopen).unwrap().method,"workflow.reopen");
         let (_,reopen)=action(&["reopen","00000000-0000-0000-0000-000000000000","ov-7"]).unwrap();
         assert!(matches!(reopen,Action::Reopen{column:None,..}),"the runner picks the column");
+    }
+    /// ov-1515: one command moves a ticket to another model, as its own method.
+    #[test]
+    fn workflow_model_travels_as_its_own_method() {
+        let ids=["--command-id","same","--revision","5","--epoch","1","--sequence","2"];
+        let action=|args:&[&str]| { let crate::Command::Workflow(cmd)=crate::Cli::try_parse_from(["farcooler","workflow"].iter().chain(args).chain(&ids)).unwrap().command else {panic!()}; cmd.action() };
+        let moved=["model","00000000-0000-0000-0000-000000000000","ov-7","claude:opus","--run","run","--pin","pin"];
+        let (workspace,sent)=action(&moved).unwrap();
+        let request=super::request(workspace,&sent).unwrap();
+        assert_eq!(request.method,"workflow.set_model");
+        let Some(request::Payload::WorkflowCommand(body))=request.payload else {panic!()};
+        assert_eq!(body.json,r#"{"action":"SetModel","mutation":{"id":"same","revision":5,"epoch":1,"sequence":2},"item":"ov-7","run":"run","pin":"pin","model":"claude:opus"}"#);
+        let (_,sent)=action(&[&moved[..],&["--step","review"]].concat()).unwrap();
+        assert!(matches!(&sent,Action::SetModel{step:Some(step),..} if step=="review"));
     }
     /// ov-1231: `workflow landed` closes a failed run with a full commit hash, as its own method.
     #[test]

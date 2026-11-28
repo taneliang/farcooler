@@ -50,6 +50,8 @@ pub const ITEM_FIELDS: &[(&str, Decision)] = &[
     ("grouped_in", Decision::Mapped("Location::InBatch")),
     ("wait_since", Decision::Mapped("Work::wait_since at a wait station")),
     ("models", Decision::Mapped("Token::models")),
+    ("moved", Decision::Dropped("Token::models carries the pick, and the pipeline chooses no model over it")),
+    ("resume_after_stop", Decision::Refused("a move to another model is still stopping its agent")),
     ("tree", Decision::Mapped("coding data tree")),
     ("sent_back", Decision::Mapped("closed visits ending sent, with the reason")),
     ("brief", Decision::Mapped("Token::brief")),

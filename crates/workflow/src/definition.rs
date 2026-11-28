@@ -120,6 +120,10 @@ pub struct Definition {
     /// listed runs the harness the runtime is configured with, as before; an empty map leaves the pin as it was.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub models: BTreeMap<String, Vec<String>>,
+    /// The model a listed step moves to when its agent's provider is at its usage limit (ov-1515), by step id. It is
+    /// one of the step's `models`, and is used only when it runs on another harness. Left out, the step fails.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub fallbacks: BTreeMap<String, String>,
     /// How many times the orchestrator may send one run back to its build step (ov-968). Left out, it is
     /// `DEFAULT_SEND_BACKS`; bounded by the published execution limits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -156,7 +160,7 @@ impl Definition {
     pub fn group_definition(&self, name: &str) -> Option<Definition> {
         let group = self.groups.get(name)?;
         Some(Definition { schema: 2, source: format!("group/{name}"), stages: group.steps.clone(),
-            max_reworks: 0, rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None, build_folders: self.build_folders.clone(), policies: self.policies.iter().filter(|(_, p)| group.steps.iter().any(|s| s.id == p.step)).map(|(n,p)| (n.clone(),p.clone())).collect() , script_policies: self.script_policies.clone(), start_policy: None, limits: self.limits.clone() })
+            max_reworks: 0, rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new(), fallbacks: BTreeMap::new(), send_backs: None, build_folders: self.build_folders.clone(), policies: self.policies.iter().filter(|(_, p)| group.steps.iter().any(|s| s.id == p.step)).map(|(n,p)| (n.clone(),p.clone())).collect() , script_policies: self.script_policies.clone(), start_policy: None, limits: self.limits.clone() })
     }
     /// Every principal a step waits on, a group's steps included, in step order, each once (ov-1002): an
     /// approval step's, and a person's or the orchestrator's review gate's.
@@ -292,6 +296,11 @@ impl Definition {
                 || !distinct || !models.iter().all(|m| valid_model(m)) {
                 return Err(stage_problem(stage, "models", "an agent stage must list a bounded set of distinct harness or harness:model names"));
             }
+        }
+        if let Some((step, _)) = self.fallbacks.iter().find(|(step, model)|
+            !self.models.get(*step).is_some_and(|list| list.contains(model))) {
+            let step = if valid_id(step) { step.as_str() } else { "?" };
+            return Err(format!("fallbacks entry for step {step:?} must be one of the models the step lists"));
         }
         Ok(())
     }
@@ -516,7 +525,7 @@ impl Definition {
     pub fn coding() -> Self {
         let kinds = [StageKind::Provision, StageKind::Build, StageKind::Check,
             StageKind::Review(Reviewer::Dispatch), StageKind::Land, StageKind::Ci];
-        Self { schema: 1, source: "coding/v1".into(), max_reworks: 2, rework_target: Some("stage-1".into()), groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None, build_folders: None, script_policies: Default::default(), start_policy: None, limits: None, policies: Default::default(),
+        Self { schema: 1, source: "coding/v1".into(), max_reworks: 2, rework_target: Some("stage-1".into()), groups: BTreeMap::new(), models: BTreeMap::new(), fallbacks: Default::default(), send_backs: None, build_folders: None, script_policies: Default::default(), start_policy: None, limits: None, policies: Default::default(),
             stages: kinds.into_iter().enumerate().map(|(i, kind)| Stage {
                 id: format!("stage-{i}"), kind, progression: Progression::Automatic,
                 max_attempts: 2, routes: BTreeMap::new(), limit: 0,
@@ -535,7 +544,7 @@ impl Definition {
             progression: Progression::AwaitApproval { principal: "orchestrator".into() },
             max_attempts: 1, routes: BTreeMap::new(), limit: 0,
             operation: OperationSpec { adapter_version: "tracker/v1".into(), arguments: vec![], environment: BTreeMap::new() } };
-        Some(Self { schema: 1, source: TICKET_SOURCE.into(), max_reworks: 0, rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None, build_folders: None, script_policies: Default::default(), start_policy: None, limits: None, policies: Default::default(),
+        Some(Self { schema: 1, source: TICKET_SOURCE.into(), max_reworks: 0, rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new(), fallbacks: Default::default(), send_backs: None, build_folders: None, script_policies: Default::default(), start_policy: None, limits: None, policies: Default::default(),
             stages: TICKET_COLUMNS.iter().cycle().skip(start).take(TICKET_COLUMNS.len()).map(|id| stage(id)).collect() })
     }
     /// Whether this is the tracker-only template: a ticket with no run, moved by column.
@@ -543,7 +552,7 @@ impl Definition {
         self.source == TICKET_SOURCE && self.stages.iter().all(|s| s.kind == StageKind::Tracker)
     }
     pub fn tracker(principal: &str) -> Self {
-        Self { schema: 1, source: "tracker/v1".into(), max_reworks: 0, rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None, build_folders: None, script_policies: Default::default(), start_policy: None, limits: None, policies: Default::default(),
+        Self { schema: 1, source: "tracker/v1".into(), max_reworks: 0, rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new(), fallbacks: Default::default(), send_backs: None, build_folders: None, script_policies: Default::default(), start_policy: None, limits: None, policies: Default::default(),
             stages: vec![Stage { id: "checklist".into(), kind: StageKind::Tracker,
                 progression: Progression::AwaitApproval { principal: principal.into() },
                 max_attempts: 1, routes: BTreeMap::new(), limit: 0,

@@ -22,11 +22,12 @@ impl Migration<'_> {
     fn placeable(&mut self, id: &str, item: &Item) -> bool {
         let Item { start_load: _, execution, definition: _, pin: _, policy_pin: _, dependencies: _, resource: _, stage: _, iteration: _,
             attempt: _, fence: _, phase, run: _, pending: _, candidate: _, last_evidence: _, stopping: _, rework_history: _,
-            back_edges: _, retries: _, refused_launch: _, members, group_of, pushed, handed, since_ms: _, grouped_in: _, wait_since: _, models: _,
+            back_edges: _, retries: _, refused_launch: _, members, group_of, pushed, handed, since_ms: _, grouped_in: _, wait_since: _, models: _, moved: _, resume_after_stop,
             tree: _, sent_back: _, brief: _, follows, followers, cancel_reason: _, closed: _, failure: _, ci_reruns: _,
             ci_retry: _, deciding, hook_calls: _, hook_refused, queue_hold: _, group_failure: _, landed: _, restart: _, reuse_checkout, carried_progress: _, history: _, reason: _, landing_ci: _, stopped_from: _ } = item;
         let before = self.refused.len();
         if *reuse_checkout { self.refuse(id, "it still needs to reuse its checkout after a workflow publication"); }
+        if *resume_after_stop { self.refuse(id, "a move to another model is still stopping its agent"); }
         if execution.is_some() { self.refuse(id, "it carries a read-time execution view, which is never stored"); }
         if follows.is_some() || !followers.is_empty() { self.refuse(id, "it follows or carries another ticket's run, and the pipeline has no followers yet"); }
         if deciding.is_some() { self.refuse(id, "a decision script is running for it, and the pipeline has no scripts"); }

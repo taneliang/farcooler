@@ -118,6 +118,13 @@ pub struct Item {
     /// default (ov-966). Empty when the definition lists none.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub models: BTreeMap<String, String>,
+    /// The steps whose model was chosen after Start: a move to another model, or a fallback at a usage limit
+    /// (ov-1515). Such a pick holds even where a review's options would choose a model by path.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub moved: BTreeSet<String>,
+    /// A move to another model is stopping the agent: once it has stopped, the step runs again (ov-1515).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub resume_after_stop: bool,
     /// The worktree the orchestrator named at Start, and main's commit then (ov-967). `None`: a private tree.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tree: Option<RunTree>,
@@ -498,6 +505,10 @@ pub enum Command {
         /// Tickets at rest that follow this run instead of having runs of their own (ov-970).
         #[serde(default, skip_serializing_if = "Vec::is_empty")] with: Vec<String> },
     Resolve { item: String, effect: String, run: String, fence: u64, outcome: Outcome },
+    /// The orchestrator moves a queued, failed or running ticket to another of its step's listed models, in the same
+    /// worktree (ov-1515). `step` left out is the step the run is at, or the build before it. A running agent of
+    /// that step is stopped first; a failed run runs again.
+    SetModel { item: String, model: String, #[serde(default, skip_serializing_if = "Option::is_none")] step: Option<String> },
     /// The orchestrator sends a run back to its last build step, with a reason the agent is told (ov-968).
     SendBack { item: String, reason: String },
     /// The orchestrator closes a Failed run whose work is already on the target branch: the ticket lands with
@@ -545,6 +556,10 @@ pub enum Outcome {
     /// The runner would not start the step's program until a person fixes something on the host, and says
     /// what (ov-1511). The run fails at once without spending an attempt, and the Retry that follows is free.
     LaunchRefused(String),
+    /// The step's agent is at its provider's usage or rate limit (ov-1515): `harness` is the one that said so and
+    /// `reason` says until when. The step moves to its fallback model, if the workflow names one on another
+    /// harness; otherwise it fails at once, spending no attempt, and the Retry that follows is free.
+    UsageLimit { harness: String, reason: String },
     Interrupted, Uncertain,
     /// A fenced recovery check could not establish what happened.
     UncertainBecause(String),
@@ -576,6 +591,9 @@ pub struct Effect {
     /// A build step's model, from the item's record (ov-966), so a launch reads it from the effect alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// `model` was chosen after Start (`Item::moved`), so nothing else picks over it (ov-1515).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub model_chosen: bool,
     /// The item's named worktree (ov-967), so every step finds the tree from the effect alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tree: Option<RunTree>,

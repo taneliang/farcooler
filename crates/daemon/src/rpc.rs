@@ -401,7 +401,7 @@ pub(crate) fn required_scope(method: &str) -> Option<Scope> {
 fn scope_of(method: Method) -> Scope {
     match method {
         Method::WorkflowCutover => Scope::HostAdmin,
-        Method::WorkspaceSetWorkflow | Method::WorkflowEnqueue | Method::WorkflowGet | Method::WorkflowApprove | Method::WorkflowResolveCancellation | Method::WorkflowCancel | Method::WorkflowResolve | Method::WorkflowRetry | Method::WorkflowQueue | Method::WorkflowLeave | Method::WorkflowSettle | Method::WorkflowTrack | Method::WorkflowMove | Method::WorkflowStart | Method::WorkflowSendBack | Method::WorkflowClose | Method::WorkflowLanded | Method::WorkflowReopen | Method::WorkflowPropose | Method::WorkflowDrafts | Method::WorkflowReview | Method::WorkflowWatch | Method::WorkflowPause | Method::WorkflowResume => Scope::Control,
+        Method::WorkspaceSetWorkflow | Method::WorkflowEnqueue | Method::WorkflowGet | Method::WorkflowApprove | Method::WorkflowResolveCancellation | Method::WorkflowCancel | Method::WorkflowResolve | Method::WorkflowRetry | Method::WorkflowQueue | Method::WorkflowLeave | Method::WorkflowSettle | Method::WorkflowTrack | Method::WorkflowMove | Method::WorkflowStart | Method::WorkflowSendBack | Method::WorkflowSetModel | Method::WorkflowClose | Method::WorkflowLanded | Method::WorkflowReopen | Method::WorkflowPropose | Method::WorkflowDrafts | Method::WorkflowReview | Method::WorkflowWatch | Method::WorkflowPause | Method::WorkflowResume => Scope::Control,
         // Themes are what a client paints with. Read, not Control: naming a
         // color changes nothing on the runner, and a phone connected in a
         // read-only capacity should still be able to render itself properly.
@@ -787,7 +787,7 @@ impl Rpc {
         let scope = self.peer.scope;
 
         match req.method.as_str() {
-            "workspace.set_workflow" | "workflow.enqueue" | "workflow.get" | "workflow.approve" | "workflow.cancel" | "workflow.resolve_cancellation" | "workflow.resolve" | "workflow.retry" | "workflow.queue" | "workflow.leave" | "workflow.settle" | "workflow.track" | "workflow.move" | "workflow.start" | "workflow.send_back" | "workflow.close" | "workflow.reopen" | "workflow.landed" | "workflow.propose" | "workflow.drafts" | "workflow.review" => self.workflow_command(req).await,
+            "workspace.set_workflow" | "workflow.enqueue" | "workflow.get" | "workflow.approve" | "workflow.cancel" | "workflow.resolve_cancellation" | "workflow.resolve" | "workflow.retry" | "workflow.queue" | "workflow.leave" | "workflow.settle" | "workflow.track" | "workflow.move" | "workflow.start" | "workflow.send_back" | "workflow.set_model" | "workflow.close" | "workflow.reopen" | "workflow.landed" | "workflow.propose" | "workflow.drafts" | "workflow.review" => self.workflow_command(req).await,
             // Watch a running engine agent's terminal, read-only (ov-972). Addressed by workspace and
             // item, never by terminal id: the engine's pane is in a tmux server the daemon's inventory
             // does not list, so `terminal.write` and the rest cannot name it. This only attaches.

@@ -15,9 +15,11 @@ fn new_item(definition: &Definition, policy_pin: &str, resource: &str,
         hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, landed: None,
         rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, refused_launch: None, pushed: None, wait_since: None,
         members: Vec::new(), handed: Vec::new(), since_ms: 0, group_of: None, grouped_in: None,
-        models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new(),
+        models: BTreeMap::new(), moved: BTreeSet::new(), resume_after_stop: false, tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new(),
     }
 }
+#[path = "model_reducer.rs"]
+mod model_reducer;
 #[path = "hook_reducer.rs"]
 mod hook_reducer;
 #[path = "state_validity.rs"]
@@ -249,6 +251,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                 | Command::Queue { item } | Command::Leave { item } | Command::RefreshJoin { item, .. }
                 | Command::HoldQueue { item, .. } | Command::Move { item, .. }
                 | Command::Resolve { item, .. } | Command::SendBack { item, .. } | Command::Close { item, .. }
+                | Command::SetModel { item, .. }
                 | Command::Land { item, .. } | Command::RepinPending { item, .. } => item,
                 Command::Decide { .. } | Command::Enqueue { .. } | Command::Advance | Command::RefreshGroups { .. } | Command::AdoptPublication { .. } | Command::Reopen { .. } | Command::Start { .. } => unreachable!(),
             };
@@ -423,7 +426,12 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                             }
                             item.stopping = None;
                             item.pending = None;
-                            finish_close(&mut item);
+                            if std::mem::take(&mut item.resume_after_stop) && item.closed.is_none() {
+                                // The old agent is gone: the step queues again, in the same tree, on its new model.
+                                model_reducer::requeue(&mut item)?;
+                                item.stopped_from = None;
+                                item.run.clear();
+                            } else { finish_close(&mut item); }
                         }
                         Outcome::FoldConflict { evidence, files, members: None } => {
                             if item.run.starts_with("cancel:") || item.group_of.is_none()
@@ -601,6 +609,8 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                             item.refused_launch = Some(item.fence);
                             item.phase = Phase::Failed;
                         }
+                        Outcome::UsageLimit { harness, reason } =>
+                            model_reducer::usage_limit(&mut item, id, input, harness, reason, &mut effects)?,
                         Outcome::ResourceHold(reason) => {
                             // A group's gate waits for its resources; a build waits for disk space (ov-1516).
                             let holds = match item.definition.stages[item.stage].kind {
@@ -652,7 +662,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                             Outcome::FoldConflict { evidence, files, .. } => {
                                 describe_failure(&mut item, &conflict_brief(evidence, files)?, Some(&evidence.receipt));
                             }
-                            Outcome::LaunchRefused(_) => {
+                            Outcome::LaunchRefused(_) | Outcome::UsageLimit { .. } => {
                                 let cause = item.failure.as_deref().unwrap_or("The runner refused to launch the step.").to_owned();
                                 describe_failure(&mut item, &cause, Some(&input.id));
                             }
@@ -745,7 +755,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                                 stopping: None, stopped_from: None, cancel_reason: None, closed: None, failure: None, queue_hold: None, group_failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, landed: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, refused_launch: None, pushed: None, wait_since: None,
                                 members: Vec::new(), handed: Vec::new(), since_ms: 0,
                                 group_of: Some(GroupOf { name: name.clone(), pin }),
-                                grouped_in: None, models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() });
+                                grouped_in: None, models: BTreeMap::new(), moved: BTreeSet::new(), resume_after_stop: false, tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() });
                             gid
                         }
                     };
@@ -796,30 +806,13 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     controller(input)?;
                     // A failed run does not own its resource, so a retry queues like new work.
                     if item.phase != Phase::Failed || item.group_of.is_some() { return Err(Refusal::Phase); }
-                    if matches!(command, Command::RestartReview { .. }) {
-                        let build = item.review_restart_stage().ok_or(Refusal::Phase)?;
-                        let prior = item.last_run();
-                        item.history.push(prior);
-                        let spent = if item.definition.schema == 2 {
-                            item.back_edges.remove(&item.definition.stages[item.stage].id).unwrap_or(0)
-                        } else { item.iteration };
-                        item.iteration -= spent;
-                        item.rework_history.clear();
-                        item.stage = build;
-                        item.candidate = None;
-                        item.last_evidence = None;
-                        item.run.clear();
-                        item.retries = 0;
-                    } else if item.refused_launch != Some(item.fence) {
-                        if item.retries >= item.definition.execution_limits().retries { return Err(Refusal::Limit); }
-                        item.retries += 1;
-                    }
-                    item.refused_launch = None;
-                    item.attempt = 1;
-                    item.failure = None;
-                    item.reason = None;
-                    item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
-                    item.phase = Phase::Blocked;
+                    if matches!(command, Command::RestartReview { .. }) { model_reducer::back_to_build(&mut item)?; }
+                    else { model_reducer::spend_retry(&mut item)?; }
+                    model_reducer::requeue(&mut item)?;
+                }
+                Command::SetModel { model, step, .. } => {
+                    controller(input)?;
+                    model_reducer::set_model(&mut item, id, input, model, step.as_deref(), &mut effects)?;
                 }
                 Command::Move { to, .. } => {
                     controller(input)?;
@@ -1221,7 +1214,8 @@ pub(crate) fn emit(item: &mut Item, id: &str, input: &Input, kind: EffectKind, e
         definition_pin: item.pin.clone(), policy_pin: item.policy_pin.clone(),
         candidate: item.candidate.clone(), members: item.members.clone(), kind,
         operation: item.definition.stages[item.stage].operation.clone(), created_ms,
-        model: item.models.get(&item.definition.stages[item.stage].id).cloned(), tree: item.tree.clone(),
+        model: item.models.get(&item.definition.stages[item.stage].id).cloned(),
+        model_chosen: item.moved.contains(&item.definition.stages[item.stage].id), tree: item.tree.clone(),
         brief: item.brief.clone().filter(|_| item.definition.stages[item.stage].kind == StageKind::Build),
         with: item.followers.clone(), ci_retry: item.ci_retry.clone() });
 }

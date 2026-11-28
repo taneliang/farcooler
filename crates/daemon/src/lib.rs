@@ -156,6 +156,7 @@ pub(crate) mod lfs_ops;
 pub mod task_ops;
 mod engine_moves;
 pub mod engine_stuck;
+mod provider_limit;
 pub mod task_starts;
 pub mod usage;
 #[cfg(test)]

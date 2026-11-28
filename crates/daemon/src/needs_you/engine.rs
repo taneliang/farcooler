@@ -16,7 +16,8 @@ pub(super) fn signal(index: usize, stuck: &Stuck, tasks: &[farcooler_store::mode
         subject,
         terminal: None,
         question: stuck.question.clone(),
-        detail: Some(stuck.item.clone()),
+        // The ticket, or for a provider's limit, the provider.
+        detail: Some(stuck.item.strip_prefix(crate::engine_stuck::LIMIT_ITEM).unwrap_or(&stuck.item).to_owned()),
         ask_id: None,
         actions: Vec::new(),
         link: None,

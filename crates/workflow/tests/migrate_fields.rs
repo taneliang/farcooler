@@ -47,6 +47,7 @@ fn every_field_set() -> Value {
         "back_edges": { "build": 1 }, "retries": 1, "refused_launch": 1, "members": [{ "item": "b", "candidate": "c" }],
         "group_of": { "name": "landing", "pin": "p" }, "pushed": "c", "handed": ["b"], "since_ms": 5, "grouped_in": "g", "wait_since": 5,
         "models": { "build": "claude:opus" },
+        "moved": ["build"], "resume_after_stop": true,
         "tree": { "name": "n", "branch": "b", "path": "/p", "base": "0123456789012345678901234567890123456789" },
         "sent_back": [{ "id": "i", "revision": 1, "run": "r", "from": "gate-0", "to": "build", "reason": "why" }],
     });

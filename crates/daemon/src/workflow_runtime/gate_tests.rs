@@ -355,6 +355,15 @@ async fn a_review_runs_with_the_model_its_changed_paths_earn_and_the_workflows_w
         assert_eq!(at(&state), ("orchestrator-review".into(), Phase::WaitingReview), "{rule}");
         assert_eq!(std::fs::read_to_string(dir.path().join("reviews")).unwrap(), format!("{model}\n{model}\n"), "{rule}: both attempts");
     }
+    // A move to another model holds over what the paths would pick (ov-1515).
+    let (dir, mut runtime, _fake) = three_gates("pass").await;
+    let definition = with_options(&runtime, "result.txt");
+    enqueue(&mut runtime, "w", "one", definition);
+    let moved = super::coding_verbs_tests::command(&runtime, farcooler_workflow::Command::SetModel {
+        item: "one".into(), model: "claude:sonnet".into(), step: Some("agent-review".into()) });
+    assert!(moved.result.is_ok(), "{moved:?}");
+    settle(&mut runtime, 2).await;
+    assert_eq!(std::fs::read_to_string(dir.path().join("reviews")).unwrap(), "claude:sonnet\nclaude:sonnet\n", "moved");
     let (_dir, mut runtime, _fake) = three_gates("never").await;
     let definition = with_options(&runtime, "result.txt");
     enqueue(&mut runtime, "w", "one", definition);

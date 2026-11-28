@@ -80,6 +80,10 @@ pub enum Action {
     /// Send a run back to its last build step, which starts again in the same worktree and is told `reason`
     /// (ov-968). Taken while the run waits (for a review, an approval or its landing group) or has failed.
     SendBack { mutation: Mutation, item: String, run: String, pin: String, reason: String },
+    /// Move a queued, failed or running ticket to another of its step's listed models, keeping its worktree
+    /// (ov-1515). A running agent is stopped first. `step` left out is the one the run is at, or the build before it.
+    SetModel { mutation: Mutation, item: String, run: String, pin: String, model: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")] step: Option<String> },
     /// Close a Failed run as landed with `sha`, a commit already on the target branch. The runner reads the remote
     /// first and refuses a commit that is not an ancestor of the target there (ov-1231).
     Landed { mutation: Mutation, item: String, run: String, pin: String, sha: String },
@@ -121,6 +125,7 @@ impl Action {
             Self::Propose { .. } => "workflow.propose",
             Self::Drafts { .. } => "workflow.drafts",
             Self::SendBack { .. } => "workflow.send_back",
+            Self::SetModel { .. } => "workflow.set_model",
             Self::Reopen { .. } => "workflow.reopen",
             Self::Landed { .. } => "workflow.landed",
         }

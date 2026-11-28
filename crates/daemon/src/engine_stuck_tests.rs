@@ -45,7 +45,7 @@ impl Pane {
 /// Collect what the watch reports for `ms`.
 async fn run(pane: &Pane, item: &str, heard: &AtomicBool, ms: u64) -> Vec<Stuck> {
     let mut seen = Vec::new();
-    let mut watching = std::pin::pin!(watch(Startup::new("ws-test", item, "claude"), &pane.tmux, &pane.id, heard, None));
+    let mut watching = std::pin::pin!(watch(Startup::new("ws-test", item, "claude"), &pane.tmux, &pane.id, heard, None, None));
     let end = tokio::time::sleep(Duration::from_millis(ms));
     tokio::pin!(end);
     let mut look = tokio::time::interval(Duration::from_millis(40));
@@ -86,4 +86,64 @@ async fn a_build_that_becomes_stuck_tells_clients_to_reread_needs_you() {
         false
     }).await.unwrap_or(false);
     assert!(said, "no NeedsYouChanged was sent when the build became stuck");
+}
+
+fn secs(s: u64) -> Duration { Duration::from_secs(s) }
+fn cpu(pairs: &[(i32, u64)]) -> Option<Cpu> { Some(pairs.iter().map(|(pid, ms)| (*pid, Duration::from_millis(*ms))).collect()) }
+
+#[test]
+fn an_agent_that_prints_nothing_and_uses_no_cpu_is_quiet_only_after_the_whole_time() {
+    let mut quiet = Quiet::default();
+    assert!(!quiet.look(secs(0), 100, cpu(&[(1, 5_000)]), secs(600)));
+    // An idle terminal program still ticks over a little.
+    assert!(!quiet.look(secs(300), 100, cpu(&[(1, 5_600)]), secs(600)));
+    assert!(quiet.look(secs(600), 100, cpu(&[(1, 6_200)]), secs(600)));
+    // A word from it ends the quiet.
+    assert!(!quiet.look(secs(630), 101, cpu(&[(1, 6_200)]), secs(600)));
+}
+
+#[test]
+fn output_or_cpu_alone_keeps_an_agent_from_being_stalled() {
+    let mut printing = Quiet::default();
+    let mut building = Quiet::default();
+    let mut unread = Quiet::default();
+    for minute in 0..30 {
+        assert!(!printing.look(secs(minute * 60), 100 + minute, cpu(&[(1, 0)]), secs(600)));
+        // A silent compile: a new child each minute, busy while it lives.
+        assert!(!building.look(secs(minute * 60), 100, cpu(&[(1, 0), (100 + minute as i32, 40_000)]), secs(600)));
+        // CPU that can't be read is not "no CPU".
+        assert!(!unread.look(secs(minute * 60), 100, None, secs(600)));
+    }
+}
+
+#[test]
+fn process_times_are_read_for_the_agent_and_everything_under_it() {
+    let table = "  10     1   0:01.50\n  11    10  12:00.00\n  12    11   0:00.25\n  20     1  99:00.00\n  30    1 1-00:00:01\n";
+    assert_eq!(cpu_under(table, 10), cpu(&[(10, 1_500), (11, 720_000), (12, 250)]));
+    assert_eq!(cpu_under(table, 30), cpu(&[(30, 86_401_000)]));
+    assert_eq!(cpu_under(table, 999), None);
+}
+
+#[tokio::test]
+async fn a_silent_idle_pane_is_listed_as_stalled_with_its_last_lines() {
+    let pane = Pane::showing("compiling things\nwaiting on nothing at all\n").await;
+    let log = pane.dir.join("agent.output");
+    std::fs::write(&log, "said once").unwrap();
+    // The pane's own process stands in for the agent: asleep, so it uses no CPU.
+    let leader = pane.tmux.run(&["display-message", "-p", "-t", &pane.id, "#{pane_pid}"]).await.unwrap().stdout.trim().parse().unwrap();
+    let pulse = Pulse { log, agent: Agent::Process(leader), after: Duration::from_millis(600), every: Duration::from_millis(100) };
+    let heard = AtomicBool::new(true);
+    let mut watching = std::pin::pin!(watch(Startup::new("ws-test", "ov-stalled", "codex"), &pane.tmux, &pane.id, &heard, None, Some(pulse)));
+    let found = async {
+        loop {
+            if let Some(stuck) = list().into_iter().find(|s| s.item == "ov-stalled") { break stuck; }
+            tokio::time::sleep(Duration::from_millis(40)).await;
+        }
+    };
+    let stuck = tokio::select! {
+        never = &mut watching => match never {},
+        stuck = tokio::time::timeout(Duration::from_secs(10), found) => stuck.expect("an idle agent is never listed"),
+    };
+    assert!(stuck.question.starts_with("codex has printed nothing and used no CPU for "), "{}", stuck.question);
+    assert!(stuck.question.contains("compiling things\nwaiting on nothing at all"), "{}", stuck.question);
 }

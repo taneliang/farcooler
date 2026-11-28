@@ -124,6 +124,8 @@ and wait for the next check-in. Inspect other refusals before retrying.
    send it back. A person gate waits for that person in the app: never decide it.
 4. **Send back.** `workflow send-back … --reason "<what to change>"` rebuilds in the same worktree with your reason. `workflow cancel` ends the run.
    `workflow retry <ws> <key>` retries a failed step within its allowance. After the review limit, it rebuilds in the same checkout with the last finding and a fresh gate allowance.
+   A provider at its limit fails the step with `usage limit until <time>`, unless the step has a fallback.
+   `workflow model <ws> <key> <model>` moves a queued, failed or running ticket to another listed model, in the same worktree.
    A worktree step left `Uncertain`, or a cancel stuck behind one: `workflow resolve …`. The runner names anything that
    remains of the worktree. If nothing remains, the step fails and you can retry.
 5. **Land.** After the last gate the ticket reads `WaitingJoin`: queue it with

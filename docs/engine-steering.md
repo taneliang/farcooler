@@ -66,3 +66,48 @@ farcooler message <key> "Read the answer note just added to this ticket"
 
 Steering changes neither workflow progression nor the engine's ownership of
 landing.
+
+## When a provider is at its limit
+
+An agent at its provider's usage or rate limit fails its step at once, with the
+reason `usage limit until <time> (Codex)` or `(Claude)`. No attempt is spent, and
+the retry that follows is free. Codex is read from its own error line on the
+pane, and only while the latest state it reports to its terminal (OSC 7501), if it
+reports one, is an error. Claude is read from its `StopFailure` hook. An error
+state with some other message isn't called a limit.
+
+Needs You lists one item for each provider in each workspace, naming every ticket
+it stopped. Those tickets don't also ask for a decision of their own. A question
+somebody asked on one still shows.
+
+To move a queued, failed or running ticket to another model:
+
+```sh
+farcooler workflow model <workspace-uuid> <key> claude:opus
+```
+
+The model must be one the step lists in the workflow's `models`. The command
+moves the step the run is at, or the build before it; `--step` names another. A
+running agent of that step is stopped first, and the step starts again on the new
+model in the same worktree, uncommitted work included. A failed run runs again,
+as `workflow retry` would run it. A ticket at rest has no run to move: pick its
+model with `workflow start --model`.
+
+A workflow can also name a fallback for a step, one of the models it lists:
+
+```json
+"models": { "build": ["codex:gpt-5.5", "claude:sonnet"] },
+"fallbacks": { "build": "claude:sonnet" }
+```
+
+When the step's agent is at its limit and the fallback runs on another provider,
+the step starts again on the fallback and the ticket says so. Each ticket reaches
+the limit once before it moves. If the fallback is at its limit too, the step
+fails. Without `fallbacks`, nothing changes models by itself.
+
+## A stalled build
+
+A native agent that prints nothing and uses next to no CPU (under 2% of one core)
+for ten minutes is listed in Needs You as stalled, with the last lines of its
+terminal, and its ticket reads `Stalled`. Nothing is stopped: watch it, message
+it, stop it, or move it. Time a landing check holds it paused doesn't count.

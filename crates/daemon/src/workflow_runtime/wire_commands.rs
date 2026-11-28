@@ -325,7 +325,7 @@ impl Runtime {
             | Action::Review { mutation, .. } | Action::Approve { mutation, .. } | Action::Cancel { mutation, .. } | Action::Retry { mutation, .. }
             | Action::ResolveCancellation { mutation, .. } | Action::Queue { mutation, .. } | Action::Leave { mutation, .. } | Action::Settle { mutation, .. } | Action::Resolve { mutation, .. }
             | Action::Track { mutation, .. } | Action::Move { mutation, .. } | Action::Start { mutation, .. }
-            | Action::SendBack { mutation, .. } | Action::Close { mutation, .. } | Action::Reopen { mutation, .. } | Action::Landed { mutation, .. } => mutation,
+            | Action::SendBack { mutation, .. } | Action::SetModel { mutation, .. } | Action::Close { mutation, .. } | Action::Reopen { mutation, .. } | Action::Landed { mutation, .. } => mutation,
             Action::Get | Action::GetPage { .. } | Action::Logs { .. } | Action::History { .. } | Action::ArchiveItem { .. } | Action::Propose { .. } | Action::Drafts { .. } | Action::PreviewPublication { .. } => unreachable!(),
         };
         if !valid_id(&mutation.id) || mutation.id.len() > 100 { return Err(Error::Refused("invalid command id")); }
@@ -531,6 +531,14 @@ impl Runtime {
                         self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Phase))?
                     } else {
                         let input = input(Command::SendBack { item:item.clone(),reason:reason.clone() },Grant::Controller);
+                        self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
+                    }
+                }
+                Action::SetModel { item, run, pin, model, step, .. } => {
+                    if !state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin) {
+                        self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Stale))?
+                    } else {
+                        let input = input(Command::SetModel { item:item.clone(),model:model.clone(),step:step.clone() },Grant::Controller);
                         self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
                     }
                 }

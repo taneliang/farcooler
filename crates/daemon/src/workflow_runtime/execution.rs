@@ -216,12 +216,12 @@ mod tests {
         ACTIVITY.scope(activity, async {
             let startup = crate::engine_stuck::Startup::new("w", ticket, "codex");
             tokio::time::advance(Duration::from_secs(59)).await;
-            startup.observe(false, false, None);
+            startup.observe(false, false, None, None);
             assert!(crate::engine_stuck::list().is_empty());
             assert_ne!(runtime.execution_state("w").unwrap().unwrap().items[ticket].phase, Phase::Stalled);
 
             tokio::time::advance(Duration::from_secs(1)).await;
-            startup.observe(false, false, None);
+            startup.observe(false, false, None, None);
             let items = crate::engine_stuck::list();
             assert_eq!(items.len(), 1);
             assert_eq!(items[0].item, ticket);
@@ -231,7 +231,7 @@ mod tests {
             assert_eq!(state.items[ticket].phase, Phase::Stalled);
             assert_eq!(state.items[ticket].execution.as_ref().unwrap().text, items[0].question);
 
-            startup.observe(true, false, None);
+            startup.observe(true, false, None, None);
             assert!(crate::engine_stuck::list().is_empty());
             assert_eq!(runtime.execution_state("w").unwrap().unwrap().items[ticket].phase, Phase::Running);
         }).await;

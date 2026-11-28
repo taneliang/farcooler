@@ -528,7 +528,7 @@ impl Runtime {
                 }
                 self.validate_definition(definition)?;
             }
-            Command::Cancel { .. } | Command::Retry { .. } | Command::Queue { .. } | Command::Leave { .. } | Command::Move { .. } => {}
+            Command::Cancel { .. } | Command::Retry { .. } | Command::Queue { .. } | Command::Leave { .. } | Command::Move { .. } | Command::SetModel { .. } => {}
             _ => return Err(Error::Refused("not a controller command")),
         }
         self.apply(request, "controller", Grant::Controller, now_ms)
@@ -1156,9 +1156,11 @@ impl Runtime {
         let uncertain = outcome == Outcome::Uncertain;
         let quarantine = matches!(&outcome, Outcome::SafeFailureBecause(reason)
             if reason.starts_with(crate::engine_stuck::QUARANTINE_PREFIX));
+        let limit = matches!(&outcome, Outcome::SafeFailureBecause(reason)
+            if crate::provider_limit::parse(reason).is_some());
         match self.write_result(workspace, effect, outcome, resolving, now_ms)? {
             Ok(()) => {
-                if quarantine { crate::engine_stuck::announce(); }
+                if quarantine || limit { crate::engine_stuck::announce(); }
                 Ok(true)
             }
             Err(reason) => {
@@ -1178,6 +1180,9 @@ impl Runtime {
             // A launch macOS would block meets the same block until a person clears it, so it spends nothing (ov-1511).
             Outcome::SafeFailureBecause(reason) if reason.starts_with(crate::engine_stuck::QUARANTINE_PREFIX) =>
                 Outcome::LaunchRefused(reason.clone()),
+            // A provider at its limit refuses the next launch too: the workflow's fallback, or a failure now (ov-1515).
+            Outcome::SafeFailureBecause(reason) if let Some((harness, _)) = crate::provider_limit::parse(reason) =>
+                Outcome::UsageLimit { harness: harness.into(), reason: reason.clone() },
             Outcome::SafeFailure | Outcome::SafeFailureBecause(_) => {
                 let journal = self.journal_path(effect);
                 match journal.file_name().and_then(|name| name.to_str()).filter(|_| journal.is_file()) {

@@ -142,6 +142,7 @@
    "landing_update",
    "native_hold",
    "path_routes",
+   "provider_limit",
    "ticket_moves",
    "workflow_deciders",
    "workflow_drafts",
