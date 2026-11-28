@@ -132,7 +132,10 @@ SSH enrollment, and the same-channel CLI links. Keep the app closed after
 the handoff. Some existing panes and agent hook configurations can still
 reference tools in the old bundle. Keep the bundle on disk while those
 sessions are working and check remaining references before removing it.
-A fresh runner still needs the usual SSH and browser enrollment.
+A fresh runner still needs the usual SSH and browser enrollment. To add it
+to the web app, turn on Remote Login in System Settings, choose Add Runner in
+your browser, and run the `join` command it shows in a terminal on this Mac,
+using `~/.local/bin/farcooler-canary`.
 
 ## What a Linux host needs
 

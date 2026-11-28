@@ -68,6 +68,35 @@ publication rules.
   self-tests, the file-size budget, the curated macOS test list check,
   the doc-comment checker and copy-lint.
 
+## Rebase onto d2be35850
+
+The branch rebased onto d2be35850 without conflicts.
+
+One change followed from reading the app's launch path. After a handoff,
+`app version` and `app update` still said the app wasn't open and suggested
+`app update --launch`. An app that opens runs `daemon ensure`, which
+replaces a runner built from other source, so following that advice would
+have undone the handoff. On a Mac with the standalone runner installed, both
+commands now point to `runner update` and open nothing. A new test failed
+before the change and passes after it. This does not stop a person from
+opening the app themselves; the docs say to keep it closed.
+
+Run on the rebased branch:
+
+- 43 CLI tests for app update, standalone activation and daemon links, and
+  the daemon-contracts launchctl test. `farcoolerd` builds.
+- The signed package verifier, the canary planner and wire gate self-tests,
+  the macOS test list check, the file-size budget, the doc-comment checker
+  and copy-lint. `actionlint` reports one `concurrency.queue` key in
+  `canary.yml` that this branch does not change.
+- The real-launchd fixture on macOS 27.2, with canary debug builds from a
+  clean tree and the installed Canary app (build 6264) as the old runner.
+  All six stages passed: clean-HOME install, SSH stdio and CLI startup with
+  the LaunchAgents unloaded, login bootstrap, migration, an update that
+  refused during a landing and then waited with `--wait`, and rollback.
+  Both fixture jobs were unloaded afterwards (`launchctl print` exit 113).
+  The account's live runner kept its PID.
+
 ## Split acceptance item
 
 Acceptance item 2 is split. This change delivers the documented no-root
@@ -98,6 +127,7 @@ on the app or a native integration.
 | Mac client identity and SSH routing | Add-runner pairing ceremony, storing device and Tailcat node keys in Keychain, pinning host keys, prompting for direct SSH fallback, and writing managed SSH config for external tools. Standalone preserves the installed CLI link used by existing SSH entries. | `AddFlow`, `Ceremony/`, `Runners`, `SshConfig`, `StableCLI` |
 | Access, enrollment and recovery UI | Native teammate and device invitations, QR handoff, runner/team and notification pairing sheets, access controls, and local Touch ID decisions including runner recovery authorization. The CLI has lower-level commands and the browser has its own enrollment flow. | `ContentView+Invite`, `DevicesSettings`, `RunnerPeopleSection`, `RunnerTeamSheet`, `NativeAgent/MacCutoverGrant` |
 | Notifications and app lifecycle | macOS Notification Center and APNs registration and actions, deep links to the relevant app window, activation/reachability handling, Sparkle updates of the GUI, service and CLI switches in Settings. | `Notifications`, `Reachability`, `FarCoolerApp`, `UpdateHold`, `Updates`, `ServiceRegistration`, `CommandLineTools` |
+| Authority the runner gives only the app | The runner trusts the signed app bundle it ships in (`caller_seat::own_app`). A standalone runner has none, so nothing can record the Mac's Touch ID step-up key, approve a proposed step-up key on the local socket, stamp a cutover answer as `app`, or mark a pairing as the app's own. A trusted phone's `device` answer and approval by another trusted device remain. Only `runner install` (Linux over SSH) creates the first-key code, so a new standalone Mac has no app-free way to trust its first step-up device. This needs a decision before the app is removed. | `caller_seat`, `step_up_rpc`, `cutover_grant`, `person_access`, `enrollment/added`, `first_key`, `runner_install` |
 | Bundled Linux runner files | The Mac app carries Linux CLI and daemon builds for SSH provisioning. Standalone provides the same CLI installer operation when given the Linux binaries. | `build-app.sh`, `runner_install.rs` |
 | Local administration and preferences | Native runner provisioning, settings and upgrade surfaces, per-member Claude sign-in with native browser handoff, Help and log reveal, per-Mac editor/shortcut preferences, native theme editing and visual appearance. | `RunnersSettings`, `RunnerUpgradeView`, `RunnerSettings`, `MemberLoginsSection`, `ClaudeSignInSheet`, `DaemonLog`, `Preferences`, `ThemeEditor` |
 
