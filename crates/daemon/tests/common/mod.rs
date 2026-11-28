@@ -223,6 +223,10 @@ pub async fn listening_daemon_with_env(dir: &std::path::Path, env: &[(&str, &str
 /// child has passed. The status file appears only by rename, whole: a bare
 /// `> status` creates it empty before printf writes, and a slow runner reads ""
 /// (ov-1036). No authority override or stub switch.
+///
+/// The child reports plenty of free disk: its builds are tiny, and a real runner
+/// holds a build under 71 GB free, which a landing check on this Mac can reach
+/// (ov-1508).
 pub async fn as_a_person(prefix: &str, name: &str, wait: std::time::Duration) -> bool {
     if std::env::var_os("FARCOOLER_WORKFLOW_PERSON_CHILD").is_some() { return false; }
     let dir = tempfile::Builder::new().prefix(prefix).tempdir_in("/tmp").unwrap();
@@ -232,8 +236,8 @@ pub async fn as_a_person(prefix: &str, name: &str, wait: std::time::Duration) ->
     let _reap = Reap(socket.clone());
     let (log, status) = (dir.path().join("output"), dir.path().join("status"));
     let quote = |s: &str| format!("'{}'", s.replace('\'', "'\\''"));
-    let command = format!("FARCOOLER_WORKFLOW_PERSON_CHILD=1 {} --exact {} --nocapture > {} 2>&1; code=$?; printf '%s' \"$code\" > {status}.tmp && mv {status}.tmp {status}",
-        quote(&std::env::current_exe().unwrap().to_string_lossy()), quote(name), quote(&log.to_string_lossy()), status = quote(&status.to_string_lossy()));
+    let command = format!("FARCOOLER_WORKFLOW_PERSON_CHILD=1 FARCOOLER_TEST_BUILD_FREE_BYTES={} {} --exact {} --nocapture > {} 2>&1; code=$?; printf '%s' \"$code\" > {status}.tmp && mv {status}.tmp {status}",
+        u64::MAX, quote(&std::env::current_exe().unwrap().to_string_lossy()), quote(name), quote(&log.to_string_lossy()), status = quote(&status.to_string_lossy()));
     let out = Command::new("tmux").args(["-S", &socket.to_string_lossy(), "-f", "/dev/null", "new-session", "-d", "-s", "person", "/bin/sh", "-c", &command]).output().await.unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     tokio::time::timeout(wait, async { while !status.exists() { tokio::time::sleep(std::time::Duration::from_millis(20)).await; } }).await.unwrap();

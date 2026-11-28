@@ -38,6 +38,28 @@ After the fix, `lane-gate.py --landing --only web` passed every step that ran,
 including all three walks. It used `FARCOOLER_SCRATCH` (99 characters) for the
 temp folder and `CARGO_TARGET_DIR`. The planted-failure runs weren't repeated.
 
+## The second gate failure: 12 Rust tests waiting for disk
+
+The next landing check ran all three walks and passed them. It failed on 12
+daemon integration tests. Their output gives the reason: `Waiting for disk
+space to start this build. 56 GB is free, and builds start at 71 GB`.
+
+ov-1516, already on main, added that hold. The 12 tests run a real debug daemon,
+so it read this Mac's free disk, and their builds never started.
+
+`common::as_a_person`, which all 12 go through, now sets
+`FARCOOLER_TEST_BUILD_FREE_BYTES`. Only a debug build reads it. With the helper
+set to 56 GiB, two of the 12 failed with the gate's messages, at lines 332 and
+530. Set to unlimited, all 34 tests in the three files that run those 12 and the
+draft approval tests pass.
+
+**How much the walks add to disk.** `target/web-walks` was 4.4 GB of that gate
+tree's 32 GB `target/`. The Rust gate's budget in `scripts/gate_disk.py` is
+36 GB, so I didn't change it. Without those 4.4 GB, free space would have been
+about 60 GB, still under 71 GB, if nothing else changed. I didn't find what
+else was using the disk. I also didn't measure a web-only landing against its
+8 GB budget, and the walks may exceed it.
+
 ## Added time for a web landing
 
 **About 5 minutes warm, about 10 minutes cold.** These are step times from this

@@ -18,6 +18,11 @@ pub(super) const SEED_PEAK: u64 = 20 * GIB;
 pub(super) const SEED_MIN_FREE: u64 = LANDING_NEED + SEED_PEAK + BUILD_MARGIN;
 pub(super) const LOW_DISK_PREFIX: &str = "resource hold: Waiting for disk space to start this build.";
 
+/// The variable a debug `farcoolerd` reads as its free disk, in bytes, so an integration test's
+/// builds don't wait on how full this machine is. A release build never reads it.
+#[cfg(debug_assertions)]
+pub(super) const TEST_FREE_BYTES: &str = "FARCOOLER_TEST_BUILD_FREE_BYTES";
+
 fn free_bytes(path: &Path) -> std::io::Result<u64> {
     let stat = rustix::fs::statvfs(path)?;
     Ok(stat.f_bavail.saturating_mul(stat.f_frsize))
@@ -38,6 +43,10 @@ impl Exec {
     pub(super) fn short_of_space(&self, tree: &Path, need: u64) -> Result<Option<u64>> {
         #[cfg(test)]
         if let Some(bytes) = self.build_free_bytes { return Ok((bytes < need).then_some(bytes)); }
+        #[cfg(debug_assertions)]
+        if let Some(free) = std::env::var(TEST_FREE_BYTES).ok().and_then(|v| v.parse::<u64>().ok()) {
+            return Ok((free < need).then_some(free));
+        }
         let free = free_bytes(&self.root)?.min(free_bytes(tree)?);
         Ok((free < need).then_some(free))
     }
