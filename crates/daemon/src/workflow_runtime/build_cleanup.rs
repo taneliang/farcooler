@@ -1,7 +1,7 @@
 //! Non-gating build output release, driven by the engine's durable cleanup outbox.
 use super::*;
 use farcooler_workflow::cleanup::{CleanupEffect, CleanupResult, DEFAULT_BUILD_FOLDERS, valid_folder};
-use std::{collections::BTreeMap, sync::{Arc, Mutex, Weak}};
+use std::{collections::BTreeMap, os::unix::ffi::OsStrExt, sync::{Arc, Mutex, Weak}};
 use tokio::sync::{OwnedMutexGuard, OwnedRwLockWriteGuard, RwLock};
 use tokio::time::Instant;
 
@@ -130,6 +130,29 @@ impl Exec {
             Some(checks) => checks.run(path, check).await,
             None => check.await,
         }
+    }
+
+    /// Which of these empty folders a process has open, as its working directory or by a handle.
+    /// Plain names, so one `lsof` answers for many folders. Any answer it can't account for is an error.
+    pub(super) async fn held_folders(&self, folders: &[PathBuf]) -> std::result::Result<BTreeSet<PathBuf>, String> {
+        let mut command = lsof(#[cfg(test)] self.cleanup_test_probe.as_ref());
+        command.args(["pn", "--"]).args(folders);
+        let output = lsof_output(command).await?;
+        // Status 1 says some name wasn't found open; 0 says all were.
+        if !matches!(output.status.code(), Some(0 | 1)) || !output.stderr.is_empty() {
+            return Err("open-file check could not establish safety".into());
+        }
+        let asked: BTreeSet<&Path> = folders.iter().map(PathBuf::as_path).collect();
+        let mut held = BTreeSet::new();
+        for name in output.stdout.split(|b| *b == b'\n').filter_map(|line| line.strip_prefix(b"n")) {
+            let name = Path::new(std::ffi::OsStr::from_bytes(name));
+            if !asked.contains(name) { return Err("open-file check named another path".into()); }
+            held.insert(name.to_path_buf());
+        }
+        if held.is_empty() && (output.status.code() == Some(0) || !output.stdout.is_empty()) {
+            return Err("open-file check named no folder it found open".into());
+        }
+        Ok(held)
     }
 
     pub(super) fn private_trees(&self) -> std::io::Result<Vec<PathBuf>> {
@@ -542,7 +565,8 @@ pub(super) fn folder_paths<'a>(tree: &'a Path, folder: &'a str) -> impl Iterator
         checked_folder(tree, folder)
     })
 }
-async fn check_open_files(path: &Path, #[cfg(test)] probe: Option<&CleanupTestProbe>) -> std::result::Result<(), String> {
+/// `lsof`, and what a test puts in its place.
+fn lsof(#[cfg(test)] probe: Option<&CleanupTestProbe>) -> tokio::process::Command {
     // macOS launch agents may run without /usr/sbin on PATH.
     let program = if cfg!(target_os = "macos") { "/usr/sbin/lsof" } else { "lsof" };
     #[cfg(test)]
@@ -550,9 +574,19 @@ async fn check_open_files(path: &Path, #[cfg(test)] probe: Option<&CleanupTestPr
     #[cfg(test)]
     let program = probe.map(|probe| probe.program.as_path()).or(shim.as_deref()).unwrap_or_else(|| Path::new(program));
     let mut command = tokio::process::Command::new(program);
-    command.args(["-nP", "-F", "p", "+D"]).arg(path).kill_on_drop(true);
-    let output = tokio::time::timeout(Duration::from_secs(120), command.output()).await
-        .map_err(|_| "open-file check timed out".to_string())?.map_err(|e| format!("open-file check unavailable: {e}"))?;
+    command.args(["-nP", "-F"]).kill_on_drop(true);
+    command
+}
+
+async fn lsof_output(mut command: tokio::process::Command) -> std::result::Result<std::process::Output, String> {
+    tokio::time::timeout(Duration::from_secs(120), command.output()).await
+        .map_err(|_| "open-file check timed out".to_string())?.map_err(|e| format!("open-file check unavailable: {e}"))
+}
+
+async fn check_open_files(path: &Path, #[cfg(test)] probe: Option<&CleanupTestProbe>) -> std::result::Result<(), String> {
+    let mut command = lsof(#[cfg(test)] probe);
+    command.args(["p", "+D"]).arg(path);
+    let output = lsof_output(command).await?;
     if !output.stdout.is_empty() { return Err("open files under folder".into()); }
     if output.status.code() != Some(1) || !output.stderr.is_empty() {
         return Err("open-file check could not establish safety".into());

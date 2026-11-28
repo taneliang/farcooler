@@ -158,6 +158,13 @@ whose step stays uncertain is deleted a day after it was recorded. Each cleanup
 round checks: at runner start, after runs finish, and hourly. Nothing is deleted
 while a process has a file open inside it (ov-1516).
 
+At runner start and hourly, the runner also sweeps `/tmp` for empty folders that
+no pending record names (ov-1528). A folder goes only if it has the engine's
+whole scratch name (`farcooler-scratch-wf1-` and 64 hex digits), is your own real
+folder, has been empty and unchanged for a day, and no process works in it or
+has it open. It's removed with `rmdir`, which refuses a folder with anything in
+it. If `lsof` can't answer, the folders stay.
+
 When the adapter sets `dependency_seed`, scratch doesn't start empty. After each
 landing, the engine checks out the landed commit privately and runs that command
 with `$FARCOOLER_SEED` set to an empty folder under the engine root, where agents

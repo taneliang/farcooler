@@ -8,6 +8,7 @@ const LOG_RETENTION_MS: i64 = 7 * 24 * 60 * 60 * 1_000;
 /// An uncertain owner's directory is an orphan this long after it was recorded (or its retention ended).
 pub(super) const ORPHAN_AGE_MS: i64 = 24 * 60 * 60 * 1_000;
 pub(super) const DIRECTORY_INTERRUPTED: &str = "directory cleanup interrupted; bytes freed unknown";
+pub(super) const SCRATCH_PREFIX: &str = "farcooler-scratch-";
 pub(super) const SCRATCH_ENV: &str = "FARCOOLER_SCRATCH";
 pub(super) const SCRATCH_PROMPT: &str = "Put temporary build output in `$FARCOOLER_SCRATCH`, for example by setting `CARGO_TARGET_DIR=\"$FARCOOLER_SCRATCH/target\"`. Never create build folders elsewhere under `/tmp` or `/private/tmp`. The engine clears this scratch directory when the step ends.";
 
@@ -44,12 +45,12 @@ impl Exec {
         // Codex workspace-write includes /tmp. Use its canonical spelling on macOS,
         // and namespace each directory by the engine root as well as the effect.
         let name = adapters::folder_name(&digest(&(&self.root, id)));
-        Ok(self.scratch_base()?.join(format!("farcooler-scratch-{name}")))
+        Ok(self.scratch_base()?.join(format!("{SCRATCH_PREFIX}{name}")))
     }
 
     /// Tests keep scratch beside their engine root, which their temporary directory removes. In
     /// /tmp no recorded path would ever name them: 6,568 empty folders built up in three days (ov-1516).
-    fn scratch_base(&self) -> Result<PathBuf> {
+    pub(super) fn scratch_base(&self) -> Result<PathBuf> {
         #[cfg(test)]
         if let Some(base) = &self.scratch_base { return Ok(base.clone()); }
         #[cfg(test)]

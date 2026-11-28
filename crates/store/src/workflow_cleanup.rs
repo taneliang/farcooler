@@ -82,6 +82,15 @@ impl Store {
         self.read_workflow_cleanups(workspace, true)
     }
 
+    /// Every output directory a pending cleanup still names, across all boards.
+    pub fn workflow_pending_output_paths(&self) -> Result<Vec<String>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT json_extract(payload,'$.directory.path') FROM engine_build_cleanup
+            WHERE json_extract(payload,'$.directory.path') IS NOT NULL
+            AND (result IS NULL OR json_extract(result,'$.retry')=1)")?;
+        Ok(stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
+    }
+
     fn read_workflow_cleanups(&self, workspace: &str, pending_only: bool) -> Result<Vec<CleanupRecord>> {
         let conn = self.conn();
         let mut stmt = conn.prepare("SELECT payload,result FROM engine_build_cleanup WHERE workspace=?1

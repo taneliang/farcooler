@@ -61,6 +61,7 @@ mod build_cleanup;
 mod dependency_seed;
 mod disk_usage;
 mod owned_directories;
+mod scratch_sweep;
 #[cfg(test)]
 mod repin_reply_tests;
 #[cfg(test)]
@@ -724,6 +725,14 @@ impl Runtime {
                         }
                         let workspaces = exec.store.workflow_workspaces()?;
                         let deadline = exec.release_builds(&workspaces).await?;
+                        // At runner start and hourly, as logs are pruned (ov-1528).
+                        if prune_logs && exec.service_mode {
+                            match exec.sweep_scratch().await {
+                                Ok(0) => {}
+                                Ok(removed) => tracing::info!(removed, "swept empty scratch folders"),
+                                Err(error) => tracing::warn!(%error, "could not sweep empty scratch folders"),
+                            }
+                        }
                         let now = tokio::time::Instant::now();
                         if recover_trees {
                             match exec.private_trees() {
