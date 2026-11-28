@@ -294,6 +294,10 @@ async function connected(s, first) {
   if (first) {
     await statusSays(page, 'Make a passkey')
     await page.click('#status-action')
+    // A new browser opens on Add Runner (ov-1490). The offer this check
+    // enrolls comes from the screen that waits for another device.
+    await page.waitForSelector('#runner-add:not([hidden])', { timeout: 90_000 })
+    await page.click('#join-from-device')
     await page.waitForFunction(() => !document.getElementById('enroll')?.hidden && document.getElementById('offer-fingerprint')?.textContent?.includes('SHA256:'), null, { timeout: 90_000 })
     const offer = JSON.parse((await device(page)).offer)
     writeFileSync(keys, `restrict,command="cd '${dir}' && '${fakeDaemon}' typed" ${offer.key_a}\n`)
