@@ -60,6 +60,25 @@ about 60 GB, still under 71 GB, if nothing else changed. I didn't find what
 else was using the disk. I also didn't measure a web-only landing against its
 8 GB budget, and the walks may exceed it.
 
+## The third gate failure: a button fade, and one leftover folder
+
+**Web.** The workday walk failed with `workday-restart-exited shows 2 filled
+buttons`. This branch had changed no web files. ov-1525 traced the message to a
+120 ms background fade: New Terminal had lost `primary` but still computed the
+accent color. Its commit `b9f6e1337` isn't on main yet, so it's cherry-picked
+here. After it, `shell-check`, `work-check`, `board-check`, the fake daemon
+walk, the join walk and the two-runner workday passed, run by hand with CI's
+commands.
+
+**Rust.** All 7670 tests passed, and `test-leak-check.py` failed the step on one
+folder left in TMPDIR, `.tmp3LfIjw`. **I didn't find which test made it, and
+nothing here fixes it.** The checker deletes the folder, and the log has only
+its name. The three test files that run under `common::as_a_person` (changed by
+this branch) passed three times under both leak checks and left nothing. Gate
+logs from other trees on Nov 26 and 27 each show one such folder too, but each
+of those runs also had a failed test. It can fail a landing again. Listing a
+leftover's contents in the checker's report would show where it came from.
+
 ## Added time for a web landing
 
 **About 5 minutes warm, about 10 minutes cold.** These are step times from this
