@@ -49,6 +49,7 @@ SCRIPT_USERS = {
     'scripts/build-derper.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
     'scripts/build-ios-frameworks.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
     'scripts/build-linux.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/build-mac-runner.sh': None,  # Full: release build wrapper run by canary.yml; no gate job executes it, so retain conservative fallback.
     'scripts/build-tailcat.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
     'scripts/build-tunnel-helper.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
     'scripts/canary-baseline-test.sh': {'wire'},  # ci.yml wire invokes this shell test; subprocesses exercise temporary repositories or fake tools.
@@ -151,6 +152,7 @@ SCRIPT_USERS = {
     'scripts/import-ios-certificate-test.sh': {'ios'},  # ci.yml ios invokes this regression test; no other gate family calls it.
     'scripts/import-ios-certificate.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
     'scripts/install-git-hooks.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/install-mac-runner.sh': None,  # Full: shipped installer and updater trust root; retain conservative fallback.
     'scripts/ios-agentkit-subset-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.
     'scripts/ios-ui-lease-test.sh': {'wire'},  # ci.yml wire invokes this shell test; subprocesses exercise temporary repositories or fake tools.
     'scripts/ios-ui-pick-simulator.py': None,  # Full: transitive gate users not established; retain conservative fallback.
@@ -171,6 +173,8 @@ SCRIPT_USERS = {
     'scripts/lint-gate.sh': {'wire'},  # Workflow lint check runs this wrapper; its lint scripts are wire users.
     'scripts/mac-capture-stop-test.sh': {'swift-tests'},  # ci.yml swift-tests invokes this test; wrapper subprocesses use stand-in tools.
     'scripts/mac-capture.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/mac-runner-handoff-test.py': None,  # Full: manual real-launchd fixture; no gate job executes it, so retain conservative fallback.
+    'scripts/mac-runner-package-test.py': None,  # Full: signed-package verifier run by canary.yml; retain conservative fallback.
     'scripts/macos-bundle-native-test.py': None,  # Full: transitive gate users not established; retain conservative fallback.
     'scripts/macos-entitlements-test.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
     'scripts/macos-rust-tests.json': None,  # Full: transitive gate users not established; retain conservative fallback.
@@ -192,6 +196,7 @@ SCRIPT_USERS = {
     'scripts/ov-1324-report.md': None,  # Full: transitive gate users not established; retain conservative fallback.
     'scripts/ov-1326-report.md': None,  # Full: transitive gate users not established; retain conservative fallback.
     'scripts/ov-1328-report.md': None,  # Full: ticket evidence; retain conservative fallback.
+    'scripts/package-mac-runner.sh': None,  # Full: release signing and packaging run by canary.yml; retain conservative fallback.
     'scripts/pixel-scale-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.
     'scripts/plan-layer-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.
     'scripts/portal-app-groups.rb': None,  # Full: transitive gate users not established; retain conservative fallback.
@@ -212,6 +217,7 @@ SCRIPT_USERS = {
     'scripts/rust-shards.py': None,  # Full: transitive gate users not established; retain conservative fallback.
     'scripts/shared-core-baseline.json': {'wire'},  # wire shared-core-lint reads its baseline and checks it against main.
     'scripts/shared-core-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.
+    'scripts/sign-mac-runner-manifest.swift': None,  # Full: release manifest signer; retain conservative fallback.
     'scripts/site-proof-fixtures/commits.txt': {'wire'},  # wire site-proof --self-test reads this proof-page fixture.
     'scripts/site-proof-fixtures/expected.html': {'wire'},  # wire site-proof --self-test reads this proof-page fixture.
     'scripts/site-proof-fixtures/milestones.json': {'wire'},  # wire site-proof --self-test reads this proof-page fixture.
