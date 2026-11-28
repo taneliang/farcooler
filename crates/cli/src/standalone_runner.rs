@@ -1,6 +1,6 @@
 //! Install a verified canary payload and let launchd own its lifecycle.
 
-use std::fs::{self, File, OpenOptions, TryLockError};
+use std::fs::{self, File, OpenOptions};
 use std::io::{ErrorKind, Write};
 use std::os::unix::{fs::symlink, process::CommandExt};
 use std::path::{Component, Path, PathBuf};
@@ -11,6 +11,8 @@ use farcooler_daemon_contracts::standalone_macos::{INSTALL_LOCK, LABEL, install_
 use farcooler_daemon::landing_update;
 use farcooler_protocol::{BUILD, CHANNEL, Channel, build_identity::same_build};
 use farcooler_transport::ClientError;
+use rustix::fs::{FlockOperation, flock};
+use rustix::io::Errno;
 
 use crate::Fallible;
 use crate::daemon_link::{self, Link};
@@ -139,7 +141,7 @@ pub(crate) async fn activate(
     let current = install.root.join("current");
     let mutex = OpenOptions::new().read(true).write(true).create(true).truncate(false)
         .open(install.root.join(INSTALL_LOCK))?;
-    if let Err(err) = mutex.try_lock() {
+    if let Err(err) = flock(&mutex, FlockOperation::NonBlockingLockExclusive) {
         return Err(format!("Cannot lock the standalone runner installation: {err}").into());
     }
     let previous = match fs::read_link(&current) {
@@ -273,10 +275,10 @@ fn app_owns_runtime(runtime: &Path) -> std::io::Result<bool> {
     // AppControl.swift holds this flock while the app answers on app.sock.
     // A copy of the app using another runtime has a different lock.
     match File::open(runtime.join("app.sock.lock")) {
-        Ok(lock) => match lock.try_lock() {
+        Ok(lock) => match flock(&lock, FlockOperation::NonBlockingLockExclusive) {
             Ok(()) => Ok(false),
-            Err(TryLockError::WouldBlock) => Ok(true),
-            Err(TryLockError::Error(err)) => Err(err),
+            Err(err) if err == Errno::WOULDBLOCK => Ok(true),
+            Err(err) => Err(err.into()),
         },
         Err(err) if err.kind() == ErrorKind::NotFound => Ok(false),
         Err(err) => Err(err),

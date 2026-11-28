@@ -97,6 +97,34 @@ Run on the rebased branch:
   Both fixture jobs were unloaded afterwards (`launchctl print` exit 113).
   The account's live runner kept its PID.
 
+## Landing gate repair
+
+The gate stopped at its first failure: the six new Mac runner scripts were
+missing from `SCRIPT_USERS` in `scripts/landing_policy.py`. No gate job
+runs any of them, so each is listed as `None`, which runs the full gate
+when one changes.
+
+A Clippy run then found a second failure behind the first. The branch used
+`File::try_lock` and `File::try_lock_shared`, which need Rust 1.89, and the
+workspace declares 1.85. Those three calls now use `rustix::fs::flock`, as
+the landing lock already does. `farcooler-cli` and
+`farcooler-daemon-contracts` gained a `rustix` dependency, which was
+already in the lockfile.
+
+Run on d2be35850 after the repair:
+
+- Every `wire` and `doc-comments` gate step passed.
+- The gate's landing Clippy run passed.
+- All 717 tests in `farcooler-cli` and `farcooler-daemon-contracts` passed
+  (2 skipped), as did the 6 `farcoolerd` binary tests. Inside an agent
+  pane, 8 hook tests fail until the pane's `FARCOOLER_*` variables are
+  removed. The gate removes the private hook route itself.
+- The signed package verifier passed.
+
+The full `rust`, `swift`, `swift-tests`, `web`, `relay`, `site` and
+`tunnel` gate jobs were not run here. The real-launchd fixture was not run
+again after the lock change.
+
 ## Split acceptance item
 
 Acceptance item 2 is split. This change delivers the documented no-root

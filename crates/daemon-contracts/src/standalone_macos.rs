@@ -24,8 +24,11 @@ pub fn is_installed() -> bool {
 /// has yet to load, clients can use their ordinary on-demand startup.
 #[cfg(target_os = "macos")]
 pub fn start_if_installed() -> io::Result<bool> {
-    use std::fs::{self, File, TryLockError};
+    use std::fs::{self, File};
     use std::process::Command;
+
+    use rustix::fs::{FlockOperation, flock};
+    use rustix::io::Errno;
 
     if farcooler_protocol::CHANNEL != farcooler_protocol::Channel::Canary
         || std::env::var_os("FARCOOLER_HOME").is_some()
@@ -41,9 +44,9 @@ pub fn start_if_installed() -> io::Result<bool> {
     }
 
     let lock = File::open(root.join(INSTALL_LOCK))?;
-    match lock.try_lock_shared() {
-        Err(TryLockError::WouldBlock) => return Ok(true),
-        Err(TryLockError::Error(err)) => return Err(err),
+    match flock(&lock, FlockOperation::NonBlockingLockShared) {
+        Err(err) if err == Errno::WOULDBLOCK => return Ok(true),
+        Err(err) => return Err(err.into()),
         Ok(()) => {}
     }
     // SAFETY: geteuid has no preconditions.

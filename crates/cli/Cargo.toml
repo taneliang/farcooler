@@ -42,6 +42,7 @@ farcooler-transport.workspace = true
 farcooler-tailcat.workspace = true
 bytes.workspace = true
 libc.workspace = true
+rustix = { version = "1", features = ["fs"] }
 tokio.workspace = true
 clap.workspace = true
 tracing.workspace = true
