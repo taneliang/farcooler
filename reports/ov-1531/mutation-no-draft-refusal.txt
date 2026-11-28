@@ -1,0 +1,30 @@
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1531-compose-test-slow-ps/crates/daemon)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 30.60s
+────────────
+ Nextest run ID e279d972-bf93-44b4-a128-4381628a7e23 with nextest profile: default
+    Starting 1 test across 78 binaries (4123 tests skipped)
+        FAIL [   0.552s] (1/1) farcooler-daemon watch::answer_wake::tests::compose_tests::a_draft_or_a_dialog_is_refused_untyped
+  stdout ───
+
+    running 1 test
+    test watch::answer_wake::tests::compose_tests::a_draft_or_a_dialog_is_refused_untyped ... FAILED
+
+    failures:
+
+    failures:
+        watch::answer_wake::tests::compose_tests::a_draft_or_a_dialog_is_refused_untyped
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3557 filtered out; finished in 0.54s
+
+  stderr ───
+
+    thread 'watch::answer_wake::tests::compose_tests::a_draft_or_a_dialog_is_refused_untyped' (138210183) panicked at crates/daemon/src/watch/answer_wake/compose_tests.rs:233:5:
+    assertion `left == right` failed
+      left: "unconfirmable"
+     right: "draft"
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+────────────
+     Summary [   0.562s] 1 test run: 0 passed, 1 failed, 4123 skipped
+        FAIL [   0.552s] (1/1) farcooler-daemon watch::answer_wake::tests::compose_tests::a_draft_or_a_dialog_is_refused_untyped
+error: test run failed

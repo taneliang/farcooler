@@ -1,0 +1,8 @@
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1531-compose-test-slow-ps/crates/daemon)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 30.89s
+────────────
+ Nextest run ID 15a93a49-48fc-40cd-a7bf-b5496f84f0b6 with nextest profile: default
+    Starting 1 test across 78 binaries (4123 tests skipped)
+        PASS [   0.683s] (1/1) farcooler-daemon watch::answer_wake::tests::compose_tests::a_draft_or_a_dialog_is_refused_untyped
+────────────
+     Summary [   0.689s] 1 test run: 1 passed, 4123 skipped

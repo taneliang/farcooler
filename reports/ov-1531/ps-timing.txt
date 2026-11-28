@@ -1,0 +1,20 @@
+## No load added by this script (the machine was already busy with other work)
+load average at start: 24.4 21.8 15.8, 10 cpus
+list (ps -t)   n=300 p50=9ms p95=63ms p99=125ms max=128ms over500ms=0
+args (ps -p)   n=300 p50=9ms p95=51ms p99=108ms max=148ms over500ms=0
+env (ps -E)    n=300 p50=10ms p95=52ms p99=115ms max=186ms over500ms=0
+load average at end:   22.8 21.6 15.8
+
+## 20 busy loops and 4 fork/exec loops
+load average at start: 38.0 26.0 17.7, 10 cpus
+list (ps -t)   n=300 p50=20ms p95=35ms p99=82ms max=111ms over500ms=0
+args (ps -p)   n=300 p50=18ms p95=24ms p99=34ms max=151ms over500ms=0
+env (ps -E)    n=300 p50=11ms p95=35ms p99=123ms max=138ms over500ms=0
+load average at end:   39.6 27.0 18.2
+
+## 60 busy loops and 16 fork/exec loops
+load average at start: 71.3 37.1 22.6, 10 cpus
+list (ps -t)   n=300 p50=293ms p95=686ms p99=1013ms max=1180ms over500ms=41
+args (ps -p)   n=300 p50=190ms p95=297ms p99=341ms max=366ms over500ms=0
+env (ps -E)    n=300 p50=212ms p95=342ms p99=414ms max=475ms over500ms=0
+load average at end:   101.8 72.0 41.1

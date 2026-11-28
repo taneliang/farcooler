@@ -1,0 +1,474 @@
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1531-compose-test-slow-ps/crates/daemon)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 22.95s
+────────────
+ Nextest run ID 0fb2ef52-c8ca-4e12-a115-6eca59a7dfee with nextest profile: default
+    Starting 467 tests across 78 binaries (3657 tests skipped)
+        PASS [   0.018s] (  1/467) farcooler-daemon watch::answer_wake::check_in::ownership_tests::scheduler_rejects_duplicate_dead_or_unhealthy_pane_claims
+        PASS [   0.020s] (  2/467) farcooler-daemon watch::answer_wake::check_in::ownership_tests::destination_binding_changes_for_each_incarnation_pane_tty_and_thread
+        PASS [   0.021s] (  3/467) farcooler-daemon watch::answer_wake::codex_turn::check_in_discovery_tests::unique_main_requires_foreground_holder_and_rejects_competing_or_unknown_files
+        PASS [   0.033s] (  4/467) farcooler-daemon watch::answer_wake::codex_turn::check_in_discovery_tests::cancelled_discovery_stays_owned_until_reaped
+        PASS [   0.015s] (  5/467) farcooler-daemon watch::answer_wake::compose::codex::tests::an_earlier_message_with_the_same_words_does_not_confirm
+        PASS [   0.311s] (  6/467) farcooler-daemon watch::answer_wake::check_in::ownership_tests::scheduler_arms_only_after_cleanup_gate_and_joins_on_shutdown
+        PASS [   0.016s] (  7/467) farcooler-daemon watch::answer_wake::registry_turn::tests::a_file_that_will_not_parse_is_torn_not_nothing
+        PASS [   0.020s] (  8/467) farcooler-daemon watch::answer_wake::registry_turn::tests::only_an_explicit_busy_is_busy
+        PASS [   0.021s] (  9/467) farcooler-daemon watch::answer_wake::registry_turn::tests::only_an_explicit_idle_is_idle
+        PASS [   0.017s] ( 10/467) farcooler-daemon watch::answer_wake::route::pin_tests::only_a_typed_send_confirms_a_typed_send
+        PASS [   0.014s] ( 11/467) farcooler-daemon watch::answer_wake::route::pin_tests::the_socket_is_a_peers_never_the_users
+        PASS [   0.017s] ( 12/467) farcooler-daemon watch::answer_wake::route::pin_tests::the_wake_is_a_notification_never_user_input
+        PASS [   0.017s] ( 13/467) farcooler-daemon watch::answer_wake::route::pin_tests::typed_is_a_human_turn
+        PASS [   0.027s] ( 14/467) farcooler-daemon watch::answer_wake::tests::a_broken_stream_proves_nothing_until_it_is_followed_again
+        PASS [   1.037s] ( 15/467) farcooler-daemon watch::answer_wake::engine::tests::working_claude_receives_message_and_acceptance_through_native_hooks
+        PASS [   0.063s] ( 16/467) farcooler-daemon watch::answer_wake::tests::a_created_agent_is_followed
+        PASS [   0.746s] ( 17/467) farcooler-daemon watch::answer_wake::tests::a_claim_left_by_a_crash_is_never_typed_again
+        PASS [   0.491s] ( 18/467) farcooler-daemon watch::answer_wake::tests::a_demoted_orchestrator_is_no_longer_followed
+        PASS [   1.789s] ( 19/467) farcooler-daemon watch::answer_wake::engine::tests::engine_message_queues_to_a_working_codex_without_touching_its_pane
+        PASS [   1.894s] ( 20/467) farcooler-daemon watch::answer_wake::engine::tests::engine_message_reaches_a_scratch_agent_and_acceptance_revision_notifies_it
+        PASS [   0.953s] ( 21/467) farcooler-daemon watch::answer_wake::tests::a_draft_is_never_touched
+        PASS [   0.010s] ( 22/467) farcooler-daemon watch::answer_wake::tests::a_draft_never_carries_a_line_break_or_ends_in_one
+        PASS [   0.980s] ( 23/467) farcooler-daemon watch::answer_wake::tests::a_draft_is_pasted_into_an_idle_orchestrator_and_never_submitted
+        PASS [   0.985s] ( 24/467) farcooler-daemon watch::answer_wake::tests::a_draft_is_refused_for_a_process_that_is_not_an_agent
+        PASS [   1.065s] ( 25/467) farcooler-daemon watch::answer_wake::tests::a_draft_is_refused_where_an_answer_would_wait
+        PASS [   3.024s] ( 26/467) farcooler-daemon watch::answer_wake::codex_turn::check_in_discovery_tests::timed_out_discovery_is_killed_and_reaped
+        PASS [   0.008s] ( 27/467) farcooler-daemon watch::answer_wake::tests::a_node_install_is_known_by_its_script
+        PASS [   0.873s] ( 28/467) farcooler-daemon watch::answer_wake::tests::a_draft_whose_send_fails_is_an_error
+        PASS [   0.820s] ( 29/467) farcooler-daemon watch::answer_wake::tests::a_newer_answer_replaces_one_not_yet_told
+        PASS [   0.011s] ( 30/467) farcooler-daemon watch::answer_wake::tests::a_pane_moved_from_a_chat_is_followed
+        PASS [   1.023s] ( 31/467) farcooler-daemon watch::answer_wake::tests::a_hand_started_orchestrator_is_told
+        PASS [   0.011s] ( 32/467) farcooler-daemon watch::answer_wake::tests::a_pane_started_before_the_daemon_is_followed_on_a_sample
+        PASS [   0.731s] ( 33/467) farcooler-daemon watch::answer_wake::tests::a_node_running_something_else_is_never_typed_into
+        PASS [   0.875s] ( 34/467) farcooler-daemon watch::answer_wake::tests::a_node_claude_is_told
+        PASS [   0.013s] ( 35/467) farcooler-daemon watch::answer_wake::tests::a_record_from_before_a_respawn_is_never_used
+        PASS [   0.014s] ( 36/467) farcooler-daemon watch::answer_wake::tests::a_restarted_agent_is_followed
+        PASS [   0.545s] ( 37/467) farcooler-daemon watch::answer_wake::tests::a_pane_without_bracketed_paste_is_never_typed_into
+        PASS [   1.242s] ( 38/467) farcooler-daemon watch::answer_wake::tests::a_pane_launched_as_codex_running_claude_is_never_told
+        PASS [   0.581s] ( 39/467) farcooler-daemon watch::answer_wake::tests::a_permission_menu_is_never_typed_into
+        PASS [   0.014s] ( 40/467) farcooler-daemon watch::answer_wake::tests::a_split_agent_is_followed
+        PASS [   0.708s] ( 41/467) farcooler-daemon watch::answer_wake::tests::a_send_failing_after_the_claim_is_not_retried
+        PASS [   0.971s] ( 42/467) farcooler-daemon watch::answer_wake::tests::a_paste_the_box_doesnt_hold_exactly_is_not_sent
+        PASS [   0.439s] ( 43/467) farcooler-daemon watch::answer_wake::tests::a_shell_in_the_foreground_is_never_typed_into
+        PASS [   0.696s] ( 44/467) farcooler-daemon watch::answer_wake::tests::a_shell_pane_running_claude_by_hand_is_never_told
+        PASS [   0.008s] ( 45/467) farcooler-daemon watch::answer_wake::tests::agent_start_tests::a_start_is_reported_once_per_reason
+        PASS [   0.956s] ( 46/467) farcooler-daemon watch::answer_wake::tests::a_tmux_that_reports_bracketing_starts_no_fanout
+        PASS [   5.404s] ( 47/467) farcooler-daemon watch::answer_wake::engine::tests::engine_message_waits_behind_a_draft_and_does_not_answer_a_dialog
+        PASS [   0.977s] ( 48/467) farcooler-daemon watch::answer_wake::tests::agent_start_tests::a_new_pane_first_seen_on_a_prompt_is_announced
+        PASS [   0.009s] ( 49/467) farcooler-daemon watch::answer_wake::tests::agent_start_tests::only_a_new_pane_is_watched
+        PASS [   1.194s] ( 50/467) farcooler-daemon watch::answer_wake::tests::agent_start_tests::a_not_started_notice_folds_into_one_still_waiting
+        PASS [   0.922s] ( 51/467) farcooler-daemon watch::answer_wake::tests::agent_start_tests::an_agent_cant_answer_the_trust_prompt
+        PASS [   0.243s] ( 52/467) farcooler-daemon watch::answer_wake::tests::an_adopted_orchestrator_at_its_shell_waits_and_says_so
+        PASS [   1.186s] ( 53/467) farcooler-daemon watch::answer_wake::tests::agent_start_tests::an_older_app_with_no_actor_answers_the_trust_prompt
+        PASS [   0.008s] ( 54/467) farcooler-daemon watch::answer_wake::tests::an_agent_is_known_by_its_executable
+        PASS [   0.566s] ( 55/467) farcooler-daemon watch::answer_wake::tests::an_agent_in_another_workspace_is_never_told
+        PASS [   1.459s] ( 56/467) farcooler-daemon watch::answer_wake::tests::agent_start_tests::an_agent_that_never_starts_is_reported_after_the_window
+        PASS [   2.247s] ( 57/467) farcooler-daemon watch::answer_wake::tests::agent_start_tests::a_builder_on_the_trust_prompt_is_told_and_answered_from_needs_you
+        PASS [   1.042s] ( 58/467) farcooler-daemon watch::answer_wake::tests::agent_start_tests::trust_folder_never_answers_a_permission_dialog
+        PASS [   1.258s] ( 59/467) farcooler-daemon watch::answer_wake::tests::agent_start_tests::the_trust_answer_is_terminal_agent_answer
+        PASS [   0.010s] ( 60/467) farcooler-daemon watch::answer_wake::tests::an_undelivered_answer_says_to_restart_the_agent
+        PASS [   0.011s] ( 61/467) farcooler-daemon watch::answer_wake::tests::an_unreadable_mark_is_typing_now
+        PASS [   0.717s] ( 62/467) farcooler-daemon watch::answer_wake::tests::an_answer_is_pasted_into_an_idle_claude_and_submitted
+        PASS [   0.693s] ( 63/467) farcooler-daemon watch::answer_wake::tests::an_unknown_process_is_never_typed_into
+        PASS [   0.758s] ( 64/467) farcooler-daemon watch::answer_wake::tests::an_unrecognized_screen_is_never_typed_into
+        PASS [   0.865s] ( 65/467) farcooler-daemon watch::answer_wake::tests::an_answer_is_told_exactly_once_across_a_restart
+        PASS [   0.844s] ( 66/467) farcooler-daemon watch::answer_wake::tests::an_answer_waits_while_the_agent_is_unknown
+        PASS [   0.964s] ( 67/467) farcooler-daemon watch::answer_wake::tests::an_answer_is_pasted_into_an_idle_codex
+        PASS [   0.687s] ( 68/467) farcooler-daemon watch::answer_wake::tests::bring_tests::a_box_at_claudes_height_is_refused
+        PASS [   0.664s] ( 69/467) farcooler-daemon watch::answer_wake::tests::bring_tests::a_changed_box_is_left_alone
+        PASS [   0.826s] ( 70/467) farcooler-daemon watch::answer_wake::tests::bring_tests::a_draft_mid_turn_is_cleared_without_stopping_the_turn
+        PASS [   1.067s] ( 71/467) farcooler-daemon watch::answer_wake::tests::bring_tests::a_clear_empties_the_box_it_read
+        PASS [   1.129s] ( 72/467) farcooler-daemon watch::answer_wake::tests::bring_tests::a_dialog_and_codex_are_refused
+        PASS [   0.758s] ( 73/467) farcooler-daemon watch::answer_wake::tests::bring_tests::a_key_just_now_holds_the_clear
+        PASS [   0.797s] ( 74/467) farcooler-daemon watch::answer_wake::tests::bring_tests::a_key_mid_clear_puts_it_back
+        PASS [   0.535s] ( 75/467) farcooler-daemon watch::answer_wake::tests::bring_tests::a_moved_cursor_is_refused
+        PASS [   1.406s] ( 76/467) farcooler-daemon watch::answer_wake::tests::bring_tests::a_dialog_mid_clear_is_not_pasted_into
+        PASS [   0.611s] ( 77/467) farcooler-daemon watch::answer_wake::tests::bring_tests::a_placeholder_is_refused
+        PASS [   0.546s] ( 78/467) farcooler-daemon watch::answer_wake::tests::bring_tests::an_empty_box_brings_nothing
+        PASS [   0.597s] ( 79/467) farcooler-daemon watch::answer_wake::tests::bring_tests::a_read_answers_the_draft_and_types_nothing
+        PASS [   0.010s] ( 80/467) farcooler-daemon watch::answer_wake::tests::codex_turn_tests::a_dead_process_s_open_turn_is_over
+        PASS [   0.738s] ( 81/467) farcooler-daemon watch::answer_wake::tests::bring_tests::keys_before_a_clear_no_longer_hold_a_send
+        PASS [   0.588s] ( 82/467) farcooler-daemon watch::answer_wake::tests::bring_tests::vim_insert_mode_is_refused
+        PASS [   1.021s] ( 83/467) farcooler-daemon watch::answer_wake::tests::bring_tests::hidden_rows_scrolling_in_put_it_back
+        PASS [   0.733s] ( 84/467) farcooler-daemon watch::answer_wake::tests::codex_turn_tests::a_pasted_answer_is_entered_only_once_codex_s_turn_ends
+        PASS [   0.748s] ( 85/467) farcooler-daemon watch::answer_wake::tests::codex_turn_tests::a_pasted_answer_waits_while_codex_s_rollout_is_lost
+        PASS [   0.788s] ( 86/467) farcooler-daemon watch::answer_wake::tests::codex_turn_tests::a_resumed_codex_is_told_over_its_dead_turn
+        PASS [   0.837s] ( 87/467) farcooler-daemon watch::answer_wake::tests::codex_turn_tests::an_idle_codex_screen_waits_while_its_rollout_says_a_turn_runs
+        PASS [   2.517s] ( 88/467) farcooler-daemon watch::answer_wake::tests::bring_tests::hidden_rows_that_look_alike_scrolling_in_put_it_back
+        PASS [   0.009s] ( 89/467) farcooler-daemon watch::answer_wake::tests::codex_turn_tests::only_a_closed_turn_is_idle
+        PASS [   2.359s] ( 90/467) farcooler-daemon watch::answer_wake::tests::bring_tests::keys_typed_between_a_read_and_the_next_key_are_not_deleted
+        PASS [   1.807s] ( 91/467) farcooler-daemon watch::answer_wake::tests::codex_turn_tests::a_tell_gets_no_enter_into_a_turn_begun_during_the_read_back
+        PASS [   1.800s] ( 92/467) farcooler-daemon watch::answer_wake::tests::codex_turn_tests::a_tell_gets_no_enter_when_the_rollout_is_lost_during_the_read_back
+        PASS [   0.758s] ( 93/467) farcooler-daemon watch::answer_wake::tests::compose_codex_tests::a_codex_mid_turn_is_busy
+        PASS [   0.892s] ( 94/467) farcooler-daemon watch::answer_wake::tests::compose_codex_tests::a_backslash_at_the_end_is_sent
+        PASS [   1.949s] ( 95/467) farcooler-daemon watch::answer_wake::tests::codex_turn_tests::a_turn_begun_during_the_read_back_holds_the_enter
+        PASS [   0.983s] ( 96/467) farcooler-daemon watch::answer_wake::tests::compose_codex_tests::a_fresh_codex_is_confirmed_by_the_rollout_it_opens
+        PASS [   0.772s] ( 97/467) farcooler-daemon watch::answer_wake::tests::compose_codex_tests::a_rollout_lost_before_the_enter_leaves_the_paste
+        PASS [   0.930s] ( 98/467) farcooler-daemon watch::answer_wake::tests::compose_codex_tests::a_long_paste_is_read_back_as_its_placeholder
+        PASS [   0.819s] ( 99/467) farcooler-daemon watch::answer_wake::tests::compose_codex_tests::a_turn_begun_before_the_enter_leaves_the_paste
+        PASS [   0.580s] (100/467) farcooler-daemon watch::answer_wake::tests::compose_codex_tests::scheduled_admission_vetoes_stop_before_kill
+        PASS [   1.177s] (101/467) farcooler-daemon watch::answer_wake::tests::compose_codex_tests::a_send_the_rollout_never_records_is_unconfirmed
+        PASS [   0.927s] (102/467) farcooler-daemon watch::answer_wake::tests::compose_codex_tests::multi_line_text_is_sent_once_the_rollout_records_it
+        PASS [   1.088s] (103/467) farcooler-daemon watch::answer_wake::tests::compose_codex_tests::an_image_goes_in_first_as_its_placeholder
+        PASS [   1.223s] (104/467) farcooler-daemon watch::answer_wake::tests::compose_codex_tests::a_watcher_that_lost_codex_defers_to_the_screen_and_rollout
+        PASS [   0.604s] (105/467) farcooler-daemon watch::answer_wake::tests::compose_codex_tests::scheduled_busy_codex_waits_without_paste_or_duplicate
+        PASS [   0.655s] (106/467) farcooler-daemon watch::answer_wake::tests::compose_codex_tests::scheduled_discovery_panic_reaps_owned_child_before_gate_release
+        PASS [   0.889s] (107/467) farcooler-daemon watch::answer_wake::tests::compose_codex_tests::scheduled_cleanup_gate_blocks_claim_paste_and_enter
+        PASS [   0.916s] (108/467) farcooler-daemon watch::answer_wake::tests::compose_codex_tests::scheduled_final_discovery_rechecks_input_before_enter
+        PASS [   0.958s] (109/467) farcooler-daemon watch::answer_wake::tests::compose_codex_tests::scheduled_final_discovery_rechecks_visible_dialog_before_enter
+        PASS [   1.081s] (110/467) farcooler-daemon watch::answer_wake::tests::compose_codex_tests::scheduled_idle_codex_submits_once_and_records_a_correlated_receipt
+        PASS [   0.900s] (111/467) farcooler-daemon watch::answer_wake::tests::compose_codex_tests::scheduled_sender_panic_disarms_and_retains_uncertain_attempt
+        PASS [   0.656s] (112/467) farcooler-daemon watch::answer_wake::tests::compose_codex_tests::the_gate_holds_when_a_known_rollout_is_lost
+        PASS [   0.648s] (113/467) farcooler-daemon watch::answer_wake::tests::compose_codex_tests::the_gate_reads_the_screen_after_the_rollout
+        PASS [   0.847s] (114/467) farcooler-daemon watch::answer_wake::tests::compose_codex_tests::the_screen_is_read_after_the_rollout_check
+        PASS [   0.572s] (115/467) farcooler-daemon watch::answer_wake::tests::compose_empty_box_tests::a_draft_drawn_just_before_a_sends_first_paste_refuses_it_untyped
+        PASS [   0.736s] (116/467) farcooler-daemon watch::answer_wake::tests::compose_codex_tests::what_codex_wouldn_t_send_is_refused_untyped
+        PASS [   0.581s] (117/467) farcooler-daemon watch::answer_wake::tests::compose_empty_box_tests::a_draft_drawn_just_before_a_tells_paste_refuses_it_untyped
+        PASS [   2.195s] (118/467) farcooler-daemon watch::answer_wake::tests::compose_codex_tests::scheduled_rollout_replacement_before_claim_or_enter_never_sends
+        PASS [   0.570s] (119/467) farcooler-daemon watch::answer_wake::tests::compose_empty_box_tests::a_draft_drawn_just_before_an_answers_paste_makes_it_wait
+        PASS [   0.707s] (120/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::a_box_holding_more_than_the_message_beside_background_shells_still_refuses
+        PASS [   0.887s] (121/467) farcooler-daemon watch::answer_wake::tests::compose_empty_box_tests::a_send_if_empty_with_text_in_the_box_types_nothing
+        PASS [   1.006s] (122/467) farcooler-daemon watch::answer_wake::tests::compose_empty_box_tests::a_draft_drawn_just_before_the_first_paste_keeps_a_held_message_held
+        PASS [   0.783s] (123/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::a_claude_beside_background_shells_takes_a_message_as_its_next_turn
+        PASS [   1.170s] (124/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::a_busy_registry_beside_background_shells_holds_the_message
+        PASS [   0.753s] (125/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::a_claude_waiting_on_background_agents_takes_a_message_as_its_next_turn
+        PASS [   0.822s] (126/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::a_command_is_held_through_a_registry_written_in_place
+        PASS [   3.584s] (127/467) farcooler-daemon watch::answer_wake::tests::compose_codex_tests::scheduled_stalled_discovery_reaps_child_and_shutdown_releases_gate
+        PASS [   0.735s] (128/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::a_message_held_too_long_says_it_wasnt_sent
+        PASS [   1.352s] (129/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::a_command_mid_turn_is_held_until_the_turn_ends
+        PASS [   0.633s] (130/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::a_registry_torn_at_the_last_check_gets_no_enter
+        PASS [   1.834s] (131/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::a_held_message_waits_out_a_draft
+        PASS [   1.756s] (132/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::a_registry_that_stays_torn_is_given_up_after_its_cap
+        PASS [   2.591s] (133/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::a_given_up_run_does_not_shorten_the_next
+        PASS [   3.233s] (134/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::a_command_is_held_through_a_registry_being_written
+        PASS [   1.123s] (135/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::a_turn_running_beside_background_agents_is_mid_turn
+        PASS [   1.628s] (136/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::a_torn_registry_that_heals_is_typed_and_a_missing_one_is_refused
+        PASS [   2.793s] (137/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::a_send_racing_one_being_held_goes_after_it
+        PASS [   1.568s] (138/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_dialog_drawn_before_the_enter_is_waited_out
+        PASS [   3.232s] (139/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::a_whole_read_between_tears_restarts_the_cap
+        PASS [   2.332s] (140/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_dialog_up_past_the_wait_is_said_so
+        PASS [   4.588s] (141/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_dialog_answered_esc_gives_the_wait_up
+        PASS [   4.519s] (142/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_dialog_answered_no_gives_the_wait_up
+        PASS [   0.751s] (143/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_message_beside_agents_its_box_hides_is_sent
+        PASS [   5.954s] (144/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_box_cleared_mid_turn_is_said_at_once
+        PASS [   4.874s] (145/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_dialog_during_the_wait_is_waited_out_and_its_answer_is_no_typing
+        PASS [   0.967s] (146/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_message_submitted_from_the_mac_during_the_wait_is_not_said_unsent
+        PASS [   0.849s] (147/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_message_submitted_straight_in_tmux_during_the_wait_is_not_said_unsent
+        PASS [   1.819s] (148/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_message_sent_while_the_runner_was_down_is_not_entered_again
+        PASS [   4.302s] (149/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_key_that_leaves_the_box_holds_the_enter_until_nobody_types
+        PASS [   0.867s] (150/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_turn_begun_beside_background_shells_takes_the_message_under_the_fence
+        PASS [   0.844s] (151/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_turn_drawn_before_the_enter_queues_the_message_under_the_fence
+        PASS [   4.399s] (152/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_long_wait_reads_claudes_process_once_and_slows
+        PASS [   2.230s] (153/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_resumed_wait_keeps_the_deadline_it_was_queued_with
+        PASS [   2.149s] (154/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_second_send_during_the_wait_is_held_behind_it
+        PASS [   2.313s] (155/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_turn_drawn_with_no_fence_gets_no_enter_and_is_left
+        PASS [   2.446s] (156/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_turn_still_running_past_the_wait_leaves_the_paste
+        PASS [   1.876s] (157/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_turn_that_ends_within_the_wait_takes_the_message_between_turns
+        PASS [   1.854s] (158/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_wait_resumed_against_another_claude_is_given_up
+        PASS [   2.335s] (159/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_wait_cut_short_by_a_restart_is_picked_up_again
+        PASS [   1.223s] (160/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::an_enter_tmux_refuses_is_said_so
+        PASS [   1.772s] (161/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_wait_whose_time_ran_out_while_the_runner_was_down_is_given_up
+        PASS [   1.420s] (162/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_bad_read_tests::a_hook_heard_before_the_enter_returns_still_confirms_it
+        PASS [   2.272s] (163/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::an_agent_glyph_in_the_message_is_no_background_agent
+        PASS [   2.436s] (164/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_bad_read_tests::a_registry_that_stays_torn_ends_the_wait_after_the_cap
+        PASS [   8.936s] (165/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_message_sent_during_a_long_turn_with_a_dialog_is_sent_when_it_ends
+        PASS [   1.936s] (166/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_bad_read_tests::a_screen_read_that_fails_once_does_not_end_the_wait
+        PASS [   1.926s] (167/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_bad_read_tests::a_torn_registry_read_does_not_end_the_wait
+        PASS [   1.815s] (168/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_bad_read_tests::a_wait_resumed_against_another_session_is_given_up
+        PASS [   2.461s] (169/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_bad_read_tests::screen_reads_that_keep_failing_end_the_wait_after_the_cap
+        PASS [   3.241s] (170/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_parked_tests::a_box_edited_while_parked_gets_no_enter_and_says_so
+        PASS [   3.654s] (171/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_parked_tests::a_box_cleared_while_parked_gets_no_enter_and_says_so
+        PASS [   3.190s] (172/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_parked_tests::a_message_parked_past_its_limit_is_given_up
+        PASS [   6.057s] (173/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_bad_read_tests::a_shell_in_the_pane_is_claude_gone
+        PASS [   3.294s] (174/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_parked_tests::a_message_parked_past_its_limit_is_taken_back_out
+        PASS [   2.843s] (175/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_parked_tests::a_message_whose_conversation_changed_is_not_sent
+        PASS [   3.441s] (176/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_parked_tests::a_parked_message_is_woken_by_the_watcher_seeing_the_turn_end
+        PASS [   7.666s] (177/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_parked_tests::a_dialog_up_at_the_turns_end_gets_no_enter_until_it_goes
+        PASS [   4.733s] (178/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_parked_tests::a_parked_message_is_sent_after_a_runner_restart
+        PASS [   1.151s] (179/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::send_now_during_the_wait_is_refused_and_the_wait_goes_on
+        PASS [   3.740s] (180/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::one_stray_idle_frame_mid_turn_gets_no_enter
+        PASS [   2.013s] (181/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::stop_during_the_wait_acts_at_once_and_the_wait_gives_up_unentered
+        PASS [   6.497s] (182/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_parked_tests::a_message_whose_turn_outlasts_the_wait_is_sent_when_it_ends
+        PASS [   1.416s] (183/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::held_messages_survive_a_restart
+        PASS [   2.188s] (184/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::the_gates_agents_are_trusted_while_fresh
+        PASS [   7.379s] (185/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_parked_tests::two_bad_reads_while_parked_do_not_end_the_wait
+        PASS [   0.524s] (186/467) farcooler-daemon watch::answer_wake::tests::compose_scrolled_tests::a_draft_drawn_before_a_tall_answer_holds_it
+        PASS [   4.844s] (187/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::the_gates_agents_are_not_trusted_past_their_time
+        PASS [   2.239s] (188/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::sends_claude_cant_take_yet_are_held_shown_and_queued_in_order
+        PASS [   0.603s] (189/467) farcooler-daemon watch::answer_wake::tests::compose_scrolled_tests::a_draft_drawn_before_a_tall_compose_is_refused
+        PASS [   0.622s] (190/467) farcooler-daemon watch::answer_wake::tests::compose_scrolled_tests::a_draft_drawn_before_a_tall_tell_is_refused
+        PASS [   5.928s] (191/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::the_box_changing_during_the_wait_gives_it_up_as_changed
+        PASS [   0.886s] (192/467) farcooler-daemon watch::answer_wake::tests::compose_scrolled_tests::a_message_taller_than_the_box_is_queued_mid_turn
+        PASS [   2.611s] (193/467) farcooler-daemon watch::answer_wake::tests::compose_scrolled_tests::a_box_short_of_claudes_tallest_is_left
+        PASS [   0.729s] (194/467) farcooler-daemon watch::answer_wake::tests::compose_scrolled_tests::a_message_taller_than_the_box_is_sent
+        PASS [   0.486s] (195/467) farcooler-daemon watch::answer_wake::tests::compose_tests::a_backslash_at_the_end_is_refused_for_claude
+        PASS [   0.889s] (196/467) farcooler-daemon watch::answer_wake::tests::compose_scrolled_tests::a_tall_answer_a_dialog_stopped_is_finished
+        PASS [   0.008s] (197/467) farcooler-daemon watch::answer_wake::tests::compose_tests::a_composes_file_paths_go_before_its_checked_text
+        PASS [   0.021s] (198/467) farcooler-daemon watch::answer_wake::tests::compose_tests::a_composition_is_checked_before_anything_is_typed
+        PASS [   0.744s] (199/467) farcooler-daemon watch::answer_wake::tests::compose_scrolled_tests::a_tell_taller_than_the_box_is_submitted
+        PASS [   0.637s] (200/467) farcooler-daemon watch::answer_wake::tests::compose_scrolled_tests::an_answer_taller_than_the_box_is_told
+        PASS [   0.456s] (201/467) farcooler-daemon watch::answer_wake::tests::compose_tests::a_panel_command_is_handed_off_untyped
+        PASS [   0.625s] (202/467) farcooler-daemon watch::answer_wake::tests::compose_tests::a_key_typed_after_the_read_back_gets_no_enter
+        PASS [   0.652s] (203/467) farcooler-daemon watch::answer_wake::tests::compose_tests::a_draft_or_a_dialog_is_refused_untyped
+        PASS [   0.009s] (204/467) farcooler-daemon watch::answer_wake::tests::compose_tests::a_prompt_with_an_image_is_read_from_its_text_block
+        PASS [   6.114s] (205/467) farcooler-daemon watch::answer_wake::tests::compose_held_tests::compose_pending_tests::typing_in_the_box_during_the_wait_gives_it_up_as_typed
+        PASS [   1.174s] (206/467) farcooler-daemon watch::answer_wake::tests::compose_tests::a_long_paste_is_read_back_as_its_placeholder
+        PASS [   0.824s] (207/467) farcooler-daemon watch::answer_wake::tests::compose_tests::a_persons_send_holds_three_seconds_after_a_key
+        PASS [   0.894s] (208/467) farcooler-daemon watch::answer_wake::tests::compose_tests::a_send_no_hook_confirms_is_unconfirmed
+        PASS [   1.268s] (209/467) farcooler-daemon watch::answer_wake::tests::compose_tests::a_prompt_command_goes_in_when_the_popup_highlights_it
+        PASS [   0.985s] (210/467) farcooler-daemon watch::answer_wake::tests::compose_tests::a_task_answer_records_refusal_when_the_agent_process_cannot_be_read
+        PASS [   2.533s] (211/467) farcooler-daemon watch::answer_wake::tests::compose_tests::a_command_the_popup_reads_as_another_is_not_entered
+        PASS [   1.249s] (212/467) farcooler-daemon watch::answer_wake::tests::compose_tests::a_turn_the_screen_misses_is_read_from_claudes_registry
+        PASS [   2.043s] (213/467) farcooler-daemon watch::answer_wake::tests::compose_tests::a_send_to_a_pane_with_an_unreadable_process_is_refused_promptly
+        PASS [   0.820s] (214/467) farcooler-daemon watch::answer_wake::tests::compose_tests::bracketed_paste_off_before_the_paste_gets_nothing
+        PASS [   0.910s] (215/467) farcooler-daemon watch::answer_wake::tests::compose_tests::an_image_goes_in_first_as_its_placeholder
+        PASS [   1.765s] (216/467) farcooler-daemon watch::answer_wake::tests::compose_tests::a_turn_begun_during_the_paste_is_queued_under_the_fence
+        PASS [   0.581s] (217/467) farcooler-daemon watch::answer_wake::tests::compose_upload_tests::a_refused_compose_leaves_no_image_behind
+        PASS [   0.762s] (218/467) farcooler-daemon watch::answer_wake::tests::compose_tests::multi_line_text_is_sent_once_the_hook_names_it
+        PASS [   0.736s] (219/467) farcooler-daemon watch::answer_wake::tests::compose_upload_tests::a_file_composes_over_the_socket_and_its_path_goes_first
+        PASS [   0.193s] (220/467) farcooler-daemon watch::answer_wake::tests::compose_upload_tests::a_stage_into_no_terminal_is_not_found_and_keeps_nothing
+        PASS [   1.163s] (221/467) farcooler-daemon watch::answer_wake::tests::compose_tests::busy_is_queued_once_the_enqueue_record_holds_it
+        PASS [   0.224s] (222/467) farcooler-daemon watch::answer_wake::tests::cursor_tests::a_pasted_message_in_a_scrolled_cursor_box_is_read_as_a_draft
+        PASS [   2.525s] (223/467) farcooler-daemon watch::answer_wake::tests::compose_tests::a_watcher_that_lost_the_agent_defers_to_claudes_registry
+        PASS [   0.612s] (224/467) farcooler-daemon watch::answer_wake::tests::control_characters_in_an_answer_arrive_as_text
+        PASS [   1.418s] (225/467) farcooler-daemon watch::answer_wake::tests::compose_tests::busy_with_only_the_hook_is_queued_and_with_nothing_unconfirmed
+        PASS [   0.008s] (226/467) farcooler-daemon watch::answer_wake::tests::cursor_tests::only_cursors_preset_differs_from_its_registry_name
+        PASS [   0.524s] (227/467) farcooler-daemon watch::answer_wake::tests::cursor_tests::a_prompt_hook_after_the_paste_is_cursor_taking_it
+        PASS [   0.914s] (228/467) farcooler-daemon watch::answer_wake::tests::compose_upload_tests::a_ten_megabyte_screenshot_composes_over_the_socket
+        PASS [   0.513s] (229/467) farcooler-daemon watch::answer_wake::tests::cursor_tests::the_text_leaving_the_box_is_taken
+        PASS [   1.336s] (230/467) farcooler-daemon watch::answer_wake::tests::cursor_tests::a_box_emptied_after_someone_typed_is_not_taken
+        PASS [   0.988s] (231/467) farcooler-daemon watch::answer_wake::tests::deliver_tests::a_failed_queue_is_not_retried_on_every_pass
+        PASS [   1.088s] (232/467) farcooler-daemon watch::answer_wake::tests::deliver_tests::a_failed_queue_falls_back_to_typing
+        PASS [   1.366s] (233/467) farcooler-daemon watch::answer_wake::tests::cursor_tests::text_left_in_the_box_is_not_taken
+        PASS [   0.853s] (234/467) farcooler-daemon watch::answer_wake::tests::deliver_tests::a_message_to_a_working_codex_is_queued_and_settled
+        PASS [   0.009s] (235/467) farcooler-daemon watch::answer_wake::tests::deliver_tests::only_a_main_thread_with_a_plain_id_is_a_target
+        PASS [   0.748s] (236/467) farcooler-daemon watch::answer_wake::tests::deliver_tests::an_unknown_thread_is_typed
+        PASS [   0.712s] (237/467) farcooler-daemon watch::answer_wake::tests::deliver_tests::the_codex_queue_can_be_turned_off
+        PASS [   0.841s] (238/467) farcooler-daemon watch::answer_wake::tests::deliver_tests::an_agents_message_to_codex_goes_by_the_queue_by_default
+        PASS [   2.255s] (239/467) farcooler-daemon watch::answer_wake::tests::cursor_tests::an_earlier_or_another_prompt_is_not_it
+        PASS [   1.026s] (240/467) farcooler-daemon watch::answer_wake::tests::deliver_tests::workflow_notice_tests::a_queue_slow_twice_settles_unknown_after_exactly_one_retry
+        PASS [   0.550s] (241/467) farcooler-daemon watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_closed_owner_cannot_prepare_or_spawn
+        PASS [   0.898s] (242/467) farcooler-daemon watch::answer_wake::tests::deliver_tests::workflow_notice_tests::a_queue_slower_than_the_bound_is_retried_once_and_hands_off
+        PASS [   1.000s] (243/467) farcooler-daemon watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_inventory_recovery_without_store_write_and_unchanged_refresh_silence
+        PASS [   1.203s] (244/467) farcooler-daemon watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_backlog_equal_events_stale_epoch_and_restored_delivery
+        PASS [   0.920s] (245/467) farcooler-daemon watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_owned_descendant_normal_cancel_timeout_and_drop::cancel
+        PASS [   2.779s] (246/467) farcooler-daemon watch::answer_wake::tests::deliver_tests::a_stuck_queue_is_given_up_on
+        PASS [   0.946s] (247/467) farcooler-daemon watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_owned_descendant_normal_cancel_timeout_and_drop::drop
+        PASS [   0.953s] (248/467) farcooler-daemon watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_owned_descendant_normal_cancel_timeout_and_drop::normal
+        PASS [   0.985s] (249/467) farcooler-daemon watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_owned_descendant_normal_cancel_timeout_and_drop::timeout
+        PASS [   0.963s] (250/467) farcooler-daemon watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_owned_descendant_normal_cancel_timeout_and_drop::unwind
+        PASS [   0.983s] (251/467) farcooler-daemon watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_owned_reconnect_wake_and_shutdown
+        PASS [   0.681s] (252/467) farcooler-daemon watch::answer_wake::tests::draft_hold_tests::a_draft_expires_once_someone_types_after_the_dialog_closes
+        PASS [   0.628s] (253/467) farcooler-daemon watch::answer_wake::tests::draft_hold_tests::a_draft_held_too_long_expires
+        PASS [   0.685s] (254/467) farcooler-daemon watch::answer_wake::tests::draft_hold_tests::a_draft_held_behind_a_dialog_is_pasted_once_it_closes
+        PASS [   0.696s] (255/467) farcooler-daemon watch::answer_wake::tests::draft_hold_tests::a_draft_prompt_answers_promptly_while_an_answer_pass_runs
+        PASS [   0.897s] (256/467) farcooler-daemon watch::answer_wake::tests::draft_hold_tests::a_held_draft_lands_after_an_answer_pass_in_progress
+        PASS [   0.642s] (257/467) farcooler-daemon watch::answer_wake::tests::draft_hold_tests::a_newer_draft_replaces_a_waiting_one
+        PASS [   1.991s] (258/467) farcooler-daemon watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_reply_loss_and_nonzero_are_unknown_without_resend
+        PASS [   0.618s] (259/467) farcooler-daemon watch::answer_wake::tests::draft_hold_tests::a_withdrawn_draft_is_never_pasted
+        PASS [   2.277s] (260/467) farcooler-daemon watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_unproved_group_cleanup_keeps_original_unknown
+        PASS [   0.355s] (261/467) farcooler-daemon watch::answer_wake::tests::follow_race_tests::a_follow_overtaken_by_a_respawn_leaves_the_pane_to_the_next_sample
+        PASS [   0.334s] (262/467) farcooler-daemon watch::answer_wake::tests::followup_tests::a_cursor_turn_s_end_takes_the_message_waiting_for_it
+        PASS [   0.286s] (263/467) farcooler-daemon watch::answer_wake::tests::followup_tests::a_hook_that_cannot_print_one_takes_none
+        PASS [   0.663s] (264/467) farcooler-daemon watch::answer_wake::tests::draft_hold_tests::only_a_dialog_holds_a_draft_and_only_when_asked
+        PASS [   0.304s] (265/467) farcooler-daemon watch::answer_wake::tests::followup_tests::a_hook_that_hung_up_leaves_the_message_claimed
+        PASS [   0.734s] (266/467) farcooler-daemon watch::answer_wake::tests::draft_hold_tests::answering_a_second_dialog_keeps_the_draft_waiting
+        PASS [   0.343s] (267/467) farcooler-daemon watch::answer_wake::tests::followup_tests::a_message_for_another_pane_stays_put
+        PASS [   1.518s] (268/467) farcooler-daemon watch::answer_wake::tests::draft_hold_tests::a_held_draft_lands_while_an_answer_waits_on_another_pane
+        PASS [   0.332s] (269/467) farcooler-daemon watch::answer_wake::tests::followup_tests::a_persons_message_to_a_working_cursor_goes_by_the_followup
+        PASS [   0.321s] (270/467) farcooler-daemon watch::answer_wake::tests::followup_tests::past_the_followup_limit_a_persons_message_says_why_it_waits
+        PASS [   0.650s] (271/467) farcooler-daemon watch::answer_wake::tests::followup_tests::a_working_cursor_waits_for_its_turn_to_end
+        PASS [   0.718s] (272/467) farcooler-daemon watch::answer_wake::tests::followup_tests::a_persons_message_to_an_idle_cursor_is_typed
+        PASS [   0.804s] (273/467) farcooler-daemon watch::answer_wake::tests::followup_tests::a_message_held_for_a_working_cursor_is_typed_once_it_idles_without_a_hook
+        PASS [   0.696s] (274/467) farcooler-daemon watch::answer_wake::tests::followup_tests::an_idle_cursor_is_typed_to
+        PASS [   0.871s] (275/467) farcooler-daemon watch::answer_wake::tests::followup_tests::an_answer_to_a_cursor_is_typed_never_held_for_the_followup
+        PASS [   0.609s] (276/467) farcooler-daemon watch::answer_wake::tests::hidden_turn_tests::a_tell_after_a_queued_long_paste_waits_for_the_call
+        PASS [   0.639s] (277/467) farcooler-daemon watch::answer_wake::tests::hidden_turn_tests::an_answer_after_a_queued_long_paste_waits_for_the_call
+        PASS [   0.628s] (278/467) farcooler-daemon watch::answer_wake::tests::hidden_turn_tests::the_registry_alone_makes_it_mid_turn
+        PASS [   0.683s] (279/467) farcooler-daemon watch::answer_wake::tests::hidden_turn_tests::an_answer_waits_while_the_registry_is_torn
+        PASS [   0.621s] (280/467) farcooler-daemon watch::answer_wake::tests::hidden_turn_tests::the_spinner_alone_makes_it_mid_turn
+        PASS [   1.149s] (281/467) farcooler-daemon watch::answer_wake::tests::input_mark_tests::a_click_is_not_typing_and_a_key_is
+        PASS [   0.659s] (282/467) farcooler-daemon watch::answer_wake::tests::interrupt_tests::a_dialog_drawn_as_the_fence_is_taken_stops_the_key
+        PASS [   1.595s] (283/467) farcooler-daemon watch::answer_wake::tests::interrupt_tests::a_call_begun_after_the_first_checks_is_waited_out_under_the_fence
+        PASS [   1.617s] (284/467) farcooler-daemon watch::answer_wake::tests::interrupt_tests::a_dialog_a_new_call_may_raise_is_waited_for
+        PASS [   1.775s] (285/467) farcooler-daemon watch::answer_wake::tests::interrupt_tests::a_confirmed_stop_ends_the_calls_it_killed
+        PASS [   0.557s] (286/467) farcooler-daemon watch::answer_wake::tests::interrupt_tests::a_session_never_heard_from_is_unconfirmable
+        PASS [   0.594s] (287/467) farcooler-daemon watch::answer_wake::tests::interrupt_tests::codex_is_unsupported
+        PASS [   2.630s] (288/467) farcooler-daemon watch::answer_wake::tests::interrupt_tests::a_dialog_a_gate_announced_is_waited_for
+        PASS [   0.594s] (289/467) farcooler-daemon watch::answer_wake::tests::interrupt_tests::nothing_is_pressed_between_turns
+        PASS [   2.570s] (290/467) farcooler-daemon watch::answer_wake::tests::interrupt_tests::a_dialog_that_keeps_maybe_coming_is_settling
+        PASS [   0.713s] (291/467) farcooler-daemon watch::answer_wake::tests::interrupt_tests::nothing_is_pressed_just_after_someone_typed
+        PASS [   2.580s] (292/467) farcooler-daemon watch::answer_wake::tests::interrupt_tests::a_gate_heard_after_the_first_checks_is_waited_out_under_the_fence
+        PASS [   0.724s] (293/467) farcooler-daemon watch::answer_wake::tests::interrupt_tests::nothing_is_pressed_on_a_dialog
+        PASS [   0.514s] (294/467) farcooler-daemon watch::answer_wake::tests::interrupt_tests::nothing_is_pressed_while_an_ask_is_held
+        PASS [   0.530s] (295/467) farcooler-daemon watch::answer_wake::tests::interrupt_tests::send_now_never_goes_over_a_draft
+        PASS [   0.010s] (296/467) farcooler-daemon watch::answer_wake::tests::interrupt_tests::the_transcript_says_what_waits_and_what_was_taken
+        PASS [   0.703s] (297/467) farcooler-daemon watch::answer_wake::tests::interrupt_tests::one_esc_stops_a_working_claude_and_is_confirmed
+        PASS [   0.325s] (298/467) farcooler-daemon watch::answer_wake::tests::lane_tests::a_lane_terminal_is_still_woken_outside_the_main_checkout
+        PASS [   0.287s] (299/467) farcooler-daemon watch::answer_wake::tests::lane_tests::a_pane_bound_to_the_task_is_woken_in_the_main_checkout
+        PASS [   0.749s] (300/467) farcooler-daemon watch::answer_wake::tests::interrupt_tests::send_now_sends_what_waits_in_the_queue
+        PASS [   2.437s] (301/467) farcooler-daemon watch::answer_wake::tests::interrupt_tests::never_twice_inside_the_lockout
+        PASS [   0.325s] (302/467) farcooler-daemon watch::answer_wake::tests::mailbox_tests::a_message_is_taken_back_when_its_wake_ends_undelivered
+        PASS [   0.486s] (303/467) farcooler-daemon watch::answer_wake::tests::lane_tests::an_answer_never_wakes_a_main_checkout_agent_as_the_tasks
+        PASS [   0.585s] (304/467) farcooler-daemon watch::answer_wake::tests::mailbox_tests::a_builders_message_names_its_role_and_ticket_in_the_mailbox
+        PASS [   0.684s] (305/467) farcooler-daemon watch::answer_wake::tests::mailbox_tests::a_message_nobody_takes_is_taken_back_and_typed
+        PASS [   0.482s] (306/467) farcooler-daemon watch::answer_wake::tests::mailbox_tests::a_message_waits_in_the_mailbox_until_the_waiter_takes_it
+        PASS [   3.567s] (307/467) farcooler-daemon watch::answer_wake::tests::interrupt_tests::checks_under_the_fence_that_overrun_are_settling
+        PASS [   0.282s] (308/467) farcooler-daemon watch::answer_wake::tests::mailbox_tests::a_route_is_private
+        PASS [   0.008s] (309/467) farcooler-daemon watch::answer_wake::tests::mailbox_tests::the_switch_turns_the_sender_off
+        PASS [   0.535s] (310/467) farcooler-daemon watch::answer_wake::tests::mailbox_tests::a_rep_to_the_orchestrator_has_no_sender
+        PASS [   0.313s] (311/467) farcooler-daemon watch::answer_wake::tests::mailbox_tests::a_session_that_moves_on_gets_no_second_copy
+        PASS [   1.833s] (312/467) farcooler-daemon watch::answer_wake::tests::interrupt_tests::stop_lands_while_calls_keep_coming
+        PASS [   0.710s] (313/467) farcooler-daemon watch::answer_wake::tests::mailbox_tests::no_waiter_means_typing
+        PASS [   0.796s] (314/467) farcooler-daemon watch::answer_wake::tests::messages_tests::a_cursor_pane_is_told_between_turns_and_not_during_one
+        PASS [   0.668s] (315/467) farcooler-daemon watch::answer_wake::tests::messages_tests::a_long_message_wraps_in_cursors_box_and_is_sent
+        PASS [   1.046s] (316/467) farcooler-daemon watch::answer_wake::tests::messages_tests::a_done_transition_queues_the_notice
+        PASS [   0.717s] (317/467) farcooler-daemon watch::answer_wake::tests::messages_tests::a_message_survives_a_restart
+        PASS [   0.727s] (318/467) farcooler-daemon watch::answer_wake::tests::messages_tests::a_silent_stop_tells_the_orchestrator_once
+        PASS [   1.098s] (319/467) farcooler-daemon watch::answer_wake::tests::messages_tests::a_manual_message_after_cutover_is_told_once_and_the_old_queue_stays_inert
+        PASS [   0.358s] (320/467) farcooler-daemon watch::answer_wake::tests::messages_tests::an_engine_agent_is_addressed_by_its_ticket
+        PASS [   1.796s] (321/467) farcooler-daemon watch::answer_wake::tests::messages_tests::a_builder_is_addressed_by_its_ticket_and_tags_its_own
+        PASS [   0.296s] (322/467) farcooler-daemon watch::answer_wake::tests::messages_tests::refusals_file_nothing
+        PASS [   0.744s] (323/467) farcooler-daemon watch::answer_wake::tests::messages_tests::an_agents_message_reaches_its_orchestrator
+        PASS [   0.321s] (324/467) farcooler-daemon watch::answer_wake::tests::messages_tests::the_orchestrator_cant_message_itself_through_a_ticket
+        PASS [   0.314s] (325/467) farcooler-daemon watch::answer_wake::tests::messages_tests::with_no_orchestrator_no_notice_is_queued
+        PASS [   0.684s] (326/467) farcooler-daemon watch::answer_wake::tests::messages_tests::no_message_is_tagged_as_the_owners
+        PASS [   0.759s] (327/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::a_dialog_announced_during_the_paste_gets_no_enter
+        PASS [   0.859s] (328/467) farcooler-daemon watch::answer_wake::tests::messages_tests::the_orchestrator_reaches_a_cards_agent
+        PASS [   0.617s] (329/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::a_draft_is_pasted_into_a_working_orchestrator
+        PASS [   1.843s] (330/467) farcooler-daemon watch::answer_wake::tests::messages_tests::a_waiting_message_holds_back_later_ones_for_its_pane
+        PASS [   1.371s] (331/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::a_dropped_caller_keeps_the_fence_held_until_the_key_is_in
+        PASS [   1.421s] (332/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::a_message_reaches_a_working_claude_through_its_queue
+        PASS [   1.207s] (333/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::a_message_while_a_tool_runs_waits_with_nothing_typed
+        PASS [   1.346s] (334/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::a_slow_enter_keeps_the_fence_until_its_key_is_in
+        PASS [   0.649s] (335/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::a_working_codex_is_left_to_finish
+        PASS [   0.013s] (336/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::claudes_transcript_is_found_from_its_process
+        PASS [   1.073s] (337/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::a_working_claude_with_no_session_registry_is_left_to_finish
+        PASS [   0.902s] (338/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::an_answer_reaches_a_working_claude_through_its_queue
+        PASS [   0.678s] (339/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::an_answer_with_a_dialog_announced_during_the_paste_gets_no_enter
+        PASS [   2.803s] (340/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::a_working_claude_no_hook_was_heard_from_is_left_to_finish
+        PASS [   1.334s] (341/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::finish_tests::a_hooked_orchestrator_with_no_witness_still_waits
+        PASS [   1.152s] (342/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::finish_tests::a_hookless_orchestrator_typed_into_during_the_wait_gets_no_enter
+        PASS [   1.490s] (343/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::finish_tests::a_hookless_orchestrator_keyed_beside_the_notice_still_gets_it
+        PASS [   0.794s] (344/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::finish_tests::a_menu_and_a_key_during_the_read_back_leave_the_paste
+        PASS [   1.100s] (345/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::finish_tests::a_hookless_orchestrator_with_a_menu_up_gets_no_enter
+        PASS [   1.977s] (346/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::finish_tests::a_hookless_orchestrator_whose_registry_lags_or_works_gets_no_enter
+        PASS [   1.128s] (347/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::finish_tests::a_notice_given_up_on_is_taken_back_out_of_the_box
+        PASS [   0.853s] (348/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::finish_tests::a_pasted_answer_a_key_left_unchanged_is_entered_in_claude
+        PASS [   0.798s] (349/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::finish_tests::a_pasted_answer_codex_no_longer_holds_is_never_entered
+        PASS [   1.649s] (350/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::finish_tests::a_notice_given_up_on_leaves_an_edited_or_partial_box_alone
+        PASS [   1.426s] (351/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::finish_tests::a_notice_held_for_a_hookless_orchestrator_is_sent_once_it_goes_idle
+        PASS [   0.835s] (352/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::finish_tests::a_pasted_answer_is_finished_after_a_restart
+        PASS [   0.009s] (353/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::only_a_new_record_of_the_text_says_it_was_queued
+        PASS [   2.624s] (354/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::finish_tests::a_menu_during_the_read_back_marks_the_answer_pasted
+        PASS [   0.705s] (355/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::finish_tests::a_pasted_answer_someone_typed_beside_is_never_entered_in_codex
+        PASS [   0.758s] (356/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::finish_tests::a_pasted_answer_the_box_no_longer_holds_is_never_retyped
+        PASS [   0.895s] (357/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::finish_tests::a_pasted_answer_is_finished_once_the_dialog_goes
+        PASS [   0.742s] (358/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::the_enter_waits_on_the_screen_and_the_hooks
+        PASS [   6.612s] (359/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::a_queue_that_never_shows_the_message_is_unconfirmed
+        PASS [   0.997s] (360/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::the_enter_holds_the_fence_and_waits_on_a_tool_call
+        PASS [   0.614s] (361/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::typing_while_the_enter_waits_on_the_fence_stops_it
+        PASS [   0.582s] (362/467) farcooler-daemon watch::answer_wake::tests::nothing_is_typed_while_someone_is_typing
+        PASS [   0.710s] (363/467) farcooler-daemon watch::answer_wake::tests::mid_turn_tests::the_screen_not_the_watcher_says_whether_a_turn_runs
+        PASS [   0.926s] (364/467) farcooler-daemon watch::answer_wake::tests::queued_tests::a_live_plain_message_to_a_busy_codex_is_queued_and_nothing_else_is
+        PASS [   0.903s] (365/467) farcooler-daemon watch::answer_wake::tests::queued_tests::a_persons_message_to_a_busy_codex_goes_by_the_queue
+        PASS [   2.042s] (366/467) farcooler-daemon watch::answer_wake::tests::notice_wait_tests::a_notice_whose_turn_is_stopped_mid_pass_gets_no_enter
+        PASS [   0.756s] (367/467) farcooler-daemon watch::answer_wake::tests::queued_tests::a_persons_message_to_an_idle_codex_is_typed
+        PASS [   0.975s] (368/467) farcooler-daemon watch::answer_wake::tests::queued_tests::a_persons_message_to_codex_behind_a_draft_goes_by_the_queue
+        PASS [   0.805s] (369/467) farcooler-daemon watch::answer_wake::tests::rep_messages_tests::a_message_to_a_stopped_rep_wakes_it_then_arrives
+        PASS [   0.300s] (370/467) farcooler-daemon watch::answer_wake::tests::rep_messages_tests::a_rep_messages_nobody_but_its_orchestrator
+        PASS [   0.272s] (371/467) farcooler-daemon watch::answer_wake::tests::rep_messages_tests::a_rep_messages_only_on_its_own_board
+        PASS [   4.422s] (372/467) farcooler-daemon watch::answer_wake::tests::notice_wait_tests::one_stray_idle_frame_gets_a_waiting_notice_no_enter
+        PASS [   0.342s] (373/467) farcooler-daemon watch::answer_wake::tests::rep_messages_tests::a_rep_never_wakes_a_rep
+        PASS [   0.679s] (374/467) farcooler-daemon watch::answer_wake::tests::rep_messages_tests::a_reps_message_reaches_the_orchestrator_with_its_person
+        PASS [   0.705s] (375/467) farcooler-daemon watch::answer_wake::tests::rep_messages_tests::only_the_lead_messages_as_a_person
+        PASS [   0.352s] (376/467) farcooler-daemon watch::answer_wake::tests::rep_messages_tests::only_who_may_start_a_rep_wakes_it
+        PASS [   2.939s] (377/467) farcooler-daemon watch::answer_wake::tests::queued_tests::a_queued_message_never_seen_run_is_withdrawn_on_its_card_too
+        PASS [   0.393s] (378/467) farcooler-daemon watch::answer_wake::tests::route_tests::a_callers_seat_is_read_from_its_process
+        PASS [   6.167s] (379/467) farcooler-daemon watch::answer_wake::tests::notice_wait_tests::a_notice_whose_dialog_was_answered_esc_is_taken_back
+        PASS [   6.182s] (380/467) farcooler-daemon watch::answer_wake::tests::notice_wait_tests::a_notice_whose_dialog_was_answered_no_is_taken_back
+        PASS [   0.629s] (381/467) farcooler-daemon watch::answer_wake::tests::rep_messages_tests::the_orchestrator_asks_a_person_through_their_rep
+        PASS [   0.580s] (382/467) farcooler-daemon watch::answer_wake::tests::route_tests::a_draft_is_pasted_never_entered
+        PASS [   0.561s] (383/467) farcooler-daemon watch::answer_wake::tests::route_tests::a_key_is_gated
+        PASS [   0.629s] (384/467) farcooler-daemon watch::answer_wake::tests::route_tests::a_held_persons_message_never_stalls_the_agents_behind_it
+        PASS [   0.902s] (385/467) farcooler-daemon watch::answer_wake::tests::route_tests::a_command_an_agent_left_behind_is_refused_as_a_person
+        PASS [   1.320s] (386/467) farcooler-daemon watch::answer_wake::tests::route_tests::a_claude_in_a_shell_pane_messaging_a_lane_goes_by_the_mailbox
+        PASS [   0.636s] (387/467) farcooler-daemon watch::answer_wake::tests::route_tests::a_members_message_is_typed_never_mailboxed
+        PASS [   0.617s] (388/467) farcooler-daemon watch::answer_wake::tests::route_tests::a_persons_message_behind_a_draft_is_held_never_mailboxed
+        PASS [   0.480s] (389/467) farcooler-daemon watch::answer_wake::tests::route_tests::a_persons_message_taken_before_the_upgrade_is_not_typed_again
+        PASS [   1.210s] (390/467) farcooler-daemon watch::answer_wake::tests::route_tests::a_person_in_a_plain_shell_pane_is_typed_as_their_own_turn
+        PASS [   1.019s] (391/467) farcooler-daemon watch::answer_wake::tests::route_tests::a_persons_message_is_typed_never_mailboxed
+        PASS [   0.751s] (392/467) farcooler-daemon watch::answer_wake::tests::route_tests::a_persons_message_waiting_from_before_the_upgrade_is_taken_back_and_typed
+        PASS [   0.008s] (393/467) farcooler-daemon watch::answer_wake::tests::route_tests::a_wake_routes_by_its_author
+        PASS [   0.557s] (394/467) farcooler-daemon watch::answer_wake::tests::route_tests::a_prompt_behind_a_draft_is_refused
+        PASS [   0.885s] (395/467) farcooler-daemon watch::answer_wake::tests::route_tests::a_persons_tell_keeps_composes_rules
+        PASS [   0.365s] (396/467) farcooler-daemon watch::answer_wake::tests::route_tests::a_trust_enter_from_a_pane_is_not_a_persons
+        PASS [   0.528s] (397/467) farcooler-daemon watch::answer_wake::tests::route_tests::an_agents_live_deliveries_are_held_to_its_rules
+        PASS [   0.538s] (398/467) farcooler-daemon watch::answer_wake::tests::route_tests::agent_and_runner_messages_keep_the_mailbox
+        PASS [   0.767s] (399/467) farcooler-daemon watch::answer_wake::tests::route_tests::a_prompt_is_composed
+        PASS [   0.549s] (400/467) farcooler-daemon watch::answer_wake::tests::route_tests::an_agents_tell_with_no_card_goes_unfiled_to_the_mailbox
+        PASS [   0.607s] (401/467) farcooler-daemon watch::answer_wake::tests::route_tests::an_agents_tell_goes_by_the_mailbox_and_runs_no_command
+        PASS [   0.556s] (402/467) farcooler-daemon watch::answer_wake::tests::route_tests::an_unknown_caller_is_refused_in_pane
+        PASS [   0.729s] (403/467) farcooler-daemon watch::answer_wake::tests::route_tests::an_answer_gets_composes_check_before_an_unfenced_enter
+        PASS [   0.624s] (404/467) farcooler-daemon watch::answer_wake::tests::route_tests::answer_seat_tests::a_forged_message_record_queues_nothing_and_names_nobody
+        PASS [   0.710s] (405/467) farcooler-daemon watch::answer_wake::tests::route_tests::answer_seat_tests::a_person_answering_from_their_own_shell_pane_is_typed
+        PASS [   0.724s] (406/467) farcooler-daemon watch::answer_wake::tests::route_tests::answer_seat_tests::a_persons_answer_is_still_typed_as_their_own_turn
+        PASS [   0.491s] (407/467) farcooler-daemon watch::answer_wake::tests::route_tests::answer_seat_tests::an_agent_outside_every_pane_is_unknown_not_the_person
+        PASS [   0.257s] (408/467) farcooler-daemon watch::answer_wake::tests::route_tests::answer_seat_tests::an_answer_from_an_unreadable_seat_is_refused
+        PASS [   0.861s] (409/467) farcooler-daemon watch::answer_wake::tests::route_tests::answer_seat_tests::an_agents_answer_is_taken_back_when_its_wake_ends_undelivered
+        PASS [   0.009s] (410/467) farcooler-daemon watch::answer_wake::tests::route_tests::the_process_that_runs_a_program_is_found_not_the_shell_that_names_it
+        PASS [   0.652s] (411/467) farcooler-daemon watch::answer_wake::tests::route_tests::answer_seat_tests::an_answer_an_agent_left_behind_is_refused
+        PASS [   0.798s] (412/467) farcooler-daemon watch::answer_wake::tests::route_tests::answer_seat_tests::an_answer_from_a_claude_in_a_shell_pane_is_an_agent_message
+        PASS [   1.093s] (413/467) farcooler-daemon watch::answer_wake::tests::route_tests::answer_seat_tests::an_agents_answer_does_not_supersede_a_persons
+        PASS [   0.552s] (414/467) farcooler-daemon watch::answer_wake::tests::route_tests::answer_seat_tests::no_answer_from_the_cli_grants_a_cutover
+        PASS [   0.245s] (415/467) farcooler-daemon watch::answer_wake::tests::seat_tests::a_pane_the_inventory_hasnt_seen_is_never_a_person
+        PASS [   0.297s] (416/467) farcooler-daemon watch::answer_wake::tests::seat_tests::a_command_an_agent_left_behind_is_never_a_person
+        PASS [  10.539s] (417/467) farcooler-daemon watch::answer_wake::tests::notice_wait_tests::a_runner_notice_left_by_a_long_turn_is_sent_when_it_ends
+        PASS [   0.294s] (418/467) farcooler-daemon watch::answer_wake::tests::seat_tests::a_persons_command_in_their_own_shell_pane_is_a_person
+        PASS [   0.016s] (419/467) farcooler-daemon watch::answer_wake::tests::stand_in_set_bracketing_before_anyone_followed
+        PASS [   0.384s] (420/467) farcooler-daemon watch::answer_wake::tests::seat_tests::a_persons_terminal_or_the_mac_app_is_a_person
+        PASS [   0.340s] (421/467) farcooler-daemon watch::answer_wake::tests::seat_tests::an_agents_child_in_a_shell_pane_is_an_agent
+        PASS [   0.008s] (422/467) farcooler-daemon watch::answer_wake::tests::tell_tests::a_held_answer_names_a_word_the_cli_knows
+        PASS [   0.399s] (423/467) farcooler-daemon watch::answer_wake::tests::seat_tests::a_users_own_sshd_isnt_a_person
+        PASS [   0.454s] (424/467) farcooler-daemon watch::answer_wake::tests::seat_tests::outside_the_runner_an_agent_is_still_an_agent
+        PASS [   0.518s] (425/467) farcooler-daemon watch::answer_wake::tests::tell_tests::a_message_is_refused_for_a_process_that_is_not_an_agent
+        PASS [   0.759s] (426/467) farcooler-daemon watch::answer_wake::tests::stand_in_show::show_waits_on_the_respawned_stand_in_not_the_log_of_both
+        PASS [   0.751s] (427/467) farcooler-daemon watch::answer_wake::tests::tell_tests::a_composed_message_is_submitted_into_a_worker_claude_pane
+        PASS [   0.714s] (428/467) farcooler-daemon watch::answer_wake::tests::tell_tests::a_message_is_refused_where_an_answer_would_wait
+        PASS [   0.008s] (429/467) farcooler-daemon watch::answer_wake::tests::the_message_is_one_line_with_the_answer_and_nothing_that_acts
+        PASS [   0.009s] (430/467) farcooler-daemon watch::answer_wake::tests::the_process_in_front_is_the_one_under_the_shell
+        PASS [   0.008s] (431/467) farcooler-daemon watch::answer_wake::tests::tmux_bracketing::a_tmux_version_is_read_for_bracketing
+        PASS [   0.730s] (432/467) farcooler-daemon watch::answer_wake::tests::tell_tests::a_message_is_typed_into_an_idle_orchestrator_and_submitted
+        PASS [   0.673s] (433/467) farcooler-daemon watch::answer_wake::tests::tell_tests::a_message_too_long_empty_a_command_or_to_the_wrong_pane_is_refused
+        PASS [   1.555s] (434/467) farcooler-daemon watch::answer_wake::tests::tell_tests::a_composed_message_and_a_draft_wait_for_the_box
+        PASS [   0.632s] (435/467) farcooler-daemon watch::answer_wake::tests::typing_during_the_read_back_stops_the_enter
+        PASS [   0.594s] (436/467) farcooler-daemon watch::answer_wake::tests::typing_marks_the_pane_and_telling_does_not
+        PASS [   1.174s] (437/467) farcooler-daemon watch::answer_wake::tests::tell_tests::a_second_message_right_after_the_first_is_typed_too
+        PASS [   1.076s] (438/467) farcooler-daemon watch::answer_wake::tests::typing_tests::a_held_box_stalls_no_other_panes_answer_or_draft
+        PASS [   0.800s] (439/467) farcooler-daemon watch::answer_wake::tests::typing_tests::a_held_draft_is_skipped_while_its_own_box_is_taken
+        PASS [   1.273s] (440/467) farcooler-daemon watch::answer_wake::tests::typing_tests::a_draft_waiting_for_a_box_stalls_no_other_pane
+        PASS [   0.015s] (441/467) farcooler-daemon watch::answer_wake::tests::waiting_on_an_unproven_paste_names_tmux
+        PASS [   0.455s] (442/467) farcooler-daemon watch::answer_wake::tests::viewer_resize_tests::a_viewers_smaller_size_is_handed_back_to_the_size_before_it
+        PASS [   0.367s] (443/467) farcooler-daemon watch::answer_wake::tests::waiting_is_said_once_across_a_restart
+        PASS [   2.576s] (444/467) farcooler-daemon watch::answer_wake::tests::tell_tests::a_message_the_box_doesnt_hold_is_left_and_not_sent
+        PASS [   0.532s] (445/467) farcooler-daemon watch::answer_wake::tests::web_tests::nothing_is_typed_into_a_web_pane_whatever_it_runs
+        PASS [   0.216s] (446/467) farcooler-daemon watch::answer_wake::tests::with_nobody_there_the_task_says_nobody_was_told
+        PASS [   1.414s] (447/467) farcooler-daemon watch::answer_wake::tests::typing_tests::an_answer_waits_for_a_box_someone_else_holds
+        PASS [   0.464s] (448/467) farcooler-daemon watch::answer_wake::tests::with_the_switch_off_nobody_is_told
+        PASS [   2.875s] (449/467) farcooler-daemon watch::answer_wake::tests::two_answers_for_one_terminal_go_one_at_a_time
+        PASS [   0.639s] (450/467) farcooler-daemon watch::answer_wake::tests::with_no_agent_the_orchestrator_is_told
+        PASS [   0.543s] (451/467) farcooler-daemon watch::answer_wake::tests::worker_tests::a_hold_that_ended_goes_by_the_mailbox
+        PASS [   0.512s] (452/467) farcooler-daemon watch::answer_wake::tests::worker_tests::a_hold_that_ended_is_dropped_once_the_task_has_started
+        PASS [   0.598s] (453/467) farcooler-daemon watch::answer_wake::tests::worker_tests::a_hold_that_ended_is_given_up_on_after_half_an_hour
+        PASS [   0.649s] (454/467) farcooler-daemon watch::answer_wake::tests::worker_tests::a_hold_that_ended_is_not_pasted_beside_a_draft
+        PASS [   0.588s] (455/467) farcooler-daemon watch::answer_wake::tests::worker_tests::a_hold_that_ended_is_not_typed_to_a_process_that_isnt_an_agent
+        PASS [   0.855s] (456/467) farcooler-daemon watch::answer_wake::tests::worker_tests::a_hold_that_ended_is_not_pasted_without_bracketed_paste
+        PASS [   0.008s] (457/467) farcooler-daemon watch::answer_wake::tests::worker_tests::a_subagents_label_is_typed_as_text
+        PASS [   0.721s] (458/467) farcooler-daemon watch::answer_wake::tests::worker_tests::a_hold_that_ended_is_not_typed_over_someone_typing
+        PASS [   0.640s] (459/467) farcooler-daemon watch::answer_wake::tests::worker_tests::a_hold_that_ended_is_told_to_the_idle_orchestrator
+        PASS [   0.009s] (460/467) farcooler-daemon watch::answer_wake::tests::worker_tests::the_hold_message_says_when_and_that_it_is_the_orchestrators_call
+        PASS [   0.008s] (461/467) farcooler-daemon watch::answer_wake::tests::worker_tests::the_message_names_the_subagent
+        PASS [   0.623s] (462/467) farcooler-daemon watch::answer_wake::tests::worker_tests::a_hold_that_ended_waits_for_an_orchestrator_in_an_unknown_state
+        PASS [   0.614s] (463/467) farcooler-daemon watch::answer_wake::tests::worker_tests::a_subagent_that_ended_is_not_named
+        PASS [   0.598s] (464/467) farcooler-daemon watch::answer_wake::tests::worker_tests::an_answer_on_a_subagents_task_names_the_subagent_to_the_orchestrator
+        PASS [   0.460s] (465/467) farcooler-daemon watch::answer_wake::tests::worker_tests::with_the_switch_off_a_hold_that_ended_is_only_a_note
+        PASS [   1.148s] (466/467) farcooler-daemon watch::answer_wake::tests::worker_tests::an_answer_does_not_replace_a_hold_that_ended
+        PASS [   2.653s] (467/467) farcooler-daemon watch::answer_wake::tests::worker_tests::a_hold_and_an_answer_after_cutover_are_each_told_once
+────────────
+     Summary [  92.347s] 467 tests run: 467 passed, 3657 skipped

@@ -220,20 +220,23 @@ async fn a_panel_command_is_handed_off_untyped() {
 }
 
 /// A draft in the box is refused (R-28); so is a dialog, and a picker the
-/// box reader doesn't know: nothing typed.
+/// box reader doesn't know: nothing typed. The screen is the real pane's;
+/// the process read is faked (`FAKE_FRONT`), since its deadline running out
+/// refuses first, with another word (ov-1531).
 #[tokio::test]
 async fn a_draft_or_a_dialog_is_refused_untyped() {
     let b = board().await;
     let (agent, si) = idle_claude(&b).await;
+    let send = || super::FAKE_FRONT.scope("claude", b.watcher.compose_into(agent.id, "hello\nthere", &[]));
     si.show("draft:half a thought").await;
     b.screen_with(agent.id, "half a thought").await;
-    assert_eq!(refused(b.watcher.compose_into(agent.id, "hello\nthere", &[]).await), "draft");
+    assert_eq!(refused(send().await), "draft");
     si.show("menu").await;
     b.screen_with(agent.id, "Tab to amend").await;
-    assert_eq!(refused(b.watcher.compose_into(agent.id, "hello\nthere", &[]).await), "prompt");
+    assert_eq!(refused(send().await), "prompt");
     si.show("picker").await;
     b.screen_with(agent.id, "Select model").await;
-    assert_eq!(refused(b.watcher.compose_into(agent.id, "hello\nthere", &[]).await), "unfamiliar");
+    assert_eq!(refused(send().await), "unfamiliar");
     nothing_typed(&si);
 }
 

@@ -1163,6 +1163,10 @@ const PROCESS_READ_DEADLINE: Duration = Duration::from_millis(500);
 #[cfg(test)]
 tokio::task_local! {
     static STALLED_PS: (&'static str, std::path::PathBuf);
+    /// The agent a test says is in front of a pane, in place of reading its
+    /// processes, so a slow `ps` on a loaded runner can't change which
+    /// refusal the test sees (ov-1531). Its pid is no process's.
+    static FAKE_FRONT: &'static str;
 }
 
 /// On macOS even `ps -o comm` can wait in KERN_PROCARGS2 for a process
@@ -1189,6 +1193,10 @@ async fn pane_ps(args: &[&str]) -> std::result::Result<std::process::Output, Hel
 
 /// `foreground_agent`, with the agent's pid.
 async fn foreground(tty: &str) -> std::result::Result<Option<(&'static str, i32)>, Held> {
+    #[cfg(test)]
+    if let Ok(agent) = FAKE_FRONT.try_with(|agent| *agent) {
+        return Ok(Some((agent, 0)));
+    }
     let name = tty.strip_prefix("/dev/").unwrap_or(tty);
     let out = pane_ps(&["-t", name, "-o", "pid=,ppid=,stat=,comm="]).await?;
     let Some((pid, exe)) = in_front(&String::from_utf8_lossy(&out.stdout)) else { return Ok(None) };
