@@ -223,6 +223,18 @@ function swapDial() {
 }
 
 const sleepMs = n => new Promise(r => setTimeout(r, n))
+
+// The ceiling on waiting for a screen while connecting. A passing run does not
+// spend it: it only decides how long a screen that never comes takes to fail.
+// Measured Nov 28, 2026 (ov-1530, M-series Mac, load 6 to 8, three runs of
+// CI's command): the slowest of 63 such waits took 785 ms, and a whole run
+// 134 to 138 s. CI's step took 139 to 143 s on Linux in six green runs (its
+// waits were not timed one by one). 30 s leaves room for a loaded machine.
+// It was 90 s from the script's first commit, with no reason given. A run that
+// ends in this timeout is waiting for a screen the page no longer shows, as
+// when Add Runner became a new browser's first screen (ov-1523).
+const SCREEN_WITHIN_MS = 30_000
+
 const device = page =>
   page.evaluate(async () => {
     const db = await new Promise(r => (indexedDB.open('farcooler').onsuccess = e => r(e.target.result)))
@@ -239,7 +251,7 @@ const edit = (page, change) =>
     await new Promise(r => (store().put(d, 'this').onsuccess = r))
     db.close()
   }, change)
-const statusSays = (page, text, timeout = 90_000) =>
+const statusSays = (page, text, timeout = SCREEN_WITHIN_MS) =>
   page.waitForFunction(t => !document.getElementById('status')?.hidden && document.getElementById('status')?.textContent?.includes(t), text, { timeout })
 const LIVE = '#terminal .terminal-host:not([hidden])[data-attached="true"]'
 
@@ -296,9 +308,9 @@ async function connected(s, first) {
     await page.click('#status-action')
     // A new browser opens on Add Runner (ov-1490). The offer this check
     // enrolls comes from the screen that waits for another device.
-    await page.waitForSelector('#runner-add:not([hidden])', { timeout: 90_000 })
+    await page.waitForSelector('#runner-add:not([hidden])', { timeout: SCREEN_WITHIN_MS })
     await page.click('#join-from-device')
-    await page.waitForFunction(() => !document.getElementById('enroll')?.hidden && document.getElementById('offer-fingerprint')?.textContent?.includes('SHA256:'), null, { timeout: 90_000 })
+    await page.waitForFunction(() => !document.getElementById('enroll')?.hidden && document.getElementById('offer-fingerprint')?.textContent?.includes('SHA256:'), null, { timeout: SCREEN_WITHIN_MS })
     const offer = JSON.parse((await device(page)).offer)
     writeFileSync(keys, `restrict,command="cd '${dir}' && '${fakeDaemon}' typed" ${offer.key_a}\n`)
     await edit(page, { runners: [{ id: 'r1', label: 'studio', user: me, host_key: hostKey, token: 'test', why: '' }] })
@@ -306,7 +318,7 @@ async function connected(s, first) {
   }
   await statusSays(page, 'Connect to studio')
   await page.click('#status-action')
-  await page.waitForSelector('.app[data-screen="work"] .terminal-choice', { timeout: 90_000 })
+  await page.waitForSelector('.app[data-screen="work"] .terminal-choice', { timeout: SCREEN_WITHIN_MS })
   await page.waitForSelector(LIVE, { timeout: 60_000 })
   if (!split) return
   if (first) {
