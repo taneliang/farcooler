@@ -201,3 +201,35 @@ fn a_run_out_of_review_rounds_moves_as_retry_would_back_to_its_build() {
     assert_eq!((log.item().stage, log.item().phase.clone(), log.item().iteration), (0, Phase::Running, 0));
     assert_eq!(log.effects[0].model.as_deref(), Some("claude:opus"));
 }
+
+/// A ticket waiting its turn to start has no run yet. Its pick is kept for the run, over the start policy's own.
+#[test]
+fn a_ticket_waiting_to_start_keeps_its_new_model_for_its_run() {
+    let rest = || {
+        let mut log = Log { state: State::empty("workspace".into(), 1), effects: Vec::new() };
+        let ticket = Definition::ticket();
+        log.try_run(Command::Enqueue { item: "ov-1".into(), policy_pin: "policy-1".into(), resource: "res".into(),
+            dependencies: BTreeSet::new(), initial_candidate: Some(ticket.pin()), definition: ticket }, Grant::Controller).unwrap();
+        log
+    };
+    let pick = |log: &mut Log, step: Option<&str>| log.try_run(Command::SetModel { item: "ov-1".into(),
+        model: "claude:opus".into(), step: step.map(Into::into) }, Grant::Controller);
+    let start = |log: &mut Log, models: &[(&str, &str)]| log.try_run(Command::Start { start_load: None, item: "ov-1".into(),
+        policy_pin: "policy-2".into(), resource: "run".into(), dependencies: BTreeSet::new(), initial_candidate: None,
+        definition: coding(), models: models.iter().map(|(s, m)| ((*s).into(), (*m).into())).collect(),
+        tree: Some(Box::new(tree())), with: vec![] }, Grant::Controller).unwrap();
+    // A ticket's own columns list no models, so the step has to be named.
+    assert!(matches!(pick(&mut rest(), None), Err(Refusal::ModelRefused(_))));
+    let mut log = rest();
+    let before = log.item().clone();
+    pick(&mut log, Some("build")).unwrap();
+    assert_eq!((&log.item().phase, log.item().stage, &log.item().run), (&before.phase, before.stage, &before.run));
+    assert!(log.effects.is_empty());
+    start(&mut log, &[]);
+    assert_eq!((log.effects[0].model.as_deref(), log.effects[0].model_chosen), (Some("claude:opus"), true));
+    // A model named at Start is the later word.
+    let mut log = rest();
+    pick(&mut log, Some("build")).unwrap();
+    start(&mut log, &[("build", "claude:sonnet")]);
+    assert_eq!((log.effects[0].model.as_deref(), log.effects[0].model_chosen), (Some("claude:sonnet"), false));
+}

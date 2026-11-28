@@ -67,10 +67,38 @@ pub(super) fn usage_limit(item: &mut Item, id: &str, input: &Input, harness: &st
     Ok(())
 }
 
+/// A ticket waiting to start has no run to move: the pick is kept on it for the run. Its own columns list no
+/// models, so the runner names the step and checks the model against the published workflow.
+fn keep_for_start(item: &mut Item, model: &str, step: Option<&str>) -> Result<(), Refusal> {
+    if item.phase != Phase::WaitingApproval || item.follows.is_some() || item.closed.is_some() {
+        return Err(Refusal::Phase);
+    }
+    let step = step.ok_or_else(|| Refusal::ModelRefused("Name the step this model is for.".into()))?;
+    if !valid_id(step) || !crate::definition::valid_model(model) { return Err(Refusal::Invalid); }
+    if !item.models.contains_key(step) && item.models.len() >= usize::from(MAX_TICKET_PICKS) { return Err(Refusal::Limit); }
+    item.models.insert(step.to_owned(), model.to_owned());
+    item.moved.insert(step.to_owned());
+    Ok(())
+}
+const MAX_TICKET_PICKS: u8 = 16;
+
+/// A run starting from a waiting ticket: the model chosen for the ticket holds for each step that lists it, unless
+/// Start named another.
+pub(super) fn carry_picks(run: &mut Item, ticket: &Item, named: &BTreeMap<String, String>) {
+    for step in &ticket.moved {
+        let Some(model) = ticket.models.get(step) else { continue };
+        if !run.definition.models.get(step).is_some_and(|list| list.contains(model))
+            || named.get(step).is_some_and(|other| other != model) { continue; }
+        run.models.insert(step.clone(), model.clone());
+        run.moved.insert(step.clone());
+    }
+}
+
 /// Move a queued, failed or running ticket to another of a step's listed models (`Command::SetModel`).
 pub(super) fn set_model(item: &mut Item, id: &str, input: &Input, model: &str, step: Option<&str>,
     effects: &mut Vec<Effect>) -> Result<(), Refusal> {
-    if item.definition.is_ticket() || item.group_of.is_some() || item.follows.is_some()
+    if item.definition.is_ticket() { return keep_for_start(item, model, step); }
+    if item.group_of.is_some() || item.follows.is_some()
         || item.stopping.is_some() || item.closed.is_some()
         || matches!(item.phase, Phase::Done | Phase::Cancelled | Phase::Cancelling | Phase::Uncertain)
     { return Err(Refusal::Phase); }

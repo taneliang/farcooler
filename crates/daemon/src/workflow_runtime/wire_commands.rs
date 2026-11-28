@@ -300,6 +300,23 @@ impl CommandHandle {
     }
 }
 impl Runtime {
+    /// The step a waiting ticket's new model is for: the one named, or the published workflow's first build step
+    /// that lists models. `Err` says why the model can't be picked.
+    fn step_to_start_on(&self, workspace: &str, model: &str, step: Option<&str>) -> Result<std::result::Result<String, String>> {
+        let Some(published) = self.store.workflow_configuration(workspace)?.map(|c| c.definition) else {
+            return Ok(Err("No workflow is published, so there are no models to pick from.".into()));
+        };
+        let Some(step) = step.or_else(|| published.stages.iter()
+            .find(|s| s.kind == StageKind::Build && published.models.contains_key(&s.id)).map(|s| s.id.as_str()))
+        else { return Ok(Err("The published workflow has no build step that lists models.".into())) };
+        Ok(match published.models.get(step) {
+            None => Err("That step lists no models.".into()),
+            Some(listed) if !listed.iter().any(|known| known == model) =>
+                Err(format!("That model is not listed for step {step}. Listed: {}.", listed.join(", "))),
+            Some(_) => Ok(step.to_owned()),
+        })
+    }
+
     #[cfg(test)]
     pub(super) fn wire_command(&self, workspace: &str, principal: &str, action: Action) -> Result<serde_json::Value> {
         self.wire_command_with(workspace, principal, &[principal.to_string()], None, action, Prepared::default())
@@ -535,11 +552,18 @@ impl Runtime {
                     }
                 }
                 Action::SetModel { item, run, pin, model, step, .. } => {
-                    if !state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin) {
-                        self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Stale))?
-                    } else {
-                        let input = input(Command::SetModel { item:item.clone(),model:model.clone(),step:step.clone() },Grant::Controller);
-                        self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
+                    match state.items.get(item).filter(|i| &i.run == run && &i.pin == pin) {
+                        None => self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Stale))?,
+                        // A ticket waiting to start lists no models of its own: the published workflow does.
+                        Some(current) => match if current.definition.is_ticket() {
+                            self.step_to_start_on(workspace, model, step.as_deref())?.map(Some)
+                        } else { Ok(step.clone()) } {
+                            Err(why) => self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::ModelRefused(why)))?,
+                            Ok(step) => {
+                                let input = input(Command::SetModel { item:item.clone(),model:model.clone(),step },Grant::Controller);
+                                self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
+                            }
+                        },
                     }
                 }
                 Action::Landed { item, run, pin, sha, .. } => {

@@ -219,6 +219,10 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                 return Err(Refusal::Resource);
             }
             let mut item = new_item(definition, policy_pin, resource, dependencies, initial_candidate);
+            item.models = picked;
+            if let Some(ticket) = prior.as_ref().filter(|p| p.definition.is_ticket()) {
+                model_reducer::carry_picks(&mut item, ticket, models);
+            }
             if let Some(mut prior) = prior {
                 item.fence = prior.fence.checked_add(1).ok_or(Refusal::Limit)?;
                 item.history = std::mem::take(&mut prior.history);
@@ -238,7 +242,6 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
             }
             if !item.history.is_empty() { item.restart = Some(input.id.clone()); }
             item.start_load = start_load.clone();
-            item.models = picked;
             item.tree = tree.as_deref().cloned();
             item.followers = with.clone();
             for follower in with { next.items.get_mut(follower).ok_or(Refusal::Missing)?.follows = Some(id.clone()); }

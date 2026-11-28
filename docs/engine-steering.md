@@ -90,8 +90,13 @@ The model must be one the step lists in the workflow's `models`. The command
 moves the step the run is at, or the build before it; `--step` names another. A
 running agent of that step is stopped first, and the step starts again on the new
 model in the same worktree, uncommitted work included. A failed run runs again,
-as `workflow retry` would run it. A ticket at rest has no run to move: pick its
-model with `workflow start --model`.
+as `workflow retry` would run it.
+
+A ticket still waiting to start, such as one the start policy has queued, takes
+the same command. Nothing starts: the pick is kept on the ticket, checked against
+the published workflow's list for its first build step (or `--step`), and its run
+uses it instead of the start policy's rotation. `workflow start --model` still
+names a different one.
 
 A workflow can also name a fallback for a step, one of the models it lists:
 

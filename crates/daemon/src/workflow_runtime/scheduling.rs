@@ -144,7 +144,8 @@ impl Runtime {
                         below_milli: budgets.iter().filter_map(|b| match b { Budget::Load { below_milli, .. } => Some(*below_milli), _ => None }).min() }), item: key.clone(), definition: config.definition.clone(), policy_pin: config.pin.clone(),
                         resource: Exec::item_resource(workspace, &key), dependencies: policy.dependencies.get(&key).cloned().unwrap_or_default(),
                         initial_candidate: matches!(config.definition.stages[0].kind, StageKind::Tracker).then(|| config.pin.clone()),
-                        models: policy.models(&config.definition, ordinal), tree: None, with: vec![] }
+                        models: with_ticket_picks(policy.models(&config.definition, ordinal), item, &config.definition),
+                        tree: None, with: vec![] }
                 };
                 let input = Input { schema: 1, id: format!("runtime:{}", Uuid::now_v7()), workspace: workspace.clone(),
                     expected_revision: state.revision, epoch: state.epoch, source: "runtime".into(),
@@ -190,6 +191,14 @@ impl Runtime {
         }
         Ok(true)
     }
+}
+
+/// A waiting ticket moved to a model (ov-1515) starts on it, whatever the policy's own rotation would pick.
+fn with_ticket_picks(mut models: BTreeMap<String, String>, ticket: &Item, definition: &Definition) -> BTreeMap<String, String> {
+    for (step, model) in ticket.moved.iter().filter_map(|step| Some((step, ticket.models.get(step)?))) {
+        if definition.models.get(step).is_some_and(|list| list.contains(model)) { models.insert(step.clone(), model.clone()); }
+    }
+    models
 }
 
 /// File claims last through landing, even though landing releases build capacity.
@@ -243,6 +252,39 @@ mod tests {
         assert!(runtime.internal("w", Command::Observe { item: key.into(), effect: effect.id.clone(), run: effect.run.clone(),
             fence: effect.fence, outcome: Outcome::Passed(evidence) }, Grant::Operation { effect: effect.id,
                 run: effect.run, fence: effect.fence }, time).unwrap().result.is_ok());
+    }
+    /// ov-1515: a ticket waiting for a build slot is moved with the same command, and the policy that starts it
+    /// later keeps that pick over its own rotation.
+    #[tokio::test]
+    async fn ov_1515_a_ticket_queued_by_the_start_policy_starts_on_the_model_it_was_moved_to() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = Runtime::create(&dir.path().join("fixture")).await.unwrap();
+        let mut d = coding_definition(false);
+        d.stages.retain(|s| s.kind == StageKind::Build);
+        let step = d.stages[0].id.clone();
+        d.models.insert(step.clone(), vec!["codex:sol".into(), "claude:sonnet".into(), "claude:opus".into()]);
+        d.start_policy = Some(policy(Budget::Fixed(0)));
+        publish(&runtime, d.clone());
+        track(&runtime, &["a"]);
+        runtime.schedule(&["w".into()], 1_000, None, None).unwrap();
+        let send = |id: &str, model: &str| {
+            let state = runtime.state("w").unwrap().unwrap(); let item = &state.items["a"];
+            assert!(item.definition.is_ticket(), "still waiting");
+            runtime.wire_command("w", "orchestrator", Action::SetModel { mutation: Mutation { id: id.into(),
+                revision: state.revision, epoch: 1, sequence: state.source_sequences.get("wire:orchestrator").copied().unwrap_or(0) + 1 },
+                item: "a".into(), run: item.run.clone(), pin: item.pin.clone(), model: model.into(), step: None }).unwrap()
+        };
+        let unlisted = send("unlisted", "claude:haiku");
+        assert!(unlisted.pointer("/receipt/result/Err/ModelRefused").is_some(), "{unlisted}");
+        let moved = send("move", "claude:opus");
+        assert!(moved.pointer("/receipt/result/Ok").is_some(), "{moved}");
+        d.start_policy = Some(policy(Budget::Fixed(1)));
+        publish(&runtime, d);
+        runtime.schedule(&["w".into()], 100_000, None, None).unwrap();
+        let item = runtime.state("w").unwrap().unwrap().items["a"].clone();
+        assert!(!item.definition.is_ticket(), "{item:?}");
+        assert_eq!(item.models[&step], "claude:opus");
+        assert!(item.moved.contains(&step), "{item:?}");
     }
     fn todo_cards(runtime: &Runtime, titles: &[&str]) -> (String, Vec<farcooler_store::models::Task>) {
         use farcooler_store::models::{Actor, TaskStatus};

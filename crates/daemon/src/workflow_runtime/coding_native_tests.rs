@@ -353,6 +353,12 @@ async fn ov_1515_an_agent_at_its_limit_fails_the_step_at_once_saying_until_when(
         let item = &state.items["one"];
         assert_eq!((&item.phase, item.attempt), (&Phase::Failed, 1), "{mode}: {item:?}");
         assert_eq!(item.failure.as_deref(), Some(said), "{mode}");
+        // Needs You reads it back from the store, as one item for the provider.
+        let mut stuck = Vec::new();
+        crate::engine_stuck::include_limits(&runtime.store, &mut stuck);
+        let [listed] = &stuck[..] else { panic!("{mode}: {stuck:?}") };
+        assert!(listed.question.contains("It stopped one."), "{mode}: {}", listed.question);
+        assert!(listed.question.contains(said.split(" (").next().unwrap()), "{mode}: {}", listed.question);
     }
 }
 
