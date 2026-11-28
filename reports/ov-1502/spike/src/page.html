@@ -1,0 +1,71 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>ov-1502 data channel spike</title>
+<pre id="out">running…</pre>
+<script>
+// Query: ?n=200&policy=relay&ice=<JSON array of RTCIceServer>
+(async () => {
+  const q = new URLSearchParams(location.search);
+  const n = +(q.get('n') || 200);
+  const cfg = { iceServers: JSON.parse(q.get('ice') || '[]') };
+  if (q.get('policy') === 'relay') cfg.iceTransportPolicy = 'relay';
+  const t0 = performance.now();
+  const pc = new RTCPeerConnection(cfg);
+  const dc = pc.createDataChannel('echo');
+  dc.binaryType = 'arraybuffer';
+  await pc.setLocalDescription(await pc.createOffer());
+  await new Promise(r => {
+    if (pc.iceGatheringState === 'complete') return r();
+    pc.addEventListener('icegatheringstatechange', () => pc.iceGatheringState === 'complete' && r());
+    setTimeout(r, +(q.get('gather') || 8000));
+  });
+  const gatherMs = performance.now() - t0;
+  const resp = await fetch('/offer', { method: 'POST', body: JSON.stringify(pc.localDescription) });
+  const ans = await resp.json();
+  const answerMs = performance.now() - t0;
+  await pc.setRemoteDescription(ans);
+  await new Promise((res, rej) => { dc.onopen = res; setTimeout(() => rej(new Error('open timeout, ice=' + pc.iceConnectionState)), 20000); });
+  const openMs = performance.now() - t0;
+  let pending = null;
+  dc.onmessage = () => pending && pending();
+  const s = [];
+  for (let i = 0; i < n; i++) {
+    const t = performance.now();
+    await new Promise(r => { pending = r; dc.send(new Uint8Array([97 + (i % 26)])); });
+    s.push(performance.now() - t);
+    await new Promise(r => setTimeout(r, 10));
+  }
+  s.sort((a, b) => a - b);
+  const stats = await pc.getStats();
+  let pair, transport, local, remote;
+  stats.forEach(x => { if (x.type === 'transport') transport = x; });
+  stats.forEach(x => {
+    if (x.type === 'candidate-pair' && (transport ? x.id === transport.selectedCandidatePairId : (x.selected || x.nominated && x.state === 'succeeded'))) pair = x;
+  });
+  if (pair) { local = stats.get(pair.localCandidateId); remote = stats.get(pair.remoteCandidateId); }
+  const result = {
+    ua: navigator.userAgent, n, gather_ms: Math.round(gatherMs), answer_ms: Math.round(answerMs), open_ms: Math.round(openMs),
+    median_ms: +s[Math.floor(n / 2)].toFixed(2), p90_ms: +s[Math.floor(n * 0.9)].toFixed(2), max_ms: +s[n - 1].toFixed(2),
+    local: local && { type: local.candidateType, protocol: local.protocol, relayProtocol: local.relayProtocol },
+    remote: remote && { type: remote.candidateType, protocol: remote.protocol },
+    dtls: transport && { state: transport.dtlsState, cipher: transport.dtlsCipher, tlsVersion: transport.tlsVersion, role: transport.dtlsRole },
+    sdp_fingerprint_present: /a=fingerprint:sha-256/.test(ans.sdp),
+  };
+  if (q.get('ssh')) {
+    // Open an "ssh" channel (spliced to sshd by the runner), send a client
+    // banner, and keep what sshd sends back: its banner and KEXINIT.
+    const ch = pc.createDataChannel('ssh'); ch.binaryType = 'arraybuffer';
+    const got = [];
+    await new Promise((res, rej) => { ch.onopen = res; setTimeout(() => rej(new Error('ssh open timeout')), 10000); });
+    const ts = performance.now();
+    ch.onmessage = e => got.push(new Uint8Array(e.data));
+    ch.send(new TextEncoder().encode('SSH-2.0-ov1502spike\r\n'));
+    await new Promise(r => setTimeout(r, 1500));
+    const all = new Uint8Array(got.reduce((n, a) => n + a.length, 0)); let o = 0; for (const a of got) { all.set(a, o); o += a.length; }
+    const text = new TextDecoder('latin1').decode(all);
+    result.ssh = { bytes: all.length, banner: text.split('\r\n')[0], kexinit_has_curve25519: text.includes('curve25519'), hostkey_algs_has_ed25519: text.includes('ssh-ed25519') };
+  }
+  window.result = result;
+  document.getElementById('out').textContent = JSON.stringify(result, null, 2);
+})().catch(e => { window.result = { error: String(e) }; document.getElementById('out').textContent = String(e); });
+</script>
