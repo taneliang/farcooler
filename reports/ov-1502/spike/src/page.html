@@ -4,14 +4,69 @@
 <pre id="out">running…</pre>
 <script>
 // Query: ?n=200&policy=relay&ice=<JSON array of RTCIceServer>
+// ov-1534: &relay=&token=&runner=&device= signals through the relay instead.
 (async () => {
   const q = new URLSearchParams(location.search);
   const n = +(q.get('n') || 200);
   const cfg = { iceServers: JSON.parse(q.get('ice') || '[]') };
   if (q.get('policy') === 'relay') cfg.iceTransportPolicy = 'relay';
   const t0 = performance.now();
-  const pc = new RTCPeerConnection(cfg);
-  const dc = pc.createDataChannel('echo');
+  let pc, dc, ans, gatherMs, answerMs, signaling;
+  if (q.get('relay') !== null) {
+    // ov-1534: signal through the relay (open, send, poll) with trickle ICE.
+    // Query adds: relay=<origin, or empty for this one>, token, runner, device.
+    const base = q.get('relay') + '/v1/rtc/';
+    const runner = q.get('runner'), device = q.get('device');
+    const call = async (route, body) => {
+      const r = await fetch(base + route, { method: 'POST', headers: { authorization: 'Bearer ' + q.get('token') }, body: JSON.stringify(body) });
+      const j = await r.json();
+      if (!r.ok) throw new Error(route + ' ' + r.status + ' ' + JSON.stringify(j));
+      return j;
+    };
+    const opened = await call('open', { runner, device });
+    const session = opened.session, ice = opened.ice_servers;
+    cfg.iceServers = [{ urls: ice.urls, ...(ice.username ? { username: ice.username, credential: ice.credential } : {}) }];
+    signaling = { session, stun_only: ice.stun_only || null, ttl: ice.ttl, sent: 0, received: 0, open_ms: Math.round(performance.now() - t0) };
+    pc = new RTCPeerConnection(cfg);
+    dc = pc.createDataChannel('echo');
+    dc.binaryType = 'arraybuffer';
+    const send = message => call('send', { runner, device, message: { session, ...message } });
+    pc.onicecandidate = e => {
+      signaling.sent++;
+      send({ type: 'candidate', candidate: e.candidate ? e.candidate.candidate : '', sdpMid: e.candidate ? e.candidate.sdpMid : null, sdpMLineIndex: e.candidate ? e.candidate.sdpMLineIndex : null }).catch(() => {});
+    };
+    await pc.setLocalDescription(await pc.createOffer());
+    gatherMs = 0;
+    await send({ type: 'offer', sdp: pc.localDescription.sdp });
+    // Candidates can beat the answer here; held until it is set.
+    const early = [];
+    let answered;
+    const gotAnswer = new Promise(r => (answered = r));
+    (async () => {
+      let cursor = 0;
+      for (;;) {
+        const r = await call('poll', { runner, session, after: cursor, wait: 20 });
+        cursor = r.cursor;
+        for (const m of r.messages) {
+          if (m.type === 'answer') {
+            ans = { type: 'answer', sdp: m.sdp };
+            await pc.setRemoteDescription(ans);
+            for (const c of early.splice(0)) await pc.addIceCandidate(c);
+            answered();
+          } else if (m.type === 'candidate' && m.candidate) {
+            signaling.received++;
+            const c = { candidate: m.candidate, sdpMid: m.sdpMid, sdpMLineIndex: m.sdpMLineIndex };
+            if (pc.remoteDescription) await pc.addIceCandidate(c); else early.push(c);
+          }
+        }
+        if (r.ended || pc.connectionState === 'closed') break;
+      }
+    })().catch(e => console.error(e));
+    await gotAnswer;
+    answerMs = performance.now() - t0;
+  } else {
+  pc = new RTCPeerConnection(cfg);
+  dc = pc.createDataChannel('echo');
   dc.binaryType = 'arraybuffer';
   await pc.setLocalDescription(await pc.createOffer());
   await new Promise(r => {
@@ -19,11 +74,12 @@
     pc.addEventListener('icegatheringstatechange', () => pc.iceGatheringState === 'complete' && r());
     setTimeout(r, +(q.get('gather') || 8000));
   });
-  const gatherMs = performance.now() - t0;
+  gatherMs = performance.now() - t0;
   const resp = await fetch('/offer', { method: 'POST', body: JSON.stringify(pc.localDescription) });
-  const ans = await resp.json();
-  const answerMs = performance.now() - t0;
+  ans = await resp.json();
+  answerMs = performance.now() - t0;
   await pc.setRemoteDescription(ans);
+  }
   await new Promise((res, rej) => { dc.onopen = res; setTimeout(() => rej(new Error('open timeout, ice=' + pc.iceConnectionState)), 20000); });
   const openMs = performance.now() - t0;
   let pending = null;
@@ -50,6 +106,7 @@
     remote: remote && { type: remote.candidateType, protocol: remote.protocol },
     dtls: transport && { state: transport.dtlsState, cipher: transport.dtlsCipher, tlsVersion: transport.tlsVersion, role: transport.dtlsRole },
     sdp_fingerprint_present: /a=fingerprint:sha-256/.test(ans.sdp),
+    signaling,
   };
   if (q.get('ssh')) {
     // Open an "ssh" channel (spliced to sshd by the runner), send a client

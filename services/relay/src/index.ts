@@ -19,6 +19,7 @@ import { listAccount, revokeOwned } from './account'
 import { ceremonyReply, sweepCeremonyReplies } from './ceremony-reply'
 import { join, JOIN_PREFIX } from './join'
 import { webVault } from './web-vault'
+import { rtc, RTC_PREFIX } from './signal'
 import { directory, DIRECTORY_PREFIX } from './directory'
 import { forgetInstall } from './directory/notices'
 import { takeInventory } from './directory/inventory'
@@ -49,6 +50,10 @@ import {
 } from './push'
 
 export type { Machine }
+
+/// The Durable Object class each runner's signaling lives in (`signal.ts`).
+/// Exported from the entry module because that is where Cloudflare looks.
+export { Signal } from './signal'
 
 export { cut, quietAfterMs, ROW_RETENTION_MS, WORKSPACE_BUDGET }
 
@@ -103,6 +108,13 @@ export interface Env extends PasskeyConfig {
   /// before that only a person's first device is ever listed, so the match
   /// would refuse every other one. See the README.
   DEVICE_KEYS_ENFORCED?: string
+  /// One Durable Object per runner: its WebRTC signaling (ov-1534, `signal.ts`).
+  SIGNAL: DurableObjectNamespace
+  /// The Cloudflare TURN key's id, a var, and its API token, a secret. Both
+  /// set by the orchestrator, never by a build. Either absent, sessions get
+  /// STUN only and are told so (`turn.ts`).
+  TURN_KEY_ID?: string
+  TURN_KEY_API_TOKEN?: string
 }
 
 export default {
@@ -115,6 +127,9 @@ export default {
       // So does a browser's sealed copy (ov-779).
       const vault = await webVault(request, env, url.pathname)
       if (vault) return vault
+      // WebRTC signaling (ov-1534): the runner's WebSocket is a GET, so it too
+      // goes before the POST check. `signal.ts` says who may call what.
+      if (url.pathname.startsWith(RTC_PREFIX)) return await rtc(request, env, url.pathname)
       if (request.method !== 'POST') return json({ error: 'method' }, 405)
       // The unauthenticated routes, throttled before they do any work.
       //

@@ -274,6 +274,40 @@ and repairs it only if it is missing or unreadable. The relay could also withhol
 person a new enrollment, or hand back an older one, which lists the runners as
 they were then.
 
+## WebRTC signaling
+
+A browser reaches a runner over a WebRTC data channel, and the relay is where
+the two meet (`src/signal.ts`, `src/turn.ts`, ov-1534). Each runner has one
+Durable Object, `Signal`, named by its directory id; the runner holds a
+hibernating WebSocket to it and a browser calls it over HTTPS.
+
+- `GET /v1/rtc/runner` is the runner's WebSocket, with its daemon token. The
+  object is the one for the runner row that token belongs to. A token with no
+  runner row gets 403. A second connection replaces the first.
+- `POST /v1/rtc/open` takes `{runner, device}` and answers
+  `{session, ice_servers}`; the runner is sent the same `ice_servers` first.
+- `POST /v1/rtc/send` takes `{runner, device, message}`: an offer, a
+  candidate or an end. The runner gets the offer with `device {id, account,
+  fingerprints}` added, the device the relay checked.
+- `POST /v1/rtc/poll` takes `{runner, session, after, wait}` and answers
+  `{messages, cursor, ended}`, waiting up to 25 s for a message.
+
+`open` and `send` refuse, with one 404, unless the session's account owns
+`device`, the device is trusted or certified, one of its keys is in the
+runner's last reported `authorized_keys` (the inventory), and the account is
+in the runner's team. `poll` answers only the account that opened the
+session. The relay rebuilds every message from the fields it checked.
+
+TURN credentials are minted per session, for an hour, by Cloudflare's
+credential endpoint with `TURN_KEY_ID` (a var) and `TURN_KEY_API_TOKEN` (a
+secret). The orchestrator sets both. Without either, sessions get Cloudflare's
+STUN only, marked `stun_only: "no_key"`; a failed mint gives
+`stun_only: "refused"`. Neither the key nor a credential is logged.
+
+The suite for this runs on its own (`vitest.signal.config.ts`), because the
+test pool can't isolate storage under a SQLite Durable Object holding a
+WebSocket. `npm test` runs both.
+
 ## Live Activities
 
 A `/v1/notify` that carries a `status` also drives the lock-screen card, on top

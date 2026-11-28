@@ -12,6 +12,11 @@
 //!       The "browser" side in Rust, usable as an ssh ProxyCommand: opens a
 //!       data channel labelled "ssh" and splices it to stdin/stdout.
 //!
+//!   dcspike relay <ws-url> <runner-token> <ssh-target>
+//!       ov-1534: the "runner" on the relay's signaling instead of HTTP. Keeps
+//!       a WebSocket to <ws-url> (`/v1/rtc/runner`), takes each session's
+//!       `ice_servers`, answers its offer, and trickles candidates both ways.
+//!
 //! An ice argument is `url` or `url,username,credential`. POLICY=relay in the
 //! environment forces relayed candidates only.
 use anyhow::{Context, Result, anyhow};
@@ -58,10 +63,25 @@ struct Handler {
     gathered: mpsc::Sender<()>,
     ssh_target: Option<String>,
     started: Instant,
+    /// ov-1534: the session and the relay socket to trickle candidates to.
+    trickle: Option<(String, mpsc::UnboundedSender<serde_json::Value>)>,
 }
 
 #[async_trait::async_trait]
 impl PeerConnectionEventHandler for Handler {
+    async fn on_ice_candidate(&self, event: webrtc::peer_connection::RTCPeerConnectionIceEvent) {
+        let Some((session, out)) = &self.trickle else { return };
+        match event.candidate.to_json() {
+            Ok(init) => {
+                eprintln!("[{:>6} ms] trickle {}", self.started.elapsed().as_millis(), init.candidate);
+                let _ = out.send(serde_json::json!({
+                    "session": session, "type": "candidate",
+                    "candidate": init.candidate, "sdpMid": "0", "sdpMLineIndex": 0,
+                }));
+            }
+            Err(e) => eprintln!("candidate to_json: {e}"),
+        }
+    }
     async fn on_ice_gathering_state_change(&self, state: RTCIceGatheringState) {
         if state == RTCIceGatheringState::Complete {
             let _ = self.gathered.try_send(());
@@ -132,9 +152,17 @@ async fn new_pc(
     ice: &[String],
     ssh_target: Option<String>,
 ) -> Result<(Arc<dyn PeerConnection>, mpsc::Receiver<()>)> {
+    new_pc_with(ice_servers(ice), ssh_target, None).await
+}
+
+async fn new_pc_with(
+    servers: Vec<RTCIceServer>,
+    ssh_target: Option<String>,
+    trickle: Option<(String, mpsc::UnboundedSender<serde_json::Value>)>,
+) -> Result<(Arc<dyn PeerConnection>, mpsc::Receiver<()>)> {
     let mut media = MediaEngine::default();
     let registry = register_default_interceptors(Registry::new(), &mut media)?;
-    let mut cfg = RTCConfigurationBuilder::new().with_ice_servers(ice_servers(ice));
+    let mut cfg = RTCConfigurationBuilder::new().with_ice_servers(servers);
     if std::env::var("POLICY").as_deref() == Ok("relay") {
         cfg = cfg.with_ice_transport_policy(RTCIceTransportPolicy::Relay);
     }
@@ -143,7 +171,7 @@ async fn new_pc(
         .with_configuration(cfg.build())
         .with_media_engine(media)
         .with_interceptor_registry(registry)
-        .with_handler(Arc::new(Handler { gathered: tx, ssh_target, started: Instant::now() }))
+        .with_handler(Arc::new(Handler { gathered: tx, ssh_target, started: Instant::now(), trickle }))
         .with_runtime(default_runtime().ok_or_else(|| anyhow!("no runtime"))?)
         .with_udp_addrs(vec![std::env::var("UDP_BIND").unwrap_or_else(|_| "0.0.0.0:0".into())])
         .build()
@@ -295,6 +323,91 @@ async fn pipe(url: String, ice: Vec<String>) -> Result<()> {
     Ok(())
 }
 
+/// ov-1534: a runner on the relay's signaling WebSocket. One peer connection
+/// per session; servers from the session's `ice_servers`; the answer sent as
+/// soon as it is made and every candidate trickled as it is found.
+async fn relay(ws_url: String, token: String, target: String) -> Result<()> {
+    use futures_util::{SinkExt, StreamExt};
+    use std::collections::HashMap;
+    use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
+
+    let started = Instant::now();
+    let mut req = ws_url.as_str().into_client_request()?;
+    req.headers_mut().insert("authorization", format!("Bearer {token}").parse()?);
+    let (ws, _) = tokio_tungstenite::connect_async(req).await.context("relay websocket")?;
+    eprintln!("[relay] connected to {ws_url}");
+    let (mut sink, mut stream) = ws.split();
+    let (out, mut out_rx) = mpsc::unbounded_channel::<serde_json::Value>();
+    tokio::spawn(async move {
+        while let Some(v) = out_rx.recv().await {
+            if sink.send(Message::Text(v.to_string().into())).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    let mut servers: HashMap<String, Vec<RTCIceServer>> = HashMap::new();
+    let mut pcs: HashMap<String, Arc<dyn PeerConnection>> = HashMap::new();
+    while let Some(frame) = stream.next().await {
+        let Message::Text(text) = frame? else { continue };
+        let m: serde_json::Value = serde_json::from_str(&text)?;
+        let Some(session) = m["session"].as_str().map(str::to_string) else { continue };
+        let ms = started.elapsed().as_millis();
+        match m["type"].as_str().unwrap_or("") {
+            "ice_servers" => {
+                // webrtc-rs takes TURN over UDP only (ov-1502 report §2).
+                let urls: Vec<String> = m["urls"].as_array().into_iter().flatten()
+                    .filter_map(|u| u.as_str())
+                    .filter(|u| !u.starts_with("turns:") && !u.contains("transport=tcp"))
+                    .map(str::to_string).collect();
+                eprintln!("[{ms:>6} ms] {session}: ice_servers {urls:?} stun_only={}", m["stun_only"]);
+                let entry = RTCIceServer {
+                    urls,
+                    username: m["username"].as_str().unwrap_or("").to_string(),
+                    credential: m["credential"].as_str().unwrap_or("").to_string(),
+                    ..Default::default()
+                };
+                servers.insert(session, vec![entry]);
+            }
+            "offer" => {
+                eprintln!("[{ms:>6} ms] {session}: offer from device {}", m["device"]);
+                let ice = servers.get(&session).cloned().unwrap_or_default();
+                let (pc, _gathered) = new_pc_with(ice, Some(target.clone()), Some((session.clone(), out.clone()))).await?;
+                pc.set_remote_description(RTCSessionDescription::offer(m["sdp"].as_str().unwrap_or("").to_string())?).await?;
+                let ans = pc.create_answer(None).await?;
+                pc.set_local_description(ans).await?;
+                let local = pc.local_description().await.context("no local description")?;
+                let _ = out.send(serde_json::json!({ "session": session, "type": "answer", "sdp": local.sdp }));
+                eprintln!("[{:>6} ms] {session}: answer sent", started.elapsed().as_millis());
+                pcs.insert(session, pc);
+            }
+            "candidate" => {
+                let candidate = m["candidate"].as_str().unwrap_or("").to_string();
+                if candidate.is_empty() { continue }
+                if let Some(pc) = pcs.get(&session) {
+                    let init = webrtc::peer_connection::RTCIceCandidateInit {
+                        candidate: candidate.clone(),
+                        sdp_mid: m["sdpMid"].as_str().map(str::to_string),
+                        sdp_mline_index: m["sdpMLineIndex"].as_u64().map(|i| i as u16),
+                        ..Default::default()
+                    };
+                    match pc.add_ice_candidate(init).await {
+                        Ok(()) => eprintln!("[{ms:>6} ms] {session}: remote candidate {candidate}"),
+                        Err(e) => eprintln!("[{ms:>6} ms] {session}: add_ice_candidate: {e}"),
+                    }
+                }
+            }
+            "end" => {
+                eprintln!("[{ms:>6} ms] {session}: end {}", m["reason"]);
+                if let Some(pc) = pcs.remove(&session) { let _ = pc.close().await; }
+            }
+            other => eprintln!("[{ms:>6} ms] {session}: unexpected {other}"),
+        }
+    }
+    eprintln!("[relay] websocket closed");
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
@@ -302,6 +415,7 @@ async fn main() -> Result<()> {
     match a.get(1).map(String::as_str) {
         Some("serve") => serve(a[2].clone(), a[3].clone(), a[4..].to_vec()).await,
         Some("pipe") => pipe(a[2].clone(), a[3..].to_vec()).await,
+        Some("relay") => relay(a[2].clone(), a[3].clone(), a[4].clone()).await,
         _ => Err(anyhow!("usage: dcspike serve <listen> <ssh-target> [ice..] | pipe <url> [ice..]")),
     }
 }

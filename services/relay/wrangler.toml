@@ -111,6 +111,27 @@ database_id = "fe999c45-6f1f-4883-bf09-c1adc88b9e6a"
 binding = "METRICS"
 dataset = "farcooler_events"
 
+# One Durable Object per runner: its WebRTC signaling (ov-1534, src/signal.ts).
+# The runner keeps a hibernating WebSocket to its own object and browsers reach
+# it over HTTPS. NOT inherited, like every binding here, so each environment
+# below repeats it; the migration that creates the class is inherited and is
+# declared once, after this block.
+[[durable_objects.bindings]]
+name = "SIGNAL"
+class_name = "Signal"
+
+# The class's creation, the one Durable Object migration so far. Additive: a
+# new class, SQLite-backed as Cloudflare recommends for every new class (and
+# requires on the free plan), holding nothing that outlives a signaling session.
+#
+# INHERITED, unlike the binding above: wrangler 3.114.17 reads `migrations`
+# through `inheritable()`, so all four relays create the class from this one
+# entry. A tag, once deployed, is history: never edit or remove this entry; a
+# change to the class's storage is a new entry with a new tag.
+[[migrations]]
+tag = "v1-signal"
+new_sqlite_classes = ["Signal"]
+
 [vars]
 WORKOS_CLIENT_ID = "client_01M03MXEFY8BCKCEJCXARCHMMX"
 # The only issuer whose tokens this deployment accepts.
@@ -163,6 +184,12 @@ CHANNEL = "stable"
 #   FCM_SERVICE_ACCOUNT the Google service account JSON, for Android
 #   ANALYTICS_SALT      rotates monthly; see analytics.ts. Without it
 #                       the relay records no metrics and logs an error
+#   TURN_KEY_API_TOKEN  the Cloudflare TURN key's API token (ov-1534), set by
+#                       the orchestrator alone. Its id goes in `vars` as
+#                       TURN_KEY_ID, in the same step: a var set anywhere but
+#                       this file is erased by the next deploy. Without either,
+#                       WebRTC sessions get STUN only, and are told so
+#                       (src/turn.ts)
 #   VISITOR_SECRET      the same value as VISITOR_SECRET on this channel's
 #                       web client Worker and site Worker (services/web and
 #                       services/site wrangler.toml), so the auth limit keys on
@@ -254,6 +281,11 @@ database_id = "853ac487-4ce6-4b0e-8291-1e54c7233eb3"
 binding = "METRICS"
 dataset = "farcooler_events_preview"
 
+# WebRTC signaling (ov-1534); the stable block says why.
+[[env.preview.durable_objects.bindings]]
+name = "SIGNAL"
+class_name = "Signal"
+
 [env.preview.vars]
 WORKOS_CLIENT_ID = "client_01M03MXE27CHCZJJ0TMY7KCMAH"
 # The path form, carrying THIS environment's client id — the line above, again.
@@ -311,6 +343,11 @@ database_id = "9a02931a-1f29-4560-8da2-69af03674f6f"
 [[env.canary.analytics_engine_datasets]]
 binding = "METRICS"
 dataset = "farcooler_events_canary"
+
+# WebRTC signaling (ov-1534); the stable block says why.
+[[env.canary.durable_objects.bindings]]
+name = "SIGNAL"
+class_name = "Signal"
 
 [env.canary.vars]
 WORKOS_CLIENT_ID = "client_01M03MZKRH5ZPR160DATT149WX"
@@ -376,6 +413,11 @@ database_id = "797e5eb9-8e90-4464-9890-3e35494205fe"
 [[env.local.analytics_engine_datasets]]
 binding = "METRICS"
 dataset = "farcooler_events_local"
+
+# WebRTC signaling (ov-1534); the stable block says why.
+[[env.local.durable_objects.bindings]]
+name = "SIGNAL"
+class_name = "Signal"
 
 [env.local.vars]
 WORKOS_CLIENT_ID = "client_01M03N3DFQNDCK819XSRTK2FJD"

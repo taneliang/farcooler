@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url'
 
 import { defineWorkersConfig, readD1Migrations } from '@cloudflare/vitest-pool-workers/config'
+import { configDefaults } from 'vitest/config'
 
 // Tests run INSIDE workerd, against a real D1, not against mocks.
 //
@@ -14,7 +15,18 @@ import { defineWorkersConfig, readD1Migrations } from '@cloudflare/vitest-pool-w
 // direction that matters here: this service's rule is that migrations are
 // additive, and a test that builds the final shape in one statement can never
 // catch an ALTER that does not apply on top of what is already deployed.
-export default defineWorkersConfig(async () => {
+//
+// Two runs, one config. Every suite but one runs with isolated storage, each
+// test starting from the database the one before it found. The exception is
+// `test/signal.test.ts` (ov-1534): a runner's signaling lives in a
+// SQLite-backed Durable Object holding a hibernating WebSocket, and this pool
+// can't pop isolated storage under either ("Expected .sqlite, got
+// ….sqlite-shm"; see the pool's known issues). That suite runs alone, from
+// `vitest.signal.config.ts`, with isolation off; every test in it builds its
+// own runners, so none reads another's. `npm test` runs both.
+export const SIGNAL_SUITE = 'test/signal.test.ts'
+
+export async function relayTestConfig({ isolated }: { isolated: boolean }) {
   const migrations = await readD1Migrations(fileURLToPath(new URL('./migrations', import.meta.url)))
 
   return {
@@ -28,10 +40,17 @@ export default defineWorkersConfig(async () => {
     // it.
     server: { fs: { allow: [fileURLToPath(new URL('../..', import.meta.url))] } },
     test: {
+      ...(isolated ? { exclude: [...configDefaults.exclude, SIGNAL_SUITE] } : { include: [SIGNAL_SUITE] }),
       setupFiles: ['./test/migrations.ts'],
       poolOptions: {
         workers: {
           singleWorker: true,
+          isolatedStorage: isolated,
+          // The entry module, so workerd can find the `Signal` Durable Object
+          // class it exports (ov-1534): a binding to a class in this worker
+          // needs the worker named. Tests still import `../src/index` and call
+          // its `fetch` with `env`, exactly as before.
+          main: './src/index.ts',
           miniflare: {
             // Not the real wrangler.toml: that one names a D1 database by id and
             // declares a rate-limit binding, neither of which exists locally. The
@@ -42,6 +61,11 @@ export default defineWorkersConfig(async () => {
             // applies the migrations to it one file at a time and compares the
             // schema after each, which DB (migrated once, up front) can't show.
             d1Databases: ['DB', 'SCRATCH'],
+            // One object per runner, its WebRTC signaling (`src/signal.ts`).
+            // No TURN key in the suite's bindings: a relay without one is the
+            // default, and `test/signal.test.ts` hands its routes a key, and a
+            // fake Cloudflare, per test.
+            durableObjects: { SIGNAL: 'Signal' },
             analyticsEngineDatasets: { METRICS: { dataset: 'farcooler_events' } },
             bindings: {
               TEST_MIGRATIONS: migrations,
@@ -139,4 +163,6 @@ export default defineWorkersConfig(async () => {
       },
     },
   }
-})
+}
+
+export default defineWorkersConfig(() => relayTestConfig({ isolated: true }))
