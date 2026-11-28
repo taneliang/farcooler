@@ -10,6 +10,15 @@ pub fn install_root(home: &Path) -> PathBuf {
     home.join(".local/share/farcooler-runner-canary")
 }
 
+/// Whether this account's runner is the standalone one: the installer's
+/// release pointer is there. `FARCOOLER_HOME` selects another runtime.
+pub fn is_installed() -> bool {
+    farcooler_protocol::CHANNEL == farcooler_protocol::Channel::Canary
+        && std::env::var_os("FARCOOLER_HOME").is_none()
+        && std::env::var_os("HOME")
+            .is_some_and(|home| install_root(Path::new(&home)).join("current").is_symlink())
+}
+
 /// True when launchd owns startup. An updater holding the exclusive lock
 /// will start the job itself, so clients can wait for the socket. If the job
 /// has yet to load, clients can use their ordinary on-demand startup.

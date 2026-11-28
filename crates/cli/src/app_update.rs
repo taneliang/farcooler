@@ -80,6 +80,10 @@ pub(crate) async fn app(runner: Option<&str>, cmd: AppCmd, json: bool) -> crate:
     }
     let socket = socket_path()?;
     let names = Names::of(CHANNEL);
+    let standalone = farcooler_daemon_contracts::standalone_macos::is_installed();
+    if let Some(said) = standalone_instead(&socket, &names, standalone).await {
+        return Err(said.into());
+    }
     match cmd {
         AppCmd::Update { no_relaunch, launch, wait } => {
             let report = request_update(&socket, &names, launch, !no_relaunch, wait).await?;
@@ -92,6 +96,20 @@ pub(crate) async fn app(runner: Option<&str>, cmd: AppCmd, json: bool) -> crate:
         }
     }
     Ok(())
+}
+
+/// What to say in place of asking an app that isn't answering, on a Mac with
+/// the standalone runner (ov-1488). Never `--launch`: an app that opens runs
+/// `daemon ensure`, which replaces the standalone runner with its own.
+async fn standalone_instead(socket: &Path, names: &Names, installed: bool) -> Option<String> {
+    if !installed || Conn::open(socket).await.is_ok() {
+        return None;
+    }
+    Some(format!(
+        "This Mac runs the standalone runner. Run `{cli} runner update` to check for a newer build and install it, \
+         or `{cli} status` to see what's running. Don't open {app}: it would replace the standalone runner",
+        cli = names.cli, app = names.app
+    ))
 }
 
 /// Where this channel's app listens: beside its daemon's socket, so

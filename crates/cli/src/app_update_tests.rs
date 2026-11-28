@@ -115,6 +115,21 @@ async fn an_app_on_the_newest_build_says_so() {
 }
 
 #[tokio::test]
+async fn a_mac_on_the_standalone_runner_is_sent_to_runner_update_instead_of_the_app() {
+    let dir = tempfile::tempdir().unwrap();
+    let closed = dir.path().join("app.sock");
+    let names = canary();
+    let said = standalone_instead(&closed, &names, true).await.expect("a closed app, standalone installed");
+    assert!(said.contains("`farcooler-canary runner update`"), "{said}");
+    assert!(!said.contains("--launch"), "opening the app would take the runner back: {said}");
+    assert_eq!(standalone_instead(&closed, &names, false).await, None);
+
+    // An app that is open still answers for itself.
+    let app = FakeApp::start(vec![vec![]]);
+    assert_eq!(standalone_instead(&app.socket, &names, true).await, None);
+}
+
+#[tokio::test]
 async fn a_busy_landing_refuses_an_update_unless_the_caller_asks_to_wait() {
     let app = FakeApp::start(vec![vec![
         serde_json::json!({ "event": "upToDate", "app": about("2329", "8476e3b", 10) }),

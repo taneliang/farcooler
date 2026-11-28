@@ -94,6 +94,11 @@ launchctl print "user/$(id -u)/com.farcooler.daemon.canary.standalone"
 ~/.local/bin/farcooler-canary runner update --wait
 ```
 
+`runner update` is the whole check-and-install step: it reads the signed
+feed and says when the build is already current. `app version` and
+`app update` ask the Mac app, so on a standalone Mac they send you to
+`runner update`.
+
 An update waits for the runner's existing landing checks and pushes only
 when you pass `--wait`. The new build starts with the same database,
 install identity, and tmux server. The updater reloads its LaunchAgents
