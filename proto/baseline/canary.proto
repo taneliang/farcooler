@@ -1,8 +1,4 @@
-// Shipped by Canary at 63374831f3903403f60dcc35c6f1f1b04a1e383a. Written by canary-baseline.yml; see scripts/proto-lint.py.
-// Manual recovery (ov-1317): next_after never shipped. This existing main
-// anchor excludes the unshipped rename interval and survives cherry-pick landing.
-// The snapshot restores next_page_after on tag 3, as originally added in
-// 60ddb56c71, and is additive against the last shipped baseline (4a0fee927).
+// Shipped by Canary at 5960d575a084d12df5884f2409927f80d249933a. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -21,14 +17,14 @@ message WireEnvelope {
   uint32 protocol_version = 1;
   bytes message_id = 2; // UUIDv7, 16 bytes
 
+  reserved 15, 16;
+
   oneof body {
     ClientHello client_hello = 10;
     ServerHello server_hello = 11;
     Request request = 12;
     Response response = 13;
     Event event = 14;
-    SnapshotChunk snapshot_chunk = 15;
-    TerminalFrame terminal_frame = 16;
   }
 }
 
@@ -36,6 +32,9 @@ message ClientHello {
   repeated uint32 supported_protocol_versions = 1;
   string client_name = 2;
   string client_version = 3;
+  // A random, per-app-process UUID for a native client that uses several
+  // connections. The runner also requires the same authenticated principal.
+  bytes writer_client_instance = 4;
 }
 
 message ServerHello {
@@ -151,6 +150,7 @@ message Request {
     // now, so there is nothing for a client to import. The tag is retired
     // rather than reused.
     TerminalWrite terminal_write = 31;
+    TerminalWriterRequest terminal_writer = 651;
     TerminalScreenRequest terminal_screen_request = 32;
     // 33 was SetPaneMode, and 37 and 40-45 the chat pane's mode, model,
     // config, queue and adapter payloads. Chat mode was retired (ov-377): an
@@ -217,6 +217,7 @@ message Request {
     TaskWorkerSet task_worker_set = 132;
     // Raise what is read on a board (ov-113), behind `board_reads`.
     WorkspaceMarkRead workspace_mark_read = 133;
+    TaskReorder task_reorder = 134;
     // A worktree's files, read-only (ov-189), behind `worktree_files`. Tags
     // from 150, for 120's reason.
     WorktreeDirRequest worktree_dir = 150;
@@ -233,14 +234,7 @@ message Request {
     BoardThemeUpdate board_theme_update = 162;
     BoardThemeCards board_theme_cards = 163;
     PlanEventsRequest plan_events = 169;
-    // Orchestrator pages (ov-269), behind `board_pages`: a document of typed
-    // blocks per slot. Experimental: it may be withdrawn, and 170-179 are
-    // reserved for it so withdrawing it never frees a tag for another meaning.
-    PageListRequest page_list = 170;
-    PageGetRequest page_get = 171;
-    PageSet page_set = 172;
-    PageRemove page_remove = 173;
-    PageStatsRequest page_stats = 174;
+    BoardThemeListRequest board_theme_list = 630;
     // Decided for you (ov-304), the plan layer's rulings, behind
     // `board_rulings`. Experimental with the layer: 180-189 are theirs, the
     // rest held by `reserved` below, so withdrawing them never frees a tag for another meaning. Read
@@ -269,6 +263,9 @@ message Request {
     // `agent.image` (ov-454), behind `agent_images`. 451-459 are held by
     // `reserved` below.
     AgentImageRequest agent_image = 450;
+    // `agent.file` (ov-1509), behind `agent_files`. 661-669 are held by
+    // `reserved` below.
+    AgentFileRequest agent_file = 660;
     // People and their reps (ov-494), behind `representatives`. 463-469 are
     // held by `reserved` below. `member.list` takes no payload.
     MemberSet member_set = 460;
@@ -350,7 +347,13 @@ message Request {
     // Fixed, owner-authorized workspace check-ins (ov-892).
     CheckInEnable check_in_enable = 620;
     CheckInHoldResolve check_in_hold_resolve = 621;
+    // `link.ending` (ov-1513): why a client is about to end the link, for the
+    // runner's log. The transport files it and answers nothing. 671-679 are
+    // its block.
+    LinkEnding link_ending = 670;
   }
+  reserved 170 to 179;
+  reserved "page_list", "page_get", "page_set", "page_remove", "page_stats";
   // Chat mode's payloads (ov-377).
   reserved 33, 37, 40 to 45, 63;
   reserved "set_pane_mode", "agent_set_mode", "agent_set_model", "agent_set_config",
@@ -372,6 +375,8 @@ message Request {
   reserved 431 to 439;
   // The rest of prompt images' block (ov-454).
   reserved 451 to 459;
+  // The rest of sent files' block (ov-1509).
+  reserved 661 to 669;
   // The rest of people's block (ov-494).
   reserved 463 to 469;
   // The rest of the repository survey's block (ov-519).
@@ -405,6 +410,8 @@ message Request {
   reserved 605, 606, 607 to 609;
   // The rest of `agent.stop`'s block (ov-872).
   reserved 611 to 619;
+  // The rest of `link.ending`'s block (ov-1513).
+  reserved 671 to 679;
 }
 
 // Closed JSON v1 contract: crates/protocol/src/workflow_commands.rs.
@@ -459,6 +466,7 @@ message Result {
     Operation operation = 10;
     DaemonVersion daemon_version = 11;
     TerminalAttachResult terminal_attach = 12;
+    TerminalWriterState terminal_writer = 651;
     BranchList branch_list = 13;
     PaneGroupList pane_group_list = 14;
     DiscoveredWorktreeList discovered_worktree_list = 15;
@@ -511,14 +519,7 @@ message Result {
     BoardThemeView board_theme_view = 160;
     Plan plan = 162;
     PlanEventList plan_event_list = 163;
-    // Orchestrator pages (ov-269), behind `board_pages`. `page.list` answers
-    // with the list, `page.get` and `page.remove` with the page, `page.set`
-    // with the page and whether the write changed it, and `page.stats` with
-    // how each slot has been published.
-    BoardPageList board_page_list = 170;
-    BoardPage board_page = 171;
-    PageSetResult page_set_result = 172;
-    PageStatsList page_stats_list = 173;
+    BoardThemeList board_theme_list = 630;
     // `ruling.add` and `ruling.set`, behind `board_rulings`: the ruling.
     BoardRuling board_ruling = 180;
     // `repository.landing` (ov-313), behind `landing`: what the runner read of
@@ -546,6 +547,9 @@ message Result {
     MessageSent message_sent = 430;
     // `agent.image` (ov-454), behind `agent_images`: a piece of one image.
     AgentImage agent_image = 450;
+    // `agent.file` (ov-1509), behind `agent_files`: a piece of one sent file,
+    // in the shape of an image's piece. `mime_type` is by its extension.
+    AgentImage agent_file = 660;
     // `member.list`, `member.set` and `member.remove` (ov-494), behind
     // `representatives`: everyone on the runner. `rep.start`: the rep.
     MemberList member_list = 460;
@@ -597,6 +601,8 @@ message Result {
     CheckInStatus check_in_status = 620;
     CheckInHoldList check_in_hold_list = 621;
   }
+  reserved 170 to 179;
+  reserved "board_page_list", "board_page", "page_set_result", "page_stats_list";
   // `adapter.*`'s results (ov-377).
   reserved 21, 22;
   reserved "adapter_list", "adapter_test_result";
@@ -620,6 +626,7 @@ message Result {
   reserved 431 to 439;
   // The rest of prompt images' block (ov-454).
   reserved 451 to 459;
+  reserved 661 to 669;
   // The rest of people's block (ov-494).
   reserved 462 to 469;
   // The rest of the repository survey's block (ov-519).
@@ -691,6 +698,21 @@ message AgentImageRequest {
   // Which of the row's `images`, from 0.
   uint32 index = 3;
   uint64 offset = 4;
+}
+
+// `agent.file` (ov-1509): one file the agent sent with `SendUserFile`, from
+// its tool row's `sent.files`, a piece at a time like `agent.image`. It is
+// named by row and place only: a request carries no path, and the runner
+// reads none but what the transcript says was delivered.
+message AgentFileRequest {
+  bytes terminal_id = 1;
+  // The `Tool` row's id, `tool:<tool_use_id>`.
+  string row_id = 2;
+  // Which of the row's `sent.files`, from 0.
+  uint32 index = 3;
+  uint64 offset = 4;
+  // A subagent's own row, as `AgentRowsPage.agent_id`.
+  string agent_id = 5;
 }
 
 // A piece of one image, at most `MAX_AGENT_IMAGE_CHUNK` bytes.
@@ -1111,10 +1133,6 @@ message Event {
     // open re-reads `plan.get`; one without it ignores this. A runner without
     // the capability never sends it.
     PlanChanged plan_changed = 27;
-    // A page on a board was written or removed (ov-269), behind `board_pages`.
-    // A client with that page open re-reads the slot; one without pages open
-    // ignores it. Not `task_changed`: nothing about a task moved.
-    PagesChanged pages_changed = 28;
     // This runner has taken this device's access away (ov-820): it was
     // revoked, or released from its member. The last frame on a connection
     // the runner is closing for that reason, sent to that connection alone,
@@ -1124,7 +1142,12 @@ message Event {
     // same as a runner that is asleep. A device offline at the time never gets
     // it. A client keeps it for this runner until a dial gets in again.
     Empty device_released = 29;
+    TerminalWriterLost terminal_writer_lost = 30;
+    // A lease changed on a terminal this connection opted into with WATCH.
+    TerminalWriterChanged terminal_writer_changed = 31;
   }
+  reserved 28;
+  reserved "pages_changed";
 }
 
 // One task notice, as the runner decided, worded and named it (ov-94). The
@@ -1164,22 +1187,9 @@ message Notice {
   string author = 13;
 }
 
-message SnapshotChunk {
-  oneof kind {
-    SnapshotBegin begin = 1;
-    SnapshotEnd end = 2;
-    Event resource = 3;
-  }
-}
-
-message SnapshotBegin {
-  bytes snapshot_id = 1;
-  google.protobuf.Timestamp generated_at = 2;
-}
-
-message SnapshotEnd {
-  bytes snapshot_id = 1;
-}
+message SnapshotChunk { reserved 1 to 3; }
+message SnapshotBegin { reserved 1 to 2; }
+message SnapshotEnd { reserved 1; }
 
 // ---------------------------------------------------------------------------
 // Terminal channel
@@ -1192,12 +1202,10 @@ message TerminalFrame {
   bytes terminal_id = 1;
   uint64 epoch = 2;
 
+  reserved 11 to 14;
+
   oneof kind {
     TerminalOutput output = 10;
-    TerminalInput input = 11;
-    TerminalInputAck input_ack = 12;
-    TerminalResizeFrame resize = 13;
-    FlowAck flow_ack = 14;
     Gap gap = 15;
   }
 }
@@ -1207,25 +1215,10 @@ message TerminalOutput {
   bytes payload = 2;
 }
 
-message TerminalInput {
-  uint64 lease_generation = 1;
-  uint64 client_input_id = 2;
-  bytes payload = 3;
-}
-
-message TerminalInputAck {
-  uint64 client_input_id = 1;
-}
-
-message TerminalResizeFrame {
-  uint32 columns = 1;
-  uint32 rows = 2;
-  uint64 view_activity_id = 3;
-}
-
-message FlowAck {
-  uint64 acked_sequence = 1; // one past the highest contiguous byte applied
-}
+message TerminalInput { reserved 1 to 3; }
+message TerminalInputAck { reserved 1; }
+message TerminalResizeFrame { reserved 1 to 3; }
+message FlowAck { reserved 1; }
 
 message Gap {
   uint64 resumed_at_sequence = 1;
@@ -1921,6 +1914,15 @@ message Terminal {
   // the names here are cleaned and cut and no longer match what the rows
   // say. Empty from a runner before it (ov-619).
   repeated string subagent_ids = 50;
+
+  // Why this caller's `terminal.restart` of this terminal would be refused
+  // for who they are, in that refusal's own word (ov-1491): `not_lead` for
+  // another's orchestrator, `not_yours` for another person's lane or rep. So
+  // an app disables Restart and says why. Per caller, as `activity` is, and
+  // set on `terminal.list` and a terminal reply, never on an event. Absent
+  // when the runner would take it, and from a runner before it. Scope is not
+  // in it: a caller below `control` restarts nothing.
+  optional string restart_refusal = 51;
 }
 
 // The person a pane's Claude login belongs to. Names them rather than
@@ -2168,6 +2170,14 @@ message DaemonVersion {
 message Empty {}
 
 message TypedConfirmation { string typed_confirmation = 1; }
+
+// `cause` is one of "probe-timeout", "silence", "socket-close", "sign-out"
+// (`farcooler_protocol::link_ending`); a runner drops any other word.
+// `idle_ms` is how long the client had heard nothing when it decided.
+message LinkEnding {
+  string cause = 1;
+  uint64 idle_ms = 2;
+}
 
 message RepositoryRootAdd {
   string absolute_path = 1;
@@ -2449,6 +2459,36 @@ message TerminalScreen {
 // the way would have to know the terminal's mode to get them right.
 message TerminalWrite {
   bytes payload = 1;
+}
+
+// The target terminal and any expected generation are on the request envelope.
+message TerminalWriterRequest {
+  enum Action {
+    STATUS = 0;
+    CLAIM = 1;
+    TAKE_OVER = 2;
+    RELEASE = 3;
+    // Claim and receive invalidations on this connection until RELEASE.
+    WATCH = 4;
+  }
+  Action action = 1;
+}
+
+message TerminalWriterChanged {
+  bytes terminal_id = 1;
+}
+
+message TerminalWriterState {
+  // Only the writer receives a generation for use in input requests.
+  optional uint64 generation = 1;
+  // A stable reason for the viewer, or empty when this client owns the lease.
+  string reason = 2;
+  bool occupied = 3;
+}
+
+message TerminalWriterLost {
+  bytes terminal_id = 1;
+  uint64 generation = 2;
 }
 
 // One chunk of a file on its way to a terminal.
@@ -2971,6 +3011,11 @@ message FileDiff {
   // The commit had more than one parent and this is its first-parent view.
   bool first_parent_of_merge = 6;
   uint64 change_set_version = 7;
+  // Git identities of the change set used to choose the comparison. These
+  // survive concurrent refreshes of the runner's cache generation.
+  string base_commit = 8;
+  string head_commit = 9;
+  string worktree_digest = 10;
 }
 
 // ---------------------------------------------------------------------------
@@ -3096,11 +3141,7 @@ message StackGet {
   string branch = 2;
 }
 
-message StackSetParent {
-  bytes repository_id = 1;
-  string branch = 2;
-  string parent_branch = 3;
-}
+message StackSetParent { reserved 1 to 3; }
 
 message PrRefresh { bytes repository_id = 1; }
 
@@ -3659,9 +3700,8 @@ enum TaskWaitKind {
   TASK_WAIT_KIND_PARKED = 4;
 }
 
-// Which line. AGENT is for tasks not yet started (backlog, todo): the order
-// they get a free agent in. BUILD is for tasks started (in progress, in
-// review) that wait for the one build slot.
+// Which manual line. AGENT takes Backlog and To Do. BUILD takes In Progress
+// and In Review. Both follow board order.
 enum TaskLine {
   TASK_LINE_UNSPECIFIED = 0;
   TASK_LINE_AGENT = 1;
@@ -3683,8 +3723,8 @@ message TaskWait {
   TaskWaitKind kind = 1;
   // IN_LINE: which line.
   TaskLine line = 2;
-  // IN_LINE, derived on every read: 1 is next. Counts only the tasks in the
-  // same line on the same board whose status fits the line.
+  // IN_LINE, derived from board order. Counts only the tasks in the same
+  // manual line whose status fits. Engine slot positions use workflow.get.
   uint32 position = 3;
   // IN_LINE, derived: the keys of the first three tasks in the line ahead
   // of this one, in line order (all of them, when fewer).
@@ -3945,6 +3985,8 @@ message TaskCreate {
   // `Request.required_capabilities` by a client that sets it: an older daemon
   // drops the field and files the task on the repository's only board.
   optional bytes workspace_id = 9;
+  // File the new card in this workspace theme atomically.
+  optional bytes theme_id = 10;
 }
 
 // Revise what is currently understood. The mutable half of the design.
@@ -4047,8 +4089,7 @@ message TaskBlockSet {
 //
 // For a task that hasn't started. A TODO task held or parked moves to
 // BACKLOG in the same write: a held task isn't ready. A task that has
-// started is refused (`wait_status`); a started task waits in the build
-// line, `task.set_line`. IN_LINE is refused here too (`kind`): a line is
+// started is refused (`wait_status`). IN_LINE is refused here too (`kind`): a line is
 // set whole. UNSPECIFIED clears whatever wait the task has, a place in a
 // line included. Answers with the task.
 //
@@ -4067,13 +4108,12 @@ message TaskSetWait {
   string actor = 5;
 }
 
-// Replace one of a board's lines, whole, in order: the first task is next.
-// `task.set_line`, behind `task_waits`.
-//
-// Whole rather than one task at a time, because the line is what goes
-// stale: a task in it that isn't named here loses its place. A task named
-// here loses any other wait it had. An empty list empties the line. Answers
-// with the line's tasks in order.
+// `task.set_line`, behind `task_waits`: move the named cards to the front
+// of the board in the given order and replace manual line membership.
+// A manually managed card named here loses any other wait it had. An empty
+// list clears manual membership and preserves board order. Engine-owned
+// runs use the board order and report slot positions through `workflow.get`.
+// Answers with the named tasks.
 //
 // Refusals, as `Error.what`:
 //   `line`           no line named
@@ -4292,6 +4332,16 @@ message WorkspaceSetSettings {
   // agent's pane (`person_only`).
   optional bool pr_nudge = 8;
   optional uint32 pr_nudge_hours = 9;
+}
+
+// `task.reorder`: place a task before or after a card on its board.
+message TaskReorder {
+  bytes task_id = 1;
+  oneof placement {
+    bytes before = 2;
+    bytes after = 3;
+  }
+  string actor = 4;
 }
 
 // `task.move`: put tasks on another board in the same repository. All or
@@ -4901,6 +4951,10 @@ message TicketRun {
   string gate = 4;
   // Who decides, with a gate.
   string gate_principal = 5;
+  // The failed step, its verdict, and the receipt when available.
+  optional string reason = 6;
+  // The latest refused send-back for this step's run.
+  optional string send_back_refused = 7;
 }
 
 // A ticket an agent works now.
@@ -4971,12 +5025,14 @@ message PlanCard {
 message Plan {
   // The runner's clock, so ages and `stale` agree across devices.
   int64 now_ms = 1;
+  // In a paged read, a theme can appear in consecutive fragments with the
+  // same ID and disjoint task_ids. Append the IDs in order.
   repeated BoardThemeView themes = 2;
   // Lanes, their order, coverage, trains, the agents and their spend, and
   // whom to ask about a lane, until ov-872 replaced them with the fields
   // from 16 on.
   reserved 3, 4, 6, 8, 12, 13, 15;
-  // Every card any theme, ticket or landing names, once.
+  // Cards named by the visible rows, once per read.
   repeated PlanCard cards = 5;
   // Decided for you (ov-304), behind `board_rulings`: every standing ruling,
   // newest first, then the confirmed (said "kept" to the owner, ov-333) and
@@ -4984,10 +5040,9 @@ message Plan {
   // when the request said so. Empty from a runner without the capability.
   repeated BoardRuling rulings = 7;
   // What the runner last read of CI for each subject the board names: its
-  // landings' pushed SHAs and its pages' CI references (ov-306).
+  // landing groups' pushed SHAs.
   repeated BoardCiRead ci = 9;
-  // How many of the board's cards are in each status, every card counted
-  // (ov-306): what a page's card-count references draw.
+  // How many of the board's cards are in each status.
   PlanStatusCounts board_counts = 10;
   // The week's tokens and the harness and model comparison (ov-307). Behind
   // `board_cost`; unset without it.
@@ -5018,6 +5073,25 @@ message Plan {
   // asks someone or has been reviewed, and one with nobody to suggest, is left
   // out; so is every ticket below Control scope (these are GitHub logins).
   repeated TicketReviewers suggested_reviewers = 20;
+  // Open cards with no theme, including cards outside the plan.
+  optional uint64 unthemed_open = 21;
+  // Present when a paged overview or detail read has more records.
+  optional uint32 next_offset = 22;
+  // A single-response caller received a reduced overview because of the frame
+  // limit. The complete live overview is available with overview_offset.
+  bool overview_truncated = 23;
+  // A fingerprint of the paged result, independent of now_ms. Restart at
+  // offset zero if this changes between pages.
+  optional fixed64 page_revision = 24;
+  // A paged read can carry a chunk of an oversized row instead of complete rows.
+  PlanRowChunk row_chunk = 25;
+}
+
+message PlanRowChunk {
+  // Concatenate these bytes across consecutive pages, then merge the result
+  // into Plan. The result encodes a Plan containing just the oversized row.
+  bytes data = 1;
+  bool last = 2;
 }
 
 // One reviewer pull requests of a board are waiting on (ov-579).
@@ -5093,11 +5167,44 @@ message HarnessModelCost {
   optional int64 cost_micros = 5;
 }
 
+// A bounded page of workspace theme names, ordered by id.
+message BoardThemeListRequest {
+  bytes workspace_id = 1;
+  bytes after_id = 2;
+}
+message BoardThemeName { bytes id = 1; string name = 2; }
+message BoardThemeList { repeated BoardThemeName themes = 1; }
+
 // `plan.get`, at `read`.
 message PlanGetRequest {
   bytes workspace_id = 1;
   // Include every finished ticket and landing, not only the last week's.
   bool include_closed = 2;
+  // Opt in to byte-bounded detail pages. Older callers omit this.
+  PlanDetailRead detail = 3;
+  // Opt in to paging the recent overview. Start at zero and follow
+  // Plan.next_offset. Omit detail and leave include_closed false.
+  optional uint32 overview_offset = 4;
+}
+
+// A page of Plan rows. An unset subject reads across all sections.
+message PlanDetailRead {
+  uint32 offset = 1;
+  oneof subject {
+    // Exact name, short ID or name prefix. Empty matches all themes.
+    string theme_name = 2;
+    // A single landing, or every landing when the number is absent.
+    PlanLandingQuery landings = 3;
+    PlanTicketQuery tickets = 4;
+  }
+}
+
+message PlanLandingQuery {
+  optional uint32 number = 1;
+}
+
+message PlanTicketQuery {
+  repeated string keys = 1;
 }
 
 // `board_theme.create`, at `control`. A card already in another theme moves.
@@ -5167,9 +5274,8 @@ message TicketLineSet {
   string actor = 11;
 }
 
-// `line.order`, at `control`: set the plan whole. These waiting tickets in
-// this order, next up first, and every other ticket out of it. Answers with
-// the new `Plan`.
+// `line.order`, at `control`: move the named waiting tickets to the front
+// of the board and replace the plan's membership. Answers with the new `Plan`.
 message LineOrder {
   bytes workspace_id = 1;
   repeated bytes task_ids = 2;
@@ -5994,6 +6100,8 @@ message Landing {
   int64 phase_since = 20;
   // What its lander has spent; zero without one.
   Spend spend = 21;
+  // Why the workflow group failed.
+  optional string reason = 22;
 }
 
 enum BoardCiStatus {
@@ -6042,157 +6150,57 @@ message BoardCiRead {
   int64 asked_at = 8;
 }
 
-// `landing.start`, at `control`: a landing with these tickets, open. The
-// board's collecting landing is adopted when it has one: it keeps its number,
-// carries exactly the tickets listed, and stops collecting.
-message LandingStart {
-  bytes workspace_id = 1;
-  LandingRoute route = 2;
-  string base = 3;
-  repeated bytes task_ids = 4;
-  string title = 5;
-  optional bytes lander_id = 6;
-  string actor = 7;
-  // The runner runs the landing (ov-872): the charter's `## Landing` section
-  // chooses each ticket's route, and the push route is folded, gated, pushed
-  // and watched to landed by the runner's landing job. `route` is ignored.
-  // Refused `no_landing_rules` when the charter has no such section.
-  bool run = 8;
-  // With `run`: you said to land tickets the charter asked about. Only a
-  // person says it, never an agent (`land_is_yours`).
-  bool land = 9;
-}
+message LandingStart { reserved 1 to 9; }
+message LandingSet { reserved 1 to 9; }
 
-// `landing.set`, at `control`: move it, rebase it, record what it pushed,
-// name its lander, and put tickets on or off it. A new SHA without a state
-// moves it to pushed.
-message LandingSet {
-  bytes landing_id = 1;
-  LandingState state = 2;
-  optional string base = 3;
-  optional string sha = 4;
-  repeated bytes add_task_ids = 5;
-  repeated bytes remove_task_ids = 6;
-  optional string title = 7;
-  optional bytes lander_id = 8;
-  string actor = 9;
-}
-
-// ---------------------------------------------------------------------------
-// Orchestrator pages (ov-269)
-//
-// A page is a small JSON document of typed blocks that the apps draw natively
-// (`farcooler_core::page_doc` is its one definition, and `test/fixtures/pages/`
-// holds it to Swift and Kotlin). One page per slot per board. Behind the
-// `board_pages` capability, which is EXPERIMENTAL and may be withdrawn: no task
-// and nothing in the plan layer refers to it, and a page names cards, lanes and
-// themes by text.
-//
-// Read at `read`, written at `control`. A page is free text, so the runner
-// can't redact it: everyone who can read the board can read it, as with a task
-// note.
-// ---------------------------------------------------------------------------
-
+// Retired Pages messages keep their wire field numbers and names reserved.
 message BoardPage {
-  bytes id = 1;
-  string slot = 2;
-  string title = 3;
-  // One line for the page's row in an overview.
-  string summary = 4;
-  // Empty, or `theme`.
-  string anchor_kind = 5;
-  // The theme's id, as text, when anchored. Never a key into the plan layer:
-  // a client that can't find the theme draws the page in the board's list.
-  string anchor = 6;
-  // The validated, normalized document. Empty in a list asked for without
-  // documents.
-  string doc_json = 7;
-  // Counts the writes that changed the page, from 1.
-  uint64 revision = 8;
-  uint32 ordinal = 9;
-  string actor = 10;
-  // When the page last changed, in Unix milliseconds.
-  int64 updated_at_ms = 11;
+  reserved 1 to 11;
+  reserved "id", "slot", "title", "summary", "anchor_kind", "anchor", "doc_json", "revision", "ordinal", "actor", "updated_at_ms";
 }
-
-message BoardPageList { repeated BoardPage pages = 1; }
-
-// `page.list`, at `read`. With documents the answer is at most 12 pages of 32
-// KiB, which fits a control envelope.
+message BoardPageList {
+  reserved 1;
+  reserved "pages";
+}
 message PageListRequest {
-  bytes workspace_id = 1;
-  bool with_docs = 2;
+  reserved 1, 2;
+  reserved "workspace_id", "with_docs";
 }
-
-// `page.get`, at `read`.
 message PageGetRequest {
-  bytes workspace_id = 1;
-  string slot = 2;
+  reserved 1, 2;
+  reserved "workspace_id", "slot";
 }
-
-// `page.set`, at `control`: validate, normalize and replace the slot whole.
-// Identical bytes are no change, and nothing is announced.
 message PageSet {
-  bytes workspace_id = 1;
-  string slot = 2;
-  string doc_json = 3;
-  // Absent leaves the anchor as it is (none, for a new page); present and
-  // empty takes the page off its theme; otherwise the theme's id.
-  optional bytes anchor_theme_id = 4;
-  // Where it sorts. Absent keeps its place, or puts a new page last.
-  optional uint32 ordinal = 5;
-  // Refuse when the page's revision isn't this (0 for a slot with no page).
-  optional uint64 if_revision = 6;
-  string actor = 7;
+  reserved 1 to 7;
+  reserved "workspace_id", "slot", "doc_json", "anchor_theme_id", "ordinal", "if_revision", "actor";
 }
-
 message PageSetResult {
-  BoardPage page = 1;
-  // False when the same bytes, anchor and place were already there.
-  bool changed = 2;
+  reserved 1, 2;
+  reserved "page", "changed";
 }
-
-// `page.remove`, at `control`. Answers with the page it removed.
 message PageRemove {
-  bytes workspace_id = 1;
-  string slot = 2;
-  string actor = 3;
+  reserved 1 to 3;
+  reserved "workspace_id", "slot", "actor";
 }
-
-// `page.stats`, at `read`: how each slot has been published, from the log,
-// which keeps shapes and never content.
 message PageStatsRequest {
-  bytes workspace_id = 1;
-  int64 since_ms = 2;
+  reserved 1, 2;
+  reserved "workspace_id", "since_ms";
 }
-
-message PageStatsList { repeated PageSlotStats slots = 1; }
-
+message PageStatsList {
+  reserved 1;
+  reserved "slots";
+}
 message PageSlotStats {
-  string slot = 1;
-  uint32 sets = 2;
-  uint32 removes = 3;
-  int64 first_at_ms = 4;
-  int64 last_at_ms = 5;
-  // Block and reference counts over its writes, by name: `table`, `list`,
-  // `ref-lane`, `ref-task`.
-  repeated PageShapeCount shape = 6;
+  reserved 1 to 6;
+  reserved "slot", "sets", "removes", "first_at_ms", "last_at_ms", "shape";
 }
-
 message PageShapeCount {
-  string kind = 1;
-  uint32 count = 2;
+  reserved 1, 2;
+  reserved "kind", "count";
 }
-
-// A page on a board changed; see `Event.pages_changed`.
 message PagesChanged {
-  bytes workspace_id = 1;
-  string slot = 2;
-  // The page's revision after the write; the last one it had when removed.
-  uint64 revision = 3;
-  // As `TaskChanged.actor`.
-  string actor = 4;
-  bool removed = 5;
+  reserved 1 to 5;
+  reserved "workspace_id", "slot", "revision", "actor", "removed";
 }
 
 // ---------------------------------------------------------------------------
