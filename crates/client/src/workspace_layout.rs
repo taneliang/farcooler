@@ -51,6 +51,7 @@ enum Page {
     Board,
     Plan,
     Ticket,
+    Engine,
     Workflow,
 }
 
@@ -115,6 +116,7 @@ enum Command {
     Needs,
     Board,
     Plan,
+    Engine,
     Workflow,
     Orchestrator,
     Split,
@@ -138,6 +140,7 @@ impl Command {
             Self::Needs => "Needs You",
             Self::Board => "Board",
             Self::Plan => "Plan",
+            Self::Engine => "Engine",
             Self::Workflow => "Workflow Runs",
             Self::Orchestrator => "Orchestrator",
             Self::Split => "Split Pane",
@@ -218,9 +221,9 @@ struct Action<'a> {
     enabled: bool,
 }
 
-const COMMANDS: [Command; 18] = [
+const COMMANDS: [Command; 19] = [
     Command::Commands, Command::Shortcuts, Command::Terminals, Command::Needs, Command::Board, Command::Plan,
-    Command::Workflow, Command::Orchestrator, Command::Split, Command::CloseSplit, Command::FocusOther,
+    Command::Engine, Command::Workflow, Command::Orchestrator, Command::Split, Command::CloseSplit, Command::FocusOther,
     Command::Conversation, Command::RawTerminal, Command::ClosePage, Command::StartWork,
     Command::RenameTerminal, Command::CloseTerminal, Command::RecoverTerminal,
 ];
@@ -302,7 +305,7 @@ impl Layout {
 
     fn allowed(&self, command: Command, slot: Slot, context: &Context) -> bool {
         match command {
-            Command::Board | Command::Orchestrator | Command::Workflow => context.workspace,
+            Command::Board | Command::Orchestrator | Command::Engine | Command::Workflow => context.workspace,
             Command::Split => self.side.is_none(),
             Command::CloseSplit | Command::FocusOther => self.side.is_some(),
             Command::Conversation | Command::RawTerminal => {
@@ -311,7 +314,7 @@ impl Layout {
             }
             Command::StartWork | Command::RenameTerminal | Command::CloseTerminal | Command::RecoverTerminal =>
                 self.work_label(command, slot, context).is_some(),
-            Command::ClosePage => matches!(context.page, Page::Ticket | Page::Workflow),
+            Command::ClosePage => matches!(context.page, Page::Ticket | Page::Engine | Page::Workflow),
             _ => true,
         }
     }
@@ -327,6 +330,7 @@ impl Layout {
             Command::Needs => Effect::Navigate { page: Page::Needs },
             Command::Board => Effect::Navigate { page: Page::Board },
             Command::Plan => Effect::Navigate { page: Page::Plan },
+            Command::Engine => Effect::Navigate { page: Page::Engine },
             Command::Workflow => Effect::Navigate { page: Page::Workflow },
             Command::ClosePage => Effect::ClosePage,
             Command::StartWork | Command::RenameTerminal | Command::CloseTerminal | Command::RecoverTerminal =>
@@ -445,7 +449,7 @@ pub fn json(request: &str) -> String {
 /// Restore a page when its workspace or ticket can still be read.
 pub fn page_available(page: &str, workspace: bool, ticket: bool) -> bool {
     match page {
-        "board" | "workflow" => workspace,
+        "board" | "engine" | "workflow" => workspace,
         "ticket" => ticket,
         _ => true,
     }
@@ -497,6 +501,7 @@ mod tests {
         let missing = step(&view, &page, value!({"kind": "present"}));
         assert_eq!(missing["main"]["terminal"], Value::Null);
         assert!(!page_available("workflow", false, true));
+        assert!(!page_available("engine", false, true));
         assert!(!page_available("board", false, false));
         assert!(page_available("board", true, false));
         assert_eq!(run(&view, &page, "board")["effect"], value!({"kind": "navigate", "page": "board"}));
@@ -580,7 +585,7 @@ mod tests {
         let open = run(&Value::Null, &page, "orchestrator");
         let raw = run(&open, &page, "raw_terminal");
         assert_eq!(raw["side"]["mode"], "terminal");
-        for page in ["ticket", "workflow", "needs", "terminals"] {
+        for page in ["ticket", "engine", "workflow", "needs", "terminals"] {
             let page = context(page);
             let mut undiscovered = page.clone();
             undiscovered["orchestrator"] = Value::Null;

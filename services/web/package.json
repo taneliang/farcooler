@@ -9,6 +9,8 @@
     "pretest:needs": "cargo build --manifest-path ../../Cargo.toml -p farcooler-client --example plan_view_bin -j 2",
     "test:needs": "vitest run --config vitest.needs.config.ts",
     "test:workflow": "node scripts/workflow-test.mjs",
+    "pretest:engine": "cd ../.. && FARCOOLER_ENGINE_FIXTURE=\"$PWD/services/web/engine-fixture.json\" cargo test -p farcooler-daemon --lib ov1486_a_board -j 6",
+    "test:engine": "node test/browser/engine-check.mjs engine-fixture.json",
     "size-gate": "node scripts/size-gate.mjs dist"
   },
   "devDependencies": {

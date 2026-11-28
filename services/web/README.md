@@ -32,6 +32,19 @@ dialogs, filled buttons and contrast at 320, 768 and 1280 px in both themes.
 change width: a split closed and reopened, another terminal and back, and a
 reply that lands while its pane is away.
 
+## The Engine view
+
+`engine-view.ts` draws the page the shared core makes
+(`crates/client/src/engine_page.rs`): stations, landing groups, drafts waiting
+for approval, and the actions on each row. It reads the runner's one-reply
+`workflow.get`, and takes titles from the plan and the board. A press sends back
+the row and kind, or the draft and the question read; the core makes the command
+from a fresh read, and the runner decides who may send it.
+
+`npm run test:engine` has a real runner read a 340-item board, then runs
+`test/browser/engine-check.mjs` over the page the core made from that read. Give
+the check a second argument, a folder, to write captures there.
+
 ## Adding a Tailcat relay host
 
 The CSP names Tailcat's relays one by one, not as `*.ipn.dev`, so a relay that

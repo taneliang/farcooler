@@ -280,12 +280,9 @@ pub fn project(state: &State, auth: &Capabilities, style: Style) -> Result<Prese
         }
         // Only what the reducer accepts: a follower goes where its lead goes, and a group whose push may be in flight
         // cannot be called back. A failed run is retried, or closed (that is what cancelling it does).
-        let pushing = !item.members.is_empty() && (item.pushed.is_some()
-            || matches!(item.definition.stages.get(item.stage).map(|s| &s.kind), Some(StageKind::Push)));
-        let ended = matches!(item.phase, Phase::Done | Phase::Cancelled | Phase::Cancelling) || item.run.starts_with("cancel:");
         if auth.controller && item.phase == Phase::Failed && item.group_of.is_none() && item.retries < MAX_RETRIES
         { kinds.push(ActionKind::Retry); }
-        if auth.controller && !ended && !pushing && item.follows.is_none() { kinds.push(ActionKind::Cancel); }
+        if auth.controller && cancellable(item) { kinds.push(ActionKind::Cancel); }
         let primary = [ActionKind::Approve, ActionKind::AcceptReview, ActionKind::Retry,
             ActionKind::InspectUncertainty, ActionKind::InspectLatestEvidence]
             .into_iter().find(|kind| kinds.contains(kind));
@@ -320,6 +317,15 @@ pub fn project(state: &State, auth: &Capabilities, style: Style) -> Result<Prese
                 })), split: i.group_failure.as_ref().is_some_and(|f| f.split),
                 heavy_lock_wait: i.execution.as_ref().and_then(|view| view.heavy_lock_wait.clone()),
             }).collect() })
+}
+
+/// What the reducer lets a person cancel (or close, when it has failed): a follower goes where its lead
+/// goes, and a group whose push may be in flight can't be called back. The Engine view asks the same.
+pub(crate) fn cancellable(item: &farcooler_workflow::Item) -> bool {
+    let pushing = !item.members.is_empty() && (item.pushed.is_some()
+        || matches!(item.definition.stages.get(item.stage).map(|s| &s.kind), Some(StageKind::Push)));
+    let ended = matches!(item.phase, Phase::Done | Phase::Cancelled | Phase::Cancelling) || item.run.starts_with("cancel:");
+    !ended && !pushing && item.follows.is_none()
 }
 
 /// Reproject against the latest snapshot AND current authenticated context on every click.

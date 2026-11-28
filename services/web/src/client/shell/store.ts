@@ -11,8 +11,8 @@ import { RUNS_TITLE } from '../workflow-view'
 
 export type ShellScreen = 'status' | 'runner-add' | 'enroll' | 'compare' | 'join' | 'work'
 export type ShellTab = 'terminals' | 'needs' | 'board' | 'plan'
-export type ShellPage = ShellTab | 'workflow' | 'ticket'
-export type ShellTool = 'orchestrator' | 'workflow' | 'commands'
+export type ShellPage = ShellTab | 'engine' | 'workflow' | 'ticket'
+export type ShellTool = 'orchestrator' | 'engine' | 'workflow' | 'commands'
 
 export interface Command {
   label: string
@@ -76,7 +76,7 @@ export const INITIAL: ShellState = {
   busy: false,
   page: 'terminals',
   nav: { terminals: idle('Terminals'), needs: idle(countLabel(0)), board: { label: 'Board', disabled: true }, plan: idle('Plan') },
-  tools: { orchestrator: idle('Orchestrator'), workflow: idle(RUNS_TITLE), commands: idle('Commands') },
+  tools: { orchestrator: idle('Orchestrator'), engine: idle('Engine'), workflow: idle(RUNS_TITLE), commands: idle('Commands') },
   startWork: null,
   terminalLost: false,
   linkLost: false,

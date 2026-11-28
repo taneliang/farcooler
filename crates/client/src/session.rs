@@ -53,6 +53,7 @@ mod pr_actions;
 mod crash_report;
 mod notice_task;
 mod plan;
+mod engine;
 mod results;
 mod rows;
 pub use board_reads::{MarkRead, reads_json};

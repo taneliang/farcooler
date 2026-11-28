@@ -5,6 +5,12 @@ pub fn presentation(request: &str) -> String {
     farcooler_client::workflow_presentation::json(request)
 }
 
+/// The Engine view's own words (ov-1486), for before its first read and while offline.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = engineWords))]
+pub fn engine_words() -> String {
+    serde_json::to_string(&farcooler_client::engine_page::words()).expect("words serialize")
+}
+
 /// The plan's view model (ov-1016): the same pure function the phones and the
 /// Mac call, so the browser sorts and words the plan with no copy of its own.
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = planView))]

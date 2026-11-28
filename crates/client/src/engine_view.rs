@@ -140,6 +140,11 @@ pub struct Landing {
 #[derive(Serialize)]
 struct Subject { id: String, title: String }
 
+impl Landing {
+    /// The group's id, which its actions are kept under.
+    pub fn id(&self) -> &str { &self.id }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Ci {

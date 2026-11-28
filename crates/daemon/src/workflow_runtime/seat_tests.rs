@@ -11,7 +11,7 @@ use farcooler_transport::{Handler, Peer};
 
 /// A pane of the owner's in `worktree`, in `workspace` as `role`: on the runner's own login, in a workspace nobody
 /// leads. An agent (a builder's or a reviewer's pane) runs Claude.
-async fn owners_pane(svc: &Arc<Service>, worktree: Uuid, workspace: Uuid, role: TerminalRole) -> (Uuid, i32) {
+pub(super) async fn owners_pane(svc: &Arc<Service>, worktree: Uuid, workspace: Uuid, role: TerminalRole) -> (Uuid, i32) {
     let t = svc.create_terminal(worktree, "the owner's pane", "shell").await.unwrap();
     svc.store.update_terminal(t.id, t.resource_version, TerminalUpdate {
         title: t.title, command_preset: "claude".into(), intent: t.intent,

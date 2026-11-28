@@ -22,8 +22,9 @@
 /// 'script'`) refuse an HTML string sink outright.
 
 import { openWorkflow, installWorkflowPort } from './workflow-view'
+import { openEngine } from './engine-view'
 import { WorkflowSessionPort } from './workflow-session'
-import init, { connect, newWriterKey, approvalAsking, sealApproval, needsAttention, needsYouView, runnerHealth, passkeyKeyLine, planView, recoveryView, registrationData, registrationProof, rpId, workFailure, workView, boardFailure, reviewFailure, reviewApprovalResult, workspaceLayout, workspacePageAvailable, type WebRunner } from 'fc-web'
+import init, { connect, newWriterKey, approvalAsking, sealApproval, needsAttention, needsYouView, runnerHealth, passkeyKeyLine, planView, recoveryView, registrationData, registrationProof, rpId, workFailure, workView, boardFailure, reviewFailure, reviewApprovalResult, workspaceLayout, workspacePageAvailable, engineWords, type WebRunner } from 'fc-web'
 
 import { approvalFailure, connectFailure, needsYouFailure, registerFailure, restoreFailure, runnerDeferred, runnerStopped, saveFailure, unreachable } from './copy'
 import { askForCopy, assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed, verifyWith } from './device'
@@ -346,6 +347,8 @@ let workScreen: ReturnType<typeof mountWork> | null = null
 
 /// The workspace workflow sheet, preserving the panes behind it.
 let workflowSheet: ReturnType<typeof openWorkflow> | null = null
+/// The workspace's Engine view, the same way.
+let engineSheet: ReturnType<typeof openEngine> | null = null
 /// The plan tab, while a runner is connected.
 let planTab: PlanTab | null = null
 let ticketBoard: ReturnType<typeof mountBoard> | null = null
@@ -455,6 +458,8 @@ function stopNeeds(): void {
   layout?.stop()
   layout = null
   sheet?.close()
+  engineSheet?.close()
+  engineSheet = null
   workflowSheet?.close()
   workflowSheet = null
   installWorkflowPort(() => null)
@@ -592,6 +597,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     show: view => {
       if (view.kind === 'reconnecting' && view.tunnel === 'dialing') panes?.disconnect()
       showLink(view, target.label)
+      engineSheet?.connection(view.kind === 'up')
       workflowSheet?.connection(view.kind === 'up')
       // Its list is read as soon as the connection is up, and set aside while
       // it is not.
@@ -817,7 +823,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     const keys = (command: { key?: string | null }) => command.key ? view.shortcut_prefix + command.key.toUpperCase() : undefined
     const board = view.actions.find(a => a.id === 'board')!
     shell.command('nav', 'board', { label: board.label, disabled: !board.enabled, keys: keys(board) })
-    for (const tool of ['orchestrator', 'workflow', 'commands'] as const) {
+    for (const tool of ['orchestrator', 'engine', 'workflow', 'commands'] as const) {
       const command = view.actions.find(a => a.id === tool)!
       shell.command('tools', tool, { label: command.label, disabled: !command.enabled, keys: keys(command) })
     }
@@ -839,9 +845,9 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   }, effect => {
     if (effect.kind === 'focus') mounted.focus(effect.slot, false)
     else if (effect.kind === 'navigate') {
-      if (effect.page === 'workflow') {
-        if (navigation && navigation.route.page !== 'workflow') {
-          navigation.navigate({ space: chosenSpace, page: 'workflow', tab: navigation.route.tab }, true)
+      if (effect.page === 'engine' || effect.page === 'workflow') {
+        if (navigation && navigation.route.page !== effect.page) {
+          navigation.navigate({ space: chosenSpace, page: effect.page, tab: navigation.route.tab }, true)
         }
       } else showTab(effect.page)
     } else if (effect.kind === 'close_page') navigation?.leave()
@@ -958,6 +964,8 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     }
     previous = route
     sheet?.close()
+    engineSheet?.close()
+    engineSheet = null
     workflowSheet?.close()
     workflowSheet = null
     planList?.close()
@@ -992,6 +1000,11 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     if (lastView) drawNeeds(lastView)
     else drawSpaces(new Map())
     if (route.page === 'needs') void mine.refresh()
+    if (route.page === 'engine' && chosenSpace) {
+      engineSheet = openEngine($<HTMLDialogElement>('engine'), () => reconnector.current, chosenSpace,
+        JSON.parse(engineWords()) as Record<string, string>,
+        () => controller.run('close_page'), () => controller.run('workflow'))
+    }
     if (route.page === 'workflow' && chosenSpace) {
       workflowSheet = openWorkflow($<HTMLDialogElement>('workflow-runs'), target.id, chosenSpace,
         `${scope}:workflow:${JSON.stringify(chosenSpace)}`, () => controller.run('close_page'))

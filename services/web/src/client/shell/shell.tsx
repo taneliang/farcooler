@@ -75,12 +75,13 @@ function Legacy({ view, state, className }: { view: LegacyView; state: ShellStat
 }
 
 const TABS: ShellTab[] = ['terminals', 'needs', 'board', 'plan']
-const TOOLS: ShellTool[] = ['orchestrator', 'workflow', 'commands']
+const TOOLS: ShellTool[] = ['orchestrator', 'engine', 'workflow', 'commands']
 
 /// A page's heading. Needs You's nav label carries its count; the heading
 /// doesn't.
 function titleOf(page: ShellPage, state: ShellState): string {
   if (page === 'needs') return 'Needs You'
+  if (page === 'engine') return state.tools.engine.label
   if (page === 'workflow') return state.tools.workflow.label
   if (page === 'ticket') return titleOf(state.nav.board.disabled ? 'needs' : 'board', state)
   return state.nav[page].label
@@ -192,7 +193,7 @@ function PageHead({ state, store }: { state: ShellState; store: ShellStore }) {
     </div>
   </header>
   return <Routes location={{ pathname: `/${state.page}` }}>
-    {(['terminals', 'needs', 'board', 'plan', 'workflow', 'ticket'] as const).map(page =>
+    {(['terminals', 'needs', 'board', 'plan', 'engine', 'workflow', 'ticket'] as const).map(page =>
       <Route key={page} path={`/${page}`} element={head(page)} />)}
   </Routes>
 }

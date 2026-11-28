@@ -66,3 +66,6 @@ __pycache__/
 
 # crates/web is a workspace of its own, with its own target directory.
 crates/web/target/
+
+# Written by services/web `npm run test:engine`: the page a real runner read made.
+services/web/engine-fixture.json

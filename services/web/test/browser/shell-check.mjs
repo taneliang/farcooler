@@ -91,7 +91,7 @@ async function arrowTo(page, name) {
 const ORDER = [
   'runner-picker', 'add-runner', 'space-picker',
   'show-terminals', 'show-needs', 'show-board', 'show-plan',
-  'show-orchestrator', 'show-workflow', 'show-commands',
+  'show-orchestrator', 'show-engine', 'show-workflow', 'show-commands',
   'workspace-link', 'a:orchestrator', 'a:Check the release logs and rec', 'a:Bring back the observability a',
   'show-start-work',
 ]

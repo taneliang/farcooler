@@ -193,6 +193,7 @@ impl Session {
             #[serde(default)] reason: Option<String>,
         }
         #[derive(Deserialize)] #[serde(deny_unknown_fields)] struct Submit { prepared: PreparedWorkflowAction }
+        if method.starts_with("engine.") { return self.engine_call(method, args).await; }
         let value = match method {
             "workflow.snapshot" => { let a: Snapshot = serde_json::from_value(args).map_err(|e| invalid(e.to_string()))?;
                 serde_json::to_value(self.workflow_snapshot(a.workspace, a.style).await?) },

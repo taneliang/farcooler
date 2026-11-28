@@ -1,10 +1,10 @@
 import type { WorkTerminal, WorkView } from './work-screen'
 
 export type Slot = 'main' | 'side'
-export type Page = 'terminals' | 'needs' | 'board' | 'plan' | 'ticket' | 'workflow'
-export type Tab = Exclude<Page, 'ticket' | 'workflow'>
+export type Page = 'terminals' | 'needs' | 'board' | 'plan' | 'ticket' | 'engine' | 'workflow'
+export type Tab = Exclude<Page, 'ticket' | 'engine' | 'workflow'>
 type WorkCommand = 'start_work' | 'rename_terminal' | 'close_terminal' | 'recover_terminal'
-type Command = WorkCommand | 'commands' | 'shortcuts' | 'terminals' | 'needs' | 'board' | 'plan' | 'workflow' |
+type Command = WorkCommand | 'commands' | 'shortcuts' | 'terminals' | 'needs' | 'board' | 'plan' | 'engine' | 'workflow' |
   'orchestrator' | 'split' | 'close_split' | 'focus_other' | 'conversation' | 'raw_terminal' | 'close_page'
 type Action = { id: Command; label: string; key: string | null; enabled: boolean }
 export type PaneModel = {
@@ -19,7 +19,7 @@ type Intent = { kind: 'present' } | { kind: 'focus'; slot: Slot } | { kind: 'ope
   { kind: 'run'; command: Command; slot?: Slot } | { kind: 'bind'; command: Command; key: string } |
   { kind: 'key'; key: string; alt: boolean; shift: boolean; ctrl: boolean; meta: boolean; editing: boolean; terminal: boolean; modal: boolean }
 type Effect = { kind: 'none' | 'commands' | 'shortcuts' | 'close_page' | 'refresh_pane' } |
-  { kind: 'focus'; slot: Slot } | { kind: 'navigate'; page: Tab | 'workflow' } |
+  { kind: 'focus'; slot: Slot } | { kind: 'navigate'; page: Tab | 'engine' | 'workflow' } |
   { kind: 'work'; command: WorkCommand }
 export type LayoutView = {
   layout: unknown

@@ -810,3 +810,64 @@ async fn ov1468_refuses_a_foreign_operation_pin_even_when_the_adapter_changed() 
     drop(link);
     host.close().await;
 }
+
+/// ov-1486: the web's Engine view over a real session and a real runner. A signed-in person reads the draft
+/// whole, declines one, approves another, and cancels the run the published workflow starts.
+#[tokio::test]
+async fn ov1486_a_person_decides_a_draft_and_cancels_a_run_from_the_engine_view() {
+    use farcooler_client::engine_page::{Kind, Selection};
+    if as_a_person("ov1486_a_person_decides_a_draft_and_cancels_a_run_from_the_engine_view").await { return; }
+    let (dir, config) = configured().await;
+    let host = Host::open(dir.path()).await;
+    let (ws, mut link) = (host.workspace, host.connect().await);
+    let session = farcooler_client::session::Session::connect_local(&host.socket).await.unwrap();
+
+    let first = propose(&mut link, ws, bundle(&config, "ticket-push", "make lint"), "Lint first.").await;
+    let page = session.engine_page(ws).await.unwrap();
+    assert_eq!(page.drafts_problem, None);
+    let draft = page.drafts.first().expect("the draft waits on the view").clone();
+    assert_eq!(draft.question, asked(&host, card_of(&first)).0.body, "the whole question, not a cut of it");
+    // A press on a question the card no longer asks sends nothing.
+    let stale = session.engine_decide(ws, &draft.id, &Uuid::now_v7().to_string(), true).await.unwrap();
+    assert!(!stale.ok, "{stale:?}");
+    assert_eq!(pin(&host), None);
+    let declined = session.engine_decide(ws, &draft.id, &draft.note, false).await.unwrap();
+    assert!(declined.ok, "{declined:?}");
+    assert_eq!(pin(&host), None, "declining publishes nothing");
+    assert!(session.engine_page(ws).await.unwrap().drafts.is_empty());
+    let again = session.engine_decide(ws, &draft.id, &draft.note, true).await.unwrap();
+    assert!(!again.ok, "a declined draft can't be approved: {again:?}");
+
+    propose(&mut link, ws, bundle(&config, "ticket-push", "make check"), "Gate every push on make check.").await;
+    let draft = session.engine_page(ws).await.unwrap().drafts.first().expect("the second draft").clone();
+    let approved = session.engine_decide(ws, &draft.id, &draft.note, true).await.unwrap();
+    assert!(approved.ok, "{approved:?}");
+    let published = pin(&host).expect("approving published it");
+
+    let long = "Engine: land a batched push even when the target branch moves while the gate is still running";
+    let ticket = host.service.store.create_task(ws, long, farcooler_store::models::Actor::User).unwrap().key;
+    let state = call(&mut link, ws, Action::Get).await;
+    let enqueued = call(&mut link, ws, Action::Enqueue { item: ticket.clone(), pin: published,
+        mutation: Mutation { id: "engine-view-run".into(), revision: state["state"]["revision"].as_u64().unwrap_or(0), epoch: 1,
+            sequence: state["state"]["source_sequences"]["wire:owner"].as_u64().unwrap_or(0) + 1 } }).await;
+    assert!(enqueued.pointer("/receipt/result/Ok").is_some(), "{enqueued}");
+    // The engine is running the new run, so its row can move between the look and the press; look again if so.
+    let cancelled = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        loop {
+            let page = session.engine_page(ws).await.unwrap();
+            assert!(serde_json::to_string(&page.view).unwrap().contains(long), "the row has its ticket's title");
+            let offer = page.actions.get(&ticket).and_then(|offers| offers.iter().find(|o| o.kind == Kind::Cancel));
+            let Some(offer) = offer else { panic!("no cancel offered: {:?}", page.actions) };
+            let outcome = session.engine_act(ws, Selection { item: ticket.clone(), kind: Kind::Cancel,
+                guard: offer.guard.clone(), reason: None }).await.unwrap();
+            if outcome.ok { return outcome; }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    }).await.expect("the cancel was taken");
+    assert!(cancelled.ok);
+    let after = call(&mut link, ws, Action::Get).await;
+    let item = &after["state"]["items"][&ticket];
+    assert!(item.is_null() || matches!(item["phase"].as_str(), Some("Cancelling" | "Cancelled" | "Uncertain")), "{item}");
+    drop((link, session));
+    host.close().await;
+}

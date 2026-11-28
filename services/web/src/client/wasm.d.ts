@@ -77,6 +77,8 @@ declare module 'fc-web' {
   export function planView(request: string): string
   export function workspacePageAvailable(page: string, workspace: boolean, ticket: boolean): boolean
   export function workspaceLayout(request: string): string
+  /** The Engine view's words (`engine_page::words`), as a JSON object. */
+  export function engineWords(): string
   export function runnerHealth(runner: string, connection: string): string
   export function needsAttention(count: number): string | undefined
   export function needsYouView(request: string): string
