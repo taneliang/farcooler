@@ -7,6 +7,7 @@
 /// for good.
 
 import { json, type Env } from '../index'
+import { recheckSignaling } from '../signal'
 import { audit, bodyOf, nameOf, requireUser, teamFor, TEAM_ROLES, type TeamRole } from './common'
 import { holds, TRUST_RESET_HOLD_MS, type HoldRow } from './hold'
 
@@ -300,7 +301,13 @@ export async function removeMember(request: Request, env: Env): Promise<Response
     )
   }
   const [removed] = await env.DB.batch(statements)
-  if ((removed.meta?.changes ?? 0) > 0) return json({ ok: true, runners: access.results.length })
+  if ((removed.meta?.changes ?? 0) > 0) {
+    // Their sessions with the team's runners end now, and any token of theirs
+    // succession deleted closes its socket (ov-1541).
+    const runners = await env.DB.prepare(`SELECT id FROM runners WHERE team_id = ?`).bind(team).all<{ id: string }>()
+    await recheckSignaling(env, runners.results.map(r => r.id))
+    return json({ ok: true, runners: access.results.length })
+  }
   return json({ error: 'last admin' }, 409)
 }
 

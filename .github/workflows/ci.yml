@@ -1779,7 +1779,20 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit
       - run: npm test
+      # Stable, then every [env.*] in wrangler.toml, read from the file so a
+      # new environment is checked without editing this: each has bindings of
+      # its own, and one wrong in a single environment fails here, not at
+      # its deploy.
       - run: npx wrangler deploy --dry-run --outdir /tmp/relay-build
+      - name: Dry-run every other relay environment
+        run: |
+          envs=$(sed -n 's/^\[env\.\([A-Za-z0-9_-]*\)\]$/\1/p' wrangler.toml)
+          [ -n "$envs" ] || { echo "no [env.*] tables found in wrangler.toml"; exit 1; }
+          for env in $envs; do
+            echo "::group::wrangler deploy --dry-run --env $env"
+            npx wrangler deploy --dry-run --env "$env" --outdir "/tmp/relay-build-$env"
+            echo "::endgroup::"
+          done
 
   site:
     name: Site

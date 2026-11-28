@@ -18,6 +18,7 @@
 /// ov-561). There is no support desk or admin step to stand in for it.
 
 import { json, type Env } from '../index'
+import { recheckSignaling, runnersOfAccount } from '../signal'
 import { parseDeviceKey, parsePublicKey, verifyDeviceSignature, verifySignature, type PublicKey } from '../sshsig'
 import { audit, bodyOf, isConstraint, nameOf, requireUser } from './common'
 import { deviceNotice, tellAccount } from './notices'
@@ -490,6 +491,9 @@ export async function revokeDeviceKeys(request: Request, env: Env): Promise<Resp
     audit(env, { team: null, actor: account, action: 'device.revoked', subject: body.device }),
   ])
   const uncertified = results[handover.length + 1]
+  // Its signaling sessions end now, and those of every device the cascade
+  // sent back to pending (ov-1541).
+  await recheckSignaling(env, await runnersOfAccount(env, account))
   // A stolen session can remove devices too, so a removal is never silent.
   await tellAccount(env, account, deviceNotice('removed', device.label))
   return json({

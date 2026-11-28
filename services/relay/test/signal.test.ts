@@ -1,9 +1,9 @@
-import { env } from 'cloudflare:test'
+import { env, runInDurableObject } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import worker from '../src/index'
 import { RUNNER_NAMESPACE, runnerStatement } from '../src/directory/runners'
-import { messageOf } from '../src/signal'
+import { MAX_BYTES, MAX_MESSAGES, MAX_QUEUE, MAX_SESSIONS, messageOf, SESSION_LIFETIME_MS } from '../src/signal'
 import { STUN_URLS, TURN_TTL_S } from '../src/turn'
 import { makeKey } from './sshsig-signer'
 
@@ -127,6 +127,8 @@ function browser(user: string, bindings: Record<string, unknown> = {}) {
 interface Line {
   ws: WebSocket
   heard: any[]
+  /// The close code, once the relay closes the socket.
+  closed: Promise<number>
   next(): Promise<any>
   send(message: unknown): void
 }
@@ -142,6 +144,7 @@ async function connect(token: string): Promise<Line> {
   ws.accept()
   sockets.push(ws)
   const heard: any[] = []
+  const closed = new Promise<number>(resolve => ws.addEventListener('close', event => resolve((event as CloseEvent).code)))
   let read = 0
   let waiting: (() => void) | null = null
   ws.addEventListener('message', event => {
@@ -151,6 +154,7 @@ async function connect(token: string): Promise<Line> {
   return {
     ws,
     heard,
+    closed,
     async next() {
       while (read >= heard.length) {
         await new Promise<void>((resolve, reject) => {
@@ -632,5 +636,327 @@ describe('TURN credentials', () => {
     // An answer with no TURN address in it is no credential either.
     turnReply = () => new Response(JSON.stringify({ iceServers: { urls: ['stun:x.example'], username: 'u', credential: 'c' } }))
     expect((await browser('alice', withTurn).open(runner.id, dev)).body.ice_servers.stun_only).toBe('refused')
+  })
+})
+
+// MARK: - Access ends when it is taken away (ov-1541)
+
+/// `promise`, or a failure naming `what` if it takes longer than `ms`.
+async function within<T>(promise: Promise<T>, what: string, ms = 2000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what} took over ${ms} ms`)), ms)
+  })
+  try {
+    return await Promise.race([promise, late])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/// Polls until `count` messages are there (or `until` matches the last), as
+/// the runner's messages each wait on the directory before they are queued.
+async function pollFor(
+  b: ReturnType<typeof browser>,
+  runner: string,
+  session: string,
+  after: number,
+  count: number,
+  until?: (m: any) => boolean,
+): Promise<{ messages: any[]; cursor: number }> {
+  const deadline = Date.now() + 3000
+  for (;;) {
+    const polled = (await b.poll(runner, session, after)).body
+    const done = until ? polled.messages.some(until) : polled.messages.length >= count
+    if (done || Date.now() > deadline) return polled
+    await settle()
+  }
+}
+
+async function daemonOf(runner: string): Promise<string> {
+  const row = await env.DB.prepare(`SELECT daemon_id FROM runners WHERE id = ?`).bind(runner).first<{ daemon_id: string }>()
+  return row!.daemon_id
+}
+
+/// The sessions a runner's object holds, straight from its storage.
+async function stored(runner: string): Promise<Map<string, any>> {
+  const stub = env.SIGNAL.get(env.SIGNAL.idFromName(runner))
+  return await runInDurableObject(stub, async (_: unknown, state: DurableObjectState) => await state.storage.list({ prefix: 's:' }))
+}
+
+describe('a revoked runner', () => {
+  it('has its socket closed the moment its token is revoked, and hears nothing more', async () => {
+    const { runner, device: dev, line, browser: alice } = await scene('alice')
+    const { session } = (await alice.open(runner.id, dev)).body
+    await line.next()
+
+    const revoked = await call('/v1/daemons/revoke', { id: await daemonOf(runner.id) }, await sessionFor('alice'))
+    expect(revoked.body.ok).toBe(true)
+    // At once: nothing else has crossed the socket to make the relay look.
+    expect(await within(line.closed, 'the socket closing')).toBe(4001)
+
+    // The browser is told, and can send no more; nothing reaches the runner.
+    const polled = await alice.poll(runner.id, session)
+    expect(polled.body).toEqual({ messages: [{ session, type: 'end', reason: 'runner_revoked' }], cursor: 1, ended: true })
+    expect((await alice.send(runner.id, dev, { session, type: 'offer', sdp: OFFER })).status).toBe(410)
+    expect((await alice.open(runner.id, dev)).status).toBe(503)
+    await settle()
+    expect(line.heard.map(m => m.type)).toEqual(['ice_servers'])
+  })
+
+  it('is cut off at its next message even when nothing tells the relay', async () => {
+    const { runner, device: dev, line, browser: alice } = await scene('alice')
+    const { session } = (await alice.open(runner.id, dev)).body
+    await line.next()
+    // The token lapses, with no route to call `recheckSignaling`.
+    await env.DB.prepare(`UPDATE daemons SET expires_at = 1 WHERE id = ?`).bind(await daemonOf(runner.id)).run()
+
+    // What the runner says next is dropped, and closes it.
+    line.send({ session, type: 'answer', sdp: ANSWER })
+    expect(await within(line.closed, 'the socket closing')).toBe(4001)
+    const polled = await alice.poll(runner.id, session)
+    expect(polled.text).not.toContain(ANSWER)
+    expect(polled.body.messages).toEqual([{ session, type: 'end', reason: 'runner_revoked' }])
+  })
+
+  it('is never sent an offer on a lapsed token, though its socket still looks open', async () => {
+    const { runner, device: dev, line, browser: alice } = await scene('alice')
+    const { session } = (await alice.open(runner.id, dev)).body
+    await line.next()
+    await env.DB.prepare(`UPDATE daemons SET expires_at = 1 WHERE id = ?`).bind(await daemonOf(runner.id)).run()
+    expect(line.ws.readyState).toBe(WebSocket.OPEN)
+
+    expect((await alice.send(runner.id, dev, { session, type: 'offer', sdp: OFFER })).status).toBe(410)
+    await settle()
+    expect(line.heard.map(m => m.type)).toEqual(['ice_servers'])
+    expect(await within(line.closed, 'the socket closing')).toBe(4001)
+  })
+
+  it('closes when its runner is removed from the directory', async () => {
+    const { runner, line } = await scene('alice')
+    expect((await as('alice', 'runners/remove', { runner: runner.id })).body.ok).toBe(true)
+    expect(await within(line.closed, 'the socket closing')).toBe(4001)
+  })
+
+  it('is refused when two runner rows name its token, rather than given the first', async () => {
+    const runner = await runnerFor('alice')
+    const daemon = await daemonOf(runner.id)
+    await env.DB.prepare(
+      `INSERT INTO runners (id, team_id, runner_key, runner_key_fingerprint, install_key, name, daemon_id, created_at)
+       VALUES (?, ?, 'k', ?, 'i', 'Twin', ?, 0)`,
+    )
+      .bind(`twin-${runner.id}`, runner.team, `twin-fp-${runner.id}`, daemon)
+      .run()
+    const response = await worker.fetch(
+      new Request(`${RELAY}/v1/rtc/runner`, { headers: { upgrade: 'websocket', authorization: `Bearer ${runner.token}` } }),
+      env as never,
+      ctx,
+    )
+    expect(response.status).toBe(403)
+    expect(response.webSocket).toBeNull()
+  })
+
+  it('loses a socket it already had when a second row comes to name its token', async () => {
+    const { runner, device: dev, line, browser: alice } = await scene('alice')
+    await env.DB.prepare(
+      `INSERT INTO runners (id, team_id, runner_key, runner_key_fingerprint, install_key, name, daemon_id, created_at)
+       VALUES (?, ?, 'k', ?, 'i', 'Twin', ?, 0)`,
+    )
+      .bind(`twin-${runner.id}`, runner.team, `twin-fp-${runner.id}`, await daemonOf(runner.id))
+      .run()
+    expect((await alice.open(runner.id, dev)).status).toBe(503)
+    await settle()
+    expect(line.heard).toEqual([])
+  })
+})
+
+describe('a revoked device or a removed member', () => {
+  it('has its sessions ended the moment the device is revoked, a waiting poll included', async () => {
+    const { runner, device: dev, line, browser: alice } = await scene('alice')
+    const { session } = (await alice.open(runner.id, dev)).body
+    await line.next()
+    const started = Date.now()
+    const waiting = alice.poll(runner.id, session, 0, 10)
+    await settle()
+
+    expect((await as('alice', 'devices/revoke', { device: dev })).body.ok).toBe(true)
+    expect(await line.next()).toEqual({ session, type: 'end', reason: 'revoked' })
+    const woken = await waiting
+    expect(woken.status).toBe(404)
+    expect(Date.now() - started).toBeLessThan(5000)
+    expect((await alice.poll(runner.id, session)).status).toBe(404)
+    expect((await alice.send(runner.id, dev, { session, type: 'offer', sdp: OFFER })).status).toBe(404)
+    expect(await stored(runner.id)).toHaveProperty('size', 0)
+  })
+
+  it('has its polls refused even when nothing tells the relay', async () => {
+    const { runner, device: dev, line, browser: alice } = await scene('alice')
+    const { session } = (await alice.open(runner.id, dev)).body
+    await line.next()
+    line.send({ session, type: 'answer', sdp: ANSWER })
+    await settle()
+    await env.DB.prepare(`UPDATE device_keys SET state = 'pending' WHERE id = ?`).bind(dev).run()
+
+    const polled = await alice.poll(runner.id, session)
+    expect(polled.status).toBe(404)
+    expect(polled.text).not.toContain(ANSWER)
+    expect(await line.next()).toEqual({ session, type: 'end', reason: 'revoked' })
+  })
+
+  it('has its sessions ended the moment they leave the team, and no one else’s', async () => {
+    const { runner, device: dev, line, browser: alice } = await scene('alice')
+    await joinTeam(runner.team, 'bob')
+    const bobKey = await fp(`bob-${runner.id}`)
+    const bobs = await device('bob', bobKey)
+    await onRunner(runner.token, [await fp(`alice-browser-${runner.id}`), bobKey])
+    const bob = browser('bob')
+    const bobSession = (await bob.open(runner.id, bobs)).body.session
+    const aliceSession = (await alice.open(runner.id, dev)).body.session
+    await line.next()
+    await line.next()
+
+    expect((await as('alice', 'teams/members/remove', { team: runner.team, user: 'bob' })).body.ok).toBe(true)
+    expect(await line.next()).toEqual({ session: bobSession, type: 'end', reason: 'revoked' })
+    expect((await bob.poll(runner.id, bobSession)).status).toBe(404)
+    expect((await bob.open(runner.id, bobs)).status).toBe(404)
+
+    // Alice's session carries on.
+    expect((await alice.send(runner.id, dev, { session: aliceSession, type: 'offer', sdp: OFFER })).status).toBe(200)
+    expect((await line.next()).type).toBe('offer')
+    expect((await alice.poll(runner.id, aliceSession)).status).toBe(200)
+  })
+
+  it('is refused a poll once out of the team even when nothing tells the relay', async () => {
+    const { runner } = await scene('alice')
+    await joinTeam(runner.team, 'bob')
+    const bobKey = await fp(`bob-quiet-${runner.id}`)
+    const bobs = await device('bob', bobKey)
+    await onRunner(runner.token, [await fp(`alice-browser-${runner.id}`), bobKey])
+    const bob = browser('bob')
+    const session = (await bob.open(runner.id, bobs)).body.session
+    await env.DB.prepare(`DELETE FROM memberships WHERE team_id = ? AND account_id = 'bob'`).bind(runner.team).run()
+    expect((await bob.poll(runner.id, session)).status).toBe(404)
+  })
+})
+
+describe('a poll', () => {
+  it('wakes no runner’s object for a caller outside the runner’s team', async () => {
+    const { runner, device: dev, browser: alice } = await scene('alice')
+    const { session } = (await alice.open(runner.id, dev)).body
+    const named: string[] = []
+    const SIGNAL = {
+      idFromName: (name: string) => {
+        named.push(name)
+        return env.SIGNAL.idFromName(name)
+      },
+      get: (id: DurableObjectId) => env.SIGNAL.get(id),
+    }
+    await as('mallory', 'me')
+    const mallory = browser('mallory', { SIGNAL })
+    // A well-formed id that is no runner, and a real runner not hers.
+    expect((await mallory.poll(crypto.randomUUID(), session)).status).toBe(404)
+    expect((await mallory.poll(runner.id, session)).status).toBe(404)
+    expect(named).toEqual([])
+    // The same route does reach the object for its own.
+    expect((await browser('alice', { SIGNAL }).poll(runner.id, session)).status).toBe(200)
+    expect(named).toEqual([runner.id])
+  })
+})
+
+describe('a session', () => {
+  it('ends at its hard lifetime however busy it is', async () => {
+    const { runner, device: dev, line, browser: alice } = await scene('alice')
+    const { session } = (await alice.open(runner.id, dev)).body
+    await line.next()
+    // Opened a lifetime ago, and touched just now.
+    const stub = env.SIGNAL.get(env.SIGNAL.idFromName(runner.id))
+    await runInDurableObject(stub, async (_: unknown, state: DurableObjectState) => {
+      const s = (await state.storage.get<any>(`s:${session}`))!
+      await state.storage.put(`s:${session}`, { ...s, opened: Date.now() - SESSION_LIFETIME_MS, touched: Date.now() })
+    })
+    expect((await alice.send(runner.id, dev, { session, type: 'candidate', candidate: CANDIDATE })).status).toBe(404)
+    expect((await alice.poll(runner.id, session)).status).toBe(404)
+    await settle()
+    expect(line.heard).toHaveLength(1)
+  })
+
+  it('takes at most its share of messages from the browser, but always its end', async () => {
+    const { runner, device: dev, line, browser: alice } = await scene('alice')
+    const { session } = (await alice.open(runner.id, dev)).body
+    for (let i = 0; i < MAX_MESSAGES; i++) {
+      expect((await alice.send(runner.id, dev, { session, type: 'candidate', candidate: `${CANDIDATE} ${i}` })).status).toBe(200)
+    }
+    expect((await alice.send(runner.id, dev, { session, type: 'candidate', candidate: CANDIDATE })).status).toBe(429)
+    expect((await alice.send(runner.id, dev, { session, type: 'end', reason: 'done' })).status).toBe(200)
+    await settle()
+    expect(line.heard).toHaveLength(1 + MAX_MESSAGES + 1)
+  })
+
+  it('takes at most its share of bytes from the browser', async () => {
+    const { runner, device: dev, line, browser: alice } = await scene('alice')
+    const { session } = (await alice.open(runner.id, dev)).body
+    const big = `v=0\r\n${'a'.repeat(31 * 1024)}`
+    const fits = Math.floor(MAX_BYTES / big.length)
+    for (let i = 0; i < fits; i++) expect((await alice.send(runner.id, dev, { session, type: 'offer', sdp: big })).status).toBe(200)
+    expect((await alice.send(runner.id, dev, { session, type: 'offer', sdp: big })).status).toBe(429)
+    await settle()
+    expect(line.heard).toHaveLength(1 + fits)
+  })
+
+  it('takes at most its share of messages and bytes from the runner, but always its end', async () => {
+    const { runner, device: dev, line, browser: alice } = await scene('alice')
+    const { session } = (await alice.open(runner.id, dev)).body
+    let cursor = 0
+    for (let sent = 0; sent < MAX_MESSAGES; sent += MAX_QUEUE) {
+      for (let i = 0; i < MAX_QUEUE; i++) line.send({ session, type: 'candidate', candidate: `${CANDIDATE} ${sent + i}` })
+      const polled = await pollFor(alice, runner.id, session, cursor, MAX_QUEUE)
+      // In the order the runner sent them.
+      expect(polled.messages.map((m: any) => m.candidate)).toEqual([...Array(MAX_QUEUE).keys()].map(i => `${CANDIDATE} ${sent + i}`))
+      cursor = polled.cursor
+      // Acknowledged, so the queue has room: only the session's share is left.
+      await alice.poll(runner.id, session, cursor)
+    }
+    line.send({ session, type: 'candidate', candidate: 'one too many' })
+    line.send({ session, type: 'end', reason: 'done' })
+    const last = await pollFor(alice, runner.id, session, cursor, 1)
+    expect(last.messages).toEqual([{ session, type: 'end', reason: 'done' }])
+
+    // Bytes: a second session, answered with large answers.
+    const other = (await alice.open(runner.id, dev)).body.session
+    const big = `v=0\r\n${'a'.repeat(31 * 1024)}`
+    for (let i = 0; i < 5; i++) line.send({ session: other, type: 'answer', sdp: big })
+    line.send({ session: other, type: 'end', reason: 'done' })
+    const answered = await pollFor(alice, runner.id, other, 0, 1, m => m.type === 'end')
+    expect(answered.messages.filter((m: any) => m.type === 'answer')).toHaveLength(Math.floor(MAX_BYTES / big.length))
+  })
+
+  it('gives up its slot the moment the runner ends it', async () => {
+    const { runner, device: dev, line, browser: alice } = await scene('alice')
+    const sessions: string[] = []
+    for (let i = 0; i < MAX_SESSIONS; i++) {
+      const opened = await alice.open(runner.id, dev)
+      expect(opened.status).toBe(200)
+      sessions.push(opened.body.session)
+    }
+    expect((await alice.open(runner.id, dev)).body.error).toBe('busy')
+    line.send({ session: sessions[0], type: 'end', reason: 'closed' })
+    await settle()
+    expect((await alice.open(runner.id, dev)).status).toBe(200)
+    // And its end is still there to read.
+    expect((await alice.poll(runner.id, sessions[0])).body.ended).toBe(true)
+  })
+
+  it('gives up its slot when its servers never reach the runner', async () => {
+    const { runner, device: dev, line } = await scene('alice')
+    // The runner drops off while the relay mints its servers.
+    const ok = turnReply
+    turnReply = (async () => {
+      line.ws.close(1000, 'gone')
+      await settle()
+      return ok()
+    }) as never
+    const opened = await browser('alice', withTurn).open(runner.id, dev)
+    expect(opened.status).toBe(503)
+    expect(await stored(runner.id)).toHaveProperty('size', 0)
   })
 })

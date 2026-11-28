@@ -14,6 +14,7 @@
 /// role written is the owner, who is already the runner's admin.
 
 import { installKey, json, sha256, TOKEN_LIFETIME_MS, type Env } from '../index'
+import { recheckSignaling } from '../signal'
 import { parsePublicKey, verifySignature, type PublicKey } from '../sshsig'
 import { audit, bodyOf, isConstraint, nameOf, requireUser, teamFor, type RunnerRole } from './common'
 
@@ -290,6 +291,8 @@ export async function register(env: Env, p: Proven): Promise<Response> {
       ),
     ])
     if ((inserted.meta?.changes ?? 0) === 0) return json({ error: 'registered' }, 409)
+    // The old token's socket closes; the runner comes back with the new one.
+    await recheckSignaling(env, [existing.id])
     return json({ runner: existing.id, team: p.team, token })
   }
 
@@ -377,6 +380,8 @@ export async function claimRunner(request: Request, env: Env): Promise<Response>
     audit(env, { team: existing.team_id, actor: p.account, action: 'runner.claimed_away', subject: existing.id, detail: { to: p.team } }),
     audit(env, { team: p.team, actor: p.account, action: 'runner.claimed', subject: existing.id, detail: { from: existing.team_id, name: p.name } }),
   ])
+  // Its old token's socket closes, and the old team's sessions with it end.
+  await recheckSignaling(env, [existing.id])
   return json({ runner: existing.id, team: p.team, token })
 }
 
@@ -401,6 +406,7 @@ export async function removeRunner(request: Request, env: Env): Promise<Response
     env.DB.prepare(`DELETE FROM runners WHERE id = ?`).bind(runner.id),
     audit(env, { team: runner.team_id, actor: account, action: 'runner.removed', subject: runner.id, detail: { name: runner.name } }),
   ])
+  await recheckSignaling(env, [runner.id])
   return json({ ok: true })
 }
 

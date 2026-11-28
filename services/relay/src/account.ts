@@ -1,9 +1,11 @@
 /// The apps' management screen: what this account has registered, and
 /// revoking one of its devices or machines. Moved out of `index.ts` whole
-/// (its file-size budget); nothing here changed.
+/// (its file-size budget). Revoking a runner's token also closes its
+/// signaling socket (`recheckSignaling`, ov-1541).
 
 import { requireAccount } from './session'
 import { json, type Env } from './index'
+import { recheckSignaling } from './signal'
 
 /// Everything this account has registered, for the apps' management screen.
 ///
@@ -102,10 +104,19 @@ export async function revokeOwned(
   // which the top-level catch turns into a 500 for what is a bad request.
   if (typeof body.id !== 'string' || !body.id) return json({ error: 'id' }, 400)
 
+  // A runner's token: its runner's signaling socket closes (ov-1541). Read
+  // before the delete, which leaves the runner row naming no token.
+  const runners =
+    table === 'daemons'
+      ? await env.DB.prepare(`SELECT n.id FROM runners n JOIN daemons d ON d.id = n.daemon_id WHERE d.id = ? AND d.account_id = ?`)
+          .bind(body.id, account)
+          .all<{ id: string }>()
+      : null
   const result = await env.DB.prepare(
     `DELETE FROM ${table} WHERE id = ? AND account_id = ?`,
   )
     .bind(body.id, account)
     .run()
+  if (runners?.results.length) await recheckSignaling(env, runners.results.map(r => r.id))
   return json({ ok: (result.meta?.changes ?? 0) > 0 })
 }
