@@ -265,7 +265,7 @@ def script_users(path, commands):
     return users
 
 
-# What the csp-check browser walks cover (ov-1508): a change under one of these
+# What the csp-check walks and sleep-check cover (ov-1508, ov-1530): a change under one of these
 # can break a walk, so the gate runs them. ov-1470 and ov-1485 each passed their
 # gate, landed together, and broke the workday walk only on main.
 WALK_PATHS = ("services/web/", "crates/web/", "crates/client/")

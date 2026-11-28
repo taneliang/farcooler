@@ -55,12 +55,12 @@ here as it is in CI (ov-812).
 
 Not run here, and said so in the output: the iOS UI smoke (a simulator; use
 scripts/ios-ui-tests.sh, one simulator at most) and the parts of the web job
-that download Linux binaries, and sleep-check. A heavy job waits while the 1-minute load average
+that download Linux binaries. A heavy job waits while the 1-minute load average
 is 20 or more.
 
 A change under services/web, crates/web or crates/client also runs CI's
 csp-check walks (ov-1508): the fake daemon one, the join walk and the two-runner
-workday. They need wasm-opt (brew install binaryen), Go, tmux, Playwright's
+workday, and its sleep-check (ov-1530). They need wasm-opt (brew install binaryen), Go, tmux, Playwright's
 Chromium and a committed tree, and their canary daemon builds in target/web-walks.
 
 Only one heavy job runs on this Mac at a time (ov-831). Ten lanes each running a
@@ -130,10 +130,10 @@ SETUP = re.compile(r"apt-get|brew install|sdkmanager|ci-install-tmux\.sh|Install
 WEB_LINUX_ONLY = re.compile(
     r"gh-download\.sh|curl -fsSL|playwright|WASM_BINDGEN|WASM_OPT|wasm-stable|wasm-canary|size-gate\.mjs dist|fake_daemon|crates/web/build\.sh|\./build\.sh"
 )
-# The web job's csp-check walks and what only they need (ov-1508). They match
+# The web job's csp-check walks, its sleep-check (ov-1530) and what only they need (ov-1508). They match
 # WEB_LINUX_ONLY by name and run here anyway; landing_policy.web_walks leaves
 # them to CI when the change touches nothing they walk.
-WEB_WALK = re.compile(r"test/browser/csp-check\.mjs|--example fake_daemon|\./build\.sh --channel canary --build")
+WEB_WALK = re.compile(r"test/browser/(csp|sleep)-check\.mjs|--example fake_daemon|\./build\.sh --channel canary --build")
 # The ios job's own steps build an archive; its plan job's checks are the cheap half.
 IOS_KEEP = re.compile(r"import-ios-certificate-test|generator-test|ios-ui-shards\.py|ios-ui-pick-simulator\.py|ios-ui-plan\.py --self-test")
 
@@ -355,8 +355,6 @@ def steps_for(job, workflows, ctx):
                 skip = "local gate runs the full Rust suite; the filtered Mac CI replay would duplicate it"
             elif ci_id == "web-bundles" and run.strip() == "npm ci":
                 skip = "the local Web jobs share the dependencies installed by web-tests"
-            elif job == "web" and "test/browser/sleep-check.mjs" in run:
-                skip = "sleep-check is not one of the walks the gate runs; left to CI"
             elif job == "web" and not WEB_WALK.search(run) and WEB_LINUX_ONLY.search(hay):
                 skip = "needs the Linux x86 wasm toolchain CI downloads; left to CI"
             elif job == "ios" and not IOS_KEEP.search(run):
@@ -1657,7 +1655,7 @@ def _self_test():
     def running(steps, text):
         return [s for s in steps if not s.skip and text in s.run]
 
-    walk_commands = ("--tunnel-delay 100", "csp-check.mjs --join", '--workday-cli "${CARGO_TARGET_DIR:-../../target}/debug/farcooler"',
+    walk_commands = ("--tunnel-delay 100", "sleep-check.mjs --fake-daemon", "csp-check.mjs --join", '--workday-cli "${CARGO_TARGET_DIR:-../../target}/debug/farcooler"',
                      "--example fake_daemon", "./build.sh --channel canary --build", "test-module.sh --bundle")
     for path in ("services/web/src/client/app.ts", "crates/web/src/lib.rs", "crates/client/src/lib.rs"):
         walked = web_plan("docs/a.md", path)
@@ -1671,16 +1669,18 @@ def _self_test():
     walked = web_plan("services/web/src/a.ts")
     order = [next((i for i, s in enumerate(walked) if not s.skip and text in s.run), -1)
              for text in ("npm ci", "test-module.sh --bundle", "./build.sh --channel canary --build",
-                          "--example fake_daemon", "--tunnel-delay 100", "csp-check.mjs --join")]
+                          "--example fake_daemon", "--tunnel-delay 100", "sleep-check.mjs --fake-daemon", "csp-check.mjs --join")]
     expect("the walks run after what they load is built", (order, -1 in order), (sorted(order), False))
     expect("one wasm build serves the walks and the other browser checks", len(running(walked, "test-module.sh")), 1)
     workday = running(walked, "--example web_workday_runner")
     expect("the walk's canary daemon is built apart from the target the Rust job runs",
            [s.run.startswith('export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$GITHUB_WORKSPACE/target}/web-walks"\n') for s in workday], [True])
     expect("the walk finds the fake daemon wherever cargo put it",
-           [s.run.count("${CARGO_TARGET_DIR:-../../crates/web/target}/debug/examples/fake_daemon") for s in running(walked, "--tunnel-delay 100")], [1])
-    # Every csp-check CI runs is one this gate runs: a walk added to ci.yml must not be skipped in silence.
-    expect("no csp-check in CI is left to CI", [s.label() for s in walked if s.skip and "csp-check.mjs" in s.run], [])
+           [s.run.count("${CARGO_TARGET_DIR:-../../crates/web/target}/debug/examples/fake_daemon")
+            for text in ("--tunnel-delay 100", "sleep-check.mjs --fake-daemon") for s in running(walked, text)], [1, 1])
+    # Every csp-check and sleep-check CI runs is one this gate runs: a walk added to ci.yml must not be skipped in silence.
+    expect("no csp-check or sleep-check in CI is left to CI",
+           [s.label() for s in walked if s.skip and re.search(r"(csp|sleep)-check\.mjs", s.run)], [])
 
     # --landing gives each job its own RUNNER_TEMP, below the one the plan filled
     # ${{ runner.temp }} from. What the planned wasm step writes must be what
