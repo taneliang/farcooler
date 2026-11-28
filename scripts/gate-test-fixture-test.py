@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Regression: gate self-tests do not depend on the host's disk capacity."""
+"""Regression: gate self-tests do not depend on the host's disk capacity or on
+a TMPDIR short enough to hold a Unix socket. CI's wire job runs this."""
 import os
 from pathlib import Path
 import subprocess

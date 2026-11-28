@@ -189,6 +189,10 @@ jobs:
       # Reproduce a gate launched by scripts/heavy: private test queues must
       # still lock even though the parent already holds the machine queue.
       - run: HEAVY_LOCK_HELD=1 ./scripts/lane-gate.py --self-test
+      # The same self-test again under a TMPDIR too long for a Unix socket, as an
+      # engine step's scratch directory can be. A test that binds its socket
+      # under TMPDIR passes the run above and fails this one (ov-1519).
+      - run: python3 scripts/gate-test-fixture-test.py
       - run: python3 scripts/lane-gate-lifetime-test.py
       - run: python3 scripts/gate-evidence-test.py
       - run: python3 scripts/engine-gate-test.py

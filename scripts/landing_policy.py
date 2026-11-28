@@ -133,7 +133,7 @@ SCRIPT_USERS = {
     'scripts/gate-evidence-test.py': {'wire'},  # ci.yml wire invokes this regression suite; its gate/build subprocesses use scratch fixtures.
     'scripts/gate-flaky.py': None,  # Full: transitive gate users not established; retain conservative fallback.
     'scripts/gate-summary-check.py': None,  # Full: transitive gate users not established; retain conservative fallback.
-    'scripts/gate-test-fixture-test.py': None,  # Full: end-to-end self-test regression.
+    'scripts/gate-test-fixture-test.py': None,  # Full: end-to-end self-test regression, run by ci.yml wire.
     'scripts/gate-test-fixture.py': None,  # Full: gate self-test repository construction; retain orchestration coverage.
     'scripts/gate_disk.py': None,  # Full: imported by lane-gate.py and landing-gate at admission.
     'scripts/gate_sccache.py': None,  # Full: optional compiler wrapper applied to every gate family.
@@ -280,6 +280,7 @@ DEFERRED_WIRE = {
     "python3 scripts/rust-select-test.py",
     "python3 scripts/landing-gate-test.py",
     "HEAVY_LOCK_HELD=1 ./scripts/lane-gate.py --self-test",
+    "python3 scripts/gate-test-fixture-test.py",
     "python3 scripts/lane-gate-lifetime-test.py",
     "python3 scripts/gate-evidence-test.py",
     "python3 scripts/engine-gate-test.py",

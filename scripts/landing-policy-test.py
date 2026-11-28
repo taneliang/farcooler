@@ -115,8 +115,9 @@ class LandingTests(unittest.TestCase):
         ctx = lane.make_ctx(ROOT, ROOT, "HEAD")
         plans = {"wire": lane.steps_for("wire", workflows, ctx)}
         fixtures = [step for step in plans["wire"] if step.run.strip() in {
-            "python3 scripts/rust-select-test.py", "python3 scripts/landing-gate-test.py"}]
-        self.assertEqual(len(fixtures), 2)
+            "python3 scripts/rust-select-test.py", "python3 scripts/landing-gate-test.py",
+            "python3 scripts/gate-test-fixture-test.py"}]
+        self.assertEqual(len(fixtures), 3)
         for review in (False, True):
             with self.subTest(review=review):
                 quick, remaining = policy.split_quick(plans, ["wire"], "HEAD", lane.Step,
