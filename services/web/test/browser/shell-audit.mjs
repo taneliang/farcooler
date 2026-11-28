@@ -2,7 +2,11 @@
 // primary button, and text that meets WCAG AA contrast. Run in the page.
 
 /// The visible buttons and links filled with the accent, by their words.
+/// Judged by the colors they settle on: a button's background fades
+/// (app.css), so one just demoted still computes the accent until the fade
+/// moves, and one just promoted doesn't yet (ov-1525).
 export const filledButtons = page => page.evaluate(() => {
+  for (const fade of document.getAnimations()) if (fade instanceof CSSTransition) fade.finish()
   const probe = document.createElement('span')
   probe.style.background = 'var(--accent)'
   document.body.append(probe)

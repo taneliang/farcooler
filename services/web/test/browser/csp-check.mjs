@@ -1595,7 +1595,7 @@ async function terminalsWalk({ page, runner, chooseCheckout, work, assert, wait 
       await run()
       console.log(`workday: ${name}`)
     } catch (e) {
-      await shoot(page, `workday-failed-${name.split(' ')[0]}`, 320)
+      await shoot(page, `workday-failed-${name.split(' ')[0]}`)
       failures.push(`workday: ${name}: ${e.message.replace(/\s+/g, ' ').slice(0, 600)}`)
       if (await work.isVisible()) await work.getByRole('button', { name: 'Done' }).click()
     }
@@ -1614,7 +1614,15 @@ async function terminalsWalk({ page, runner, chooseCheckout, work, assert, wait 
     const { epoch } = pane(shell)
     await typeAndSee(shell, "printf 'leaving-%d\\n' 6; exit", 'leaving-6')
     await state('Exited')
-    await shoot(page, 'workday-restart-exited', 320)
+    await shoot(page, 'workday-restart-exited')
+    // Restart Terminal is the screen's one primary action, at every width.
+    const size = page.viewportSize()
+    for (const width of [320, 768, 1280]) {
+      await page.setViewportSize({ width, height: size.height })
+      const filled = JSON.stringify(await filledButtons(page))
+      assert(filled === '["#terminal-recover Restart Terminal"]', `filled buttons at ${width}px: ${filled}`)
+    }
+    await page.setViewportSize(size)
     await page.getByRole('button', { name: 'Restart Terminal', exact: true }).click()
     await state('Running')
     assert(selected() === shell, 'the same terminal stayed selected')
@@ -1643,7 +1651,7 @@ async function terminalsWalk({ page, runner, chooseCheckout, work, assert, wait 
     await raw.click()
     await typeAndSee(seat.id, 'before-the-restart', 'before-the-restart')
     const { epoch } = pane(seat.id)
-    await shoot(page, 'workday-restart-orchestrator', 320)
+    await shoot(page, 'workday-restart-orchestrator')
     // The pane on screen is the process being replaced. Typing counts only
     // once a new one is attached in its place.
     const replaced = await page.locator(attached).elementHandle()
