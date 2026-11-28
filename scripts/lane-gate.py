@@ -80,6 +80,7 @@ gate removes target/ at the end; --keep-target keeps it. FARCOOLER_LEAN_BUILD=of
 
 import argparse
 import contextlib
+import copy
 import importlib.util
 import json
 import os
@@ -1326,7 +1327,6 @@ def run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args):
                 wait_for_load()
             # Wait once before admission, not once per family: our own workers
             # raise load and must not make later families wait on this gate.
-            import copy
             admitted = copy.copy(args)
             admitted.no_load_wait = True
             return landing_policy.run(chosen, plans, rows, repo, tmp, ctx, logdir, admitted, run_one_job)
@@ -1339,6 +1339,21 @@ def run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args):
     if "ios" in chosen:
         rows.append(("ios", "iOS UI smoke", "not run here: use scripts/ios-ui-tests.sh", "", ""))
     return failed
+
+
+def at_job_temp(step, planned, tmp):
+    """`step` with the plan's ${{ runner.temp }} moved to this job's RUNNER_TEMP.
+
+    The plan fills the expression in before --landing gives each job its own
+    folder, while a command's $RUNNER_TEMP names that folder. Without this, one
+    step writes where the next doesn't look (ov-1508)."""
+    if not planned or planned == str(tmp):
+        return step
+    def move(text):
+        return text.replace(planned, str(tmp))
+    moved = copy.copy(step)
+    moved.run, moved.env = move(step.run), {k: move(v) for k, v in step.env.items()}
+    return moved
 
 
 def run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args, *, quick=False):
@@ -1383,7 +1398,8 @@ def run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args, *, quick=False):
         # swift job's APP_NAME) is read back into it for the steps after
         # (ov-812). The step's own `env:` is laid over it inside run_step.
         result, secs, counts, ok, log, output = run_step_safely(
-            s, repo, env, logdir, tmp, getattr(args, "fail_fast", False), quick=quick)
+            at_job_temp(s, ctx.get("runner.temp"), tmp), repo, env, logdir, tmp,
+            getattr(args, "fail_fast", False), quick=quick)
         rows.append((j, s.label(), result, f"{secs:.0f}", counts))
         if getattr(args, "landing", False):
             landing_policy.record_timing(logdir, j, s, result, started, time.monotonic())
@@ -1665,6 +1681,30 @@ def _self_test():
            [s.run.count("${CARGO_TARGET_DIR:-../../crates/web/target}/debug/examples/fake_daemon") for s in running(walked, "--tunnel-delay 100")], [1])
     # Every csp-check CI runs is one this gate runs: a walk added to ci.yml must not be skipped in silence.
     expect("no csp-check in CI is left to CI", [s.label() for s in walked if s.skip and "csp-check.mjs" in s.run], [])
+
+    # --landing gives each job its own RUNNER_TEMP, below the one the plan filled
+    # ${{ runner.temp }} from. What the planned wasm step writes must be what
+    # CI's dist step, which reads $RUNNER_TEMP, finds (ov-1508).
+    with tempfile.TemporaryDirectory() as t:
+        t = pathlib.Path(t)
+        landing_ctx = {**ctx, "runner.temp": str(t)}
+        planned = {j: steps_for(j, wf, landing_ctx) for j in ("wire", "web")}
+        walk_policy.workflow_checks(planned, ["services/web/src/a.ts"], Step)
+        module = next(s for s in planned["web"] if "test-module.sh --bundle" in s.run)
+        reader = next(s for s in planned["web"] if "./build.sh --channel canary --build" in s.run)
+        wasm_dir = re.search(r'WEB_WASM_DIR="([^"]+)"', reader.run)[1]
+        pair = [Step("web", "write", 'mkdir -p "$MODULE_DIR" && touch "$MODULE_DIR/built"\n', env=module.env),
+                Step("web", "read by shell", f'test -f "{wasm_dir}/built"\n'),
+                Step("web", "read by env", 'test -f "$WEB_WASM_DIR/built"\n', env={"WEB_WASM_DIR": module.env["MODULE_DIR"]})]
+        job_tmp = t / "web"
+        job_tmp.mkdir()
+        rows = []
+        args = argparse.Namespace(landing=False, no_load_wait=True, strict_leaks=False, quick_only=False)
+        with contextlib.redirect_stdout(io.StringIO()):
+            run_one_job("web", {"web": pair}, rows, t, job_tmp, landing_ctx, t, args)
+        expect("a job with its own temp folder reads what it wrote under runner.temp",
+               [r[2].split()[0] for r in rows], ["pass"] * 3)
+        expect("the shared plan is left as it was", module.env["MODULE_DIR"], f"{t}/wasm-canary")
 
     # The real CI producers and consumers must stay paired by channel. A skipped
     # producer cannot supply dist, even if a stale dist happens to exist locally.
