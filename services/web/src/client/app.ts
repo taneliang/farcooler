@@ -23,7 +23,7 @@
 
 import { openWorkflow, installWorkflowPort } from './workflow-view'
 import { WorkflowSessionPort } from './workflow-session'
-import init, { connect, newWriterKey, approvalAsking, sealApproval, needsAttention, needsYouView, runnerHealth, passkeyKeyLine, planView, recoveryView, registrationData, registrationProof, rpId, workFailure, workView, boardFailure, reviewFailure, reviewApprovalResult, ticketForm, workspaceLayout, workspacePageAvailable, type WebRunner } from 'fc-web'
+import init, { connect, newWriterKey, approvalAsking, sealApproval, needsAttention, needsYouView, runnerHealth, passkeyKeyLine, planView, recoveryView, registrationData, registrationProof, rpId, workFailure, workView, boardFailure, reviewFailure, reviewApprovalResult, workspaceLayout, workspacePageAvailable, type WebRunner } from 'fc-web'
 
 import { approvalFailure, connectFailure, needsYouFailure, registerFailure, restoreFailure, runnerDeferred, runnerStopped, saveFailure, unreachable } from './copy'
 import { askForCopy, assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed, verifyWith } from './device'
@@ -413,7 +413,7 @@ let sheet: DetailSheet | null = null
 
 /// Open a task's detail, read from the runner it is on. The buttons that
 /// answer it are the Needs You item's own, while one waits on the person.
-function openCard(runner: string, task: { id: string; key: string; title: string }): void {
+function openCard(runner: string, task: { id: string; key: string; title: string; record?: boolean }): void {
   if (fleet?.cardsOf(runner)?.deps?.task && navigation) {
     const { space, tab } = navigation.route
     navigation.navigate({ space, tab, page: 'ticket', ticket: { runner, ...task } }, true)
@@ -723,9 +723,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
   }
   const board = mountBoard({
     root: $('board'),
-    dialog: $('board-form') as HTMLDialogElement,
     current: liveRunner,
-    create: ticketForm,
     failure: e => boardFailure(e.message, e.code ?? '', e.what ?? ''),
     href: (id, kind) => workspaceUrl(target.id, kind
       ? { space: chosenSpace, page: 'terminals', tab: 'terminals', [kind]: id }
@@ -737,7 +735,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
       if (route === navigation?.route) paneControls?.open(id)
     },
     openWorktree: id => navigation?.navigate({ space: chosenSpace, page: 'terminals', tab: 'terminals', worktree: id }),
-    openActivity: card => openCard(target.id, card),
+    openActivity: card => openCard(target.id, { ...card, record: true }),
     review: {
       current: liveRunner,
       navigate: (boardTask, review) => navigation?.navigate({ space: chosenSpace, page: 'board', tab: 'board', boardTask, review }),

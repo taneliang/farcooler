@@ -452,12 +452,12 @@ async fn web_review_browser_bridge() {
                 );
                 Ok(Value::Null)
             }
-            "form" => Ok(crate::web_board::form(None)),
             "ticket" => session.web_ticket(h.workspace, fixture.ticket).await,
             "intent" => {
                 session
                     .web_board_intent(h.workspace, serde_json::from_value(body.clone()).unwrap())
                     .await
+                    .map(|()| Value::Null)
             }
             "review" => {
                 session

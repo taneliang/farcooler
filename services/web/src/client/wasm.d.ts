@@ -84,7 +84,6 @@ declare module 'fc-web' {
   export function reviewFailure(word: string, code: string, what: string): string
   export function reviewApprovalResult(raw: string): string
   export function boardFailure(word: string, code: string, what: string): string
-  export function ticketForm(): string
   export function workFailure(word: string, code: string, what: string): string
   export class WebRunner {
     devices(keyA: string): Promise<string>
@@ -98,7 +97,7 @@ declare module 'fc-web' {
     web_review(workspace: string, ticket: string, request: string): Promise<string>
     board(workspace: string, repository: string): Promise<string>
     board_ticket(workspace: string, task: string): Promise<string>
-    board_intent(workspace: string, intent: string): Promise<string>
+    board_intent(workspace: string, intent: string): Promise<void>
     runtime_health(): Promise<string>
     review_files(worktree: string): Promise<string>
     review_patch(worktree: string, path: string): Promise<string>

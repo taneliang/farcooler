@@ -18,10 +18,9 @@ fn main() {
             print!("{}", farcooler_client::web_board::board(&board, &scope));
         }
         Some("/ticket") => {
-            let (task, scope, guard, links): (_, String, Option<String>, _) = serde_json::from_str(&body).unwrap();
-            print!("{}", farcooler_client::web_board::ticket(&task, &scope, true, guard.as_deref(), links));
+            let (task, scope, links): (_, String, _) = serde_json::from_str(&body).unwrap();
+            print!("{}", farcooler_client::web_board::ticket(&task, &scope, true, links));
         }
-        Some("/ticket-form") => print!("{}", farcooler_client::web_board::form(None)),
         Some("/layout") => print!("{}", farcooler_client::workspace_layout::json(&body)),
         _ => panic!("unknown projection"),
     }

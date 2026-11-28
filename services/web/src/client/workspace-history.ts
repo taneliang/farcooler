@@ -11,7 +11,7 @@ export interface Route {
   boardTask?: string
   review?: ReviewRoute
   slot?: Slot
-  ticket?: { runner: string; id: string; key: string; title: string }
+  ticket?: { runner: string; id: string; key: string; title: string; record?: boolean }
 }
 
 export function workspaceUrl(runner: string, route: Route): URL {

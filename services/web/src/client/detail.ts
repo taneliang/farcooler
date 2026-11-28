@@ -13,6 +13,8 @@ export interface Subject {
   id: string
   key: string
   title: string
+  /// Opened from the board, whose cards add no note, as the Mac's don't.
+  record?: boolean
 }
 
 export interface Criterion {

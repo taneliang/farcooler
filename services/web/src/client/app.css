@@ -367,13 +367,6 @@ button.danger { color: var(--danger); }
 .board-ticket p { white-space: pre-wrap; margin: 8px 0; }
 .board-ticket li { margin: 6px 0; }
 .board-ticket input { margin-inline-end: 8px; }
-.board-form { width: min(620px, calc(100% - 24px)); padding: 20px; }
-.board-form h2 { margin-top: 0; }
-.board-fields { display: grid; gap: 10px; margin-bottom: 14px; }
-.board-fields label { display: grid; gap: 4px; }
-.board-fields textarea, .board-fields input { padding: 8px; border: 1px solid var(--rule); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
-.board-fields textarea { min-height: 55px; resize: vertical; }
-.board-form .board-actions { margin-top: 14px; justify-content: end; }
 @media (max-width: 640px) {
   .board { padding: 16px; }
   .board-toolbar .board-actions { margin-left: 0; }

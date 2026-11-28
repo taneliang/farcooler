@@ -8,21 +8,15 @@ type Board = {
   refresh: string
   empty: string
   unread?: string
-  create?: string
   markAll?: Mark
   columns: { title: string; rows: Card[] }[]
 }
-type Field = { name: string; label: string; multiline: boolean; required?: boolean; value: string }
-type Form = { heading: string; submit: string; cancel: string; fields: Field[] }
 type Link = { id: string; label: string }
 type Ticket = {
   task: Card
   status: string
-  version: string
   back: string
   activity: string
-  edit?: Form
-  start?: { label: string; guard: string }
   mark: number | null
   agent?: Link
   worktree?: Link
@@ -32,14 +26,12 @@ type Ticket = {
 type Runner = {
   board(workspace: string, repository: string): Promise<string>
   board_ticket(workspace: string, task: string): Promise<string>
-  board_intent(workspace: string, intent: string): Promise<string>
+  board_intent(workspace: string, intent: string): Promise<void>
 }
 
 interface Options {
   root: HTMLElement
-  dialog: HTMLDialogElement
   current(): Runner | null
-  create(): string
   failure(error: WorkError): string
   href(id?: string, kind?: 'terminal' | 'worktree'): URL
   openTicket(id?: string): void
@@ -75,7 +67,7 @@ function anchor(text: string, url: URL, run: () => void): HTMLAnchorElement {
 }
 
 export function mountBoard(options: Options) {
-  const { root, dialog } = options
+  const { root } = options
   const body = el('div', undefined, 'board-content')
   const notice = el('p', '', 'plan-notice')
   notice.setAttribute('role', 'status')
@@ -97,10 +89,7 @@ export function mountBoard(options: Options) {
   let reading = false
   let last = ''
   let markedThrough: number | null = null
-  dialog.oncancel = event => { if (busy) event.preventDefault() }
-
   function select(id: string | null): void {
-    if (dialog.open) dialog.close()
     review?.close()
     reviewLinks = null
     task = id
@@ -113,14 +102,14 @@ export function mountBoard(options: Options) {
     void refresh()
   }
 
-  function report(words: string, target = notice): void {
-    target.textContent = words
-    target.hidden = !words
+  function report(words: string): void {
+    notice.textContent = words
+    notice.hidden = !words
   }
 
   async function refresh(poll = false): Promise<void> {
     const runner = options.current()
-    if (!front || !workspace || !repository || busy || (poll && (reading || dialog.open))) return
+    if (!front || !workspace || !repository || busy || (poll && reading)) return
     if (reviewRoute && reviewLinks && task) {
       review?.show(workspace, task, reviewRoute, reviewLinks)
       return
@@ -169,7 +158,7 @@ export function mountBoard(options: Options) {
     }
   }
 
-  async function send(intent: object, onSuccess: (reply: string) => void, errorTarget = notice): Promise<void> {
+  async function markBoardRead(through: number): Promise<void> {
     const runner = options.current()
     if (!front || !workspace || !runner || busy) return
     const destination = { workspace, task }
@@ -178,19 +167,18 @@ export function mountBoard(options: Options) {
     revision++
     reading = false
     body.setAttribute('aria-busy', 'true')
-    report('', errorTarget)
-    let reply: string
+    report('')
     try {
-      reply = await runner.board_intent(workspace, JSON.stringify(intent))
+      await runner.board_intent(workspace, JSON.stringify({ action: 'mark', through }))
     } catch (e) {
-      if (stillHere()) report(options.failure(e as WorkError), errorTarget)
+      if (stillHere()) report(options.failure(e as WorkError))
       return
     } finally {
       busy = false
       body.removeAttribute('aria-busy')
       if (!stillHere()) void refresh()
     }
-    if (stillHere()) onSuccess(reply)
+    if (stillHere()) void refresh()
   }
 
   function renderBoard(view: Board): void {
@@ -200,10 +188,9 @@ export function mountBoard(options: Options) {
     toolbar.append(heading)
     if (view.unread) toolbar.append(el('span', view.unread, 'board-meta'))
     const actions = el('div', undefined, 'board-actions')
-    if (view.create) actions.append(button(view.create, () => edit(JSON.parse(options.create()) as Form)))
     if (view.markAll) {
       const mark = view.markAll
-      actions.append(button(mark.label, () => void send({ action: 'mark', through: mark.through }, () => void refresh()), true))
+      actions.append(button(mark.label, () => void markBoardRead(mark.through), true))
     }
     actions.append(button(view.refresh, () => void refresh(), true))
     toolbar.append(actions)
@@ -246,10 +233,6 @@ export function mountBoard(options: Options) {
     const heading = el('h1', view.task.title)
     const toolbar = el('div', undefined, 'board-actions')
     toolbar.append(button(view.activity, () => options.openActivity(view.task), true))
-    if (view.edit) toolbar.append(button(view.edit.heading, () => edit(view.edit!, view), true))
-    if (view.start) toolbar.append(button(view.start.label, () => void send(
-      { action: 'start', task: view.task.id, guard: view.start!.guard }, () => void refresh(),
-    )))
     if (view.agent) {
       const agent = view.agent
       toolbar.append(anchor(agent.label, options.href(agent.id, 'terminal'), () => options.openAgent(agent.id)))
@@ -289,52 +272,6 @@ export function mountBoard(options: Options) {
     body.replaceChildren(content)
   }
 
-  function edit(view: Form, ticket?: Ticket): void {
-    const form = el('form')
-    const fields = el('div', undefined, 'board-fields')
-    for (const field of view.fields) {
-      const label = el('label', field.label)
-      const input = field.multiline ? el('textarea') : el('input')
-      input.name = field.name
-      input.required = !!field.required
-      input.value = field.value
-      label.append(input)
-      fields.append(label)
-    }
-    const actions = el('div', undefined, 'board-actions')
-    const submit = el('button', view.submit, 'primary')
-    submit.type = 'submit'
-    const cancel = button(view.cancel, () => dialog.close(), true)
-    actions.append(submit, cancel)
-    const error = el('p', '', 'plan-notice')
-    error.setAttribute('role', 'alert')
-    error.hidden = true
-    const heading = el('h2', view.heading)
-    heading.id = 'board-form-heading'
-    dialog.setAttribute('aria-labelledby', heading.id)
-    form.append(heading, fields, error, actions)
-    form.onsubmit = async event => {
-      event.preventDefault()
-      if (!options.current() || busy) return
-      submit.disabled = true
-      cancel.disabled = true
-      const draft = Object.fromEntries(new FormData(form))
-      const request = ticket
-        ? { action: 'edit', task: ticket.task.id, version: ticket.version, draft }
-        : { action: 'create', draft }
-      await send(request, reply => {
-        dialog.close()
-        const id: string = JSON.parse(reply)
-        if (id === task) void refresh()
-        else options.openTicket(id)
-      }, error)
-      submit.disabled = false
-      cancel.disabled = false
-    }
-    dialog.replaceChildren(form)
-    dialog.showModal()
-  }
-
   function show(on: boolean, ws: string | null = null, repo: string | null = null, id: string | null = null, route?: ReviewRoute): void {
     const sameTicket = on === front && ws === workspace && repo === repository && id === task
     if (sameTicket && JSON.stringify(route) === JSON.stringify(reviewRoute)) return
@@ -347,7 +284,6 @@ export function mountBoard(options: Options) {
       revision++
       reading = false
       review?.close()
-      if (dialog.open) dialog.close()
       return
     }
     reviewRoute = route

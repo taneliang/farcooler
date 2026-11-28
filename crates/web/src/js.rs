@@ -494,10 +494,10 @@ impl WebRunner {
         Ok(self.0.session.web_ticket(workspace, task).await.map_err(|e| web_failure(e.into()))?.to_string())
     }
 
-    pub async fn board_intent(&self, workspace: &str, intent: &str) -> Result<String, JsValue> {
+    pub async fn board_intent(&self, workspace: &str, intent: &str) -> Result<(), JsValue> {
         let workspace = board_id(workspace)?;
         let intent = serde_json::from_str(intent).map_err(|e| failure("protocol", &e.to_string()))?;
-        Ok(self.0.session.web_board_intent(workspace, intent).await.map_err(|e| web_failure(e.into()))?.to_string())
+        self.0.session.web_board_intent(workspace, intent).await.map_err(|e| web_failure(e.into()))
     }
 
     pub async fn web_review(&self, workspace: &str, ticket: &str, request: &str) -> Result<String, JsValue> {
@@ -757,11 +757,6 @@ pub fn work_failure(word: &str, code: &str, what: &str) -> String {
 
 fn board_id(id: &str) -> Result<Uuid, JsValue> {
     Uuid::parse_str(id).map_err(|e| failure("protocol", &e.to_string()))
-}
-
-#[wasm_bindgen(js_name = ticketForm)]
-pub fn ticket_form() -> String {
-    farcooler_client::web_board::form(None).to_string()
 }
 
 #[wasm_bindgen(js_name = boardFailure)]

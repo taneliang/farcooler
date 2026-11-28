@@ -1,5 +1,7 @@
 import { WorkflowSessionPort } from '../../src/client/workflow-session'
 import { mountBoard } from '../../src/client/board-screen'
+import { DetailBoard } from '../../src/client/detail'
+import { DetailSheet } from '../../src/client/detail-view'
 import { workspaceUrl, WorkspaceHistory, type Route } from '../../src/client/workspace-history'
 import { WorkspaceLayout } from '../../src/client/workspace-layout'
 import type { WorkView } from '../../src/client/work-screen'
@@ -61,14 +63,15 @@ function mountLayout(work: WorkView): WorkspaceLayout {
 
 async function main(): Promise<void> {
   harnessShell()
-  const form = await call({ method: 'form' })
   const current = {
     web_review: (workspace: string, task: string, request: string) =>
       call({ method: 'review', workspace, task, request: JSON.parse(request) }),
     workflow_call: (method: string, args: string) => call({ method, args: JSON.parse(args) }),
     board: (workspace: string, repository: string) => call({ method: 'board', workspace, repository }),
     board_ticket: (workspace: string, task: string) => call({ method: 'ticket', workspace, task }),
-    board_intent: (workspace: string, intent: string) => call({ method: 'intent', workspace, ...JSON.parse(intent) }),
+    board_intent: async (workspace: string, intent: string) => {
+      await call({ method: 'intent', workspace, ...JSON.parse(intent) })
+    },
   }
   const runner = 'canary'
   const params = new URL(location.href).searchParams
@@ -80,17 +83,24 @@ async function main(): Promise<void> {
   const boardRoute = (id?: string): Route => ({ space: workspace, page: 'board', tab: 'board', boardTask: id })
   const terminalRoute = (id: string, kind: 'terminal' | 'worktree'): Route =>
     ({ space: workspace, page: 'terminals', tab: 'terminals', [kind]: id })
+  const sheet = new DetailSheet(get('detail') as HTMLDialogElement, get, () => 'Waiting on You', () => sheet.close())
   const screen = mountBoard({
     root: get('board'),
-    dialog: get('board-form') as HTMLDialogElement,
     current: () => current,
-    create: () => form,
     failure: error => error.message,
     href: (id, kind) => workspaceUrl(runner, kind && id ? terminalRoute(id, kind) : boardRoute(id)),
     openTicket: id => history.navigate(boardRoute(id)),
     openAgent: id => history.navigate(terminalRoute(id, 'terminal')),
     openWorktree: id => history.navigate(terminalRoute(id, 'worktree')),
-    openActivity: () => {},
+    openActivity: card => {
+      const subject = { runner, record: true, ...card }
+      sheet.open(new DetailBoard({
+        runner: runnerName,
+        task: task => call({ method: 'record', task }),
+        addNote: async () => { throw new Error('a card from the board adds no note') },
+        show: view => sheet.draw(view),
+      }, subject), () => [], '', () => {})
+    },
     review: {
       current: () => current,
       navigate: (ticket, review) => history.navigate({ ...boardRoute(ticket), review }),

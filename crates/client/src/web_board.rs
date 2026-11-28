@@ -9,19 +9,7 @@ use uuid::Uuid;
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum Intent {
-    Create { draft: Draft },
-    Edit { task: Uuid, version: String, draft: Draft },
     Mark { task: Option<Uuid>, through: i64 },
-    Start { task: Uuid, guard: String },
-}
-
-#[derive(Deserialize)]
-pub struct Draft {
-    pub title: String,
-    pub intent: String,
-    pub acceptance: String,
-    pub constraints: String,
-    pub labels: String,
 }
 
 pub fn can_write(scope: &str) -> bool {
@@ -59,30 +47,10 @@ pub fn board(raw: &Value, scope: &str) -> Value {
     json!({
         "title": "Board", "refresh": "Refresh", "empty": "No tickets",
         "unread": floor.map(|_| format!("{unread} unread")),
-        "create": write.then_some("New Ticket"),
         "markAll": (write && unread > 0).then(|| json!({"label":"Mark Board Read", "through":through})),
         "columns": STATUSES.iter().zip(columns).map(|(status, rows)| json!({
             "title": status.apple, "rows": rows,
         })).collect::<Vec<_>>(),
-    })
-}
-
-pub fn form(task: Option<&Value>) -> Value {
-    let lines = |key: &str, field: Option<&str>| task.and_then(|t| t[key].as_array()).into_iter()
-        .flatten().filter_map(|line| field.map_or(line, |name| &line[name]).as_str())
-        .collect::<Vec<_>>().join("\n");
-    let text = |key: &str| task.and_then(|t| t[key].as_str()).unwrap_or_default();
-    json!({
-        "heading": if task.is_some() { "Edit Ticket" } else { "New Ticket" },
-        "submit": if task.is_some() { "Save Ticket" } else { "Create Ticket" },
-        "cancel": "Cancel",
-        "fields": [
-            {"name":"title", "label":"Title", "multiline":false, "required":true, "value":text("title")},
-            {"name":"intent", "label":"Intent", "multiline":true, "value":text("intent")},
-            {"name":"acceptance", "label":"Acceptance criteria", "multiline":true, "value":lines("acceptance", Some("text"))},
-            {"name":"constraints", "label":"Constraints", "multiline":true, "value":lines("constraints", None)},
-            {"name":"labels", "label":"Labels", "multiline":true, "value":lines("labels", None)}
-        ],
     })
 }
 
@@ -98,16 +66,14 @@ pub fn destinations(task: &pb::Task, terminals: &[pb::Terminal], trees: &[pb::Wo
 }
 
 pub fn ticket(
-    value: &Value, scope: &str, shared_reads: bool, start: Option<&str>,
+    value: &Value, scope: &str, shared_reads: bool,
     (agent, tree): (Option<Uuid>, Option<Uuid>),
 ) -> Value {
     let write = can_write(scope);
     json!({
         "task": {"id":value["id"], "key":value["key"], "title":value["title"]},
-        "version": value["resource_version"].to_string(), "back": "Back to Board", "activity": "Activity and Notes",
+        "back": "Back to Board", "activity": "Activity and Notes",
         "status": STATUSES.iter().find(|s| value["status"] == s.wire).map(|s| s.apple),
-        "edit": write.then(|| form(Some(value))),
-        "start": start.filter(|_| write).map(|guard| json!({"label":"Start Ticket", "guard":guard})),
         "mark": (write && shared_reads).then(|| movement(value)),
         "agent": agent.filter(|_| write).map(|id| json!({"id":id, "label":"Open Agent"})),
         "worktree": tree.map(|id| json!({"id":id, "label":"Open Worktree"})),
@@ -123,9 +89,6 @@ pub fn ticket(
 pub fn failure(word: &str, code: &str, what: &str) -> &'static str {
     match (word, code, what) {
         (_, "scope-denied", _) => "This action needs control of the runner.",
-        (_, _, "ticket_version") => "This ticket changed while you were editing. Copy your draft, then reopen the ticket before saving.",
-        (_, _, "ticket_start") => "The workflow changed or refused to start this ticket. Reopen the ticket to see its current state.",
-        (_, _, "ticket_title" | "title") => "Enter a ticket title with 200 characters or fewer.",
         (_, "not-found", _) => "This ticket is no longer on this board.",
         ("runner_too_old", _, _) => "Update Far Cooler on the runner to open this board.",
         ("closed" | "no_answer", _, _) => "The runner didn’t answer. Refresh to check its current state.",
@@ -154,9 +117,30 @@ mod tests {
         assert_eq!(backlog["rows"][1]["unread"], "Unread");
         let read = board(&raw, "read");
         assert_eq!(read["unread"], "1 unread");
-        assert!(read["create"].is_null());
         assert!(read["markAll"].is_null());
         assert!(board(&json!({"tasks":raw["tasks"]}), "control")["unread"].is_null());
+    }
+
+    // ov-1487: the web board offers what the Mac board does, and the
+    // orchestrator owns creating, editing and starting tickets.
+    #[test]
+    fn the_board_sends_no_way_to_create_edit_or_start_a_ticket() {
+        let raw = json!({"tasks":[], "reads":{"floor_ms":0, "opened":[]}});
+        for scope in ["control", "host_admin"] {
+            let view = board(&raw, scope);
+            assert!(view.get("create").is_none(), "{view}");
+        }
+        let task = pb::Task { id: bytes::Bytes::copy_from_slice(Uuid::now_v7().as_bytes()),
+            status: pb::TaskStatus::Backlog as i32, ..Default::default() };
+        let view = ticket(&crate::tasks_json::task_json(&task, 0), "control", true, (None, None));
+        for key in ["edit", "version", "start"] {
+            assert!(view.get(key).is_none(), "{key}: {view}");
+        }
+        for action in ["create", "edit", "start"] {
+            let draft = json!({"title":"t", "intent":"", "acceptance":"", "constraints":"", "labels":""});
+            let intent = json!({"action":action, "draft":draft, "task":Uuid::nil(), "version":"1", "guard":"g"});
+            assert!(serde_json::from_value::<Intent>(intent).is_err(), "{action} is still accepted");
+        }
     }
 
     #[test]
@@ -164,7 +148,7 @@ mod tests {
         let (id, other, terminal, checkout) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
         let bytes = |id: Uuid| bytes::Bytes::copy_from_slice(id.as_bytes());
         let task = pb::Task { id: bytes(id), status: pb::TaskStatus::Todo as i32,
-            resource_version: u64::MAX, updated_at: 91, ..Default::default() };
+            updated_at: 91, ..Default::default() };
         let agent = pb::Terminal { task_id: Some(bytes(id)), id: bytes(terminal),
             worktree_id: bytes(checkout), role: TerminalRole::Agent as i32,
             state: TerminalState::Running as i32, ..Default::default() };
@@ -173,13 +157,12 @@ mod tests {
         let links = destinations(&task, &[agent, unrelated], &[tree]);
         assert_eq!(links, (Some(terminal), Some(checkout)));
         let raw = crate::tasks_json::task_json(&task, 100);
-        let control = ticket(&raw, "control", true, Some("guard"), links);
-        assert_eq!(control["version"], u64::MAX.to_string());
+        let control = ticket(&raw, "control", true, links);
         assert_eq!(control["agent"]["id"], json!(terminal));
         assert_eq!(control["worktree"]["id"], json!(checkout));
         assert_eq!(control["mark"], 91);
-        let read = ticket(&raw, "read", true, Some("guard"), links);
-        for key in ["edit", "start", "mark", "agent"] {
+        let read = ticket(&raw, "read", true, links);
+        for key in ["mark", "agent"] {
             assert!(read[key].is_null(), "{key}");
         }
     }

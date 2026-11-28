@@ -47,7 +47,6 @@ const board = {
 const agent = '00000000-0000-0000-0000-00000000000a'
 const tree = '00000000-0000-0000-0000-00000000000b'
 const commands = []
-let time = 10
 
 function answer(args, scope) {
   if (args.method === 'layout') return project('/layout', args.request)
@@ -62,46 +61,31 @@ function answer(args, scope) {
         agent: true, orchestrator: true, state: 'running', columns: 80, rows: 24 }],
     }, { workspace }])
   }
-  if (args.method === 'form') return project('/ticket-form', {})
   if (args.method === 'board') {
     assert.equal(args.workspace, 'delivery')
     assert.equal(args.repository, 'repo')
     return project('/board', [board, scope])
   }
   const task = board.tasks.find(task => task.id === args.task)
+  if (args.method === 'record') {
+    assert.ok(task)
+    return JSON.stringify({ task, blocks: [],
+      notes: [{ id: 'note', kind: 'decision', actor: 'orchestrator', at: 1, body: 'Kept the anchor in Rust.' }] })
+  }
   if (args.method === 'ticket') {
     assert.ok(task)
-    const start = task.status === 'backlog' ? 'start-guard' : null
-    return project('/ticket', [task, scope, start, task.status === 'in_progress' ? [agent, tree] : [null, null]])
+    return project('/ticket', [task, scope, task.status === 'in_progress' ? [agent, tree] : [null, null]])
   }
   assert.equal(scope, 'control')
   assert.equal(args.workspace, 'delivery')
   commands.push(args)
-  switch (args.action) {
-    case 'mark':
-      if (task) {
-        const found = board.reads.opened.find(mark => mark.task_id === task.id)
-        if (found) found.opened_ms = Math.max(found.opened_ms, args.through)
-        else board.reads.opened.push({ task_id: task.id, opened_ms: args.through })
-      } else board.reads.floor_ms = Math.max(board.reads.floor_ms, args.through)
-      return 'null'
-    case 'create':
-      board.tasks.push({ ...args.draft, id: 'new', key: 'ov-2000', status: 'backlog',
-        acceptance: [{ text: args.draft.acceptance, met: false }], constraints: [], labels: [],
-        updated_at: ++time, resource_version: 1 })
-      return '"new"'
-    case 'edit':
-      if (args.version !== String(task.resource_version)) throw new Error('The ticket changed while editing.')
-      Object.assign(task, { title: args.draft.title, intent: args.draft.intent, updated_at: ++time,
-        resource_version: task.resource_version + 1 })
-      return '"new"'
-    case 'start':
-      assert.equal(args.guard, 'start-guard')
-      assert.equal(task.status, 'backlog')
-      Object.assign(task, { status: 'in_progress', updated_at: ++time })
-      return 'null'
-    default: throw new Error('Unexpected call')
-  }
+  assert.equal(args.action, 'mark')
+  if (task) {
+    const found = board.reads.opened.find(mark => mark.task_id === task.id)
+    if (found) found.opened_ms = Math.max(found.opened_ms, args.through)
+    else board.reads.opened.push({ task_id: task.id, opened_ms: args.through })
+  } else board.reads.floor_ms = Math.max(board.reads.floor_ms, args.through)
+  return 'null'
 }
 
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH })
@@ -211,28 +195,32 @@ try {
   const reader = await page('read')
   const action = name => editor.getByRole('button', { name, exact: true })
   await reader.getByText('6 unread', { exact: true }).waitFor()
-  assert.equal(await reader.getByRole('button', { name: 'New Ticket' }).count(), 0)
-  await action('New Ticket').click()
-  const dialog = editor.getByRole('dialog')
-  await dialog.getByLabel('Title').fill('Restore browser review position after a daemon reconnect')
-  await dialog.getByLabel('Intent').fill('Keep the selected candidate, file and line when the browser reloads.')
-  await dialog.getByLabel('Acceptance criteria').fill('Returning to an updated candidate resolves the anchor in Rust.')
-  await dialog.getByRole('button', { name: 'Create Ticket' }).click()
-  await editor.waitForURL('**ticket=new')
-  await editor.getByRole('heading', { name: 'Restore browser review position after a daemon reconnect' }).waitFor()
-  await action('Edit Ticket').click()
-  await dialog.getByLabel('Title').fill('Retain exact browser review position after reconnect')
-  await dialog.getByRole('button', { name: 'Save Ticket' }).click()
-  await editor.getByRole('heading', { name: 'Retain exact browser review position after reconnect' }).waitFor()
-  await action('Edit Ticket').click()
-  await dialog.getByLabel('Title').fill('Concurrent edit draft')
-  board.tasks.at(-1).resource_version++
-  await dialog.getByRole('button', { name: 'Save Ticket' }).click()
-  await dialog.getByRole('alert').waitFor()
-  assert.equal(await dialog.getByLabel('Title').inputValue(), 'Concurrent edit draft')
-  await dialog.getByRole('button', { name: 'Cancel' }).click()
-  await action('Start Ticket').click()
+  // ov-1487: tickets are made, changed and started by asking the orchestrator.
+  // The board and a ticket offer what the Mac's do, and no more.
+  const noTicketForms = async where => {
+    for (const name of ['New Ticket', 'Edit Ticket', 'Create Ticket', 'Save Ticket', 'Start Ticket']) {
+      assert.equal(await editor.getByRole('button', { name, exact: true }).count(), 0, `${name} on ${where}`)
+    }
+    assert.equal(await editor.locator('#board-form, .board-fields').count(), 0, `ticket form on ${where}`)
+  }
+  await editor.getByRole('link', { name: /ov-1446/ }).waitFor()
+  assert.deepEqual(await editor.locator('#board button').allTextContents(), ['Mark Board Read', 'Refresh'])
+  await noTicketForms('the board')
+  await editor.getByRole('link', { name: /ov-1446/ }).click()
+  await editor.getByRole('heading', { name: 'Acceptance criteria' }).waitFor()
+  assert.deepEqual(await editor.locator('#board button').allTextContents(), ['Activity and Notes'])
+  await noTicketForms('a backlog ticket')
+  // The Mac's card shows its record and adds no note to it.
+  await action('Activity and Notes').click()
+  const record = editor.locator('#detail')
+  await record.getByText('Kept the anchor in Rust.', { exact: true }).waitFor()
+  assert.equal(await record.getByRole('textbox').count(), 0, 'note field on a card opened from the board')
+  assert.equal(await record.getByRole('button', { name: 'Add Note' }).count(), 0)
+  await record.getByRole('button', { name: 'Close' }).click()
+  await editor.getByRole('link', { name: 'Back to Board' }).click()
+  await editor.getByRole('link', { name: /ov-1445/ }).click()
   await editor.getByRole('link', { name: 'Open Agent' }).waitFor()
+  await noTicketForms('a ticket in progress')
   for (const [name, param, id] of [['Open Agent', 'terminal', agent], ['Open Worktree', 'worktree', tree]]) {
     const link = editor.getByRole('link', { name })
     assert.equal(new URL(await link.getAttribute('href')).searchParams.get(param), id)
@@ -255,9 +243,9 @@ try {
   await action('Mark Board Read').click()
   await reader.getByRole('button', { name: 'Refresh' }).click()
   await reader.getByText('0 unread', { exact: true }).waitFor()
-  assert.equal(commands.filter(c => c.action === 'start').length, 1)
-  assert.ok(commands.some(c => c.action === 'mark' && c.task === 'new'))
-  console.log('PASS create, edit, refuse stale save, start, reload, history, linked destinations and shared unread')
+  assert.deepEqual([...new Set(commands.map(c => c.action))], ['mark'])
+  assert.ok(commands.some(c => c.task === 'ov-1445'))
+  console.log('PASS no ticket forms or start, a read-only record, reload, history, linked destinations and shared unread')
 
   if (output) {
     board.reads.floor_ms = 3

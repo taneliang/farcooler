@@ -374,69 +374,43 @@ async fn workflow_reasoned_socket_selection_loss_and_reconnect() {
     eprintln!("B authenticated Session validation -> exact prepared reason -> accepted-before-answer-loss -> replacement Session identical receipt; request={bytes}; receipt={receipt}");
 }
 
+/// A ticket filed as the orchestrator files one: the web board makes none.
+fn file_ticket(h: &Harness, title: &str, intent: &str) -> Uuid {
+    h.service.store.create_task_complete(
+        h.workspace,
+        &farcooler_store::TaskUpdate {
+            title: title.into(), intent: intent.into(), acceptance: vec![], constraints: vec![],
+            labels: vec![], worktree_id: None,
+        },
+        farcooler_store::Actor::User,
+    ).unwrap().id
+}
+
 #[tokio::test]
-async fn web_board_ticket_creates_edits_marks_read_and_starts_over_the_socket() {
-    use crate::web_board::{Draft, Intent};
+async fn web_board_ticket_marks_read_over_the_socket() {
+    use crate::web_board::Intent;
 
     let h = start().await;
     let a = Session::connect_local(&h.socket).await.unwrap();
     let repo = h.service.store.get_workspace(h.workspace).unwrap().repository_id;
-    let draft = |title: &str| Draft {
-        title: title.into(), intent: "Verify the web board.".into(),
-        acceptance: "Review in the browser.".into(), constraints: String::new(), labels: String::new(),
-    };
-
-    let reply = a.web_board_intent(h.workspace, Intent::Create { draft: draft("Original title") }).await.unwrap();
-    let task = serde_json::from_value(reply).unwrap();
-    let ticket = a.web_ticket(h.workspace, task).await.unwrap();
-    let key = ticket["task"]["key"].as_str().unwrap().to_owned();
-    let version = ticket["version"].as_str().unwrap().to_owned();
-    a.web_board_intent(h.workspace, Intent::Edit { task, version: version.clone(), draft: draft("Revised title") }).await.unwrap();
-    let stale = a.web_board_intent(h.workspace, Intent::Edit { task, version, draft: draft("Stale title") }).await;
-    assert!(matches!(stale, Err(SessionError::Refused { what, .. }) if what == "ticket_version"));
+    let task = file_ticket(&h, "Original title", "Verify the web board.");
 
     let ticket = a.web_ticket(h.workspace, task).await.unwrap();
-    assert_eq!(ticket["task"]["title"], "Revised title");
+    assert_eq!(ticket["task"]["title"], "Original title");
     let through = ticket["mark"].as_i64().unwrap();
     a.web_board_intent(h.workspace, Intent::Mark { task: Some(task), through }).await.unwrap();
     let b = Session::connect_local(&h.socket).await.unwrap();
     assert_eq!(b.web_board(h.workspace, repo).await.unwrap()["unread"], "0 unread");
 
-    // This fixture attaches a workflow runtime at the RPC layer, without the service
-    // lifecycle hook that tracks new cards on a real runner.
-    let publish = wire::Action::Publish {
-        reason: None, notifications: None, adapter: None, expected_pin: None,
-        mutation: Mutation { id: "board-publish".into(), sequence: 1, revision: 0, epoch: 1 },
-        definition: coding_definition(false),
-    };
-    let published = a.workflow_wire(h.workspace, serde_json::to_string(&publish).unwrap()).await.unwrap();
-    let revision = published.pointer("/receipt/result/Ok").and_then(|v| v.as_u64()).unwrap();
-    let track = wire::Action::Track {
-        mutation: Mutation { id: "board-track".into(), sequence: 2, revision, epoch: 1 },
-        item: key.clone(), column: Some("backlog".into()),
-    };
-    let tracked = a.workflow_wire(h.workspace, serde_json::to_string(&track).unwrap()).await.unwrap();
-    assert!(tracked.pointer("/receipt/result/Ok").is_some(), "{tracked}");
-
-    let ticket = a.web_ticket(h.workspace, task).await.unwrap();
-    let guard = ticket["start"]["guard"].as_str().unwrap().to_owned();
-    a.web_board_intent(h.workspace, Intent::Start { task, guard: guard.clone() }).await.unwrap();
-    let snapshot = a.workflow_snapshot(h.workspace, Style::Apple).await.unwrap();
-    assert!(!snapshot.state.items[&key].definition.is_ticket());
-    let retry = a.web_board_intent(h.workspace, Intent::Start { task, guard }).await;
-    assert!(matches!(retry, Err(SessionError::Refused { what, .. }) if what == "ticket_start"));
-
     h.scope.store(Scope::Read as i32, Ordering::SeqCst);
     let reader = Session::connect_local(&h.socket).await.unwrap();
-    assert!(reader.web_ticket(h.workspace, task).await.unwrap()["edit"].is_null());
+    assert!(reader.web_ticket(h.workspace, task).await.unwrap()["mark"].is_null());
     assert!(matches!(reader.web_board_intent(h.workspace, Intent::Mark { task: Some(task), through }).await,
         Err(SessionError::Refused { code, .. }) if code == farcooler_protocol::v1::ErrorCode::ScopeDenied as i32));
 }
 
 #[tokio::test]
 async fn web_board_collects_a_workspace_bigger_than_a_control_response() {
-    use crate::web_board::{Draft, Intent};
-
     let h = start().await;
     let session = Session::connect_local(&h.socket).await.unwrap();
     let repo = h.service.store.get_workspace(h.workspace).unwrap().repository_id;
@@ -444,10 +418,7 @@ async fn web_board_collects_a_workspace_bigger_than_a_control_response() {
     let count = 22;
     assert!(intent.len() * count > farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES);
     for i in 0..count {
-        session.web_board_intent(h.workspace, Intent::Create { draft: Draft {
-            title: format!("Ticket {i}"), intent: intent.clone(), acceptance: String::new(),
-            constraints: String::new(), labels: String::new(),
-        }}).await.unwrap();
+        file_ticket(&h, &format!("Ticket {i}"), &intent);
     }
     let board = session.web_board(h.workspace, repo).await.unwrap();
     let backlog = board["columns"].as_array().unwrap().iter()

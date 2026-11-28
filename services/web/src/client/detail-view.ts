@@ -63,6 +63,7 @@ export class DetailSheet {
     note.value = draft
     this.saveDraft = save
     this.$('detail-notice').hidden = true
+    this.$('detail-form').hidden = !!board.subject.record
     this.dialog.setAttribute('open', '')
     this.$('detail-body').scrollTop = 0
     board.publish()
