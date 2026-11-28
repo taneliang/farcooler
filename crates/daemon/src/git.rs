@@ -8,7 +8,9 @@
 //! Serialization is NOT this module's job. `Service::repo_lock` holds a mutex
 //! across the whole mutate-git-then-write-the-row sequence, because that is the
 //! span the reconciler must not observe half of, and nothing at this level can
-//! see the metadata half.
+//! see the metadata half. The one exception is git's own: a `worktree add` never
+//! runs beside a git that reads every worktree's half-written metadata
+//! (`worktree_metadata`, ov-1526).
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -19,6 +21,7 @@ use farcooler_core::{DomainError, Result};
 use tokio::process::Command;
 
 mod provision_lock;
+mod worktree_metadata;
 pub(crate) use provision_lock::{PROVISION_WRITERS, inherit_process_lock, try_process_lock, wait_provision_lock};
 
 /// How long any single git invocation may take before it is killed.
@@ -234,6 +237,8 @@ async fn run_bounded(
     extra: &[crate::git_guard::Pin],
     index: Option<&Path>,
 ) -> Result<GitBytes> {
+    // Held until the git has ended, and taken before its time starts: waiting behind another add isn't the git's.
+    let _metadata = worktree_metadata::hold(args).await;
     let deadline = tokio::time::Instant::now() + timeout;
     let out = if unguarded() {
         spawn_bounded(launch, deadline, cwd, args, None, index).await?
