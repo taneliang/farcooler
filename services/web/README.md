@@ -28,6 +28,10 @@ one stylesheet, both served from `/a/` under the strict CSP.
 `test/browser/shell-check.mjs` covers keyboard focus order, the pickers and
 dialogs, filled buttons and contrast at 320, 768 and 1280 px in both themes.
 
+`test/browser/split-check.mjs` covers the message box as panes come back and
+change width: a split closed and reopened, another terminal and back, and a
+reply that lands while its pane is away.
+
 ## Adding a Tailcat relay host
 
 The CSP names Tailcat's relays one by one, not as `*.ipn.dev`, so a relay that

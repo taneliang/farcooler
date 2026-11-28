@@ -1612,8 +1612,8 @@ def _self_test():
             readers.append(step.label())
             expect(f"{step.label()} has its wasm module built first", step.env["WEB_WASM_DIR"] in written, True)
     expect("the browser checks that read the wasm module still run here",
-           [any(name in label for label in readers) for name in ("chat-check", "chat-files-check", "work_view_bin")],
-           [True, True, True])
+           [any(name in label for label in readers) for name in ("chat-check", "chat-files-check", "split-check", "work_view_bin")],
+           [True, True, True, True])
 
     # The real CI producers and consumers must stay paired by channel. A skipped
     # producer cannot supply dist, even if a stale dist happens to exist locally.

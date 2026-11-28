@@ -43,6 +43,12 @@ export class ChatView implements Pane<WebRunner> {
   /// What is drawn, by node id: the element and what it was drawn from.
   private readonly drawn = new Map<string, { el: HTMLElement | null; sig: string }>()
   private child: { dialog: HTMLDialogElement; view: ChatView } | null = null
+  /// The conversation's own size: it changes when the pane is drawn again and
+  /// when the window or a split makes it wider or narrower.
+  private readonly resized = new ResizeObserver(() => {
+    this.sizeBox()
+    this.placeScroll()
+  })
   /// The files and pictures this conversation shows (chat-files.ts).
   private readonly media = new Media(
     ask => this.bytes(ask),
@@ -135,6 +141,8 @@ export class ChatView implements Pane<WebRunner> {
     const foot = el('div', 'chat-foot')
     foot.append(this.working, this.problem, this.composer)
     host.append(this.note, this.scroller, this.latest, foot)
+    // The host, not the box: sizing the box leaves the host as it was.
+    this.resized.observe(host)
 
     this.scroller.addEventListener('scroll', () => {
       if (this.host.hidden || this.restorePosition !== null) return
@@ -268,6 +276,7 @@ export class ChatView implements Pane<WebRunner> {
   }
 
   dispose(): void {
+    this.resized.disconnect()
     this.detach()
     this.media.clear()
     this.host.remove()
@@ -425,7 +434,12 @@ export class ChatView implements Pane<WebRunner> {
 
   private sizeBox(): void {
     this.box.style.height = 'auto'
-    this.box.style.height = `${Math.min(this.box.scrollHeight, 200)}px`
+    // A box that isn't drawn measures 0: a pane is shown before its screen is
+    // unhidden, and a reply can land while it's away. Kept as a height, that
+    // leaves a sliver with the placeholder cut off and nothing to click
+    // (ov-1495), so it stays at its one row until it's drawn.
+    const words = this.box.scrollHeight
+    this.box.style.height = words ? `${Math.min(words, 200)}px` : ''
     this.paintSend()
   }
 
