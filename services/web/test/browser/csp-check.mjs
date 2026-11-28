@@ -1541,14 +1541,17 @@ async function remoteWorkday({ context, page, passkeys }) {
   await landing.getByText(/^checking on ci$/i).waitFor(wait)
   console.log('workday: answered Needs You, read the committed diff and followed the runner’s landing in Plan')
 
-  await terminalsWalk({ page, runner: second, chooseCheckout, work, assert, wait })
+  await terminalsWalk({ page, runner: second, label: 'build-box', agents: true, chooseCheckout, work, assert, wait })
+  // A shell's exit and restart hold on each of the two runners, not only one.
+  await switchRunner('studio')
+  await terminalsWalk({ page, runner, label: 'studio', agents: false, chooseCheckout, work, assert, wait })
 }
 
 /// New shell and agent terminals, and restarting one that exited and the
 /// workspace's orchestrator (ov-1491). Everything the browser claims is read
-/// back through the runner's own CLI. The three scenarios stand alone, so one
-/// failing doesn't hide the others.
-async function terminalsWalk({ page, runner, chooseCheckout, work, assert, wait }) {
+/// back through the runner's own CLI. The scenarios stand alone, so one
+/// failing doesn't hide the others. `agents` adds the two that start an agent.
+async function terminalsWalk({ page, runner, label, agents, chooseCheckout, work, assert, wait }) {
   const env = { ...process.env, FARCOOLER_HOME: runner.runtime }
   const cli = (...args) => execFileSync(workdayCli, args, { env, encoding: 'utf8' })
   const listed = () => JSON.parse(cli('--json', 'worktree', 'list')).worktrees
@@ -1593,10 +1596,10 @@ async function terminalsWalk({ page, runner, chooseCheckout, work, assert, wait 
   async function scenario(name, run) {
     try {
       await run()
-      console.log(`workday: ${name}`)
+      console.log(`workday: ${label}: ${name}`)
     } catch (e) {
       await shoot(page, `workday-failed-${name.split(' ')[0]}`)
-      failures.push(`workday: ${name}: ${e.message.replace(/\s+/g, ' ').slice(0, 600)}`)
+      failures.push(`workday: ${label}: ${name}: ${e.message.replace(/\s+/g, ' ').slice(0, 600)}`)
       if (await work.isVisible()) await work.getByRole('button', { name: 'Done' }).click()
     }
   }
@@ -1629,6 +1632,8 @@ async function terminalsWalk({ page, runner, chooseCheckout, work, assert, wait 
     await eventually('a new epoch', () => pane(shell).epoch > epoch)
     await typeAndSee(shell, "printf 'again-%d\\n' 49", 'again-49')
   })
+
+  if (!agents) return
 
   await scenario('started Claude Code with a chosen model', async () => {
     const agent = await openNew('claude', 'sonnet')
