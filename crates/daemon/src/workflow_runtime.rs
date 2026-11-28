@@ -278,6 +278,9 @@ pub struct Exec {
     pub(super) user_home: Option<PathBuf>,
     #[cfg(test)]
     pub(super) build_free_bytes: Option<u64>,
+    /// A test's stand-in for the platform's file clone under the dependency seed (ov-1524).
+    #[cfg(test)]
+    pub(super) seed_clone: Option<fn(&Path, &Path) -> std::io::Result<()>>,
     /// Where a test's scratch folders go; by default beside its engine root (ov-1516).
     #[cfg(test)]
     pub(super) scratch_base: Option<PathBuf>,
@@ -464,7 +467,7 @@ impl Runtime {
         let runtime = Self { inbox, send, next_lease: None, next_cleanup: None, orphan_cleanup_retries: BTreeMap::new(), next_process_log_prune: None, continuous: false,
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
             exec: Exec { yielding: crate::yielding::Yielding::at(&root), activities: Default::default(), places: std::sync::Arc::new(std::sync::Mutex::new(Places::load(&root)?)), root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, runner_interrupted: Default::default(), host: None,
-                seeding: Default::default(), tree_locks: Default::default(), disk_usage: Default::default(), seeds: Default::default(), #[cfg(test)] user_home: None, #[cfg(test)] build_free_bytes: Some(u64::MAX), #[cfg(test)] scratch_base: None, #[cfg(test)] cleanup_check: None, #[cfg(test)] cleanup_test_probe: None, open_file_checks: None },
+                seeding: Default::default(), tree_locks: Default::default(), disk_usage: Default::default(), seeds: Default::default(), #[cfg(test)] user_home: None, #[cfg(test)] build_free_bytes: Some(u64::MAX), #[cfg(test)] seed_clone: None, #[cfg(test)] scratch_base: None, #[cfg(test)] cleanup_check: None, #[cfg(test)] cleanup_test_probe: None, open_file_checks: None },
             notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None, trees_recovered: false, next_join_refresh: None, cleanup_started: None, cancel_refused: Default::default(), recovery: Default::default(), restart_pacing: Default::default(), scheduling: Default::default(),
             _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
         runtime.validate_native_host()?;

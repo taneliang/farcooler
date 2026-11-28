@@ -4,7 +4,10 @@
 //! `dependency_seed` command, the engine runs it after each landing in a private checkout of the landed commit,
 //! with `FARCOOLER_SEED` set to an empty folder under the engine root. Builders never get that folder: agents can
 //! write anywhere under /tmp, so the seed is made and kept where only the engine writes. Each Build or Review step's
-//! scratch then starts as an APFS clone of the newest seed, which shares its blocks until a builder writes.
+//! scratch then starts as a clone of the newest seed, which shares its blocks until a builder writes: clonefile(2)
+//! on APFS, FICLONE on a Linux filesystem with reflinks (btrfs, XFS). Where the engine's disk can't clone, there
+//! are no seeds at all (ov-1524): a full copy per builder would cost the very disk a seed exists to save, and a
+//! seed nobody can clone would only hold its 20 GB.
 //!
 //! Every folder here is named in the ledger before it is made, and only a folder the ledger names is ever deleted,
 //! by that exact path, once no process has a file open in it.
@@ -25,6 +28,8 @@ struct SeedState {
     building: bool,
     /// The last commit whose seed failed, so the next landing tries again but the same commit doesn't.
     failed: Option<String>,
+    /// Whether the seed folder's disk clones files, found the first time a seed would start.
+    clones: Option<bool>,
 }
 
 /// What the engine made under its seed folder: the seed builders clone, and folders still to remove.
@@ -61,11 +66,12 @@ impl Exec {
     /// seed already failed. Called when a landing push lands, and when a build starts with no seed at all.
     pub(super) fn refresh_seed(&self, commit: &str) -> Option<tokio::task::JoinHandle<()>> {
         let command = self.coding.as_ref()?.dependency_seed.clone()?;
-        if !cfg!(target_os = "macos") || !coding::sha(commit) { return None; }
+        if !coding::sha(commit) { return None; }
         {
             let mut state = self.seeds.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let current = self.seed_ledger().ok()?.current;
             if state.building || current.as_deref() == Some(commit) || state.failed.as_deref() == Some(commit) { return None; }
+            if !*state.clones.get_or_insert_with(|| self.seeds_clone()) { return None; }
             state.building = true;
         }
         let (exec, commit) = (self.clone(), commit.to_string());
@@ -135,6 +141,33 @@ impl Exec {
         Ok(true)
     }
 
+    /// Whether a file in the seed folder clones beside itself. Says once, in the log, why seeds are off when not.
+    /// The probe's two files are this call's own, made and removed by their exact paths.
+    pub(super) fn seeds_clone(&self) -> bool {
+        let (probe, clone) = (self.seeds_dir().join("clone-probe"), self.seeds_dir().join("clone-probe.clone"));
+        let tried = (|| {
+            std::fs::DirBuilder::new().recursive(true).mode(0o700).create(self.seeds_dir())?;
+            for path in [&probe, &clone] {
+                match std::fs::remove_file(path) { Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error), _ => {} }
+            }
+            std::fs::write(&probe, b"clone probe")?;
+            self.clone_tree(&probe, &clone)
+        })();
+        for path in [&probe, &clone] { let _ = std::fs::remove_file(path); }
+        if let Err(error) = &tried {
+            tracing::warn!(%error, "no dependency seeds: this engine's disk can't clone files (APFS on a Mac, btrfs or XFS on Linux), \
+                and a full copy for every builder would cost the disk a seed saves; builders start cold");
+        }
+        tried.is_ok()
+    }
+
+    /// The platform clone, or a test's stand-in for it.
+    fn clone_tree(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+        #[cfg(test)]
+        if let Some(clone) = self.seed_clone { return clone(from, to); }
+        clone_tree(from, to)
+    }
+
     /// Remove the folders the ledger retired, each by its exact path, skipping any a process has files open in.
     /// Only the one seed build under way calls this, so it never races a build's own folders.
     async fn remove_retired_seeds(&self) {
@@ -182,8 +215,8 @@ impl Exec {
         }
     }
 
-    /// Clone the current seed into a new, empty scratch folder. Best effort: without a seed, or off APFS, the
-    /// builder simply starts cold. Starts a seed of `base` when there is none yet.
+    /// Clone the current seed into a new, empty scratch folder. Best effort: without a seed, or when the scratch is
+    /// on another disk than the seed, the builder simply starts cold. Starts a seed of `base` when there is none yet.
     pub(super) async fn seed_scratch(&self, scratch: &Path, base: &str) {
         if self.coding.as_ref().is_none_or(|c| c.dependency_seed.is_none()) { return; }
         let (exec, scratch) = (self.clone(), scratch.to_path_buf());
@@ -193,7 +226,7 @@ impl Exec {
             let seed = exec.seed_path(&commit);
             for entry in std::fs::read_dir(&seed)? {
                 let entry = entry?;
-                clone_tree(&entry.path(), &scratch.join(entry.file_name()))?;
+                exec.clone_tree(&entry.path(), &scratch.join(entry.file_name()))?;
             }
             Ok(Some(commit))
         }).await;
@@ -220,9 +253,44 @@ fn clone_tree(from: &Path, to: &Path) -> std::io::Result<()> {
     if unsafe { libc::clonefile(from.as_ptr(), to.as_ptr(), CLONE_NOFOLLOW) } == 0 { Ok(()) }
     else { Err(std::io::Error::last_os_error()) }
 }
-#[cfg(not(target_os = "macos"))]
+/// A reflink clone of `from` at `to`, which must not exist: folders and links are made anew, and each file
+/// shares its blocks through FICLONE. Fails on a filesystem without reflinks, such as ext4.
+#[cfg(target_os = "linux")]
+fn clone_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+    walk_tree(from, to, &|from, to| {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let source = std::fs::File::open(from)?;
+        let mode = source.metadata()?.permissions().mode() & 0o7777;
+        let target = std::fs::OpenOptions::new().write(true).create_new(true).mode(mode).open(to)?;
+        // SAFETY: both descriptors are open files that live across the call.
+        if unsafe { libc::ioctl(target.as_raw_fd(), libc::FICLONE, source.as_raw_fd()) } == 0 { return Ok(()) }
+        let error = std::io::Error::last_os_error();
+        drop(target);
+        let _ = std::fs::remove_file(to);
+        Err(error)
+    })
+}
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn clone_tree(_: &Path, _: &Path) -> std::io::Result<()> {
-    Err(std::io::Error::other("dependency seeds need APFS clones"))
+    Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "dependency seeds need file clones"))
+}
+
+/// Make `to` as `from`, with `file` making each regular file: folders keep their mode, links are made anew.
+#[cfg(any(test, target_os = "linux"))]
+fn walk_tree(from: &Path, to: &Path, file: &dyn Fn(&Path, &Path) -> std::io::Result<()>) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let metadata = from.symlink_metadata()?;
+    let kind = metadata.file_type();
+    if kind.is_symlink() { return std::os::unix::fs::symlink(std::fs::read_link(from)?, to); }
+    if kind.is_file() { return file(from, to); }
+    if !kind.is_dir() { return Err(std::io::Error::other(format!("{} is not a file, folder or link", from.display()))); }
+    std::fs::DirBuilder::new().mode(metadata.permissions().mode() & 0o7777).create(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        walk_tree(&entry.path(), &to.join(entry.file_name()), file)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

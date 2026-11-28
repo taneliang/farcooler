@@ -25,7 +25,16 @@ async fn seeded(fails: bool) -> (tempfile::TempDir, Runtime) {
     config.dependency_seed = Some(seed_command(&dir.path().canonicalize().unwrap(), fails));
     std::fs::write(root.join("coding.json"), serde_json::to_vec(&config).unwrap()).unwrap();
     drop(runtime);
-    (dir, Runtime::open(&root).unwrap())
+    let mut runtime = Runtime::open(&root).unwrap();
+    // A Mac's APFS or a Linux btrfs clones for real. Linux CI's ext4 can't (ov-1524), so there the seed's files
+    // are copied instead, and everything around the clone still runs; `a_disk_that_cant_clone_gets_no_seed`
+    // is what the engine itself does on such a disk.
+    if !runtime.seeds_clone() { runtime.seed_clone = Some(copy_tree); }
+    (dir, runtime)
+}
+
+fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+    super::walk_tree(from, to, &|from, to| std::fs::copy(from, to).map(drop))
 }
 
 async fn head(runtime: &Runtime) -> String {
@@ -72,8 +81,10 @@ async fn a_landing_seeds_the_next_builds_scratch_and_retires_the_old_seed() {
     until(&mut runtime, |state| phase_of(state, "one") == Some(Phase::Done)).await;
     let landed = crate::workflow_runtime::coding_verbs_tests::remote_head(&runtime).await;
     assert_ne!(landed, base);
+    // The seed records itself as current before it removes the retired seeds, so wait for both.
     for _ in 0..400 {
-        if runtime.seed_ledger().unwrap().current.as_deref() == Some(landed.as_str()) { break; }
+        let ledger = runtime.seed_ledger().unwrap();
+        if ledger.current.as_deref() == Some(landed.as_str()) && ledger.retired.is_empty() { break; }
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }
     let ledger = runtime.seed_ledger().unwrap();
@@ -149,4 +160,35 @@ async fn only_folders_the_ledger_names_are_removed_and_never_while_open() {
     assert!(!open.exists());
     assert_eq!(runtime.seed_ledger().unwrap(), Ledger { current: Some(base.clone()), retired: vec![] });
     assert!(folder.join(&base).exists(), "the current seed stays");
+}
+
+#[tokio::test]
+async fn a_disk_that_cant_clone_gets_no_seed() {
+    let (_dir, mut runtime) = seeded(false).await;
+    runtime.seed_clone = Some(|_, _| Err(std::io::Error::from_raw_os_error(libc::EOPNOTSUPP)));
+    let base = head(&runtime).await;
+    assert!(runtime.refresh_seed(&base).is_none(), "no seed starts where builders couldn't clone it");
+    assert_eq!(runtime.seed_ledger().unwrap(), Ledger::default());
+    assert!(seeds(&runtime).is_empty(), "nothing was built and the probe left nothing: {:?}", seeds(&runtime));
+
+    let scratch = runtime.root.parent().unwrap().join("scratch");
+    std::fs::create_dir(&scratch).unwrap();
+    runtime.seed_scratch(&scratch, &base).await;
+    assert_eq!(std::fs::read_dir(&scratch).unwrap().count(), 0, "the build starts cold");
+    assert!(seeds(&runtime).is_empty(), "a build start doesn't start a seed either");
+}
+
+#[test]
+fn a_seed_tree_keeps_its_folders_links_and_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let from = dir.path().join("from");
+    std::fs::create_dir_all(from.join("target/debug/deps")).unwrap();
+    std::fs::write(from.join("target/debug/deps/unit.rlib"), "unit").unwrap();
+    std::os::unix::fs::symlink("deps/unit.rlib", from.join("target/debug/link")).unwrap();
+    std::fs::set_permissions(from.join("target/debug"), std::fs::Permissions::from_mode(0o750)).unwrap();
+    let to = dir.path().join("to");
+    copy_tree(&from, &to).unwrap();
+    assert_eq!(std::fs::read_to_string(to.join("target/debug/deps/unit.rlib")).unwrap(), "unit");
+    assert_eq!(std::fs::read_link(to.join("target/debug/link")).unwrap(), Path::new("deps/unit.rlib"));
+    assert_eq!(std::fs::metadata(to.join("target/debug")).unwrap().permissions().mode() & 0o777, 0o750);
 }
