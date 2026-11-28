@@ -62,12 +62,34 @@ Each of these checks was removed in turn, and its test failed:
 - Any workspace's orchestrator admitted.
 - A pane's answer left marked as the person's.
 
-## Not run or not passing
+## Fix round 1
 
-- `board-check.mjs` times out waiting for `#board-title`. It does the same on an
-  unchanged copy of the starting commit.
-- `csp-check.mjs`, `sleep-check.mjs` and `review-check.mjs` weren't run. They
-  need a full build or a fake runner.
+No review note was on the ticket, and the engine's logs aren't open to a
+builder's pane, so why the build was turned back isn't confirmed. One failure
+was found by running the checks again: `scripts/daemon-layers.py`, which CI and
+the landing check run. `engine_view_tests.rs` added an engine to board edge
+(`crate::task_ops::pb_note`) and one more `use super::*`. The test now reads the
+draft's card with the runner's `task.get` through dispatch, and names its
+imports. No product code or permission changed.
+
+After the fix, these passed:
+
+- The landing check's quick tier.
+- The landing check's whole web family, on this branch merged with `origin/main`
+  at 45a6fa704. That includes `board-check` and the `csp-check` walks.
+- `npm run test:engine`, on a page freshly made by a real runner.
+- `cargo test -p farcooler-client` (the real-daemon tests with the pane's
+  `FARCOOLER_*`, `CLAUDE*` and `TMUX*` variables removed; with them set, four
+  permission-hook tests failed).
+- The daemon's `ov1486`, seat and admission tests, and
+  `workflow_draft_approval`.
+- Clippy for the daemon and the client.
+
+The full Rust suite wasn't run here.
+
+## Not run
+
+- `sleep-check.mjs`. The landing check leaves it to CI.
 - `npm run test:engine` isn't wired into CI.
 
 ## Captures
