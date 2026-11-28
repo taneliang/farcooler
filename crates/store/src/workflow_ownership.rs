@@ -18,14 +18,16 @@ fn task(tx: &Transaction<'_>, input: &Input, item: &str) -> Result<Option<Vec<u8
 /// Start fences a ticket's subagent records and blocks (a run owns them), so it waits for the orchestrator to
 /// settle them: otherwise a stopped subagent could never end and a block could never clear (ov-965).
 /// The tickets that follow the run are fenced with it, so the same holds for each of them (ov-970).
-/// A block stays until it is cleared, even once the ticket it waits on is done.
+/// A block on a ticket that is done or cancelled holds nothing (ov-1505), as the board read has it
+/// (`task_facts`). Its row stays on the card, and the run fences it with the rest.
 pub(crate) fn start_held(tx: &Transaction<'_>, input: &Input) -> Result<Option<String>> {
     let Command::Start { item, with, .. } = &input.command else { return Ok(None) };
     let mut held = Vec::new();
     for ticket in std::iter::once(item).chain(with) {
         let Some(task) = task(tx,input,ticket)? else { continue };
         let key: String = tx.query_row("SELECT key FROM tasks WHERE id=?1", [&task], |r| r.get(0))?;
-        let mut blocks = tx.prepare("SELECT t.key FROM task_blocks b JOIN tasks t ON t.id=b.blocked_by WHERE b.task_id=?1 ORDER BY b.rowid")?;
+        let mut blocks = tx.prepare("SELECT t.key FROM task_blocks b JOIN tasks t ON t.id=b.blocked_by
+            WHERE b.task_id=?1 AND t.status NOT IN ('done','cancelled') ORDER BY b.rowid")?;
         for on in blocks.query_map([&task], |r| r.get::<_,String>(0))? {
             let on = on?;
             held.push(format!("{key} waits on {on}; clear that with `farcooler task block {key} --on {on} --clear`"));

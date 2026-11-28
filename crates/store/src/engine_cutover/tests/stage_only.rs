@@ -486,6 +486,32 @@ fn start_waits_for_a_tickets_subagents_and_blocks_to_settle() {
     }
 }
 
+/// ov-1505: a block on a ticket that is done or cancelled holds nothing. ov-1485 was refused as `Held` over its
+/// block on ov-1484, which had landed, while `task show` already read it as finished.
+#[test]
+fn a_block_on_a_finished_ticket_holds_no_start() {
+    for phase in PHASES {
+        for closed in [TaskStatus::Done, TaskStatus::Cancelled] {
+            let b = board(phase);
+            let (s, t, user) = (&b.store, b.ticket.id, Actor::User);
+            let tracker = Definition::tracker("owner");
+            let still_open = s.create_task(b.ws, "still open", user).unwrap();
+            let start = |id: &str| b.apply(id, Command::Start { start_load: None, item: b.ticket.key.clone(), policy_pin: tracker.pin(), resource: "own-ticket".into(),
+                dependencies: Default::default(), initial_candidate: Some(tracker.pin()), definition: tracker.clone(), models: Default::default(), tree: None, with: vec![] }).result;
+            s.set_block(t, b.other, Some("lands first")).unwrap();
+            s.set_block(t, still_open.id, None).unwrap();
+            s.set_task_status(b.other, closed, user).unwrap();
+            let Err(farcooler_workflow::Refusal::Held(why)) = start("start-1") else { panic!("{phase:?} {closed:?}: the open block still holds") };
+            let finished = s.get_task(b.other).unwrap().key;
+            assert!(why.contains(&format!("waits on {}", still_open.key)), "{phase:?} {closed:?}: {why}");
+            assert!(!why.contains(&format!("waits on {finished};")), "{phase:?} {closed:?}: the finished one isn't named: {why}");
+            s.set_task_status(still_open.id, closed, user).unwrap();
+            let result = start("start-2");
+            assert!(result.is_ok(), "{phase:?} {closed:?}: every blocker is finished, so the ticket starts: {result:?}");
+        }
+    }
+}
+
 /// ov-1220: a Start held back by a block or an open subagent says which, and the command that settles it. ov-1187
 /// was refused as a bare `Resource` five times, with an owner ask on it taking the blame, while what held it was a
 /// block on a ticket still in review. The ask itself holds nothing: answered and moved on, the ticket starts.

@@ -184,7 +184,9 @@ impl Runtime {
         let Some(task) = self.store.workflow_item_task(workspace, key)? else { return Ok(false) };
         for block in self.store.blocks_for(task).map_err(|_| Error::Refused("task blockers unreadable"))? {
             let blocker = self.store.get_task(block.blocked_by).map_err(|_| Error::Refused("task blocker missing"))?;
-            if blocker.status != farcooler_store::models::TaskStatus::Done { return Ok(false); }
+            // Done or cancelled, as Start itself reads a block (ov-1505).
+            use farcooler_store::models::TaskStatus;
+            if !matches!(blocker.status, TaskStatus::Done | TaskStatus::Cancelled) { return Ok(false); }
         }
         Ok(true)
     }
@@ -279,6 +281,43 @@ mod tests {
             if let Command::Start { item, .. } = input.command { Some(item) } else { None }
         }).collect();
         assert_eq!(started, [2, 1, 0].map(|index| tasks[index].key.clone()));
+    }
+
+    /// ov-1505: the policy starts a To Do ticket once what it's blocked on closes, and the block row it
+    /// still carries doesn't get that Start refused.
+    #[tokio::test]
+    async fn a_ticket_starts_by_itself_when_its_last_dependency_closes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+        let (workspace, tasks) = todo_cards(&runtime, &["lands", "dropped", "waiter"]);
+        let [lands, dropped, waiter] = tasks.as_slice() else { unreachable!() };
+        let boards = std::slice::from_ref(&workspace);
+        // The blockers rest outside the policy's columns, so only the waiter is a candidate.
+        for blocker in [lands, dropped] {
+            runtime.store.set_task_status(blocker.id, farcooler_store::models::TaskStatus::Backlog,
+                farcooler_store::models::Actor::User).unwrap();
+        }
+        publish_on(&runtime, &workspace, build_only(Budget::Fixed(3)));
+        runtime.store.set_block(waiter.id, lands.id, Some("lands first")).unwrap();
+        runtime.store.set_block(waiter.id, dropped.id, None).unwrap();
+        runtime.track_tickets(&[(workspace.clone(), lands.key.clone(), "backlog".into()),
+            (workspace.clone(), dropped.key.clone(), "backlog".into()),
+            (workspace.clone(), waiter.key.clone(), "todo".into())]).unwrap();
+        // Board blocks are read only by the service's runtime. Set after publishing, which in service mode
+        // wants a coding adapter this test has no use for.
+        runtime.exec.service_mode = true;
+        let waits = |runtime: &Runtime| runtime.state(&workspace).unwrap().unwrap().items[&waiter.key].definition.is_ticket();
+
+        runtime.schedule_with_load(boards, 100, Some(0)).unwrap();
+        assert!(waits(&runtime), "both dependencies are open");
+        assert!(runtime.internal(&workspace, Command::Move { item: lands.key.clone(), to: "done".into() }, Grant::Controller, 101).unwrap().result.is_ok());
+        runtime.schedule_with_load(boards, 102, Some(0)).unwrap();
+        assert!(waits(&runtime), "one dependency is still open");
+        assert!(runtime.internal(&workspace, Command::Cancel { item: dropped.key.clone(), reason: None }, Grant::Controller, 103).unwrap().result.is_ok());
+        assert_eq!(runtime.store.get_task(dropped.id).unwrap().status, farcooler_store::models::TaskStatus::Cancelled);
+        runtime.schedule_with_load(boards, 104, Some(0)).unwrap();
+        assert!(!waits(&runtime), "the last dependency closed, so the policy starts it");
+        assert!(active(&runtime.state(&workspace).unwrap().unwrap().items[&waiter.key]));
     }
 
     #[tokio::test]
