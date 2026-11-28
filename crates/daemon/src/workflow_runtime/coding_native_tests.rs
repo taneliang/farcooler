@@ -710,9 +710,12 @@ async fn ov_1515_the_stall_watch_reads_a_held_agents_processes() {
     let (cancel, cancelled) = tokio::sync::watch::channel(false);
     let started = dir.path().join("started");
     let read = async {
+        // The fixture creates the file before it writes its pid into it, so wait for the pid itself.
+        let mut agent = None::<i32>;
         assert!(super::super::wait_until(tokio::time::Instant::now() + Duration::from_secs(10), Duration::from_millis(10),
-            || started.exists()).await, "interactive fixture did not start");
-        let agent: i32 = std::fs::read_to_string(&started).unwrap().parse().unwrap();
+            || { agent = std::fs::read_to_string(&started).ok().and_then(|pid| pid.parse().ok()); agent.is_some() }).await,
+            "interactive fixture did not start");
+        let agent = agent.unwrap();
         // The agent and the command it is waiting on.
         let found = pulse.cpu().await;
         cancel.send_replace(true);
